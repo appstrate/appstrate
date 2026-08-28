@@ -16,9 +16,11 @@ import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-export const updateSkillsSchema = z.object({
-  skillIds: z.array(z.string()).max(50),
-});
+export const updateSkillsSchema = z
+  .object({
+    skillIds: z.array(z.string()).max(50),
+  })
+  .strict();
 
 /**
  * Resolve each dep ID to its canonical caret range (`^X.Y.Z`) from the

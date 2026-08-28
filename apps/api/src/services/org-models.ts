@@ -8,7 +8,7 @@ import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
-import { conflict, notFound } from "../lib/errors.ts";
+import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { checkEgressUrl, egressGuardedFetch } from "../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
@@ -33,8 +33,11 @@ import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
   applyModelGenerationCapabilitiesOverride,
+  ModelGenerationError,
+  resolveModelGenerationSettings,
   UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
+  type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 
 // --- Metadata projection ---
@@ -948,6 +951,60 @@ export async function assertExplicitModelExists(
     throw notFound(`Model '${modelId}' not found — expected a model UUID or a system model key`);
   }
   return model;
+}
+
+/**
+ * Validate a caller-supplied generation-settings override against the model it
+ * will actually run on, and answer the two ways it can be refused.
+ *
+ * One implementation, three routes: `PUT /agents/{scope}/{name}/model`,
+ * `PUT /spaces/{spaceId}/packages/{scope}/{name}` and the two schedule
+ * handlers each ran their own copy of this — same two refusals, same literal
+ * message spelled out four times, and only the `param` legitimately differed
+ * (it names the wire field the override arrived on, which is `generation`,
+ * `generationConfig` and `generation_config_override` respectively).
+ *
+ * `selectedModel` is the resolved model this layer will run on, or `null` when
+ * NOTHING resolves — no override, no agent pin, no org default. Generation
+ * settings are per-model request controls, so there is nothing to validate them
+ * against and nothing to clamp them to; storing them would mean persisting a
+ * value the next resolution could contradict.
+ *
+ * RESPONSE-SHAPE CHANGE, DELIBERATE. All four route-local copies threw the
+ * `!selectedModel` refusal with NO `param` — only their `ModelGenerationError`
+ * sibling carried one. Hoisting them here gives BOTH refusals the same `param`,
+ * so the 400 on `PUT /agents/{scope}/{name}/model`, `PUT /spaces/{spaceId}/
+ * packages/{scope}/{name}` and both schedule surfaces now carries a `param` it
+ * did not carry before. Kept rather than reverted: the two refusals come from
+ * one body field and now describe it identically, `param` is optional in the
+ * `ProblemDetail` schema (`openapi/schemas.ts`), and no consumer branches on
+ * its ABSENCE — `apps/web` reads `param` only for the two `locked_*_field`
+ * codes (`hooks/use-mutations.ts`), and `api/client.ts` passes it through
+ * untouched. Each of the four surfaces pins its own `param` in the integration
+ * tests, so a silent revert fails.
+ */
+export function validateGenerationOverride(
+  override: ModelGenerationSettings,
+  selectedModel: Pick<ResolvedModel, "generation"> | null,
+  param: string,
+): ModelGenerationSettings {
+  if (!selectedModel) {
+    throw invalidRequest(
+      "A model must be configured before generation settings can be saved",
+      param,
+    );
+  }
+  try {
+    return resolveModelGenerationSettings({
+      capabilities: selectedModel.generation,
+      override,
+    });
+  } catch (error) {
+    if (error instanceof ModelGenerationError) {
+      throw invalidRequest(error.message, param);
+    }
+    throw error;
+  }
 }
 
 // --- Connection test ---

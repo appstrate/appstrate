@@ -48,7 +48,7 @@ import {
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
-import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile, parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
@@ -286,12 +286,14 @@ const BOOT_REPORT_DEADLINE_MS = 60_000;
  * when integration health can't be confirmed (the platform contract — an
  * integration that didn't launch as declared fails the run, every tier).
  *
- * No auth header: the agent container holds no run token by design (the
- * sidecar is the only party that can call back to the platform), so the
- * endpoint mirrors `/mcp`'s network-isolation posture.
+ * Authenticated like every other sidecar call, with the run's
+ * `SIDECAR_AUTH_HEADER` token. Still no RUN token: the agent remains unable to
+ * call the PLATFORM back — this header only says "I am the agent container" to
+ * the sidecar that already knows the answer.
  */
 async function fetchIntegrationBootReport(
   sidecarUrl: string,
+  authToken: string,
 ): Promise<{ report: IntegrationBootReport } | { error: string }> {
   const url = `${sidecarUrl.replace(/\/$/, "")}/integrations/boot-report`;
   let lastError = "unknown error";
@@ -299,7 +301,10 @@ async function fetchIntegrationBootReport(
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), BOOT_REPORT_DEADLINE_MS);
     try {
-      const res = await fetch(url, { signal: ac.signal });
+      const res = await fetch(url, {
+        signal: ac.signal,
+        headers: { [SIDECAR_AUTH_HEADER]: authToken },
+      });
       if (res.ok) return { report: (await res.json()) as IntegrationBootReport };
       lastError = `HTTP ${res.status}`;
     } catch (err) {
@@ -501,6 +506,10 @@ const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
 // in 2d below.
 
 const sidecarUrl = env.sidecarUrl;
+// Non-null wherever `sidecarUrl` is: `parseRuntimeEnv` makes a sidecar-backed
+// run without it a FATAL env issue, so the branches below that use both are
+// reached only when both were supplied.
+const sidecarAuthToken = env.sidecarAuthToken ?? "";
 
 // Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
 // executes each runtime tool ONCE and journals its canonical events; the Pi
@@ -511,7 +520,7 @@ const sidecarUrl = env.sidecarUrl;
 const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
   ? createRuntimeEventDrainer({
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
-      headers: { Host: "sidecar" },
+      headers: { Host: "sidecar", [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
       logger: {
         warn: (msg, data) => logLine("warn", msg, data),
         error: (msg, data) => logLine("error", msg, data),
@@ -537,12 +546,13 @@ if (sidecarUrl) {
       // pessimising the warm-path; the fixed 60s deadline covers worst-case
       // cold container pulls (#406 acceptance criteria: 20–45s boots are
       // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
-      // The sidecar's /mcp endpoint gates inbound requests by the per-run
-      // Docker network + Host-header check (`validateMcpHostHeader`); it does
-      // NOT verify a bearer token, so the agent connects unauthenticated. (An
-      // earlier RUN_TOKEN-as-bearer path was wired but never validated — dropped.)
+      // The sidecar's /mcp endpoint gates inbound requests on the run's
+      // `SIDECAR_AUTH_HEADER` token (denied by default) plus the Host-header
+      // DNS-rebinding check (`validateMcpHostHeader`). The token is NOT the run
+      // token — that one never enters this container.
       mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
         clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+        extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
         // #779 annex — operator-tunable per-call tool timeout (absent →
         // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
         // honoured sidecar-side, so both legs of an integration tool call
@@ -613,7 +623,7 @@ if (sidecarUrl) {
   // integration failed to start OR came up with nothing callable — the
   // platform contract, every tier. A run that can't even confirm integration
   // health aborts too.
-  const bootResult = await fetchIntegrationBootReport(sidecarUrl);
+  const bootResult = await fetchIntegrationBootReport(sidecarUrl, sidecarAuthToken);
   if ("error" in bootResult) {
     await die(`Could not verify integration boot status: ${bootResult.error}`);
   } else {
@@ -635,12 +645,19 @@ if (sidecarUrl) {
   }
 
   // --- 2d. Zero-knowledge enforcement ---
-  // The sidecar URL is a runtime implementation detail. Now that the
-  // MCP client owns the only path to the sidecar, remove the env var
-  // so the Pi bash extension cannot leak it via `echo $SIDECAR_URL` or
-  // similar. Safe: no downstream consumer in this process reads
-  // SIDECAR_URL past this point.
+  // The sidecar URL and the token that opens it are runtime implementation
+  // details. Now that the MCP client, the runtime-event drainer and the Pi
+  // model record each hold their own copy, remove BOTH env vars so the Pi bash
+  // extension cannot leak them via `echo $SIDECAR_URL` / `env | grep SIDECAR`.
+  //
+  // The token goes with the URL rather than surviving it, and that is the whole
+  // point: together they are the capability to spend the org's provider
+  // credential through `/llm/*`, and the agent loop runs model-chosen shell
+  // commands over attacker-influenced input. Nothing downstream in this process
+  // re-reads either from the environment — pi-ai reads `Model.headers` off the
+  // model object built above, not `process.env`.
   delete process.env.SIDECAR_URL;
+  delete process.env.SIDECAR_AUTH_TOKEN;
 } else {
   // No sidecar attached (skip-sidecar: no integrations + static API key).
   // The platform runtime tools (output/log/note/pin) the agent

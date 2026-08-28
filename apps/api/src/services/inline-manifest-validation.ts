@@ -11,7 +11,9 @@
  *
  * Pure function — no DB, no env lookup. Caller passes the limits.
  *
- * See docs/specs/INLINE_RUNS.md §6.
+ * The inline-run surface is described in `apps/api/src/routes/runs.ts`
+ * (`POST /api/runs/inline`) and its OpenAPI path; there is no `docs/specs/`
+ * directory in this repo.
  */
 
 import { validateManifest } from "@appstrate/core/validation";

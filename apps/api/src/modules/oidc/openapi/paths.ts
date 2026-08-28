@@ -47,6 +47,7 @@ const orgLevelClientRequest = {
         "Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.",
     },
   },
+  additionalProperties: false,
 };
 
 const spaceLevelClientRequest = {
@@ -74,6 +75,7 @@ const spaceLevelClientRequest = {
         "When `true`, a successful OIDC login creates the `end_users` row on the fly (JIT provisioning). When `false` (default, secure-by-default), unknown end-users are rejected with an OAuth `access_denied` error — admins must pre-create them via `POST /api/end-users` first.",
     },
   },
+  additionalProperties: false,
 };
 
 // No `discriminator` here: OpenAPI's discriminator resolves mapping targets
@@ -119,6 +121,7 @@ const updateClientRequest = {
         "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.",
     },
   },
+  additionalProperties: false,
 };
 
 const commonHeaders = {
@@ -640,6 +643,10 @@ export const oidcPaths = {
             },
           },
         },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -675,6 +682,7 @@ export const oidcPaths = {
                 },
                 secureMode: { type: "string", enum: ["auto", "tls", "starttls", "none"] },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -702,6 +710,10 @@ export const oidcPaths = {
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -725,6 +737,7 @@ export const oidcPaths = {
               type: "object",
               required: ["to"],
               properties: { to: { type: "string", format: "email" } },
+              additionalProperties: false,
             },
           },
         },
@@ -778,6 +791,10 @@ export const oidcPaths = {
             },
           },
         },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -820,6 +837,7 @@ export const oidcPaths = {
                   maxItems: 32,
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -855,6 +873,10 @@ export const oidcPaths = {
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },

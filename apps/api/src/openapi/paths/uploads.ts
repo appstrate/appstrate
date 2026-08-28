@@ -70,6 +70,7 @@ export const uploadsPaths = {
                     "mismatch is rejected (400 `checksum_mismatch`).",
                 },
               },
+              additionalProperties: false,
             },
             example: { name: "invoice.pdf", size: 24576, mime: "application/pdf" },
           },

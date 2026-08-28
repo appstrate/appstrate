@@ -14,7 +14,9 @@
  * event ingestion lives in a separate router (`runs-events.ts`) because
  * its auth model is fundamentally different.
  *
- * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.5.1.
+ * Contract: this router plus `openapi/paths/runs.ts`; the sink-credential
+ * shape is owned by `services/run-creation.ts`. There is no `docs/specs/`
+ * directory in this repo.
  */
 
 import { Hono } from "hono";

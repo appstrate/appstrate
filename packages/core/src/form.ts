@@ -20,7 +20,6 @@
 // ─── JSON Schema Types (from @types/json-schema, draft-07 — compatible with 2020-12) ─
 
 import type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName } from "json-schema";
-import { isFileField as isFileFieldShared } from "@appstrate/afps-shared/file-field";
 export type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName };
 
 /** A JSON Schema object with typed properties — the root of input/output schemas. */
@@ -67,39 +66,121 @@ export interface SchemaWrapper {
   property_order?: string[];
 }
 
-// ─── Internal helpers ────────────────────────────────────────────────────────
+// ─── File Field Detection ────────────────────────────────────────────────────
+//
+// DELIBERATELY A PARALLEL IMPLEMENTATION of `@appstrate/afps-shared/file-field`,
+// not an import of it. Do not "deduplicate" this back into an import — that is
+// the change CI rejects.
+//
+// WHY. `@appstrate/core` is PUBLISHED to npm as source (`src/**` as `.ts`, no
+// build step, no `.d.ts` barrier), so a consumer's own `tsc` compiles these
+// files against whatever `@appstrate/afps-shared` its install resolves — never
+// against the workspace copy. Read the floor from
+// `packages/core/package.json` → `dependencies["@appstrate/afps-shared"]`; it
+// is `^0.7.0`, and `0.7.0` is the FIRST release to export
+// `isMultipleFileField` from `./file-field`. It is not on npm yet (`npm view
+// @appstrate/afps-shared versions` tops out at 0.6.0, which exports
+// `isFileField` from that subpath and nothing else), so importing it today
+// fails a consumer install outright — the same outcome as importing it at the
+// previous `^0.6.0` floor, for a different reason. `scripts/verify-package-
+// resolves.ts` — CI job "Package resolves for consumers (packages/core)" —
+// packs the real artifact into a clean npm project and is what catches it.
+//
+// The three helpers underneath (`isSingleFileNode`, `resolveItems`,
+// `resolveType`) are NOT part of that story: they are private to the shared
+// module on purpose — implementation detail of its two predicates, and a name
+// exported from a published package is a semver commitment nobody asked for.
+// They stay duplicated here whatever the floor says.
+//
+// WHAT WOULD LET THE TWO PREDICATES MERGE. Publish `afps-shared@0.7.0` (`git
+// tag afps-shared@0.7.0`). The floor bump it needs has already been made, so
+// that publish is the only remaining step: after it, this block becomes
+// `export { isFileField, isMultipleFileField } from
+// "@appstrate/afps-shared/file-field"`, with the `JSONSchema7` parameter types
+// below re-declared at the call sites that want them.
+//
+// HOW THE COPIES ARE HELD TOGETHER MEANWHILE. Both sides derive every predicate
+// from ONE single-file-node rule, so `isFileField` and `isMultipleFileField`
+// cannot disagree about the same array node — the defect this replaced, where
+// core's `isMultipleFileField` tested `!!items.contentMediaType` (truthiness)
+// while `isFileField` tested "declared", so `contentMediaType: ""` rendered a
+// single-file picker bound to an array property. `packages/core/test/
+// form.test.ts` pins that input AND asserts table-wide parity against the
+// shared module, which the workspace resolves to local source — so a future
+// divergence on either side fails a core test at dev time, long before the
+// published floor could hide it.
 
-/** Resolve the `type` string from a JSONSchema7 (handles array types by picking the first). */
-function getType(prop: JSONSchema7): string | undefined {
-  if (typeof prop.type === "string") return prop.type;
-  if (Array.isArray(prop.type) && prop.type.length > 0) return prop.type[0];
+/**
+ * Narrow a schema node to an indexable object, or `undefined`.
+ *
+ * Typed as `unknown`-in on purpose, mirroring the shared module: callers reach
+ * `@appstrate/core/form` through `asJSONSchemaObject` casts of JSONB columns and
+ * dynamic manifests, so a node can carry values `JSONSchema7` says are
+ * impossible. Reading it structurally is what keeps the two rules identical at
+ * RUNTIME and not merely where the types happen to agree.
+ */
+function asNode(schema: unknown): Record<string, unknown> | undefined {
+  return schema && typeof schema === "object" ? (schema as Record<string, unknown>) : undefined;
+}
+
+/**
+ * A single file field: `format: "uri"` + a DECLARED `contentMediaType`.
+ *
+ * "Declared" is `!= null && !== false`, deliberately NOT truthiness: the
+ * keyword's presence is what marks the field as a file, and whether its value is
+ * a well-formed media type is the manifest validator's job, not this predicate's.
+ * `contentMediaType: ""` is therefore a file field — the reading
+ * `apps/api/src/services/inline-run.ts` documents and relies on.
+ */
+function isSingleFileNode(schema: unknown): boolean {
+  const node = asNode(schema);
+  if (!node) return false;
+  return node.format === "uri" && node.contentMediaType != null && node.contentMediaType !== false;
+}
+
+/**
+ * Resolve a node's `items` schema, handling the JSON Schema boolean / tuple
+ * forms (`items: false` → none; `items: [first, …]` → first object entry).
+ */
+function resolveItems(schema: unknown): Record<string, unknown> | undefined {
+  const node = asNode(schema);
+  const items = node?.items;
+  if (!items || typeof items === "boolean") return undefined;
+  if (Array.isArray(items)) {
+    const first = items[0];
+    return first && typeof first === "object" ? (first as Record<string, unknown>) : undefined;
+  }
+  if (typeof items === "object") return items as Record<string, unknown>;
   return undefined;
 }
 
-/** Resolve the `items` schema (handles boolean / tuple forms). */
-function getItems(prop: JSONSchema7): JSONSchema7 | undefined {
-  if (!prop.items) return undefined;
-  if (typeof prop.items === "boolean") return undefined;
-  if (Array.isArray(prop.items))
-    return typeof prop.items[0] === "object" ? prop.items[0] : undefined;
-  return prop.items;
+/** Resolve a node's `type` (JSON Schema allows a union array — first wins). */
+function resolveType(schema: unknown): string | undefined {
+  const node = asNode(schema);
+  if (!node) return undefined;
+  if (typeof node.type === "string") return node.type;
+  if (Array.isArray(node.type) && node.type.length > 0 && typeof node.type[0] === "string") {
+    return node.type[0];
+  }
+  return undefined;
 }
-
-// ─── File Field Detection ────────────────────────────────────────────────────
 
 /**
- * Detect a file field: format "uri" + contentMediaType present (single or array).
- * Delegates to the canonical `@appstrate/afps-shared` predicate (single source
- * of truth) — the observable behaviour is unchanged for core consumers.
+ * Detect an AFPS file field: a single string-URI node with `contentMediaType`,
+ * OR an array whose items are such a node.
  */
 export function isFileField(prop: JSONSchema7): boolean {
-  return isFileFieldShared(prop);
+  return isSingleFileNode(prop) || isMultipleFileField(prop);
 }
 
-/** Detect a multiple-files field (array of file URIs). */
+/**
+ * Detect a MULTIPLE-files field: an array whose `items` are a single file node.
+ *
+ * Shares {@link isSingleFileNode} with {@link isFileField} by construction, so
+ * the two can never disagree about the same array node.
+ */
 export function isMultipleFileField(prop: JSONSchema7): boolean {
-  const items = getItems(prop);
-  return getType(prop) === "array" && items?.format === "uri" && !!items?.contentMediaType;
+  return resolveType(prop) === "array" && isSingleFileNode(resolveItems(prop));
 }
 
 /** Whether a schema has any file fields (format: "uri" + contentMediaType). */
@@ -203,9 +284,9 @@ export function mapAfpsToRjsf(rawWrapper: SchemaWrapper): {
     const hint = uiHints?.[key];
     const constraint = fileConstraints?.[key];
     const constraintMaxSize = constraint?.max_size;
-    const items = getItems(prop);
+    const items = resolveItems(prop);
     const isArrayOfEnum =
-      getType(prop) === "array" && Array.isArray(items?.enum) && items.enum.length > 0;
+      resolveType(prop) === "array" && Array.isArray(items?.enum) && items.enum.length > 0;
     const isConst = "const" in prop;
 
     if (hint?.placeholder) {

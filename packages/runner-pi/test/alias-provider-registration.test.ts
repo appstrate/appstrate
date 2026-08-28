@@ -25,6 +25,7 @@ import {
   PI_SDK_VERSION,
   PI_SDK_VERSION_HEADER,
 } from "../src/provider-map.ts";
+import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import type { Api, Model } from "../src/pi-sdk.ts";
 
@@ -63,6 +64,26 @@ async function newRuntime() {
     modelsPath: null,
     allowModelNetwork: false,
   });
+}
+
+/** Drive one turn against a capturing `fetch` and return the headers pi-ai sent. */
+async function sentHeaders(
+  runtime: Awaited<ReturnType<typeof newRuntime>>,
+  model: Model<Api>,
+): Promise<Record<string, string>> {
+  let sent: Record<string, string> = {};
+  const stream = runtime.stream(
+    model,
+    { messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+    {
+      fetch: ((_url: unknown, init: { headers?: Record<string, string> }) => {
+        sent = init.headers ?? {};
+        throw new Error("captured");
+      }) as unknown as typeof fetch,
+    },
+  );
+  for await (const event of stream) if (event.type === "error") break;
+  return sent;
 }
 
 /** Drive one turn and return how it terminated (never reaches the network). */
@@ -110,6 +131,32 @@ describe("alias provider key on ModelRuntime", () => {
     );
     for await (const event of stream) if (event.type === "error") break;
     expect(sent[PI_SDK_VERSION_HEADER]).toBe(PI_SDK_VERSION);
+  });
+
+  it("puts `Model.headers` on the wire for an ALIASED run, alongside the provider config", async () => {
+    // Load-bearing for the sidecar's agent-auth gate: an aliased container
+    // reaches `/llm/*` over `pi-messages`, and the ONLY thing carrying its
+    // `SIDECAR_AUTH_HEADER` token there is `Model.headers`, set by
+    // `buildPiModelFromEnv`. pi-ai's own `pi-messages` adapter reads
+    // `options.headers` only (which is why the version stamp above goes in as
+    // provider config) — what closes the gap is `ModelRuntime`'s provider
+    // composer, which folds `model.headers` into those options. Asserted on the
+    // bytes, because that fold is the SDK's behaviour and not ours.
+    const runtime = await newRuntime();
+    await setPiRuntimeCredential(runtime, ALIAS_PI_PROVIDER_KEY, "sk-placeholder");
+    const sent = await sentHeaders(runtime, {
+      ...ALIASED_MODEL,
+      headers: { [SIDECAR_AUTH_HEADER]: "alias-run-token" },
+    } as unknown as Model<Api>);
+    expect(sent[SIDECAR_AUTH_HEADER]).toBe("alias-run-token");
+    // The two mechanisms coexist rather than one shadowing the other.
+    expect(sent[PI_SDK_VERSION_HEADER]).toBe(PI_SDK_VERSION);
+
+    // Control: a model with no headers sends none, so the line above is about
+    // the model record and not about some ambient default.
+    const bare = await newRuntime();
+    await setPiRuntimeCredential(bare, ALIAS_PI_PROVIDER_KEY, "sk-placeholder");
+    expect((await sentHeaders(bare, ALIASED_MODEL))[SIDECAR_AUTH_HEADER]).toBeUndefined();
   });
 
   it("stamps NOTHING on `openai-codex`, which talks to a real vendor", async () => {

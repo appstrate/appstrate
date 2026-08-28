@@ -18,8 +18,8 @@
  * caller chain, rooted here. `AppstrateEventSink.handle()` is instantiated
  * inside `ingestRunEvent`; it is never called from anywhere else.
  *
- * See `docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md` §6.3, §7 for the full
- * design.
+ * This file is the full design — there is no `docs/specs/` directory in this
+ * repo. Its transport half lives in `routes/runs-events.ts`.
  */
 
 import { and, eq, isNull, sql } from "drizzle-orm";

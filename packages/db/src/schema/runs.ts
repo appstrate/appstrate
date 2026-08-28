@@ -509,6 +509,16 @@ export const packagePersistence = pgTable(
     index("pkp_run_id")
       .on(table.runId)
       .where(sql`${table.runId} IS NOT NULL`),
+    // FK cascade scan: space delete CASCADEs package_persistence.space_id
+    // (migration 0055). Same gap `pkp_run_id` already closes for `run_id`, and
+    // the same reason it cannot be served by anything above: `pkp_key_unique`
+    // and `pkp_lookup` are package-LEADING, `pkp_org` is org-leading, and the
+    // cascade's only qual is `space_id`. Postgres indexes the referenced side
+    // of a foreign key, never the referencing side.
+    //
+    // NON-partial, unlike `pkp_run_id`: `space_id` is NOT NULL, so a predicate
+    // would exclude nothing and only cost the planner the chance to use it.
+    index("pkp_space").on(table.spaceId),
     check("pkp_actor_type_valid", sql`actor_type IN ('user', 'end_user', 'shared')`),
     check(
       "pkp_actor_id_shape",

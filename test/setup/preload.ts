@@ -3,8 +3,10 @@
  *
  * 1. Starts test containers (PostgreSQL + Redis + MinIO + DinD) if not already running
  * 2. Sets environment variables for the test database and Redis
- * 3. Runs Drizzle migrations against the test database (core + all modules)
- * 4. Registers module-owned tables for truncation
+ * 3. Runs the core Drizzle migrations against the test database. Modules own no
+ *    tables, so this one step creates every table in the schema — including the
+ *    ones modules read and write (see apps/api/src/modules/README.md).
+ * 4. Registers the tables a module reads/writes for truncation
  *
  * Module discovery — two roots:
  *   - apps/api/src/modules/<name>/ (built-in modules, entry: index.ts)
@@ -12,10 +14,9 @@
  *
  * Each module directory contributes:
  *   - the entry file — default-exports an AppstrateModule (used by getTestApp)
- *   - drizzle/migrations/NNNN_name.sql — applied in file-name order (alphabetical)
  *   - test/tables.ts — default-exports a string[] of tables for truncateAll()
  *
- * All three are optional. Running core tests alone still picks up installed
+ * Both are optional. Running core tests alone still picks up installed
  * modules because anything in either root is part of the repo — there is no
  * "module disabled" state in tests, unlike production (MODULES env var).
  */
@@ -273,7 +274,7 @@ if (TIER0) {
   }
 }
 
-// ─── Module migrations + truncation registration ────────────
+// ─── Module discovery + truncation registration ─────────────
 // Auto-discover every module in the repo and wire up its test infrastructure.
 // We do this from the root preload (not per-module) so that `bun test` from
 // any directory sees a consistent state.
@@ -281,8 +282,12 @@ if (TIER0) {
 // Two layouts are recognised:
 //   - apps/api/src/modules/<name>/index.ts (built-in modules)
 //   - packages/module-<name>/src/index.ts (workspace-package modules)
-// Both share the same `drizzle/migrations/` and `test/tables.ts` conventions
-// (relative to the module's root directory).
+// Both share the same `test/tables.ts` convention (relative to the module's
+// root directory) — and only that one. Modules do NOT own migrations: their
+// tables live in the core schema and are created by the core migration step
+// above, as the code below says. This block used to promise a
+// `drizzle/migrations/` convention as well, which nothing here has read since
+// the tables moved.
 
 interface DiscoveredModule {
   /** Module root directory. */

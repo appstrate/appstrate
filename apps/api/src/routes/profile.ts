@@ -16,14 +16,18 @@ import { scopedWhere } from "../lib/db-helpers.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { setDisplayName } from "../services/profile.ts";
 
-export const profileUpdateSchema = z.object({
-  language: z.enum(["fr", "en"]).optional(),
-  displayName: z.string().min(1).max(100).optional(),
-});
+export const profileUpdateSchema = z
+  .object({
+    language: z.enum(["fr", "en"]).optional(),
+    displayName: z.string().min(1).max(100).optional(),
+  })
+  .strict();
 
-export const batchLookupSchema = z.object({
-  ids: z.array(z.string()).max(100),
-});
+export const batchLookupSchema = z
+  .object({
+    ids: z.array(z.string()).max(100),
+  })
+  .strict();
 
 // BOTH bounds are imported from the Better Auth password config
 // (`packages/db/src/password-policy.ts`) so validation fails here with a proper
@@ -31,9 +35,11 @@ export const batchLookupSchema = z.object({
 // for the same reason as the minimum, not held locally: it is a fact about the
 // credential, and while it was per-endpoint this route said 128 and
 // `auth-bootstrap` said 256 for the same password.
-export const setPasswordSchema = z.object({
-  newPassword: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
-});
+export const setPasswordSchema = z
+  .object({
+    newPassword: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
+  })
+  .strict();
 
 const profileRouter = new Hono<AppEnv>();
 

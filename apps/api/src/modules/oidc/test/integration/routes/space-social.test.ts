@@ -66,13 +66,27 @@ describe("/api/spaces/:id/social-providers/:provider", () => {
     expect(res.status).toBe(404);
   });
 
-  it("404s for an app that does not belong to the caller's org", async () => {
-    const res = await app.request(`/api/spaces/spc_doesnotexist/social-providers/google`, {
-      method: "PUT",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "x", clientSecret: "y" }),
-    });
+  it("404s for a space that does not belong to the caller's org", async () => {
+    const res = await app.request(
+      `/api/spaces/spc_${crypto.randomUUID()}/social-providers/google`,
+      {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: "x", clientSecret: "y" }),
+      },
+    );
     expect(res.status).toBe(404);
+  });
+
+  // A malformed id is NOT "a space that is not yours": these routes now run the
+  // canonical `validateSpaceInOrg`, whose shape guard answers 400 and names the
+  // retired `app_` prefix when that is what arrived.
+  it("400s for a malformed space id", async () => {
+    const res = await app.request(`/api/spaces/spc_doesnotexist/social-providers/google`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Malformed space id");
   });
 
   it("scopes rows by (app, provider) — google and github are independent", async () => {

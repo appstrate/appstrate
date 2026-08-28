@@ -159,6 +159,55 @@ function clientErrorMessage(error: unknown): string {
   return clientTurnErrorMarker(classifyClientTurnError(error));
 }
 
+/**
+ * Claim the conversation for this turn, then write its user message. Returns the
+ * user message id, which the assistant turn derives its own id from.
+ *
+ * THE ORDER IS THE INVARIANT, not a preference. Chat persistence has a second
+ * writer — `persistNotice`, driving the orphaned-run reconciliation — and the
+ * rule it obeys is "a turn owns its conversation from start to finalize",
+ * evaluated as `chat_sessions.active_stream_id IS NULL` under the session row's
+ * lock. Writing the user message first left a window in which that predicate was
+ * TRUE while a turn was already under way: `onRunStatusChange` →
+ * `reconcileChatRun` → `persistNotice` took the lock, legitimately saw NULL, and
+ * committed a notice at the seq BETWEEN this turn's user message and its
+ * assistant message. The transcript then read user / notice / assistant, and the
+ * session was marked unread while its owner sat watching it generate.
+ *
+ * Claiming first closes the window instead of narrowing it, and costs nothing
+ * that anything reads back. The two things that consult the marker both already
+ * treat "set, but no live producer" as no stream: the resume GET answers 204
+ * when the store has no producer for the id (`routes.ts`), which is the same
+ * answer it already owes a stale id left by a crash, and `POST …/stop` looks the
+ * id up in the stop registry, where this turn's controller is registered a few
+ * statements later — the same gap it already had. What is briefly true is the
+ * DTO's `generating` flag, for the duration of one INSERT, and that is simply
+ * the truth: the turn has started.
+ *
+ * A locked transaction spanning both writes would close the window too. This is
+ * the cheaper half of that choice: no transaction on the pre-inference path of
+ * every turn, and no lock held across a `chat_messages` insert.
+ */
+export async function claimTurn(
+  sessionId: string,
+  streamId: string,
+  message: UIMessage,
+): Promise<string> {
+  await setActiveStream(sessionId, streamId);
+  try {
+    return await persistUserMessage(sessionId, message);
+  } catch (err) {
+    // A claim must not outlive the turn it was taken for. Without this, a failed
+    // user-message write would leave the session marked generating forever: the
+    // resume GET keeps answering 204, `persistNotice` keeps refusing, and the
+    // sidebar keeps a spinner on a turn that never started. `clearActiveStream`
+    // only clears a marker still pointing at THIS stream, so a newer turn that
+    // already claimed the session is left alone.
+    await clearActiveStream(sessionId, streamId).catch(() => {});
+    throw err;
+  }
+}
+
 export async function handleChatStream(
   c: Context<ChatEnv>,
   deps: ChatPlatformDeps,
@@ -394,19 +443,18 @@ export async function handleChatStream(
   // `active_stream_id` so a reloaded client's resume GET can find the live turn.
   const streamId = crypto.randomUUID();
 
-  // The session row was already ensured up front (before the preamble). Persist
-  // the user turn and mark the in-flight stream now, just before generation.
+  // The session row was already ensured up front (before the preamble). Claim
+  // the conversation and persist the user turn now, just before generation.
   let userMessageId: string | undefined;
   if (sessionId && lastMessage?.id) {
     try {
-      userMessageId = await persistUserMessage(sessionId, lastMessage);
-      // Mark the in-flight stream so a mid-inference reload can reconnect to it.
-      await setActiveStream(sessionId, streamId);
+      userMessageId = await claimTurn(sessionId, streamId, lastMessage);
     } catch (err) {
       // The concurrency slot is already reserved but generation has not started,
       // so neither `finalize` (teardown via onSettled) nor `failCleanup` (defined
       // below) owns it yet. Release it on this error path before rethrowing, or
-      // one slot leaks per failed turn.
+      // one slot leaks per failed turn. `claimTurn` has already undone its own
+      // half (the in-flight marker); the slot is this function's to undo.
       slot.release();
       throw err;
     }

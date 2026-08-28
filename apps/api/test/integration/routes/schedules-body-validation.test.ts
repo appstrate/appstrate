@@ -74,7 +74,7 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
 
   it("rejects an unknown field with 400 instead of freezing a schedule without it", async () => {
     const res = await post({ cron_expression: "0 9 * * 1-5", config: { days: 30 } });
-    await expectRejectedField(res, "body");
+    await expectRejectedField(res, "config");
   });
 
   it("rejects an empty connection_overrides value with 400", async () => {
@@ -155,7 +155,7 @@ describe("PUT /api/schedules/:id — body validation", () => {
 
   it("rejects an unknown field with 400 instead of applying the rest of the patch", async () => {
     const res = await put({ enabled: false, config: { days: 30 } });
-    await expectRejectedField(res, "body");
+    await expectRejectedField(res, "config");
   });
 
   it("rejects an empty connection_overrides value with 400", async () => {

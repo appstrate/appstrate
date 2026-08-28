@@ -27,17 +27,19 @@ import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
 import { normalizeMime } from "../services/mime-policy.ts";
 import { getEnv } from "@appstrate/env";
 
-export const createUploadSchema = z.object({
-  name: z.string().min(1).max(255),
-  size: z.coerce.number().int().positive().max(UPLOAD_MAX_BYTES),
-  mime: z.string().min(1).max(255),
-  // Optional client integrity claim: lowercase-hex SHA-256, verified
-  // server-side (S3 checksum on PUT, proxy-sink re-hash, and again at consume).
-  sha256: z
-    .string()
-    .regex(/^[0-9a-fA-F]{64}$/, "sha256 must be a 64-character hex SHA-256 digest")
-    .optional(),
-});
+export const createUploadSchema = z
+  .object({
+    name: z.string().min(1).max(255),
+    size: z.coerce.number().int().positive().max(UPLOAD_MAX_BYTES),
+    mime: z.string().min(1).max(255),
+    // Optional client integrity claim: lowercase-hex SHA-256, verified
+    // server-side (S3 checksum on PUT, proxy-sink re-hash, and again at consume).
+    sha256: z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, "sha256 must be a 64-character hex SHA-256 digest")
+      .optional(),
+  })
+  .strict();
 
 export function createUploadsRouter() {
   const router = new Hono<AppEnv>();

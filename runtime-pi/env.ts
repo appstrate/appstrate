@@ -19,7 +19,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import type { Api, Model } from "./pi-sdk.ts";
-import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
+import { MODEL_API_SHAPES, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import {
   modelNativeReasoningLevelSchema,
   modelReasoningLevelSchema,
@@ -73,6 +73,18 @@ interface RuntimeEnv {
   sink: { url: string; finalizeUrl: string; secret: string };
   /** Sidecar URL — present when the platform attached a sidecar. */
   sidecarUrl?: string;
+  /**
+   * Per-run secret this container presents on `SIDECAR_AUTH_HEADER` for every
+   * request to the sidecar's control surface (`/llm/*`, `/mcp`,
+   * `/integrations/boot-report`, `/runtime-events`). Present exactly when
+   * {@link sidecarUrl} is — the platform mints and emits the pair together.
+   *
+   * Captured here so `entrypoint.ts` can delete the env var alongside
+   * `SIDECAR_URL` once the model and the clients hold it: the two together are
+   * the capability to reach the sidecar, and the Pi bash extension must not be
+   * able to `env | grep SIDECAR` its way to a free `/llm` call.
+   */
+  sidecarAuthToken?: string;
   /**
    * Wall-clock execution budget for the run, in seconds. Surfaced on
    * `ExecutionContext.timeoutSeconds`; the runner arms its own timeout
@@ -343,6 +355,14 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     issues.push(`SIDECAR_URL: must be an http(s) URL when set (got "${sidecarUrl}")`);
   }
 
+  // FATAL rather than a warning: without it every sidecar call answers 401, so
+  // the run would boot, connect to nothing, and fail on its first tool call
+  // with an error that names the symptom instead of the cause.
+  const sidecarAuthToken = source.SIDECAR_AUTH_TOKEN;
+  if (sidecarUrl && !sidecarAuthToken) {
+    issues.push("SIDECAR_AUTH_TOKEN: required whenever SIDECAR_URL is set");
+  }
+
   const modelBaseUrl = source.MODEL_BASE_URL;
   if (modelBaseUrl && !isHttpUrl(modelBaseUrl))
     issues.push(`MODEL_BASE_URL: must be an http(s) URL when set (got "${modelBaseUrl}")`);
@@ -427,6 +447,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     agentInput,
     sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },
     sidecarUrl: sidecarUrl || undefined,
+    sidecarAuthToken: sidecarAuthToken || undefined,
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
@@ -461,6 +482,18 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     cost: env.modelCost ?? { ...ZERO_MODEL_COST },
     contextWindow: env.modelContextWindow,
     maxTokens: env.modelMaxTokens,
+    // Agent→sidecar auth for the `/llm/*` leg, and the only place it can ride:
+    // the Pi SDK owns the request and takes no per-call headers from us.
+    // `ModelRuntime`'s provider composer folds `Model.headers` into the
+    // per-request options, so this reaches the wire for every api shape —
+    // including `pi-messages` (aliased runs) and `bedrock-converse-stream`,
+    // whose pi-ai adapters read `options.headers` and nothing else. Pinned on
+    // the bytes in `packages/runner-pi/test/alias-provider-registration.test.ts`
+    // and `runtime-pi/test/pi-runner-transport.test.ts`.
+    //
+    // Carried on the model rather than read from `process.env` at request time,
+    // so the bootloader can delete the variable once the run is wired.
+    ...(env.sidecarAuthToken ? { headers: { [SIDECAR_AUTH_HEADER]: env.sidecarAuthToken } } : {}),
   };
 }
 

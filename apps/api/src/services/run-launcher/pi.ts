@@ -22,6 +22,7 @@
  * server-side finalize race.
  */
 
+import { randomBytes } from "node:crypto";
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
@@ -318,8 +319,22 @@ async function runPlatformContainerImpl(
       };
     }
 
+    // Agent↔sidecar bearer for THIS run. Minted here, in the one frame that
+    // feeds both halves of the pair (`sidecarSpec` → the sidecar's env,
+    // `buildRuntimePiEnv` → the agent container's), so the two can never be
+    // set from different values. Never persisted, never logged, and never
+    // handed to an integration runner — the sidecar keeps it in its config
+    // object and builds runner env from the integration spec alone.
+    //
+    // Deliberately NOT `plan.runToken`, and not derived from it: the agent
+    // container must stay unable to call the platform back (zero-knowledge),
+    // so this secret carries no platform authority and no path to one.
+    // `skipSidecar` runs have no sidecar to authenticate to.
+    const sidecarAuthToken = skipSidecar ? undefined : randomBytes(32).toString("base64url");
+
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken,
+      ...(sidecarAuthToken ? { sidecarAuthToken } : {}),
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's
@@ -394,6 +409,11 @@ async function runPlatformContainerImpl(
       // owns the topology (Docker DNS alias, host loopback port, in-guest
       // loopback for microVMs) and pi.ts stays backend-agnostic.
       sidecarUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.sidecarUrl,
+      // Other half of the pair minted above. `buildRuntimePiEnv` throws when a
+      // sidecar-backed run reaches it without one, the same way it does for
+      // `sidecarUrl` — a run that cannot authenticate to its sidecar must not
+      // start rather than 401 on its first inference call.
+      sidecarAuthToken,
       // Sidecar-backed runs route LLM traffic through the sidecar proxy
       // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
       // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the
@@ -449,36 +469,77 @@ async function runPlatformContainerImpl(
     // agent boots; racing it alongside the create calls here satisfies that
     // ordering. When `skipSidecar`, only the agent is created (it reaches the
     // platform directly over its egress network).
-    const [sidecar, agent] = await Promise.all([
-      skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
-      orch.createWorkload(
-        {
-          runId,
-          role: "agent",
-          image: getEnv().PI_IMAGE,
-          env: containerEnv,
-          resources: plan.resources.workload,
-          // Without a sidecar there is no egress proxy — the agent must
-          // reach the upstream LLM and the platform sink directly, so it
-          // goes on the egress network instead of the internal boundary.
-          egress: skipSidecar,
-          // Hard host-side lifetime ceiling (B2): run budget + the same
-          // boot grace the platform safety net uses + a 600 s margin, so
-          // the daemon's kill is strictly a LAST resort behind the
-          // safety-net setTimeout in waitForWorkload — it only ever fires
-          // when the platform died or was partitioned mid-run and its own
-          // stop can no longer reach the workload.
-          maxLifetimeSeconds:
-            plan.timeout +
-            Math.ceil((input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs()) / 1000) +
-            600,
-        },
-        boundary,
+    //
+    // `allSettled`, NOT `all`. Two distinct leaks came out of `all`, and only
+    // waiting for every branch closes both:
+    //   - `all` rejects on the FIRST failure, so the `await` never returns and
+    //     `sidecarHandle` / `agentHandle` are never assigned — the `finally`
+    //     below then sees `undefined` and removes nothing. On Docker the agent
+    //     container sits on `boundary.id`, so `removeIsolationBoundary`'s
+    //     network + volume removals 409 on the still-attached container and are
+    //     swallowed by its own `allSettled`: container, network AND volume all
+    //     leak, holding `spec.env` — RUN_TOKEN, sink secret, model credentials,
+    //     the sidecar auth token — readable via `docker inspect` forever
+    //     (`cleanupOrphans()` runs only at boot).
+    //   - `all` also resumes the caller while the slower branches are still in
+    //     flight, so a container created AFTER a sibling's rejection is born
+    //     orphaned — cleanup has already run.
+    // Assignment therefore happens on the settled results, before the rethrow.
+    //
+    // `rejections` preserves WHICH failure the caller sees: `all` reported the
+    // branch that failed first IN TIME, not the lowest index, and the catch
+    // below plus the caller's error mapping have always keyed off that one.
+    // Re-deriving it from array position would silently blame a different phase.
+    const rejections: unknown[] = [];
+    const track = <T>(p: Promise<T>): Promise<T> =>
+      p.catch((err: unknown) => {
+        rejections.push(err);
+        throw err;
+      });
+    const [sidecarResult, agentResult, uploadResult] = await Promise.allSettled([
+      track(
+        skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
       ),
-      uploadBundle(runId, plan.agentPackage ?? undefined),
+      track(
+        orch.createWorkload(
+          {
+            runId,
+            role: "agent",
+            image: getEnv().PI_IMAGE,
+            env: containerEnv,
+            resources: plan.resources.workload,
+            // Without a sidecar there is no egress proxy — the agent must
+            // reach the upstream LLM and the platform sink directly, so it
+            // goes on the egress network instead of the internal boundary.
+            egress: skipSidecar,
+            // Hard host-side lifetime ceiling (B2): run budget + the same
+            // boot grace the platform safety net uses + a 600 s margin, so
+            // the daemon's kill is strictly a LAST resort behind the
+            // safety-net setTimeout in waitForWorkload — it only ever fires
+            // when the platform died or was partitioned mid-run and its own
+            // stop can no longer reach the workload.
+            maxLifetimeSeconds:
+              plan.timeout +
+              Math.ceil((input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs()) / 1000) +
+              600,
+          },
+          boundary,
+        ),
+      ),
+      track(uploadBundle(runId, plan.agentPackage ?? undefined)),
     ]);
-    sidecarHandle = sidecar;
-    agentHandle = agent;
+    // Reclaimable BEFORE the rethrow: whatever exists must reach the `finally`.
+    if (sidecarResult.status === "fulfilled") sidecarHandle = sidecarResult.value;
+    if (agentResult.status === "fulfilled") agentHandle = agentResult.value;
+    if (
+      sidecarResult.status === "rejected" ||
+      agentResult.status === "rejected" ||
+      uploadResult.status === "rejected"
+    ) {
+      throw rejections[0];
+    }
+    const sidecar = sidecarResult.value;
+    const agent = agentResult.value;
     recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
     spawnRecorded = true;
 

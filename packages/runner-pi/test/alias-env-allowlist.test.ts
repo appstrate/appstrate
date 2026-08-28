@@ -82,6 +82,7 @@ const RUN: RuntimePiEnvOptions = {
   agentInput: { topic: "quarterly report" },
   timeoutSeconds: 900,
   sidecarUrl: "http://sidecar:8080",
+  sidecarAuthToken: "sidecar-auth-token-fixture",
   sidecarProxyLlmUrl: "http://sidecar:8080/llm",
   outputSchema: { type: "object", properties: { summary: { type: "string" } } },
   maxFileBytes: 104_857_600,
@@ -112,6 +113,13 @@ const RUN: RuntimePiEnvOptions = {
  *   out-tells them anyway (`docs/architecture/MODEL_ALIASES.md`).
  * - `MODEL_INPUT` is the modality vector, published on purpose: withholding it
  *   would silently disable image input for the run.
+ * - `SIDECAR_AUTH_TOKEN` is this run's own credential toward its own sidecar —
+ *   random per run, so it correlates with nothing and names no backing. It is
+ *   here on purpose: the sidecar's control surface denies by default because
+ *   integration runner containers share the run's Docker network, and the agent
+ *   is the one party that must get through. It grants no platform authority
+ *   (that is `RUN_TOKEN`, which stays outside the container) and is worthless
+ *   once the run's network is gone.
  * - `MODEL_RETRY_ENABLED` is the operator's opt-out of the Pi SDK retry loop, and
  *   `MODEL_COMPACTION_ENABLED` the same opt-out for its auto-compaction loop.
  *   Both are the operator's own choice, read off the host env and identical
@@ -146,6 +154,7 @@ const ALIASED_CONTAINER_ENV_KEYS = [
   "MODEL_TEMPERATURE",
   "NO_PROXY",
   "OUTPUT_SCHEMA",
+  "SIDECAR_AUTH_TOKEN",
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   "SIDECAR_URL",
   "TOOL_RESULT_BYTE_LIMIT",
@@ -316,5 +325,37 @@ describe("aliased agent container env — exact allowlist (issue #1198, Threat B
     expect(aliased.MODEL_MAX_TOKENS).toBe(byok.MODEL_MAX_TOKENS);
     expect(aliased.MODEL_CONTEXT_WINDOW).toBe("200000");
     expect(aliased.MODEL_MAX_TOKENS).toBe("64000");
+  });
+
+  it("refuses to build an aliased container env at all when there is no sidecar", () => {
+    // Every mask asserted above is applied by this builder except one: on the
+    // no-sidecar path `MODEL_BASE_URL` becomes `model.baseUrl`, the backing
+    // vendor's own hostname, because there is no proxy URL to put there instead.
+    // That mask lives in the sidecar, not here, so the only way to keep it is to
+    // refuse the combination — an aliased run without the component that performs
+    // the aliasing is not a run this contract can describe.
+    //
+    // Held HERE and not only at the caller: `run-launcher/pi.ts` gates its
+    // no-sidecar path on `!llmConfig.aliased` today, one package away, where this
+    // file's exact-set assertions cannot see it.
+    const noSidecar: RuntimePiEnvOptions = {
+      ...RUN,
+      sidecarUrl: undefined,
+      sidecarProxyLlmUrl: undefined,
+      forwardProxyUrl: undefined,
+      noSidecar: true,
+    };
+
+    expect(() =>
+      buildRuntimePiEnv({ ...noSidecar, model: { ...RUN.model, aliased: true } }),
+    ).toThrow(/aliased run cannot be launched with noSidecar/);
+
+    // Control: the refusal is about the ALIAS, not about noSidecar. The same
+    // options with the flag off build fine and hand over the vendor's endpoint —
+    // which is exactly what a BYOK run is entitled to, and exactly what an alias
+    // must never see.
+    const byok = buildRuntimePiEnv({ ...noSidecar, model: { ...RUN.model, aliased: false } });
+    expect(byok.MODEL_BASE_URL).toBe("https://api.deepseek.com/v1");
+    expect(byok.SIDECAR_URL).toBeUndefined();
   });
 });

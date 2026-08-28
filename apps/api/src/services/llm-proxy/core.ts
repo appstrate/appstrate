@@ -81,8 +81,15 @@ interface ProxyCallInputs {
 }
 
 export class LlmProxyUnsupportedModelError extends Error {
-  constructor(presetId: string) {
-    super(`Model preset "${presetId}" is not enabled for this organization.`);
+  /**
+   * @param presetId - The preset the caller asked for
+   * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising
+   *   this from a `catch`. The message is a CONCLUSION ("not enabled"), and
+   *   the catch below reaches it for any `loadModel` failure — a DB outage
+   *   included. Without the cause that misdiagnosis is unfalsifiable.
+   */
+  constructor(presetId: string, options?: ErrorOptions) {
+    super(`Model preset "${presetId}" is not enabled for this organization.`, options);
     this.name = "LlmProxyUnsupportedModelError";
   }
 }
@@ -349,8 +356,12 @@ async function resolvePresetForOrg(
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
     loaded = await loadModel(orgId, presetId);
-  } catch {
-    throw new LlmProxyUnsupportedModelError(presetId);
+  } catch (err) {
+    // The comment above names ONE expected failure (a non-UUID presetId), but
+    // this catch swallows every other one too — a dropped connection, a
+    // migration mid-flight — and reports all of them to the operator as
+    // "preset not found". Keep what actually failed.
+    throw new LlmProxyUnsupportedModelError(presetId, { cause: err });
   }
   if (!loaded) {
     throw new LlmProxyUnsupportedModelError(presetId);

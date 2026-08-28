@@ -67,11 +67,46 @@ const REFRESH_DECLARATIONS = new Set(["default", "not_supported"]);
  * confirmed against the provider's documentation. Entries are
  * `"<packageId>:<authKey>"`.
  *
- * This list only ever shrinks. To remove an entry: read the provider's OAuth
- * docs, then either add the authorize param / scope it requires, or record
- * `_meta["dev.appstrate/oauth"].refresh_token_issuance` in the manifest. Do NOT add a new
- * integration here — a new manifest's author is the one person who has the
- * provider's docs open.
+ * This list only ever shrinks, and {@link UNVERIFIED_CEILING} — which must
+ * equal its size exactly — is what makes that mechanical rather than
+ * aspirational. Do NOT add a new integration here: a new manifest's author is
+ * the one person who has the provider's docs open, and the ceiling will
+ * reject the addition anyway.
+ *
+ * ## Burning one entry down
+ *
+ * "Verifying" an entry is a documentation task, not a code task. For
+ * `"@appstrate/foo:primary"`:
+ *
+ *   1. Open that provider's OAuth documentation and answer ONE question:
+ *      what does an authorize request have to say for the token endpoint to
+ *      return a `refresh_token`? Providers answer it in one of three shapes —
+ *      an authorize-time parameter, a scope, or "nothing, we always issue
+ *      one" / "nothing, we never issue one".
+ *   2. Record the answer in `scripts/system-packages/integration-foo-<v>/manifest.json`,
+ *      under `auths.primary`:
+ *      - authorize parameter → add it to `authorization_params`, AND add the
+ *        `name: value` pair to {@link OFFLINE_AUTHORIZE_PARAMS} below if this
+ *        check does not recognise it yet (an unlisted parameter proves
+ *        nothing — see that table's own comment);
+ *      - scope → add it to `default_scopes` (and to the auth's
+ *        `scope_catalog`, which `build:system-packages:check` cross-checks);
+ *      - neither → set
+ *        `_meta["dev.appstrate/oauth"].refresh_token_issuance` to `"default"`
+ *        or `"not_supported"`.
+ *   3. Bump the package `version`, rename its source directory to match, and
+ *      run `bun run scripts/build-system-packages.ts` — an already-published
+ *      version is immutable, so without the bump the fix never reaches
+ *      production (#928).
+ *   4. Delete the entry from this list AND decrement {@link UNVERIFIED_CEILING}
+ *      by one. Both, in the same commit: the ceiling is an equality, so
+ *      either edit alone fails the gate.
+ *
+ * Step 4 is the only step that touches this file, and it is the only step
+ * that can be done without reading the provider's docs — which is why it is
+ * gated on step 2 having actually happened: drop an entry whose manifest
+ * still declares nothing and the auth stops being a warning and becomes a
+ * hard `fail`, immediately, in the same run.
  */
 export const UNVERIFIED = new Set<string>([
   "@appstrate/airtable:primary",
@@ -225,29 +260,68 @@ function declaredAuthKeys(entries: SystemPackageEntry[]): Set<string> {
 }
 
 /**
- * Ceiling on the backlog. Lower it — never raise it — as entries are verified
- * and removed.
+ * The size {@link UNVERIFIED} is allowed to have. Not an upper bound — an
+ * EQUALITY, and it may only ever be decremented.
  *
- * Without a ceiling the waiver list is a TODO in a nicer shell: it can grow
+ * Without a ceiling the waiver list is a TODO in a nicer shell: it grows
  * silently, and 29 permanent warnings train everyone to stop reading the
- * report. The repo already ratchets `verify:type-coverage --at-least 98` for
- * the same reason; this is that pattern applied to provider knowledge.
+ * report — which is exactly what happened between this constant landing
+ * (2026-08-19) and the audit that found it still at 29 with zero burn-down.
+ * The repo already ratchets `verify:type-coverage --at-least 98` for the same
+ * reason; this is that pattern applied to provider knowledge.
+ *
+ * It is an equality and not a `<=` because the two failure modes are opposite
+ * and a `<=` only catches one of them:
+ *
+ *   - grown (`size > ceiling`) — a new integration joined the backlog instead
+ *     of declaring its refresh strategy. A `<=` catches this.
+ *   - shrunk (`size < ceiling`) — someone did the real work, verified a
+ *     provider and removed its entry, and left the ceiling where it was. A
+ *     `<=` waves this through, and the slack it leaves is a free seat: the
+ *     next addition then passes silently. That is how a ratchet stops
+ *     ratcheting, so it is a failure here too, with a message that says
+ *     "you're done, write the smaller number down".
+ *
+ * The equality is also what makes the remaining hole small enough to police
+ * by review. Raising this constant is still just an edit — no gate can stop
+ * a determined `= 30` — but it is now the ONLY edit that can turn a grown
+ * list green, it is one line, it is named, and it contradicts the sentence
+ * directly above it. A `+1` buried in a 29-line alphabetical list is not.
  */
 export const UNVERIFIED_CEILING = 29;
 
-/** Fail when the backlog grows past its ceiling. */
-export function checkBacklogCeiling(): Finding[] {
-  if (UNVERIFIED.size <= UNVERIFIED_CEILING) return [];
+/**
+ * Fail unless the backlog is exactly its ceiling — in either direction. See
+ * {@link UNVERIFIED_CEILING} for why both directions are failures.
+ *
+ * `size` and `ceiling` default to the checked-in pair, which is the only way
+ * production calls it. They are parameters so the two violating states can be
+ * exercised for real in tests: both live values are module constants, and the
+ * alternative — asserting against a re-implementation of this branch — would
+ * test nothing.
+ */
+export function checkBacklogCeiling(
+  size: number = UNVERIFIED.size,
+  ceiling: number = UNVERIFIED_CEILING,
+): Finding[] {
+  if (size === ceiling) return [];
   return [
     {
       packageId: "(conformance)",
       check: CHECK,
       severity: "fail",
       message:
-        `UNVERIFIED holds ${UNVERIFIED.size} entries, above the ceiling of ` +
-        `${UNVERIFIED_CEILING}. A new integration must declare its refresh strategy, ` +
-        `not join the backlog — the list only ever shrinks. If an entry was genuinely ` +
-        `verified away, lower UNVERIFIED_CEILING to match.`,
+        size > ceiling
+          ? `UNVERIFIED holds ${size} entries, above its ceiling of ${ceiling}. ` +
+            `A new integration must declare its refresh strategy, not join the ` +
+            `backlog — the list only ever shrinks, and raising UNVERIFIED_CEILING ` +
+            `to make this pass is the wrong fix. Burn-down procedure: see the ` +
+            `comment on UNVERIFIED in scripts/conformance/refresh-strategy.ts.`
+          : `UNVERIFIED holds ${size} entries but its ceiling is still ${ceiling}. ` +
+            `An entry was verified away without lowering the ceiling, which leaves ` +
+            `${ceiling - size} free seat(s) a future waiver could take silently. ` +
+            `Set UNVERIFIED_CEILING = ${size} in ` +
+            `scripts/conformance/refresh-strategy.ts.`,
     },
   ];
 }

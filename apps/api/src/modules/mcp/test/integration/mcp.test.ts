@@ -18,6 +18,7 @@ import { getEnv } from "@appstrate/env";
 import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
+import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
 import { seedApiKey } from "../../../../../test/helpers/seed.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
@@ -416,6 +417,13 @@ describe("mcp tool round-trip", () => {
 describe("mcp audit + rate limiting", () => {
   beforeEach(async () => {
     await truncateAll();
+    // The burst assertion below counts requests against a Redis-backed limiter
+    // whose keys `truncateAll()` does not touch. Without this the test silently
+    // depends on every suite that ran before it having spent none of that
+    // budget — it passes alone and gets a premature 429 in a full run, which is
+    // exactly what happened once this branch added request-making tests
+    // upstream of it. 24 other suites already flush for the same reason.
+    await flushRedis();
     resetCatalog();
   });
 
@@ -478,9 +486,18 @@ describe("mcp audit + rate limiting", () => {
     expect(rows.length).toBe(0);
   });
 
-  it("emits IETF RateLimit headers and rejects bursts beyond the limit with 429", async () => {
-    // One fixed identity (same API key) so every request keys to the same
-    // rate-limit bucket. The limit is 120/min; fire enough to trip it.
+  // What is unique to THIS layer is the WIRING: that `/api/mcp/o/:org` is
+  // actually mounted behind `rateLimitMcp(MCP_RATE_LIMIT_PER_MIN)` and charges
+  // the caller's API key. The limiter's own semantics — IETF headers, 429,
+  // Retry-After, the identity ladder, one bucket across paths — are pinned in
+  // `apps/api/test/unit/rate-limit.test.ts` against small limits.
+  //
+  // This used to fire 125 sequential envelopes to burn a 120/min budget down
+  // to a 429. That re-proved the unit-tested behaviour at the cost of ~5s of
+  // in-process HTTP, and CI timed it out. Two requests prove the wiring: the
+  // advertised limit is the mounted constant, and the second request is
+  // charged to the same bucket as the first.
+  it("charges the mounted 120/min MCP limiter, keyed on the caller", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const init = {
       jsonrpc: "2.0",
@@ -492,27 +509,29 @@ describe("mcp audit + rate limiting", () => {
         clientInfo: { name: "t", version: "1" },
       },
     } as const;
-
-    const first = await app.request(mcpPath(headers), {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-      body: JSON.stringify(init),
-    });
-    expect(first.status).toBe(200);
-    expect(first.headers.get("RateLimit")).toContain("limit=120");
-
-    let sawRateLimit = false;
-    for (let i = 0; i < 125 && !sawRateLimit; i++) {
-      const res = await app.request(mcpPath(headers), {
+    const post = () =>
+      app.request(mcpPath(headers), {
         method: "POST",
         headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
         body: JSON.stringify(init),
       });
-      if (res.status === 429) {
-        sawRateLimit = true;
-        expect(res.headers.get("Retry-After")).not.toBeNull();
-      }
-    }
-    expect(sawRateLimit).toBe(true);
+
+    const first = await post();
+    expect(first.status).toBe(200);
+    expect(first.headers.get("RateLimit")).toContain("limit=120");
+    const firstRemaining = Number(
+      /remaining=(\d+)/.exec(first.headers.get("RateLimit") ?? "")?.[1],
+    );
+    expect(firstRemaining).toBe(119);
+
+    // Same API key, same bucket: one more point gone. A route mounted behind a
+    // per-request limiter, or keyed on something that varies per call, would
+    // hand back 119 again here.
+    const second = await post();
+    expect(second.status).toBe(200);
+    const secondRemaining = Number(
+      /remaining=(\d+)/.exec(second.headers.get("RateLimit") ?? "")?.[1],
+    );
+    expect(secondRemaining).toBe(118);
   });
 });

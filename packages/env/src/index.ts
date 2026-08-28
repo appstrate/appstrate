@@ -314,7 +314,7 @@ export const envSchema = z
     PLATFORM_RUN_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // Inline-run specific limits (caps on manifest size, skills/tools count,
-    // authorized URIs, retention). See docs/specs/INLINE_RUNS.md §6.
+    // authorized URIs, retention). Shape: `apps/api/src/services/run-limits.ts`.
     INLINE_RUN_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // LLM proxy limits — caps on `/api/llm-proxy/*` (per-call rate, body size).
@@ -328,8 +328,8 @@ export const envSchema = z
     CREDENTIAL_PROXY_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // Unified runner protocol — governs the event-ingestion surface shared
-    // by platform containers and remote CLIs. See
-    // docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md.
+    // by platform containers and remote CLIs. Shape:
+    // `apps/api/src/services/run-event-ingestion.ts`.
     //
     // Default sink TTL when the caller does not request one (remote CLI) or
     // cannot (platform container boot env). 2h is comfortably above the

@@ -1015,9 +1015,9 @@ export {
   chatSessionUpdateEventSchema,
   runUpdateToRunPatch,
 } from "./realtime-events.ts";
-export type {
-  RunUpdateEvent,
-  RunLogEvent,
-  RunMetricEvent,
-  RealtimeEvent,
-} from "./realtime-events.ts";
+// `RunUpdateEvent` is deliberately absent: the last consumer outside
+// `realtime-events.ts` went with the run-detail page's unused `run_update`
+// listener. It is still live *inside* that module (`RealtimeEvent`'s union arm
+// and `runUpdateToRunPatch`'s parameter), so it stays exported there — this
+// barrel just no longer re-publishes a name nothing imports.
+export type { RunLogEvent, RunMetricEvent, RealtimeEvent } from "./realtime-events.ts";

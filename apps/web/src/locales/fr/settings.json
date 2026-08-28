@@ -129,6 +129,7 @@
   "orgSettings.removeMember": "Retirer {{name}} de l'organisation ?",
   "orgSettings.noMembers": "Aucun membre.",
   "orgSettings.noMembersHint": "Ajoutez des membres par email.",
+  "packages.type.agent": "agent",
   "packages.type.skill": "skill",
   "packages.type.skills": "Skills",
   "packages.type.mcp-server": "serveur MCP",

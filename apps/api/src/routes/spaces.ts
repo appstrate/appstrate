@@ -3,10 +3,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
-  ModelGenerationError,
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
-  resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
@@ -36,7 +34,11 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
+import {
+  assertExplicitModelExists,
+  resolveModel,
+  validateGenerationOverride,
+} from "../services/org-models.ts";
 
 /**
  * Project a Drizzle space row onto the wire shape. The DB column is
@@ -50,35 +52,43 @@ function toSpaceWire<T extends { createdBy: string | null }>(
   return { ...rest, created_by: createdBy };
 }
 
-export const createSpaceSchema = z.object({
-  name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
-  settings: spaceSettingsSchema.optional(),
-});
+export const createSpaceSchema = z
+  .object({
+    name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
+    settings: spaceSettingsSchema.optional(),
+  })
+  .strict();
 
-export const updateSpaceSchema = z.object({
-  name: z
-    .string()
-    .min(1, "name is required")
-    .max(100, "name must be 100 characters or less")
-    .optional(),
-  settings: spaceSettingsSchema.optional(),
-});
+export const updateSpaceSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1, "name is required")
+      .max(100, "name must be 100 characters or less")
+      .optional(),
+    settings: spaceSettingsSchema.optional(),
+  })
+  .strict();
 
 // Neither body carries the agent's stored input values: `PUT
 // /api/agents/{scope}/{name}/input-settings` is their single write path,
 // because it is the only one that validates them against
 // `manifest.input.schema` and enforces `assertLockedFieldsSatisfiable`.
-export const installPackageSchema = z.object({
-  packageId: z.string().min(1),
-});
+export const installPackageSchema = z
+  .object({
+    packageId: z.string().min(1),
+  })
+  .strict();
 
-export const updatePackageSchema = z.object({
-  generationConfig: modelGenerationSettingsSchema.nullable().optional(),
-  modelId: z.string().nullable().optional(),
-  proxyId: z.string().nullable().optional(),
-  version_id: z.number().int().nullable().optional(),
-  enabled: z.boolean().optional(),
-});
+export const updatePackageSchema = z
+  .object({
+    generationConfig: modelGenerationSettingsSchema.nullable().optional(),
+    modelId: z.string().nullable().optional(),
+    proxyId: z.string().nullable().optional(),
+    version_id: z.number().int().nullable().optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
 
 export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
@@ -213,8 +223,11 @@ export function createSpacesRouter() {
     return next();
   });
 
-  // GET /api/spaces/:spaceId/packages — list installed packages
-  router.get("/:spaceId/packages", async (c) => {
+  // GET /api/spaces/:spaceId/packages — list installed packages.
+  // The `router.use` guards above only prove the space belongs to the org;
+  // `spaces:read` is the read twin of the `spaces:write` the mutating routes
+  // carry, and matches this route being package-type agnostic.
+  router.get("/:spaceId/packages", requirePermission("spaces", "read"), async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
@@ -235,21 +248,25 @@ export function createSpacesRouter() {
   });
 
   // GET /api/spaces/:spaceId/packages/:packageId — get installed package detail
-  router.get(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
-    const spaceId = c.req.param("spaceId")!;
-    const orgId = c.get("orgId");
-    const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
-    if (!row) {
-      throw new ApiError({
-        status: 404,
-        code: "package_not_installed",
-        title: "Package Not Installed",
-        detail: `Package '${packageId}' is not installed in this space`,
-      });
-    }
-    return c.json({ object: "space_package", ...row });
-  });
+  router.get(
+    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
+    requirePermission("spaces", "read"),
+    async (c) => {
+      const spaceId = c.req.param("spaceId")!;
+      const orgId = c.get("orgId");
+      const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+      const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
+      if (!row) {
+        throw new ApiError({
+          status: 404,
+          code: "package_not_installed",
+          title: "Package Not Installed",
+          detail: `Package '${packageId}' is not installed in this space`,
+        });
+      }
+      return c.json({ object: "space_package", ...row });
+    },
+  );
 
   // PUT /api/spaces/:spaceId/packages/:packageId — update config
   router.put(
@@ -272,27 +289,22 @@ export function createSpacesRouter() {
           explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId));
 
         if (generationConfig && Object.keys(generationConfig).length > 0) {
-          if (!selectedModel) {
-            throw invalidRequest(
-              "A model must be configured before generation settings can be saved",
-            );
-          }
-          try {
-            generationConfig = resolveModelGenerationSettings({
-              capabilities: selectedModel.generation,
-              override: generationConfig,
-            });
-          } catch (error) {
-            if (error instanceof ModelGenerationError) {
-              throw invalidRequest(error.message, "generationConfig");
-            }
-            throw error;
-          }
+          generationConfig = validateGenerationOverride(
+            generationConfig,
+            selectedModel,
+            "generationConfig",
+          );
         } else if (
           generationConfig === undefined &&
           data.modelId !== undefined &&
           installed.generationConfig
         ) {
+          // Reconcile only when `modelId` is part of THIS patch: re-clamping
+          // stored settings is a response to the selected model possibly
+          // having changed, and a patch that never mentions `modelId` cannot
+          // change it. Without the conjunct a `{ enabled: false }` patch would
+          // silently rewrite `generation_config` on a request that never named
+          // it.
           generationConfig = reconcileModelGenerationSettings(
             installed.generationConfig,
             selectedModel?.generation,

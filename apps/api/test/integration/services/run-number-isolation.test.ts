@@ -13,6 +13,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedSpace } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { createRun } from "../../../src/services/state/runs.ts";
+import { initRunLimits } from "../../../src/services/run-limits.ts";
 import { runs } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -23,6 +24,11 @@ describe("nextRunNumber isolation per space", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // `createRun`'s per-org concurrency reservation reads the limits registry
+    // and lets an uninitialized read THROW — a fail-open catch there would
+    // silently uncap the org. This file never boots the app, so it boots the
+    // registry itself.
+    initRunLimits();
     ctx = await createTestContext();
     const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SpaceB" });
     spaceBId = spaceB.id;

@@ -33,12 +33,16 @@ export const chatComponentSchemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  // One stored conversation node returned by `GET /sessions/{id}` so the
+  // One stored conversation message returned by `GET /sessions/{id}` so the
   // client can seed `useChat({ messages })` on load. Written server-side
   // (user turn before inference, assistant turn on finalize); `content` is the
   // ai-sdk/v6 format-encoded message (UIMessage minus its id). The list is
   // returned in insertion order — the transcript carries no ordering field of
   // its own.
+  //
+  // `parent_id` and `format` were removed in `0054` along with the columns
+  // behind them: a re-encoding of `seq` order and a server constant, neither
+  // read by any client.
   ChatMessage: {
     type: "object",
     required: ["id", "content"],
@@ -96,6 +100,7 @@ export const chatPaths = {
             schema: {
               type: "object",
               properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              additionalProperties: false,
             },
           },
         },
@@ -167,6 +172,7 @@ export const chatPaths = {
               type: "object",
               required: ["title"],
               properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              additionalProperties: false,
             },
           },
         },

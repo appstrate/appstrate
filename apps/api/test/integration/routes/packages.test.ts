@@ -152,6 +152,77 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
+  // Cross-space isolation of the package LIST routes
+  //
+  // The whole space boundary of every `GET /api/packages/{type}` list is one
+  // term in a LEFT JOIN's ON clause (`services/package-items/crud.ts` →
+  // `eq(spacePackages.spaceId, spaceId)`). Drop it and any package installed
+  // ANYWHERE in the org joins a row in every space, so the full org
+  // catalogue appears in a space it was never installed in — while the
+  // detail route, which resolves through a different function, keeps 404ing
+  // and hides the breakage. The space cases above all exercise DETAIL; these
+  // are the only ones that issue a LIST with a non-default `X-Space-Id`.
+  // ═══════════════════════════════════════════════
+
+  describe("GET /api/packages/{type} — cross-space isolation", () => {
+    /** ids the list route reports for `type`, seen from `spaceId`. */
+    async function listedIds(type: string, spaceId: string): Promise<string[]> {
+      const res = await app.request(`/api/packages/${type}`, {
+        headers: { ...authHeaders(ctx), "X-Space-Id": spaceId },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }> };
+      return body.data.map((p) => p.id);
+    }
+
+    it("does not list an agent installed only in another space of the same org", async () => {
+      await seedAgent({ id: "@pkgorg/space-a-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@pkgorg/space-a-agent",
+      );
+      const spaceB = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Space B",
+        createdBy: ctx.user.id,
+      });
+
+      expect(await listedIds("agents", spaceB.id)).not.toContain("@pkgorg/space-a-agent");
+      // Control: from the space it IS installed in, the same list serves it —
+      // so the absence above is the space predicate, not an unrelated filter.
+      expect(await listedIds("agents", ctx.defaultSpaceId)).toContain("@pkgorg/space-a-agent");
+    });
+
+    it("does not list a skill installed only in another space of the same org", async () => {
+      await seedPackage({
+        id: "@pkgorg/space-a-skill",
+        orgId: ctx.orgId,
+        type: "skill",
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/space-a-skill",
+          version: "0.1.0",
+          type: "skill",
+          description: "Installed in the default space only",
+        },
+        draftContent: "# Space A",
+      });
+      await installPackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@pkgorg/space-a-skill",
+      );
+      const spaceB = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Skill Space B",
+        createdBy: ctx.user.id,
+      });
+
+      expect(await listedIds("skills", spaceB.id)).not.toContain("@pkgorg/space-a-skill");
+      expect(await listedIds("skills", ctx.defaultSpaceId)).toContain("@pkgorg/space-a-skill");
+    });
+  });
+
+  // ═══════════════════════════════════════════════
   // GET /api/packages/agents/:scope/:name — agent detail
   // ═══════════════════════════════════════════════
 
@@ -703,7 +774,7 @@ describe("Packages API", () => {
         }),
       });
 
-      await expectRejectedField(rejectedCreate, "body");
+      await expectRejectedField(rejectedCreate, "source_code");
 
       const createRes = await app.request("/api/packages/integrations", {
         method: "POST",
@@ -729,7 +800,7 @@ describe("Packages API", () => {
         }),
       });
 
-      await expectRejectedField(updateRes, "body");
+      await expectRejectedField(updateRes, "source_code");
 
       // The control for that refusal, and the only place this file pins that
       // `.strict()` left the ordinary update path alone: the same body MINUS

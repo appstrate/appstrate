@@ -4,7 +4,7 @@
  * Integration tests for the credential-proxy JWT bearer path.
  *
  * The core route `/api/credential-proxy/proxy` was API-key-only until the
- * remote-backed CLI work (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md). These
+ * remote-backed CLI work. These
  * tests pin the new contract:
  *
  *   1. A device-flow JWT minted by `POST /api/auth/cli/token` authenticates

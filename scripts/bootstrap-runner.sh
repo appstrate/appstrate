@@ -112,8 +112,20 @@ _appstrate_runner_bootstrap() {
     fi
     (
       cd "$TMPDIR"
-      grep " ${ASSET}\$" checksums.txt > checksums.local.txt || true
-      if [ ! -s checksums.local.txt ] || [ "$(wc -l < checksums.local.txt)" -ne 1 ]; then
+      # Only the line for our asset matters — filtering keeps the tool from
+      # failing on missing sibling binaries we didn't download. The `|| true`
+      # lets us own the empty-result error path below instead of dying inside
+      # `grep` with a generic exit 1.
+      grep " ${ASSET}\$" checksums.txt >checksums.local.txt || true
+      # CRITICAL: `sha256sum -c` on an EMPTY manifest exits 0 silently ("0 lines
+      # processed, 0 failures"), so a validly signed checksums.txt that simply
+      # does not list our asset would sail through — a broken release matrix, an
+      # asset-rename typo, or targeted tampering. Assert the line EXISTS, and
+      # belt-and-braces assert it is the ONLY line for our asset (a duplicate
+      # entry could otherwise mask a real mismatch). `scripts/bootstrap.sh`
+      # carries the same two assertions, split across two branches with their
+      # own messages; keep the two in step.
+      if [ ! -s checksums.local.txt ] || [ "$(wc -l <checksums.local.txt)" -ne 1 ]; then
         err "Asset ${ASSET} not uniquely listed in the signed manifest — refusing to install."
         exit 1
       fi

@@ -94,8 +94,26 @@ export class ApiError extends Error {
     retryAfter?: number;
     errors?: ValidationFieldError[];
     headers?: Record<string, string>;
+    /**
+     * The underlying failure, when this error is raised from a `catch`.
+     *
+     * ESLint's `preserve-caught-error` only inspects `throw new <builtin
+     * Error>`, so it cannot see a custom class — this parameter is what makes
+     * the obligation expressible for the one thrown ~20 times inside a catch.
+     * Same treatment `PackageZipError` got, adapted to this class's
+     * single-options-object shape.
+     *
+     * It is LOG-ONLY. {@link ApiError.toProblemDetail} reads `message` and
+     * never `cause`, because a cause routinely holds internal detail (SQL
+     * constraint names, upstream URLs) and the problem body is a public
+     * contract. The API error handler is what renders it, into the log.
+     */
+    cause?: unknown;
   }) {
-    super(opts.detail);
+    // Only pass ErrorOptions when there IS a cause, so an ApiError raised
+    // outside a catch carries no `cause` own property at all rather than one
+    // set to `undefined`.
+    super(opts.detail, opts.cause === undefined ? undefined : { cause: opts.cause });
     this.name = "ApiError";
     this.status = opts.status;
     this.code = opts.code;
@@ -413,15 +431,37 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * When neither a path nor a fallback is available the field defaults to
  * `"body"` rather than the empty string, so clients always receive a usable
  * pointer.
+ *
+ * `unrecognized_keys` is the one issue that does NOT name its field through
+ * `path`: Zod reports the container's path (EMPTY for a top-level body) and
+ * puts the offending names in `issue.keys`. Routing it through the generic
+ * branch therefore blamed `fallbackField` — so `PUT /agents/{scope}/{name}/
+ * skills` (`param: "skillIds"`) answered `field: "skillIds"` for a body whose
+ * `skillIds` was perfectly valid, naming the one field the client got right.
+ * Each unrecognized key gets its OWN entry, appended to the container path, so
+ * `{ extra, other }` yields two actionable pointers instead of one ambiguous
+ * combined message.
  */
 export function zodIssuesToFieldErrors(
   issues: readonly z.core.$ZodIssue[],
   fallbackField?: string,
 ): ValidationFieldError[] {
-  return issues.map((issue) => {
+  return issues.flatMap((issue) => {
+    if (issue.code === "unrecognized_keys" && issue.keys.length > 0) {
+      const single = issue.keys.length === 1;
+      return issue.keys.map((key) => ({
+        field: renderFieldPath([...issue.path, key]),
+        code: mapZodCode(issue),
+        // One key: Zod's own message already names exactly that key, so it is
+        // reused verbatim. Several: the combined message lists them all, which
+        // would repeat every key on every entry — render the per-key form in
+        // Zod's own spelling instead.
+        message: single ? issue.message : `Unrecognized key: ${JSON.stringify(key)}`,
+      }));
+    }
     const path = renderFieldPath(issue.path);
     const field = path || fallbackField || "body";
-    return { field, code: mapZodCode(issue), message: issue.message };
+    return [{ field, code: mapZodCode(issue), message: issue.message }];
   });
 }
 
@@ -429,7 +469,9 @@ export function zodIssuesToFieldErrors(
  * Parse a request body with a Zod schema. On failure throws a 400 with every
  * issue populated in `errors[]` so clients receive all problems in one call.
  * The optional `param` is a fallback used when Zod reports an empty path —
- * never as a prefix on top of a resolved path.
+ * never as a prefix on top of a resolved path, and never for an
+ * `unrecognized_keys` issue, which names its own field (see
+ * {@link zodIssuesToFieldErrors}).
  */
 export function parseBody<T extends z.ZodType>(
   schema: T,

@@ -380,10 +380,9 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   if (!token) return;
 
   // Resolve the in-flight client from the TRANSACTION BINDING (the
-  // `(token → client)` record persisted at issuance), falling back to the
-  // pending-client cookie for links issued before the binding mechanism —
-  // same precedence as the realm resolver and the db-hook signup guard
-  // (see `services/oauth-transaction-binding.ts`, CRIT-15).
+  // `(token → client)` record persisted at issuance) — same source as the
+  // realm resolver and the db-hook signup guard, and no cookie fallback on
+  // this leg (see `services/oauth-transaction-binding.ts`, CRIT-15).
   const binding = await resolvePendingClientBinding({
     headers: ctx.request?.headers ?? null,
     path: MAGIC_LINK_VERIFY_PATH,

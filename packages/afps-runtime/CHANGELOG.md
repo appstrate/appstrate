@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — five unraised error classes and the `isAfpsError` marker
+
+- `RunTimeoutError`, `RunCancelledError`, `WorkloadExitError`,
+  `RunHistoryError` and `CredentialResolutionError` are gone from
+  `@appstrate/afps-runtime/errors`, along with their codes (`RUN_TIMEOUT`,
+  `RUN_CANCELLED`, `WORKLOAD_EXIT_NONZERO`, `RUN_HISTORY_FETCH_FAILED`,
+  `RUN_HISTORY_BAD_RESPONSE`, `CREDENTIAL_RESOLUTION`) in the `AfpsErrorCode`
+  union, and the `isAfpsError` marker predicate. Nothing in this package or in
+  the platform ever raised one: the taxonomy was written ahead of the call
+  sites, and the call sites were built on other error paths. Timeouts,
+  cancellation and non-zero workload exits are decided by the runner
+  (`PiRunner.readTerminalError`) and surfaced as run status, not thrown as
+  typed errors; run-history failures and credential resolution raise
+  `ResolverError`. `isAfpsError` existed to branch across the deleted set — the
+  two classes that remain, `ResolverError` and `AuthorizedUrisError`, are
+  reached by `instanceof` at every live call site.
+- `AfpsError` remains exported as the structural shape (`name`, `code`,
+  `message`, optional `details`), and `AfpsRuntimeError` remains the base
+  class. No live import changes.
+
+### Changed — the two surviving error classes can carry a `cause`
+
+- `AuthorizedUrisError` and `ResolverError` gained an optional trailing
+  `options?: ErrorOptions` argument, forwarded to `AfpsRuntimeError`'s base
+  constructor. Until now the base accepted `ErrorOptions` and neither concrete
+  class passed one, so the parameter was unreachable and the runtime's own
+  errors could not participate in a `cause` chain — in the same cycle that
+  threaded `cause` through the rest of the platform. Purely additive: every
+  existing call site keeps its meaning.
+
+### Removed — four unread re-exports from the resolvers barrel
+
+- `defaultInlineLimit`, `isReproducibleBody`, `resolveBodyForFetch` and
+  `serializeFetchResponse` no longer appear in
+  `@appstrate/afps-runtime/resolvers`. The three that still have a consumer are
+  reached by their own module path from `integration-api-call.ts`;
+  `defaultInlineLimit` is now private to `http-call-core.ts`. Barrel-only
+  removal — the implementations are unchanged.
+
 ### Removed — the `Runner` interface
 
 - `Runner` (`{ name, run(options: RunOptions): Promise<void> }`) is gone from
@@ -124,9 +163,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same unreleased cycle: no wire ever carried them. The platform serialises
   errors through `@appstrate/core/api-errors` plus
   `run-launcher/bundle-error-mapping.ts`, which translates this taxonomy into
-  the platform's own catalogue. `ResolverError`, `AuthorizedUrisError`,
-  `WorkloadExitError` and `isAfpsError` are unaffected — build an HTTP envelope
-  from `isAfpsError` + `code` + `message`.
+  the platform's own catalogue. `ResolverError` and `AuthorizedUrisError` are
+  unaffected; `WorkloadExitError` and `isAfpsError` were removed later in the
+  same unreleased cycle (see "Removed — five unraised error classes and the
+  `isAfpsError` marker" above). Build an HTTP envelope from `code` + `message`
+  on the two surviving classes.
 
 ### Added — shared tool-result truncation
 

@@ -65,7 +65,14 @@ describe("chat transcript ordering", () => {
     await persistAssistantMessage(id, uiMessage("a1", "assistant", "salut"), "u1");
     // A server-authored notice goes through the same writer, so it takes the
     // next seq like anything else.
-    expect(await persistNotice(id, "notice_1", "un run a livré report.html")).toBe(true);
+    expect(
+      await persistNotice({
+        sessionId: id,
+        orgId: ctx.orgId,
+        messageId: "notice_1",
+        text: "un run a livré report.html",
+      }),
+    ).toBe(true);
     await persistUserMessage(id, uiMessage("u2", "user", "merci"));
     await persistAssistantMessage(id, uiMessage("a2", "assistant", "de rien"), "u2");
 

@@ -62,18 +62,20 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
-export const redeemSchema = z.object({
-  token: z.string().min(1).max(128),
-  email: z.email().toLowerCase().trim(),
-  name: z.string().min(1).max(120).trim(),
-  // Both bounds shared with Better Auth's own config. The cap used to be a
-  // local 256, above the 128 Better Auth actually enforced, so a 200-character
-  // password cleared this schema and was refused downstream — surfacing as the
-  // catch-all `bootstrap_signup_rejected` 400 below (or `bootstrap_signup_failed`
-  // 500 on the throw branch): RFC 9457 either way, but naming neither the length
-  // nor the bound. The Zod bound turns that into a 400 that does.
-  password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
-});
+export const redeemSchema = z
+  .object({
+    token: z.string().min(1).max(128),
+    email: z.email().toLowerCase().trim(),
+    name: z.string().min(1).max(120).trim(),
+    // Both bounds shared with Better Auth's own config. The cap used to be a
+    // local 256, above the 128 Better Auth actually enforced, so a 200-character
+    // password cleared this schema and was refused downstream — surfacing as the
+    // catch-all `bootstrap_signup_rejected` 400 below (or `bootstrap_signup_failed`
+    // 500 on the throw branch): RFC 9457 either way, but naming neither the length
+    // nor the bound. The Zod bound turns that into a 400 that does.
+    password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
+  })
+  .strict();
 
 // Stable bigint key for the cluster-wide advisory lock. Picked outside
 // the range used by core migrations and module migrations so collisions
@@ -218,11 +220,17 @@ export function createAuthBootstrapRouter(): Hono {
               "Use an allowlisted email for the bootstrap owner.",
           });
         }
+        // The two branches above are diagnoses the code is confident of, and
+        // both are logged with `msg` already. This one is the fall-through —
+        // "something in Better Auth's signup threw" — so it is the branch that
+        // needs the original attached: the error handler renders the chain
+        // against this request's id, which the WARN line above cannot do.
         throw new ApiError({
           status: 500,
           code: "bootstrap_signup_failed",
           title: "Internal Server Error",
           detail: "Signup failed during bootstrap redemption.",
+          cause: err,
         });
       }
 
@@ -317,6 +325,9 @@ export function createAuthBootstrapRouter(): Hono {
           code: "bootstrap_org_failed",
           title: "Internal Server Error",
           detail: "Bootstrap org creation failed after signup; instance is in a partial state.",
+          // A 500 that leaves the instance half-provisioned: the operator will
+          // be reading logs, and the chain is what says which step failed.
+          cause: err,
         });
       }
 

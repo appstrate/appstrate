@@ -905,10 +905,18 @@ async function spawnAndConnectLocalIntegration(params: {
   }
 
   // AFPS — fetch the referenced mcp-server package's bundle (the runnable
-  // server code), NOT the integration's own bundle. Local-source integrations
-  // always carry `server.packageId`; fall back to the integration id only
-  // if a spec somehow omits it (defensive).
-  const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
+  // server code), NOT the integration's own bundle. `server.packageId` is
+  // required for a local source (optional in TypeScript only because the
+  // `server` bag is the collapsed union of the local / remote / serverless
+  // shapes), so an absent one means the spec did not come from a conforming
+  // manifest — a hard-fail at boot, never a fetch of some other package's
+  // bytes into a code-execution position.
+  const serverPackageId = spec.manifest.server?.packageId;
+  if (!serverPackageId) {
+    throw new Error(
+      `integration ${spec.integrationId} declares sourceKind="local" but no server.packageId`,
+    );
+  }
   const bytes = await fetchBundleBytes(
     serverPackageId,
     spec.manifest.server?.version,

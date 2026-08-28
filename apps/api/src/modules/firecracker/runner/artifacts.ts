@@ -518,6 +518,7 @@ export async function ensureGuestArtifacts(
         `Pin FIRECRACKER_ARTIFACTS_VERSION to a reachable release, ` +
         `build them locally with \`bun run firecracker:build\` (then set FIRECRACKER_ARTIFACTS_LOCAL=1), ` +
         `or check network access to ${baseUrl}.`,
+      { cause: err },
     );
   }
 }

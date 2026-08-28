@@ -237,3 +237,27 @@ describe("withSpinner", () => {
     expect(controlTail).toMatch(/[◒◐◓◑]/);
   });
 });
+
+describe("formatError renders the cause chain", () => {
+  it("appends each cause to the message", async () => {
+    // Delete-to-fail: revert the catch-all branch to `err.message` and the
+    // reason a command failed disappears from the terminal. Only Bun's
+    // UNCAUGHT-exception printer walks `cause`, and reaching `formatError`
+    // means the error was caught, so this is the CLI's only renderer of it.
+    const { formatError } = await import("../src/lib/ui.ts");
+    const err = new Error("Cannot read --snapshot", {
+      cause: new Error("ENOENT: no such file or directory, open '/tmp/nope.json'"),
+    });
+    expect(formatError(err)).toBe(
+      "Cannot read --snapshot: ENOENT: no such file or directory, open '/tmp/nope.json'",
+    );
+  });
+
+  it("is unchanged for an error with no cause", async () => {
+    // Control: the branch must stay a drop-in for `err.message`, or every
+    // existing terminal string shifts.
+    const { formatError } = await import("../src/lib/ui.ts");
+    expect(formatError(new Error("plain failure"))).toBe("plain failure");
+    expect(formatError("not an error")).toBe("not an error");
+  });
+});

@@ -400,7 +400,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Execute an inline agent (no persisted package)",
       description:
-        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.",
+        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -877,10 +877,7 @@ const canonicalRunsPaths = {
                 scheduleId: "sched_cm1abc456def789",
                 status: "success",
                 input: { folder: "inbox", maxEmails: 50 },
-                result: {
-                  output: { processed: 42, labeled: 38 },
-                  text: "## Inbox triage\nProcessed 42 emails, labeled 38.",
-                },
+                result: { output: { processed: 42, labeled: 38 } },
                 artifacts: { status: "complete", published: 2, failed: [] },
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 error: null,
@@ -1120,7 +1117,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:
-        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. See `docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md`.",
+        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/AppstrateVersion" },
@@ -1773,6 +1770,7 @@ const canonicalRunsPaths = {
               properties: {
                 ttl_seconds: { type: "integer", minimum: 1, maximum: 86400 },
               },
+              additionalProperties: false,
             },
           },
         },

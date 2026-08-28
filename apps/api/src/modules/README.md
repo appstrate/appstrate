@@ -1,6 +1,8 @@
 # Built-in Modules
 
-Built-in modules extend the Appstrate platform with optional features (currently: oidc, webhooks). They follow the same `AppstrateModule` contract as external modules published on npm, but live inside the API package so they can share test infrastructure and be discovered automatically.
+Built-in modules extend the Appstrate platform with optional features. They follow the same `AppstrateModule` contract as external modules published on npm, but live inside the API package so they can share test infrastructure and be discovered automatically.
+
+**This file is the owner of two facts other docs point at**: which directories are built-in modules, and the database-ownership rule below. The directories at the time of writing are `core-providers`, `firecracker`, `mcp`, `oidc` and `webhooks` — `ls apps/api/src/modules/` is the authority, because the loader reads the directory and not a list (see Auto-discovery). Of those, `firecracker` is opt-in and absent from the `MODULES` default.
 
 ## Auto-discovery
 
@@ -148,7 +150,7 @@ router.post(
 );
 ```
 
-Both built-in modules in this repo (`webhooks`, `oidc`) use this pattern — read their `index.ts` + `routes.ts` for reference.
+The built-in modules that contribute permissions (`webhooks`, `oidc`, `mcp`) use this pattern — read their `index.ts` + `routes.ts` for reference.
 
 **At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, role validity) and aggregates them into:
 

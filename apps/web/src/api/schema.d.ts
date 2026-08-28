@@ -3603,7 +3603,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an inline agent (no persisted package)
-         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.
+         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.
          */
         post: operations["runInline"];
         delete?: never;
@@ -3645,7 +3645,7 @@ export interface paths {
         put?: never;
         /**
          * Create a remote-backed run (caller executes the agent)
-         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. See `docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md`.
+         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
          */
         post: operations["createRemoteRun"];
         delete?: never;
@@ -4325,7 +4325,7 @@ export interface paths {
         };
         /**
          * Fetch live credentials + HTTP delivery plans for an installed integration
-         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed.
+         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
          */
         get: operations["getIntegrationCredentials"];
         put?: never;
@@ -4347,7 +4347,7 @@ export interface paths {
         put?: never;
         /**
          * Force-refresh OAuth2 credentials for an installed integration
-         * @description Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged.
+         * @description Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
         delete?: never;
@@ -4365,7 +4365,7 @@ export interface paths {
         };
         /**
          * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).
+         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).
          */
         get: operations["getMcpServerBundle"];
         put?: never;
@@ -6357,6 +6357,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     exportAgentBundle: {
@@ -6483,7 +6484,14 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentInputSettings"];
+                "application/json": {
+                    /** @description Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch. */
+                    values: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`. */
+                    locked_fields: string[];
+                };
             };
         };
         responses: {
@@ -6538,6 +6546,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -6803,6 +6812,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -7297,7 +7307,10 @@ export interface operations {
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z",
                      *       "actor_name": "Pierre",
-                     *       "actor_type": "user"
+                     *       "actor_type": "user",
+                     *       "running_runs": 0,
+                     *       "unread_count": 0,
+                     *       "last_run_number": 0
                      *     }
                      */
                     "application/json": components["schemas"]["Schedule"];
@@ -14364,7 +14377,12 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["OrgSettings"];
+                "application/json": {
+                    /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
+                    api_version?: string;
+                    /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
+                    dashboard_sso_enabled?: boolean;
+                };
             };
         };
         responses: {
@@ -17753,8 +17771,7 @@ export interface operations {
                      *         "output": {
                      *           "processed": 42,
                      *           "labeled": 38
-                     *         },
-                     *         "text": "## Inbox triage\nProcessed 42 emails, labeled 38."
+                     *         }
                      *       },
                      *       "artifacts": {
                      *         "status": "complete",
@@ -18602,7 +18619,10 @@ export interface operations {
                      *       "createdAt": "2026-01-14T14:00:00Z",
                      *       "updatedAt": "2026-01-15T09:00:05Z",
                      *       "actor_name": "Pierre",
-                     *       "actor_type": "user"
+                     *       "actor_type": "user",
+                     *       "running_runs": 0,
+                     *       "unread_count": 2,
+                     *       "last_run_number": 12
                      *     }
                      */
                     "application/json": components["schemas"]["Schedule"];
@@ -19002,6 +19022,13 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigView"];
                 };
             };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: {
@@ -19084,6 +19111,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: {
@@ -19157,6 +19191,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
+            };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
@@ -19235,6 +19276,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: {
@@ -19280,6 +19328,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -19358,6 +19407,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -20317,7 +20367,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
+            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. A fourth cause is unique to this operation: `connect_run_no_refresh` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -20376,7 +20426,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist. */
+            /** @description Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
             404: {
                 headers: {
                     [name: string]: unknown;

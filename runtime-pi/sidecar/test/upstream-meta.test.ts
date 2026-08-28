@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  UPSTREAM_HEADER_ALLOWLIST,
-  buildUpstreamMeta,
-  projectAllowedHeaders,
-} from "../upstream-meta.ts";
+import { UPSTREAM_HEADER_ALLOWLIST } from "@appstrate/mcp-transport";
+import { buildUpstreamMeta, projectAllowedHeaders } from "../upstream-meta.ts";
 
 describe("upstream-meta — header projection", () => {
   it("keeps allowlisted headers, strips everything else", () => {

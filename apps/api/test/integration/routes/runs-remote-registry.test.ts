@@ -19,7 +19,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { installPackage, updateInstalledPackage } from "../../../src/services/space-packages.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { validateManifest } from "@appstrate/core/validation";
@@ -43,12 +43,22 @@ function publishedManifest(version = "1.2.3") {
   } as const;
 }
 
-async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
+/**
+ * Publish `manifest` as `@acme/briefing@version` and install it in the default
+ * space: draft row, version row, `latest` dist-tag (a thin `seedPackageVersion`
+ * INSERT does not write one, but the unspecified-spec resolution path needs it)
+ * and the artefact bytes `getVersionDetail` extracts the prompt from.
+ */
+async function seedRegistryAgent(
+  ctx: TestContext,
+  manifest: Record<string, unknown>,
+  version: string,
+) {
   await seedPackage({
     orgId: ctx.orgId,
     id: "@acme/briefing",
     type: "agent",
-    draftManifest: publishedManifest(version) as unknown as Record<string, unknown>,
+    draftManifest: manifest,
     draftContent: PROMPT,
   });
   const versionRow = await seedPackageVersion({
@@ -56,22 +66,21 @@ async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
     version,
     integrity: "sha256-test",
     artifactSize: 1024,
-    manifest: publishedManifest(version) as unknown as Record<string, unknown>,
+    manifest,
   });
-  // Set the `latest` dist-tag so the unspecified-spec resolution path
-  // works — `seedPackageVersion` is a thin INSERT and doesn't touch
-  // `package_dist_tags` (the `createPackageVersion` service does that on
-  // the publish flow).
   await db
     .insert(packageDistTags)
     .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-  // Upload the artefact so getVersionDetail can extract the prompt.
-  const zip = buildMinimalZip(
-    publishedManifest(version) as unknown as Record<string, unknown>,
-    PROMPT,
-  );
-  await uploadPackageZip("@acme/briefing", version, zip);
+  await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
   await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+}
+
+async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
+  await seedRegistryAgent(
+    ctx,
+    publishedManifest(version) as unknown as Record<string, unknown>,
+    version,
+  );
 }
 
 /**
@@ -95,26 +104,11 @@ function fileInputManifest(version = "3.0.0") {
 }
 
 async function seedFileInputAgent(ctx: TestContext, version = "3.0.0") {
-  const manifest = fileInputManifest(version) as unknown as Record<string, unknown>;
-  await seedPackage({
-    orgId: ctx.orgId,
-    id: "@acme/briefing",
-    type: "agent",
-    draftManifest: manifest,
-    draftContent: PROMPT,
-  });
-  const versionRow = await seedPackageVersion({
-    packageId: "@acme/briefing",
+  await seedRegistryAgent(
+    ctx,
+    fileInputManifest(version) as unknown as Record<string, unknown>,
     version,
-    integrity: "sha256-test",
-    artifactSize: 1024,
-    manifest,
-  });
-  await db
-    .insert(packageDistTags)
-    .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-  await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+  );
 }
 
 describe("POST /api/runs/remote — kind: registry", () => {
@@ -738,6 +732,77 @@ describe("POST /api/runs/remote — kind: registry", () => {
     const body = (await res.json()) as { id: string };
     const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
     expect(run!.input).toEqual({ tone: "formal" });
+  });
+
+  // ─── Locked input fields on the remote registry launch ───
+  //
+  // `POST /api/runs/remote` is a FIFTH launch surface, and it re-implements
+  // the locked-field rule itself (`routes/runs-remote.ts` passes
+  // `lockedFields` into `resolveEffectiveInput`). Nothing else in this suite
+  // touches locks — delete the `lockedFields` argument and the file still
+  // compiles, every other case here still passes, and a CLI or GitHub-Action
+  // runner silently overrides a field an admin pinned for the space.
+  describe("locked input fields", () => {
+    const LOCKED_VERSION = "4.0.0";
+
+    /** Publish a two-field agent and pin `tone` to "formal" in the space. */
+    async function seedLockedToneAgent() {
+      await seedRegistryAgent(
+        ctx,
+        {
+          ...publishedManifest(LOCKED_VERSION),
+          input: {
+            schema: {
+              type: "object",
+              properties: { tone: { type: "string" }, topic: { type: "string" } },
+            },
+          },
+        } as unknown as Record<string, unknown>,
+        LOCKED_VERSION,
+      );
+      await updateInstalledPackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@acme/briefing",
+        { inputSettings: { values: { tone: "formal" }, locked: ["tone"] } },
+      );
+    }
+
+    function launch(input: Record<string, unknown>) {
+      return post({
+        source: {
+          kind: "registry",
+          packageId: "@acme/briefing",
+          stage: "published",
+          spec: LOCKED_VERSION,
+        },
+        spaceId: ctx.defaultSpaceId,
+        input,
+      });
+    }
+
+    it("refuses a remote launch that sets a locked field", async () => {
+      await seedLockedToneAgent();
+
+      const res = await launch({ tone: "casual" });
+      expect(res.status).toBe(400);
+      expect((await res.json()) as { code?: string }).toMatchObject({
+        code: "locked_input_field",
+      });
+      // Nothing was launched behind the refusal.
+      expect(await db.select({ id: runs.id }).from(runs)).toHaveLength(0);
+    });
+
+    it("accepts an unlocked field and runs with the pinned value (control)", async () => {
+      await seedLockedToneAgent();
+
+      // Same agent, same space, an input the admin did NOT lock — so the
+      // refusal above is the lock, not a blanket "remote runs ignore input".
+      const res = await launch({ topic: "quarterly numbers" });
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [run] = await db.select().from(runs).where(eq(runs.id, id)).limit(1);
+      expect(run!.input).toEqual({ tone: "formal", topic: "quarterly numbers" });
+    });
   });
 
   it("accepts an integrity hint without rejecting on drift", async () => {

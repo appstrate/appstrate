@@ -47,7 +47,7 @@ import {
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type IntegrationSpawnSpec,
 } from "@appstrate/core/sidecar-types";
-import { fetchMcpServerManifest } from "../integration-service.ts";
+import { resolveMcpServerForSpawn } from "../integration-service.ts";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
@@ -62,6 +62,12 @@ import {
   type WorkloadHandle,
 } from "../orchestrator/index.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
+import {
+  CONNECT_ID_PREFIX,
+  connectRunGrantTtlSeconds,
+  deleteConnectRunGrant,
+  writeConnectRunGrant,
+} from "./connect-run-grant.ts";
 import type { ConnectToolExecution, ConnectToolExecutor } from "./orchestrated-strategy.ts";
 import type { CredentialBundle } from "./strategy.ts";
 
@@ -143,17 +149,52 @@ interface ConnectRunExecutorOptions {
  * manifest auth is mis-declared (missing auth or `delivery.http`).
  */
 /**
- * Resolver for the mcp-server MCPB manifest a local-source integration
- * references (`source.server.name`). Injectable so unit tests can supply a
- * fixture without a DB; production defaults to the package-store lookup.
+ * Resolver for the mcp-server a local-source integration references
+ * (`source.server.name`). Injectable so unit tests can supply a fixture
+ * without a DB; production defaults to {@link resolveMcpServerForSpawn}, the
+ * SAME kernel the agent-run spawn resolver uses.
+ *
+ * It returns the CONCRETE published version alongside the manifest because
+ * the sidecar's byte route (`GET /internal/mcp-server-bundle/:scope/:name`)
+ * requires it: past the system-package short-circuit an absent `?version=` is
+ * rejected outright (#588 — serving "latest" is exactly the manifest/bytes
+ * skew that guard closed). `version: null` is the system-mcp-server case, the
+ * one population the byte route serves by id alone.
+ *
+ * `pin` is the manifest's `source.server.version` RANGE (e.g. `^1.0.0`), not
+ * a concrete version — resolving it is this resolver's job, never the
+ * caller's.
  */
 export type McpServerResolver = (
   packageId: string,
-) => Promise<{ server?: { type?: string; entry_point?: string } } | null>;
+  orgId: string,
+  pin: string | null,
+) => Promise<{
+  server?: { type?: string; entry_point?: string };
+  /** Concrete published version, or `null` for a system mcp-server. */
+  version?: string | null;
+} | null>;
+
+/**
+ * Production resolver — the published-version kernel shared with
+ * `integration-spawn-resolver.ts`. `orgId` scopes the lookup to the run's own
+ * org (or a system package), so a connect-run can never resolve a
+ * cross-tenant mcp-server.
+ */
+const defaultMcpServerResolver: McpServerResolver = async (packageId, orgId, pin) => {
+  const resolution = await resolveMcpServerForSpawn(packageId, orgId, pin);
+  if (!resolution.ok) return null;
+  // Same narrowing cast `integration-spawn-resolver.ts` uses on the same
+  // field: the AFPS schema types `server.type` as its own enum, and the
+  // resolver contract here is deliberately the loose `{ type?, entry_point? }`
+  // so a test fixture needs no schema import.
+  const run = (resolution.manifest as { server?: { type?: string; entry_point?: string } }).server;
+  return { ...(run ? { server: run } : {}), version: resolution.version };
+};
 
 export async function buildConnectLoginSpec(
   execution: ConnectToolExecution,
-  resolveMcpServer: McpServerResolver = fetchMcpServerManifest,
+  resolveMcpServer: McpServerResolver = defaultMcpServerResolver,
 ): Promise<IntegrationSpawnSpec> {
   const auths = (execution.manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   const auth = auths[execution.authKey];
@@ -185,7 +226,7 @@ export async function buildConnectLoginSpec(
       `connect-run: integration '${execution.integrationId}' local source is missing source.server`,
     );
   }
-  const mcpServer = await resolveMcpServer(ref.name);
+  const mcpServer = await resolveMcpServer(ref.name, execution.scope.orgId, ref.version ?? null);
   const run = mcpServer?.server;
   if (!mcpServer || !run?.type || !run.entry_point) {
     throw new Error(
@@ -209,9 +250,23 @@ export async function buildConnectLoginSpec(
     manifest: {
       name: execution.manifest.name,
       version: execution.manifest.version,
+      // AFPS — the runnable bytes live on the SEPARATE mcp-server package this
+      // integration references, so the spawn spec must NAME it: the sidecar
+      // fetches `server.packageId`'s bundle, never the integration's own. The
+      // sidecar hard-fails a local spec that omits it (it used to fall back to
+      // `spec.integrationId`, i.e. fetch a different package's bytes into a
+      // code-execution position), which made every orchestrated
+      // `connect.tool` login abort at boot until this builder started
+      // emitting the field.
       server: {
         type: run.type,
         entry_point: run.entry_point,
+        packageId: ref.name,
+        // #588 — the CONCRETE version the resolver picked, forwarded to the
+        // byte route as `?version=` so the bytes match the manifest read
+        // above. Absent only for a system mcp-server (served from the boot
+        // registry by id alone), which is the one case the route allows.
+        ...(mcpServer.version ? { version: mcpServer.version } : {}),
       },
     },
     spawnEnv: {},
@@ -344,7 +399,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
   constructor(opts: ConnectRunExecutorOptions = {}) {
     this.orchestrator = opts.orchestrator;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    this.resolveMcpServer = opts.resolveMcpServer ?? fetchMcpServerManifest;
+    this.resolveMcpServer = opts.resolveMcpServer ?? defaultMcpServerResolver;
   }
 
   async run(execution: ConnectToolExecution): Promise<CredentialBundle> {
@@ -384,7 +439,9 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       });
     }
     const orch = this.orchestrator ?? getOrchestrator();
-    const connectId = `connect_${randomBytes(12).toString("hex")}`;
+    // Prefix comes from the grant module so the mint site and the
+    // `/internal/*` discriminator can never drift apart.
+    const connectId = `${CONNECT_ID_PREFIX}${randomBytes(12).toString("hex")}`;
     const runToken = signRunToken(connectId);
     // Per-connect-run ephemeral key for the result channel. The sidecar
     // encrypts the captured credential bundle with it (AES-256-GCM) before
@@ -394,11 +451,43 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const resultKey = randomBytes(32);
 
     const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
+    // `buildConnectLoginSpec` always names the referenced mcp-server for a
+    // local source (and rejects every other source kind), so this is an
+    // invariant check, not a fallback. It is here rather than folded into the
+    // grant below because an unnamed server would mint a grant that authorises
+    // nothing, and a connect run that boots without a usable grant fails as
+    // "bundle not found" three layers away from the cause.
+    const grantedMcpServerId = spec.manifest.server?.packageId;
+    if (!grantedMcpServerId) {
+      throw new Error(
+        "connect-run: spawn spec carries no server.packageId — refusing to launch a sidecar it cannot authorise",
+      );
+    }
 
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;
 
     try {
+      // The connect run's ENTIRE authorization on `/internal/*`. There is no
+      // `runs` row behind `connectId` and no agent manifest to walk, so the
+      // grant is what the byte + credentials routes match against — one
+      // integration, one mcp-server, one concrete version, for as long as this
+      // connect run lives. Written BEFORE the sidecar exists so its first call
+      // already finds it, and revoked in the `finally` below.
+      await writeConnectRunGrant(
+        connectId,
+        {
+          orgId: execution.scope.orgId,
+          integrationId: execution.integrationId,
+          mcpServerId: grantedMcpServerId,
+          // `null` = system mcp-server (no published version; the byte route
+          // serves it from the boot registry by id alone). The grant then
+          // authorises ONLY that short-circuit.
+          mcpServerVersion: spec.manifest.server?.version ?? null,
+        },
+        connectRunGrantTtlSeconds(this.timeoutMs),
+      );
+
       boundary = await orch.createIsolationBoundary(connectId);
       sidecar = await orch.createSidecar(connectId, boundary, {
         runToken,
@@ -420,6 +509,16 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       });
       return bundle;
     } finally {
+      // Revoke the grant FIRST: past this line no token bearing `connectId`
+      // authorises anything, whether the run succeeded, failed, or timed out.
+      // The TTL is only the crash backstop for a process that never reaches
+      // here.
+      await deleteConnectRunGrant(connectId).catch((err) => {
+        logger.error("connect-run: failed to revoke the authorization grant", {
+          connectId,
+          error: getErrorMessage(err),
+        });
+      });
       // Cleanup order mirrors runPlatformContainer: sidecar → boundary.
       if (sidecar) {
         await orch.removeWorkload(sidecar).catch((err) => {

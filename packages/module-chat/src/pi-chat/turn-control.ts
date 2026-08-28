@@ -51,7 +51,14 @@ export interface PiChatToolLoopSession {
 
 /** Structural view of the Pi session the engine drives (see `engine.ts`). */
 export interface PiChatSession extends PiChatToolLoopSession {
-  subscribe(cb: (event: unknown) => void): void;
+  /**
+   * Returns the DETACH handle. Declaring it `void` here (which it was) threw
+   * the handle away at the type level, so the engine could not release the
+   * subscription when the turn ended and a late Pi event still reached a
+   * closed stream writer — a `TypeError: Invalid state` thrown from outside
+   * any caller's try/catch.
+   */
+  subscribe(cb: (event: unknown) => void): () => void;
   abort?(): Promise<void>;
 }
 

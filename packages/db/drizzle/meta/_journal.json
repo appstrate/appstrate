@@ -386,6 +386,13 @@
       "when": 1787600420000,
       "tag": "0054_drop_chat_message_parent_and_format",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1787600480000,
+      "tag": "0055_schema_integrity_repairs",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,7 @@ import { DEFAULT_IO, type CommandIO } from "./io.ts";
 import { DeviceFlowError } from "./device-flow.ts";
 import { ApiError, AuthError } from "./api.ts";
 import { InsecureInstanceError } from "./instance-url.ts";
+import { formatErrorChain } from "@appstrate/core/errors";
 
 /** What every prompt in this CLI says when the user Ctrl-Cs out of it. */
 const CANCELLED = "Cancelled.";
@@ -344,8 +345,13 @@ export function formatError(err: unknown): string {
   ) {
     return `${err.message} — ${(err as Error & { hint: string }).hint}`;
   }
-  if (err instanceof Error) return err.message;
-  return String(err);
+  // The catch-all, and the one branch that renders whatever the CLI failed on
+  // verbatim. `formatErrorChain` appends each `cause` — without it a wrapper's
+  // message ("Failed to read the run snapshot") was the whole output and the
+  // reason (ENOENT, a bad JSON offset) was discarded. Only Bun's UNCAUGHT
+  // printer walked the chain, and reaching this function means the error was
+  // caught. Identical to `err.message` when there is no cause.
+  return formatErrorChain(err);
 }
 
 /**

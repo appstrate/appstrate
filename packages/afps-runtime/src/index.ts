@@ -129,14 +129,8 @@ export * from "./resolvers/index.ts";
 // Unified error taxonomy.
 export {
   AfpsRuntimeError,
-  RunCancelledError,
-  RunTimeoutError,
-  WorkloadExitError,
   AuthorizedUrisError,
   ResolverError,
-  RunHistoryError,
-  CredentialResolutionError,
-  isAfpsError,
   type AfpsError,
   type AfpsErrorCode,
 } from "./errors.ts";

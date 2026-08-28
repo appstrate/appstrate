@@ -20,7 +20,7 @@ import {
   isSlugAvailable,
   getOrgSettings,
   updateOrgSettings,
-  orgSettingsSchema,
+  orgSettingsPatchSchema,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
@@ -52,24 +52,32 @@ import {
   canRemoveMember,
 } from "@appstrate/shared-types";
 
-export const createOrgSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
-});
+export const createOrgSchema = z
+  .object({
+    name: z.string().min(1, "Name is required"),
+    slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
+  })
+  .strict();
 
-export const updateOrgSchema = z.object({
-  name: z.string().min(1).optional(),
-  slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
-});
+export const updateOrgSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
+  })
+  .strict();
 
-export const addMemberSchema = z.object({
-  email: z.email("Email is required"),
-  role: z.enum(ASSIGNABLE_ORG_ROLES).default("member"),
-});
+export const addMemberSchema = z
+  .object({
+    email: z.email("Email is required"),
+    role: z.enum(ASSIGNABLE_ORG_ROLES).default("member"),
+  })
+  .strict();
 
-export const updateRoleSchema = z.object({
-  role: z.enum(ASSIGNABLE_ORG_ROLES),
-});
+export const updateRoleSchema = z
+  .object({
+    role: z.enum(ASSIGNABLE_ORG_ROLES),
+  })
+  .strict();
 
 /**
  * Gate an org-administration route on the caller's org role.
@@ -321,7 +329,17 @@ router.delete("/:orgId", async (c) => {
     await deleteOrganization(orgId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to delete organization";
-    throw new ApiError({ status: 400, code: "delete_failed", title: "Bad Request", detail: msg });
+    // This catch spans three calls and logs nothing — a `delete_failed` used
+    // to produce ZERO log lines, so the only record was a message the client
+    // got and the operator did not. `cause` puts it in the request-scoped log
+    // (and carries any chain beneath it, which `msg` flattens away).
+    throw new ApiError({
+      status: 400,
+      code: "delete_failed",
+      title: "Bad Request",
+      detail: msg,
+      cause: err,
+    });
   }
 
   // org_id on audit_events is denormalized (no FK), so this tombstone persists
@@ -554,7 +572,7 @@ router.put("/:orgId/settings", async (c) => {
 
   await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to update settings");
 
-  const data = await readJsonBody(c, orgSettingsSchema.partial());
+  const data = await readJsonBody(c, orgSettingsPatchSchema);
 
   // Write-side counterpart of the read-side check in `middleware/api-version.ts`.
   // That middleware is mounted on `*` and 400s on a pin it cannot serve, so

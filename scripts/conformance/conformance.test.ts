@@ -808,10 +808,31 @@ describe("refresh-strategy", () => {
     }
   });
 
-  it("keeps the backlog shrink-only", () => {
-    // A ceiling below the current size is what a NEW waiver would look like.
-    expect(UNVERIFIED.size).toBeLessThanOrEqual(UNVERIFIED_CEILING);
+  // The ceiling is an equality, not an upper bound, so the live list and the
+  // live constant are the only inputs this can be tested against — there is
+  // no seam to inject a hypothetical list through, and there should not be:
+  // the value being pinned IS the checked-in pair.
+  it("holds the backlog at exactly its ceiling", () => {
+    expect(UNVERIFIED.size).toBe(UNVERIFIED_CEILING);
     expect(checkBacklogCeiling()).toEqual([]);
+  });
+
+  // A 30th waiver, with the ceiling left alone: the shape of a new integration
+  // taking the easy way out.
+  it("fails when the backlog grows past its ceiling", () => {
+    const [finding] = checkBacklogCeiling(UNVERIFIED_CEILING + 1, UNVERIFIED_CEILING);
+    expect(finding!.severity).toBe("fail");
+    expect(finding!.message).toContain("above its ceiling");
+    expect(finding!.message).toContain("raising UNVERIFIED_CEILING");
+  });
+
+  // The half a `<=` bound waved through: real work done, ceiling not moved,
+  // and a free seat left behind for the next silent waiver.
+  it("fails when an entry is verified away but the ceiling is not lowered", () => {
+    const [finding] = checkBacklogCeiling(UNVERIFIED_CEILING - 1, UNVERIFIED_CEILING);
+    expect(finding!.severity).toBe("fail");
+    expect(finding!.message).toContain("1 free seat(s)");
+    expect(finding!.message).toContain(`UNVERIFIED_CEILING = ${UNVERIFIED_CEILING - 1}`);
   });
 
   // The whole point: a manifest that says nothing about offline access is the

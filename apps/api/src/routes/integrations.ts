@@ -130,91 +130,110 @@ import {
 // non-string credential shape before AJV ever got to see it.
 // Porte B programmatic import — the backend already holds the credential and
 // submits it directly ("import a connection", Nango `POST /connection`).
-export const importConnectionSchema = z.object({
-  credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
-    message: "credentials must contain at least one field",
-  }),
-  // Renew an existing connection in place (api_key/PAT/custom): the OAuth
-  // flow smuggles this on `needs_reconnection`; the fields flow takes the same
-  // id so the write UPDATEs the dead row instead of INSERTing a duplicate
-  // (single-writer contract, integration-connections.ts:persistCredentialBundle).
-  connection_id: z.uuid().optional(),
-});
+export const importConnectionSchema = z
+  .object({
+    credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
+      message: "credentials must contain at least one field",
+    }),
+    // Renew an existing connection in place (api_key/PAT/custom): the OAuth
+    // flow smuggles this on `needs_reconnection`; the fields flow takes the same
+    // id so the write UPDATEs the dead row instead of INSERTing a duplicate
+    // (single-writer contract, integration-connections.ts:persistCredentialBundle).
+    connection_id: z.uuid().optional(),
+  })
+  .strict();
 
-export const connectOAuthSchema = z.object({
-  scopes: z.array(z.string()).optional(),
-  force_account_select: z.boolean().optional(),
-  connection_id: z.uuid().optional(),
-});
+export const connectOAuthSchema = z
+  .object({
+    scopes: z.array(z.string()).optional(),
+    force_account_select: z.boolean().optional(),
+    connection_id: z.uuid().optional(),
+  })
+  .strict();
 
 // Mint a hosted-connect-portal session — auth-type-agnostic (issue #769). The
 // caller scopes the connect (optional OAuth scopes + reconnect target); the
 // server dispatches OAuth vs credential-form when the URL is opened.
-export const connectSessionSchema = z.object({
-  scopes: z.array(z.string()).optional(),
-  force_account_select: z.boolean().optional(),
-  connection_id: z.uuid().optional(),
-});
+export const connectSessionSchema = z
+  .object({
+    scopes: z.array(z.string()).optional(),
+    force_account_select: z.boolean().optional(),
+    connection_id: z.uuid().optional(),
+  })
+  .strict();
 
 // Hosted-form submit — credentials only; all context comes from the page cookie.
-export const connectSubmitSchema = z.object({
-  credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
-    message: "credentials must contain at least one field",
-  }),
-});
+export const connectSubmitSchema = z
+  .object({
+    credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
+      message: "credentials must contain at least one field",
+    }),
+  })
+  .strict();
 
-export const setDefaultClientSchema = z.object({
-  // The client to make default — a flat client id (system env id or custom
-  // `integration_oauth_clients.id`) from `GET .../auths/:authKey/clients`.
-  client_ref: z.string().regex(/^[\w.-]+$/, "client_ref must be a client id"),
-});
+export const setDefaultClientSchema = z
+  .object({
+    // The client to make default — a flat client id (system env id or custom
+    // `integration_oauth_clients.id`) from `GET .../auths/:authKey/clients`.
+    client_ref: z.string().regex(/^[\w.-]+$/, "client_ref must be a client id"),
+  })
+  .strict();
 
-export const updateSettingsSchema = z.object({
-  block_user_connections: z.boolean(),
-});
+export const updateSettingsSchema = z
+  .object({
+    block_user_connections: z.boolean(),
+  })
+  .strict();
 
-export const setPinSchema = z.object({
-  connection_id: z.uuid(),
-});
+export const setPinSchema = z
+  .object({
+    connection_id: z.uuid(),
+  })
+  .strict();
 
-export const setOrgDefaultSchema = z.object({
-  connection_id: z.uuid(),
-  enforce: z.boolean().default(false),
-});
+export const setOrgDefaultSchema = z
+  .object({
+    connection_id: z.uuid(),
+    enforce: z.boolean().default(false),
+  })
+  .strict();
 
 export const updateConnectionSchema = z
   .object({
     label: z.string().max(80).nullable().optional(),
     shared_with_org: z.boolean().optional(),
   })
+  .strict()
   .refine((b) => b.label !== undefined || b.shared_with_org !== undefined, {
     message: "at least one of label, shared_with_org must be provided",
   });
 
-const oauthClientSchema = z.object({
-  client_id: z.string().min(1),
-  /**
-   * Shared shape only — the concrete bodies below layer their own semantics on
-   * top with refinements (create: required unless public; update: absent means
-   * PRESERVE). Deliberately optional here so no derived schema can inherit a
-   * default that manufactures a secret nobody typed.
-   */
-  client_secret: z.string().optional(),
-  /**
-   * The admin's explicit declaration for THIS client, overriding the
-   * manifest's. `"none"` registers a PUBLIC client — the app has no secret at
-   * the provider and authenticates by `client_id` alone.
-   *
-   * Explicit rather than inferred from an empty `client_secret`: that
-   * inference could not tell "declared public" from "secret not supplied", and
-   * silently produced a token request carrying `client_secret=` that providers
-   * like Dropbox reject with `invalid_client`.
-   */
-  token_endpoint_auth_method: z
-    .enum(["client_secret_post", "client_secret_basic", "none"])
-    .optional(),
-  redirect_uri: z.url().optional(),
-});
+const oauthClientSchema = z
+  .object({
+    client_id: z.string().min(1),
+    /**
+     * Shared shape only — the concrete bodies below layer their own semantics on
+     * top with refinements (create: required unless public; update: absent means
+     * PRESERVE). Deliberately optional here so no derived schema can inherit a
+     * default that manufactures a secret nobody typed.
+     */
+    client_secret: z.string().optional(),
+    /**
+     * The admin's explicit declaration for THIS client, overriding the
+     * manifest's. `"none"` registers a PUBLIC client — the app has no secret at
+     * the provider and authenticates by `client_id` alone.
+     *
+     * Explicit rather than inferred from an empty `client_secret`: that
+     * inference could not tell "declared public" from "secret not supplied", and
+     * silently produced a token request carrying `client_secret=` that providers
+     * like Dropbox reject with `invalid_client`.
+     */
+    token_endpoint_auth_method: z
+      .enum(["client_secret_post", "client_secret_basic", "none"])
+      .optional(),
+    redirect_uri: z.url().optional(),
+  })
+  .strict();
 
 /**
  * Shared by both bodies below: `"none"` declares a PUBLIC client, so a secret

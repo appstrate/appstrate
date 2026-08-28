@@ -1276,6 +1276,32 @@ describe("Agents API", () => {
       expect(await get.json()).toMatchObject({ modelId: null, generation: null });
     });
 
+    // The "no model resolves" refusal was written out four times across
+    // `agents.ts`, `spaces.ts` and the two schedule handlers — same literal
+    // message, and NONE of the four carried an RFC 9457 `param` (only their
+    // `ModelGenerationError` sibling did). All four now go through one
+    // `validateGenerationOverride`, which gives both refusals the same `param`,
+    // so every route names its own wire field. That is a deliberate change to
+    // the 400 body — see the rationale on `validateGenerationOverride` — and
+    // this case plus its three siblings (`spaces.test.ts`, two in
+    // `schedules.test.ts`) are what pin it.
+    it("names the generation field when no model resolves at all", async () => {
+      await seedModelAgent();
+
+      const res = await app.request("/api/agents/@myorg/model-agent/model", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: null, generation: { temperature: 0.4 } }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        param: "generation",
+        detail: "A model must be configured before generation settings can be saved",
+      });
+    });
+
     it("reconciles persisted generation defaults when the model changes", async () => {
       await seedModelAgent();
       await updateInstalledPackage(

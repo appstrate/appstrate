@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "../runtime-event-journal.ts";
 import {
   buildRuntimeToolDefs,
@@ -78,7 +79,7 @@ describe("GET /runtime-events", () => {
   it("serves events after the cursor when a journal is wired", async () => {
     const journal = new RuntimeEventJournal();
     journal.append({ type: "log.written", message: "one" });
-    const app = createApp(makeDeps({ runtimeEventJournal: journal }));
+    const app = createTestApp(makeDeps({ runtimeEventJournal: journal }));
 
     const res = await app.request("/runtime-events?after=0", { headers: okHost });
     expect(res.status).toBe(200);
@@ -88,14 +89,14 @@ describe("GET /runtime-events", () => {
   });
 
   it("answers an empty batch when no journal is wired", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await app.request("/runtime-events?after=0", { headers: okHost });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { events: unknown[] }).events).toEqual([]);
   });
 
   it("rejects a foreign Host header (same posture as /mcp)", async () => {
-    const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
+    const app = createTestApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
     const res = await app.request("/runtime-events?after=0", { headers: { Host: "evil.example" } });
     expect(res.status).toBe(403);
   });

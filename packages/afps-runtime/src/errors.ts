@@ -4,36 +4,28 @@
 /**
  * Unified runtime error taxonomy for `@appstrate/afps-runtime`.
  *
- * The package already ships several typed errors close to where they
- * are raised (`BundleError`, `BundleSignaturePolicyError`,
- * `RunTimeoutError`). This module sits at the
- * top so consumers can:
+ * The package ships typed errors close to where they are raised
+ * (`BundleError`, `BundleSignaturePolicyError`). This module sits at the top
+ * so consumers can import every typed error from a single subpath
+ * (`@appstrate/afps-runtime/errors`).
  *
- *   - import every typed error from a single subpath
- *     (`@appstrate/afps-runtime/errors`),
- *   - match against the shared {@link AfpsError} marker interface to
- *     decide between domain-known and unexpected errors.
- *
- * This module used to also mint RFC 9457 problem+json bodies (`toProblem`,
- * `ProblemDetails`, `afpsErrorTypeUri`, `AFPS_ERROR_CODES`) under a
- * `docs.appstrate.dev/errors/afps/` URI namespace. Removed: no wire ever
- * carried it. The platform serialises errors through
- * `@appstrate/core/api-errors` plus `run-launcher/bundle-error-mapping.ts`,
- * which translates this taxonomy into the platform's own error catalogue, and
- * the only other callers were the tests asserting the URI shape. Consumers
- * that need an HTTP envelope build it from `isAfpsError` + `code` + `message`.
- *
- * Existing classes are re-exported here. New classes added in this
- * module fill the gaps in the previous taxonomy: provider URI
- * authorization, generic resolver wiring, run-history fetch errors,
- * runner cancellation, and non-zero workload exits.
+ * Two classes are raised here: {@link ResolverError} (generic resolver wiring
+ * and outbound-HTTP body/path refusals) and {@link AuthorizedUrisError} (an
+ * `api_call` target outside its allowlist). The platform serialises them
+ * through `@appstrate/core/api-errors` plus
+ * `run-launcher/bundle-error-mapping.ts`, which translates this taxonomy into
+ * the platform's own error catalogue.
  *
  * The base class is structural — `name`, `code`, `message`, optional
- * `details`, optional `cause`. We do not introduce a runtime
- * `instanceof AfpsError` check anywhere because the existing typed
+ * `details`, optional `cause`. `cause` reaches it through the fourth
+ * constructor argument of BOTH concrete classes, so a resolver that refuses
+ * inside a `catch` can carry the error it caught instead of dropping it; the
+ * argument is `ErrorOptions`, NOT the `details` bag, so the chain stays
+ * operator-facing and `formatErrorChain` can walk it. We do not introduce a runtime
+ * `instanceof AfpsRuntimeError` check anywhere because the existing typed
  * errors (BundleError, BundleSignaturePolicyError, …) predate this
  * module and we do not want to break user code that does
- * `instanceof BundleError`. Use {@link isAfpsError} for marker checks.
+ * `instanceof BundleError`.
  */
 
 import { BundleError, type BundleErrorCode } from "./bundle/errors.ts";
@@ -64,19 +56,12 @@ export type AfpsErrorCode =
   | BundleErrorCode
   | SignaturePolicyReason
   | "unsigned_required"
-  | "RUN_TIMEOUT"
-  | "RUN_CANCELLED"
-  | "WORKLOAD_EXIT_NONZERO"
   | "AUTHORIZED_URIS_EMPTY"
   | "AUTHORIZED_URIS_MISMATCH"
-  | ResolverErrorCode
-  | "RUN_HISTORY_FETCH_FAILED"
-  | "RUN_HISTORY_BAD_RESPONSE"
-  | "CREDENTIAL_RESOLUTION";
+  | ResolverErrorCode;
 
 /**
- * Marker interface every typed error in this module satisfies. Lets
- * consumers branch on `'code' in err` without a concrete `instanceof`.
+ * Structural shape every typed error in this module satisfies.
  */
 export interface AfpsError extends Error {
   readonly code: string;
@@ -98,37 +83,6 @@ export abstract class AfpsRuntimeError extends Error implements AfpsError {
   }
 }
 
-/** Workload did not finish within the configured timeout. */
-export class RunTimeoutError extends Error implements AfpsError {
-  readonly code = "RUN_TIMEOUT" as const;
-  override readonly name = "RunTimeoutError";
-
-  constructor(message: string) {
-    super(message);
-  }
-}
-
-/** The platform asked the runner to abort mid-run. */
-export class RunCancelledError extends AfpsRuntimeError {
-  override readonly name = "RunCancelledError";
-  readonly code = "RUN_CANCELLED" as const;
-}
-
-/** Workload exited non-zero without producing a structured output event. */
-export class WorkloadExitError extends AfpsRuntimeError {
-  override readonly name = "WorkloadExitError";
-  readonly code = "WORKLOAD_EXIT_NONZERO" as const;
-  readonly exitCode: number;
-  readonly adapterName: string;
-
-  constructor(adapterName: string, exitCode: number, lastError?: string) {
-    const message = lastError ?? `${adapterName} workload exited with code ${exitCode}`;
-    super(message, { adapterName, exitCode, ...(lastError ? { lastError } : {}) });
-    this.exitCode = exitCode;
-    this.adapterName = adapterName;
-  }
-}
-
 /** An integration `api_call` tool tried to call a target outside its allowlist. */
 export class AuthorizedUrisError extends AfpsRuntimeError {
   override readonly name = "AuthorizedUrisError";
@@ -138,8 +92,9 @@ export class AuthorizedUrisError extends AfpsRuntimeError {
     code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH",
     message: string,
     details?: Record<string, unknown>,
+    options?: ErrorOptions,
   ) {
-    super(message, details);
+    super(message, details, options);
     this.code = code;
   }
 }
@@ -149,46 +104,15 @@ export class ResolverError extends AfpsRuntimeError {
   override readonly name = "ResolverError";
   readonly code: ResolverErrorCode;
 
-  constructor(code: ResolverErrorCode, message: string, details?: Record<string, unknown>) {
-    super(message, details);
-    this.code = code;
-  }
-}
-
-/** A `run_history` sidecar fetch failed (HTTP, JSON, or shape). */
-export class RunHistoryError extends AfpsRuntimeError {
-  override readonly name = "RunHistoryError";
-  readonly code: "RUN_HISTORY_FETCH_FAILED" | "RUN_HISTORY_BAD_RESPONSE";
-
   constructor(
-    code: "RUN_HISTORY_FETCH_FAILED" | "RUN_HISTORY_BAD_RESPONSE",
+    code: ResolverErrorCode,
     message: string,
     details?: Record<string, unknown>,
+    options?: ErrorOptions,
   ) {
-    super(message, details);
+    super(message, details, options);
     this.code = code;
   }
-}
-
-/** A credential-resolver could not produce credentials for a provider. */
-export class CredentialResolutionError extends AfpsRuntimeError {
-  override readonly name = "CredentialResolutionError";
-  readonly code = "CREDENTIAL_RESOLUTION" as const;
-}
-
-/**
- * Structural marker check — true for every typed error in this module
- * (old + new), false for plain `new Error()`.
- *
- * Useful at API boundaries to decide between "known domain failure
- * → 4xx with code" and "unknown crash → 5xx".
- */
-export function isAfpsError(value: unknown): value is AfpsError {
-  return (
-    value instanceof Error &&
-    typeof (value as AfpsError).code === "string" &&
-    (value as AfpsError).code.length > 0
-  );
 }
 
 // Re-export every typed error so consumers have a single barrel.

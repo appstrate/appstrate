@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`formatErrorChain`** (`./errors`) — renders an error and every `cause`
+  beneath it as one `": "`-joined string. It exists because `{ cause }` was
+  threaded through this codebase with nothing on the other end to print it, and
+  both obvious renderers are blind to it: V8 builds `.stack` at construction and
+  never walks the chain (measured on Bun 1.3 —
+  `new Error(o, { cause: i }).stack.includes(i.message)` is `false`), and pino's
+  `err` serializer — which DOES walk it, with no configuration needed — only
+  fires for a property named `err` holding an `Error`, against 194 log sites in
+  this repo that pass `error: getErrorMessage(err)`, a pre-flattened string.
+  Bounded: at most five `cause` links past the outermost error, and an
+  identity-tracked walk so a cyclic chain terminates (`[circular cause]`) rather
+  than hanging. Returns exactly `getErrorMessage(err)` when there is no cause,
+  so it is a drop-in at any existing site.
+  The chain is OPERATOR-facing — a `cause` routinely carries SQL constraint
+  names, upstream URLs and credential-adjacent context — so it belongs in a log
+  and never in an HTTP response body. `ApiError.toProblemDetail` reads `message`
+  and never `cause`; that boundary is asserted by tests on both sides.
+  Additive — no existing export changes shape, so this is a minor.
+
+- **`SIDECAR_AUTH_HEADER`** (`./sidecar-types`) — the request header carrying the
+  per-run token that authenticates the agent container to its own sidecar,
+  `x-appstrate-sidecar-auth`. It exists because the sidecar's control surface
+  used to have no inbound auth at all, on the stated ground that "the security
+  boundary is the per-run Docker network" — which stopped being true once
+  integration runner containers were attached to that same network and handed
+  the `sidecar` hostname. A runner could therefore reach `/llm/*` and spend the
+  org's real provider credential unattributed. The surface now denies by
+  default, exempting only `/health`.
+  Published because both halves of the boundary must agree on the spelling and
+  they are built in different packages: the platform mints the token and stamps
+  it into the agent env, the sidecar reads it back. A literal in two places is
+  how that drifts.
+  Additive — no existing export changes shape, so this is a minor.
+
 ### Removed
 
 - **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — a one-element array whose
@@ -23,6 +59,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moves and no row starts or stops being recognised.
 
 ### Changed
+
+- **A rejected unknown body key now names ITSELF in `errors[].field`**
+  (`./api-errors`) — `zodIssuesToFieldErrors` previously rendered every
+  `unrecognized_keys` issue through the generic path, and Zod 4 gives that issue
+  an EMPTY `path`. The field therefore fell back to the caller's `param` option,
+  or to the placeholder `"body"` when there was none. A request carrying
+  `{"skillIds":["@a/b"],"extra":1}` came back blaming `skillIds` — a field that
+  was correct — and a body with no `param` came back blaming `"body"`, which
+  points at nothing. Both are now the offending key, taken from `issue.keys` and
+  prefixed with the issue's own path for a nested object.
+  A body with N unknown keys now yields N entries instead of one, each naming
+  its own key; a single key keeps Zod's exact message. `errors[].code` is still
+  `unknown_field` and the status is still `400`, so a consumer that branches on
+  the code is unaffected — one that branches on `field === "body"` is not.
+  Every other issue code is byte-identical, including the `param` fallback,
+  which still fires for a genuinely path-less issue such as a root-level
+  `invalid_type`.
+  This lands with ~65 request bodies closing at once across the platform, so it
+  is the difference between a 400 a caller can act on and one that sends them
+  to the wrong field.
 
 - **`integrationManifestSchema` refuses a bare auth-scheme
   `delivery.http.prefix`** (`./integration`) — a new hard rejection of a
@@ -44,20 +100,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moves `packages.draft_manifest` and `package_versions.manifest`, with a
   `WHERE` that is exactly the condition the validator now refuses.
 
-- **`@appstrate/afps-shared` dependency range moved to `^0.6.0`.** The grammar
-  behind the rule above is `isBareAuthSchemePrefix`, exported from the new
-  `@appstrate/afps-shared/delivery-http` — the leaf that already owns the
-  `delivery.http` projection both core and `@appstrate/afps-runtime` read. It
-  lives there rather than here because the runtime has a second authoring
-  surface for the same value (a hand-written local creds file, which no
-  manifest validator ever sees) and must refuse the identical form; a copy of
-  the token grammar on each side is the shape this change exists to retire, and
-  the runtime deliberately carries no `@appstrate/core` runtime dependency.
-  Nothing in core's own surface moves.
+- **`@appstrate/afps-shared` dependency range moved to `^0.7.0`.** Two things
+  moved it, and both are behaviour a core consumer receives only if the range
+  admits them.
 
-  **Publish `afps-shared@0.6.0` before this release** — `verify-package-resolves.ts`
-  packs and installs the real tarball outside the monorepo, so an unpublished
-  leaf fails the publish rather than the first consumer's `npm install`.
+  First, `isBareAuthSchemePrefix` — the grammar behind the rule above —
+  is exported from `@appstrate/afps-shared/delivery-http`, the leaf that
+  already owns the `delivery.http` projection both core and
+  `@appstrate/afps-runtime` read. It lives there rather than here because the
+  runtime has a second authoring surface for the same value (a hand-written
+  local creds file, which no manifest validator ever sees) and must refuse the
+  identical form; a copy of the token grammar on each side is the shape this
+  change exists to retire, and the runtime deliberately carries no
+  `@appstrate/core` runtime dependency. That arrived in `afps-shared@0.6.0`,
+  which is on npm.
+
+  Second, the two `guardedFetch` changes below. `./ssrf` is a pure re-export
+  barrel over `@appstrate/afps-shared/guarded-fetch`, so what a consumer gets
+  from it is decided ENTIRELY by the version their install resolves — and the
+  published `0.6.0` still has `maxRedirects ?? 5`, the non-conformant 301/302
+  clause, and no `DEFAULT_MAX_REDIRECTS`. Those changes ship in
+  `afps-shared@0.7.0`; `0.x` puts breaking changes in the MINOR position, so
+  `^0.6.0` does not admit them and the floor had to rise. Nothing in core's own
+  surface moves for this, beyond the one re-export named below.
+
+  **Publish `afps-shared@0.7.0` before this release** (`git tag
+afps-shared@0.7.0`; see `packages/afps-shared/CHANGELOG.md`). Until it is on
+  npm, `bun scripts/verify-package-resolves.ts packages/core` fails — it packs
+  core and installs the real tarball outside the monorepo, so an unpublished
+  leaf fails HERE rather than in the first consumer's `npm install`. That is
+  the gate working, not a regression.
+
+- **`isMultipleFileField` now agrees with `isFileField`** (`./form`) — the two
+  predicates were two rules. `isFileField` asked "`format: "uri"` plus a
+  DECLARED `contentMediaType`"; `isMultipleFileField` tested
+  `!!items.contentMediaType`. `{ type: "array", items: { format: "uri",
+contentMediaType: "" } }` is the input that separated them — a file field that
+  was not multiple — and `mapAfpsToRjsf` therefore emitted `ui:widget: "file"`
+  WITHOUT `multiple` for it, i.e. a single-file picker bound to an array
+  property. Both are now derived from ONE single-file-node predicate, so an
+  empty-but-present `contentMediaType` is a file field on both. Whether the
+  media type is well-formed is the manifest validator's job, not a UI
+  predicate's; this is the reading `apps/api`'s inline-run synthesiser already
+  documents and relies on. No export was added or removed.
+
+  That predicate stays a copy of `@appstrate/afps-shared/file-field`'s rather
+  than an import of it, deliberately: core ships as source, so a consumer's
+  `tsc` compiles these files against whatever `@appstrate/afps-shared` their
+  own install resolves. The floor this window raises to is `^0.7.0`, and
+  `0.7.0` is the FIRST release to export `isMultipleFileField` from that
+  subpath — it is not on npm yet, so importing it today breaks every consumer
+  install, exactly as importing it at the previous `^0.6.0` floor would have
+  (published `0.6.0` exports only `isFileField` there; verified against the
+  tarball, not inferred). `packages/core/test/form.test.ts` asserts the two
+  agree table-wide so they cannot drift while they are apart. The remaining
+  step to merge them is now only the publish: once `afps-shared@0.7.0` is on
+  npm, this block can become
+  `export { isFileField, isMultipleFileField } from "@appstrate/afps-shared/file-field"`.
+  The three helpers underneath (`isSingleFileNode`, `resolveItems`,
+  `resolveType`) are private to the leaf on purpose and stay duplicated
+  regardless — they are implementation detail of those two predicates, not
+  surface.
+
+- **`guardedFetch` follows the WHATWG 301/302 method rule** (`./ssrf`, shipped
+  in `afps-shared@0.7.0` — see the range entry above) — the
+  downgrade clause read `(301 | 302) && method !== "HEAD" → GET`, so a 302'd
+  `PUT`/`PATCH`/`DELETE` was re-issued as a bodyless `GET`: a request the caller
+  never made, silently. WHATWG fetch (HTTP-redirect fetch step 11) and RFC 9110
+  §15.4.3 downgrade **POST only**; 303 still downgrades everything except
+  GET/HEAD, and 307/308 still preserve method and body. `GET` and `POST`
+  callers — every current one in this repo — are unaffected.
+
+- **`guardedFetch`'s default `maxRedirects` is 10, not 5** (`./ssrf`, shipped
+  in `afps-shared@0.7.0` — see the range entry above), and the constant is now
+  re-exported from `@appstrate/core/ssrf` as **`DEFAULT_MAX_REDIRECTS`**, so a
+  consumer calling `guardedFetch` from this package can name the ceiling
+  instead of copying the number. It was
+  one of two unrelated budgets for the same job (the credential-proxy follower
+  in `@appstrate/afps-runtime` hard-coded `10`), and 10 is the value with a
+  reason: multi-step OAuth/CAS chains do not always terminate within five hops.
+  The cap is a loop/DoS bound, not a trust boundary — every hop is still
+  independently DNS-checked, allowlist-checked and credential-stripped — so
+  nothing is weakened by the raise. Callers that want the old ceiling pass
+  `maxRedirects: 5`.
+
+- **`ApiError` accepts an optional `cause`** (`./api-errors`) — a new optional
+  member on the constructor's options object, forwarded to `Error`'s
+  `ErrorOptions`. ESLint's `preserve-caught-error` only inspects
+  `throw new <builtin Error>`, so it is structurally blind to custom subclasses;
+  repo-wide that leaves 62 `throw new <CustomClass>` sites inside `catch` blocks
+  carrying no cause, and `ApiError` is the most-thrown of them. Without this
+  parameter the obligation was not merely unenforced, it was inexpressible.
+  Purely additive: omitting it leaves the constructed error with no `cause` own
+  property at all (not one set to `undefined`), so nothing existing changes
+  shape, and `toProblemDetail` is untouched — the cause is log-only.
 
 - **`CreateUploadUrlOptions.maxSize` is required, and `Storage.createUploadUrl`
   no longer takes `opts` optionally** (`./storage`) — a breaking type change

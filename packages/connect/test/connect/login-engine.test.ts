@@ -350,6 +350,11 @@ describe("runLogin — security limits", () => {
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("extract_failed");
+    // Delete-to-fail: drop the `{ cause }` and the thrown error says only
+    // "'<name>' json parse failed" — identical for an HTML login wall, an
+    // empty body and truncated JSON. The body itself is never logged (it can
+    // hold credentials), so the SyntaxError is the only thing left to read.
+    expect((err as LoginError).cause).toBeInstanceOf(SyntaxError);
   });
 
   it("extract_failed: a `jwt` extractor whose token ref is absent from scope", async () => {

@@ -87,6 +87,26 @@ export const SOURCE_GLOBS = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"]
 export const COMPOSE_GLOBS = ["*docker-compose*.yml", "*docker-compose*.yaml"] as const;
 
 /**
+ * Every `.env.example` the repo ships — the root one an operator copies to
+ * `.env`, and the `examples/self-hosting/` one the self-hosting guide walks
+ * through.
+ *
+ * Two gates read this population and they must read the SAME one:
+ * `verify-env-docs.ts` asks whether every name in it has a `docs/ENV.md` row
+ * (and whether every hard-required schema key appears in it), and
+ * `verify-release-version.ts` asks whether the version pins inside it are
+ * current. They had a verbatim copy each — in the very change that introduced
+ * this module for shared constants — so a third example file added under a new
+ * path would have had to be remembered twice, and the failure of forgetting is
+ * a gate that quietly covers less while still printing a tick.
+ *
+ * The pattern is a `git ls-files` pathspec, not a shell glob: a leading `*`
+ * makes it match at any depth INCLUDING zero, so it covers the root
+ * `.env.example` as well as the nested one.
+ */
+export const ENV_EXAMPLE_GLOBS = ["*.env.example"] as const;
+
+/**
  * What a caller wants done about an index entry with no file behind it.
  *
  * Required, not defaulted — see the header. The two answers are both correct,

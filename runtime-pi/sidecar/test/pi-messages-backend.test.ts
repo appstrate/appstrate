@@ -45,6 +45,7 @@ import type {
   Context,
   Model,
   PiMessagesEvent,
+  ToolCall,
   Usage,
 } from "../pi-sdk.ts";
 
@@ -539,6 +540,319 @@ describe("event projection", () => {
         message: { ...partialMessage([]), stopReason: "deferred" },
       }),
     ).toBeUndefined();
+  });
+});
+
+/**
+ * The COMPLETE set of fields `projectAssistantEvent` puts on the wire, per event
+ * kind, compared as an EXACT SET in both directions.
+ *
+ * Sibling of `packages/runner-pi/test/alias-env-allowlist.test.ts`, same argument
+ * applied to the other half of the boundary: that gate pins what an aliased
+ * container is handed BEFORE it speaks, this one pins what it is handed in reply.
+ * The projection is a whitelist rebuild — every field named in source, nothing
+ * spread — which makes any ONE projection easy to read and the SET of them easy
+ * to grow without anyone noticing. `projectUsage` already drops two fields for no
+ * reason other than that their PRESENCE narrows the backing vendor
+ * (`Usage.cacheWrite1h`, `Usage.reasoning`); a third such field arriving later,
+ * with nobody asking that question, is what this pins against.
+ *
+ * BOTH directions, for different reasons:
+ *
+ * - an UNEXPECTED field is a disclosure decision taken by accident;
+ * - a MISSING one is a broken run. The signature fields round-trip: pi-ai's
+ *   `pi-messages` reader writes them back onto the container's own assistant
+ *   message, the container replays that message in the next turn's context, and
+ *   this backend re-originates it against the backing — where the Anthropic
+ *   adapter reads `thinkingSignature` back out as `signature`, or as
+ *   `redacted_thinking` when `redacted` is set. Drop them and multi-turn extended
+ *   thinking fails upstream, at the vendor, not here.
+ *
+ * That second reason is why five of the pinned fields are KNOWN RESIDUALS: they
+ * narrow the backing and are kept anyway, because the alternative is not "drop
+ * them" but "hold them sidecar-side behind opaque handles", a redesign.
+ * `docs/architecture/MODEL_ALIASES.md` (tier 1) records them and what closing
+ * them would cost. Each note below says what its field narrows to, measured
+ * against the five shapes an alias can be backed by (`ALIAS_BACKING_SHAPES`:
+ * anthropic-messages, openai-completions, openai-responses,
+ * openai-codex-responses, mistral-conversations).
+ */
+
+/**
+ * A tool call carrying BOTH of its optional members, so the projection's
+ * treatment of each is observable rather than vacuously absent.
+ *
+ * Residual (2 of 5): `namespace` is written only by the shared openai-responses
+ * adapter, so its presence narrows the backing to `openai-responses` /
+ * `openai-codex-responses`.
+ * Residual (1 of 5): `thoughtSignature` is written by `openai-completions` (from
+ * an OpenRouter-style reasoning detail) and by the Google adapters, which cannot
+ * back an alias — so among the five it names `openai-completions` outright.
+ */
+const RESIDUAL_TOOL_CALL: ToolCall = {
+  type: "toolCall",
+  id: "call_1",
+  name: "read",
+  arguments: { path: "README.md" },
+  thoughtSignature: "reasoning-detail",
+  namespace: "custom",
+};
+
+/**
+ * Content blocks with every optional member set. MAXIMAL on purpose, the same way
+ * the env allowlist's fixture is: a source block missing an optional would leave
+ * the field absent from the projection, out of the pinned set, and free to appear
+ * later without failing anything.
+ */
+const RESIDUAL_TEXT = { type: "text", text: "hi", textSignature: "text-sig" } as const;
+const RESIDUAL_THINKING = {
+  type: "thinking",
+  thinking: "…",
+  thinkingSignature: "enc",
+  redacted: true,
+} as const;
+
+/**
+ * One row per member of the closed `PiMessagesEvent` union — a `Record` keyed by
+ * the union, so a new event kind upstream fails to compile here until someone
+ * writes down what it may carry.
+ *
+ * `done` with `reason: "deferred"` has no row: it projects to `undefined`, and the
+ * test above owns that case.
+ */
+const PROJECTION: Record<
+  PiMessagesEvent["type"],
+  { readonly inbound: AssistantMessageEvent; readonly fields: readonly string[] }
+> = {
+  start: {
+    inbound: { type: "start", partial: partialMessage([]) },
+    fields: ["type"],
+  },
+  text_start: {
+    inbound: { type: "text_start", contentIndex: 0, partial: partialMessage([RESIDUAL_TEXT]) },
+    fields: ["type", "contentIndex"],
+  },
+  text_delta: {
+    inbound: {
+      type: "text_delta",
+      contentIndex: 0,
+      delta: "hi",
+      partial: partialMessage([RESIDUAL_TEXT]),
+    },
+    fields: ["type", "contentIndex", "delta"],
+  },
+  text_end: {
+    inbound: {
+      type: "text_end",
+      contentIndex: 0,
+      content: "hi",
+      partial: partialMessage([RESIDUAL_TEXT]),
+    },
+    // Residual (2 of 5): `contentSignature` here is the block's `textSignature`,
+    // written only by the shared openai-responses adapter among the five.
+    fields: ["type", "contentIndex", "content", "contentSignature"],
+  },
+  thinking_start: {
+    inbound: {
+      type: "thinking_start",
+      contentIndex: 0,
+      partial: partialMessage([RESIDUAL_THINKING]),
+    },
+    fields: ["type", "contentIndex"],
+  },
+  thinking_delta: {
+    inbound: {
+      type: "thinking_delta",
+      contentIndex: 0,
+      delta: "…",
+      partial: partialMessage([RESIDUAL_THINKING]),
+    },
+    fields: ["type", "contentIndex", "delta"],
+  },
+  thinking_end: {
+    inbound: {
+      type: "thinking_end",
+      contentIndex: 0,
+      content: "…",
+      partial: partialMessage([RESIDUAL_THINKING]),
+    },
+    // Residual (1 of 5): `redacted` is set by the Anthropic adapter alone —
+    // it is how that vendor's safety-filtered thinking is carried back as
+    // `redacted_thinking` — so its presence identifies the backing outright.
+    // Residual (4 of 5): `contentSignature` here is the block's
+    // `thinkingSignature`, which every backing shape but `mistral-conversations`
+    // emits; the tell is the weaker one of never seeing it on a reasoning run.
+    fields: ["type", "contentIndex", "content", "contentSignature", "redacted"],
+  },
+  toolcall_start: {
+    inbound: {
+      type: "toolcall_start",
+      contentIndex: 0,
+      partial: partialMessage([RESIDUAL_TOOL_CALL]),
+    },
+    fields: ["type", "contentIndex", "id", "toolName"],
+  },
+  toolcall_delta: {
+    inbound: {
+      type: "toolcall_delta",
+      contentIndex: 0,
+      delta: '{"path":',
+      partial: partialMessage([RESIDUAL_TOOL_CALL]),
+    },
+    fields: ["type", "contentIndex", "delta"],
+  },
+  toolcall_end: {
+    inbound: {
+      type: "toolcall_end",
+      contentIndex: 0,
+      toolCall: RESIDUAL_TOOL_CALL,
+      partial: partialMessage([RESIDUAL_TOOL_CALL]),
+    },
+    fields: ["type", "contentIndex", "toolCall"],
+  },
+  done: {
+    inbound: {
+      type: "done",
+      reason: "stop",
+      // `responseId` set on the source so its omission from the projection is a
+      // measured drop: the wire event DECLARES `responseId` and `rewrite`, both
+      // of which would carry the vendor's own identifiers if ever forwarded.
+      message: { ...partialMessage([]), stopReason: "stop", usage: USAGE, responseId: "resp_1" },
+    },
+    fields: ["type", "reason", "usage"],
+  },
+  error: {
+    inbound: {
+      type: "error",
+      reason: "error",
+      // The vendor's own prose and identifiers, on the event whose wire
+      // counterpart declares `errorMessage`. Errors are SYNTHESIZED by the
+      // caller, never scrubbed, so none of this may cross.
+      error: {
+        ...partialMessage([]),
+        stopReason: "error",
+        usage: USAGE,
+        responseId: "resp_1",
+        errorMessage: "overloaded_error from api.anthropic.com",
+      },
+    },
+    fields: ["type", "reason", "usage"],
+  },
+};
+
+const WHY_THIS_GATE_EXISTS = [
+  "",
+  "Every field here crosses into an ALIASED run's container, which the",
+  "organization controls and can read. A field is a DISCLOSURE decision, not a",
+  "plumbing detail, and has to be justified against the alias contract in",
+  "docs/architecture/MODEL_ALIASES.md (tier 1) — which enumerates what the",
+  "platform hands an aliased run and states that the list is complete.",
+  "",
+  "If the field carries the same thing whatever vendor backs the alias, add it",
+  "to PROJECTION in this file and say there why it is neutral. If only some",
+  "backings emit it — a signature format, a namespace, a token bucket, a",
+  "response id — then its PRESENCE narrows the vendor even when its value says",
+  "nothing, which is the same argument projectUsage() uses to drop",
+  "Usage.cacheWrite1h and Usage.reasoning. Drop it the same way, or, if the",
+  "container genuinely needs it back, add it to the residual list in",
+  "MODEL_ALIASES.md so the accepted disclosure is written down somewhere.",
+  "",
+  "A field going MISSING is the opposite failure and just as real: the",
+  "signature fields round-trip into the next turn's request, and losing one",
+  "fails extended thinking at the vendor rather than here.",
+].join("\n");
+
+function expectExactFieldSet(
+  actual: readonly string[],
+  expected: readonly string[],
+  what: string,
+): void {
+  const unexpected = actual.filter((field) => !expected.includes(field));
+  const missing = expected.filter((field) => !actual.includes(field));
+  if (unexpected.length === 0 && missing.length === 0) return;
+  throw new Error(
+    [
+      `${what} drifted from the pinned field set.`,
+      "",
+      `  reached the container, not on the list: ${unexpected.join(", ") || "(none)"}`,
+      `  on the list, no longer emitted:         ${missing.join(", ") || "(none)"}`,
+      WHY_THIS_GATE_EXISTS,
+    ].join("\n"),
+  );
+}
+
+describe("projected event field sets — exact allowlist", () => {
+  for (const [kind, { inbound, fields }] of Object.entries(PROJECTION)) {
+    it(`emits exactly [${fields.join(", ")}] on ${kind}`, () => {
+      const projected = projectAssistantEvent(inbound);
+      expect(projected).toBeDefined();
+      expectExactFieldSet(
+        Object.keys(projected ?? {}).sort(),
+        [...fields].sort(),
+        `The \`${kind}\` event an ALIASED run receives`,
+      );
+    });
+  }
+
+  it("rebuilds `toolCall` field by field, carrying its two residual members", () => {
+    // The one nested object the projection rebuilds besides `usage`. Pinned
+    // separately because a vendor field added to pi-ai's `ToolCall` would ride
+    // inside it without changing the event's own field set.
+    const projected = projectAssistantEvent(PROJECTION.toolcall_end.inbound) as Extract<
+      PiMessagesEvent,
+      { type: "toolcall_end" }
+    >;
+    expectExactFieldSet(
+      Object.keys(projected.toolCall).sort(),
+      ["type", "id", "name", "arguments", "thoughtSignature", "namespace"].sort(),
+      "The `toolCall` an ALIASED run receives",
+    );
+  });
+
+  it("rebuilds `usage` field by field on both terminals", () => {
+    // Same reasoning, and this is the one with precedent: `cacheWrite1h` and
+    // `reasoning` are already dropped for presence alone, so the set they were
+    // dropped from is worth pinning.
+    for (const kind of ["done", "error"] as const) {
+      const projected = projectAssistantEvent(PROJECTION[kind].inbound) as Extract<
+        PiMessagesEvent,
+        { type: "done" | "error" }
+      >;
+      expectExactFieldSet(
+        Object.keys(projected.usage).sort(),
+        ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"].sort(),
+        `The \`usage\` on the \`${kind}\` an ALIASED run receives`,
+      );
+    }
+  });
+
+  it("control: the residual fields come from the source, never invented here", () => {
+    // Without this the gate would pass on a projection that stamped
+    // `contentSignature` / `redacted` unconditionally — the pinned sets would
+    // match and nothing would say the fields track the backing's real output.
+    const plainText = projectAssistantEvent({
+      type: "text_end",
+      contentIndex: 0,
+      content: "hi",
+      partial: partialMessage([{ type: "text", text: "hi" }]),
+    });
+    expectExactFieldSet(
+      Object.keys(plainText ?? {}).sort(),
+      ["type", "contentIndex", "content"].sort(),
+      "A `text_end` whose source block carries no signature",
+    );
+
+    const plainThinking = projectAssistantEvent({
+      type: "thinking_end",
+      contentIndex: 0,
+      content: "…",
+      partial: partialMessage([{ type: "thinking", thinking: "…" }]),
+    });
+    expectExactFieldSet(
+      Object.keys(plainThinking ?? {}).sort(),
+      ["type", "contentIndex", "content"].sort(),
+      "A `thinking_end` whose source block carries no signature",
+    );
   });
 });
 

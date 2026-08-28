@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 
@@ -65,6 +66,7 @@ export const organizationsPaths = {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -162,6 +164,7 @@ export const organizationsPaths = {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -220,6 +223,7 @@ export const organizationsPaths = {
                 email: { type: "string", format: "email" },
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES], default: "member" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -271,6 +275,7 @@ export const organizationsPaths = {
               properties: {
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -338,6 +343,7 @@ export const organizationsPaths = {
               properties: {
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -420,7 +426,18 @@ export const organizationsPaths = {
       requestBody: {
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/OrgSettings" },
+            // Spelled out rather than `$ref: OrgSettings`, and CLOSED:
+            // `orgSettingsPatchSchema` (`services/organizations.ts`) is
+            // `.strict()`, so an unknown key is a 400 and never a silently
+            // dropped setting. The component stays open because the READ path
+            // returns the stored JSONB verbatim — the members are shared, the
+            // closure is not.
+            schema: {
+              type: "object",
+              description: "Organization settings patch — only provided fields are updated.",
+              properties: ORG_SETTINGS_PROPERTIES,
+              additionalProperties: false,
+            },
           },
         },
       },

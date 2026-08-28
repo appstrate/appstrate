@@ -4,12 +4,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { connectionOverridesSchema, dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import {
-  ModelGenerationError,
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
-  resolveModelGenerationSettings,
-  type ModelGenerationCapabilities,
-  type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import {
@@ -31,7 +27,11 @@ import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { getSpaceScope, type SpaceScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
-import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
+import {
+  assertExplicitModelExists,
+  resolveModel,
+  validateGenerationOverride,
+} from "../services/org-models.ts";
 import {
   getInstalledPackageSettings,
   type InstalledPackageSettings,
@@ -264,20 +264,6 @@ export const updateScheduleSchema = z
   })
   .strict();
 
-function validateGenerationOverride(
-  generation: ModelGenerationSettings,
-  capabilities?: ModelGenerationCapabilities | null,
-): ModelGenerationSettings {
-  try {
-    return resolveModelGenerationSettings({ capabilities, override: generation });
-  } catch (error) {
-    if (error instanceof ModelGenerationError) {
-      throw invalidRequest(error.message, "generation_config_override");
-    }
-    throw error;
-  }
-}
-
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
@@ -343,14 +329,10 @@ export function createSchedulesRouter() {
             agent.id,
             data.model_id_override ?? packageSettings.modelId,
           ));
-        if (!selectedModel) {
-          throw invalidRequest(
-            "A model must be configured before generation settings can be saved",
-          );
-        }
         generationConfigOverride = validateGenerationOverride(
           generationConfigOverride,
-          selectedModel.generation,
+          selectedModel,
+          "generation_config_override",
         );
       }
 
@@ -477,14 +459,10 @@ export function createSchedulesRouter() {
         ));
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
-        if (!selectedModel) {
-          throw invalidRequest(
-            "A model must be configured before generation settings can be saved",
-          );
-        }
         generationConfigOverride = validateGenerationOverride(
           generationConfigOverride,
-          selectedModel.generation,
+          selectedModel,
+          "generation_config_override",
         );
       } else if (existing.generation_config_override) {
         generationConfigOverride = reconcileModelGenerationSettings(

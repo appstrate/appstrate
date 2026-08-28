@@ -432,8 +432,17 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     await replayScript();
 
     // Catalog-driven rather than a list: it asks the same question the script's
-    // own loop does, so a nineteenth foreign key added later is covered here
+    // own loop does, so an eighteenth foreign key added later is covered here
     // without editing this test.
+    //
+    // `audit_events.space_id` is UNIONed in for the same reason the script's
+    // step 4 names it explicitly — `0055_schema_integrity_repairs` dropped its
+    // foreign key (an `ON DELETE SET NULL` that blanked the attribution of
+    // every deleted space), so the catalog sweep can no longer reach it. It is
+    // still a pointer at a space and still has to be re-minted; without this
+    // term the assertion below would go green on the exact regression that
+    // matters, because the column it stopped covering is the one with no
+    // constraint left to fail loudly.
     const survivors = await rows<{ ref: string; n: number }>(`
       SELECT format('%s.%s', t.relname, a.attname) AS ref,
              (xpath('/row/c/text()', query_to_xml(
@@ -443,19 +452,22 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
         JOIN pg_class t     ON t.oid = c.conrelid
         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = c.conkey[1]
        WHERE c.contype = 'f' AND c.confrelid = 'public.spaces'::regclass
+      UNION
+      SELECT 'audit_events.space_id',
+             (SELECT count(*)::int FROM audit_events WHERE space_id LIKE 'app\\_%')
     `);
     expect(survivors.length).toBe(18);
     expect(survivors.filter((r) => r.n !== 0)).toEqual([]);
   });
 
-  it("restores all eighteen foreign keys with their ON DELETE behaviour intact", async () => {
+  it("restores all seventeen foreign keys with their ON DELETE behaviour intact", async () => {
     const before = await rows<{ child: string; conname: string; d: string }>(`
       SELECT conrelid::regclass::text AS child, conname, confdeltype AS d
         FROM pg_constraint
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(18);
+    expect(before.length).toBe(17);
 
     await replayScript();
 
@@ -465,12 +477,17 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    // Byte-for-byte the same set, same names, same delete actions. Seventeen
-    // `c` (cascade) and exactly one `n` (set null) — `audit_events`. Getting
-    // that one wrong would silently convert "keep the audit row, forget the
-    // space" into "delete the audit trail with the space".
+    // Byte-for-byte the same set, same names, same delete actions — all
+    // seventeen `c` (cascade). `audit_events` used to be an eighteenth entry at
+    // `n` (set null); `0055_schema_integrity_repairs` dropped that FK, because
+    // the SET NULL was doing exactly what the old comment here warned a wrong
+    // action would do — erasing the space attribution of every historical audit
+    // row — and doing it on purpose, on every space delete.
+    //
+    // So the assertion inverts: a resurrected `n` now means either 0055 was
+    // reverted or the capture/restore invented an action of its own.
     expect(after).toEqual(before);
-    expect(after.filter((r) => r.d !== "c").map((r) => r.child)).toEqual(["audit_events"]);
+    expect(after.filter((r) => r.d !== "c")).toEqual([]);
   });
 
   // ── Permission scope strings ───────────────────────────────────────────────
@@ -724,7 +741,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       //
       // `NOT tgisinternal` excludes the RI constraint triggers, whose generated
       // names embed OIDs and would churn purely because the script drops and
-      // restores the eighteen foreign keys.
+      // restores the seventeen foreign keys.
       const before = await triggerCatalog();
 
       // Non-vacuity: all three triggers the script actually disables are here,

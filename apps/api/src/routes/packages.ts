@@ -193,13 +193,17 @@ async function validateManifestForRoute(
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
 
-export const githubImportSchema = z.object({
-  url: z.url("Missing 'url' field"),
-});
+export const githubImportSchema = z
+  .object({
+    url: z.url("Missing 'url' field"),
+  })
+  .strict();
 
-export const forkSchema = z.object({
-  name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
-});
+export const forkSchema = z
+  .object({
+    name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
+  })
+  .strict();
 
 /**
  * JSON-body create/update payloads for the manifest-driven package types
@@ -263,7 +267,7 @@ export const packageJsonUpdateSchema = z
  * is optional (`requestBody.required: false`) — the SPA omits it entirely when
  * no override is chosen — so `version` is the only member and it is optional.
  */
-export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() });
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(

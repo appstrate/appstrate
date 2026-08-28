@@ -136,11 +136,10 @@ export const estimateTokens: TokenEstimator = (text) => {
  * Decision returned by {@link TokenBudget.decide} and
  * {@link TokenBudget.tryReserve}.
  *
- * The reason union is intentionally narrow: only the three states the
- * tracker itself can produce. Fallback states triggered by the caller
- * (no blob store configured, blob store full, …) are surfaced through
- * a wider union in the agent-facing `_meta` payload — they are not
- * decisions the budget can make.
+ * The reason union is intentionally narrow: only the states the tracker
+ * itself can produce. Fallback states triggered by the caller (no blob
+ * store configured, blob store full, …) are not decisions the budget
+ * can make; the caller logs those itself.
  */
 interface BudgetDecision {
   /**

@@ -72,7 +72,7 @@
     "conformance:check": "bun scripts/conformance/run.ts --tier gate",
     "verify:dead-code": "knip-bun",
     "test:system-packages": "bun scripts/conformance/run.ts",
-    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation typecheck:scripts verify:module-contract verify:dead-code verify:no-migration-dml",
+    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults verify:release-version verify:env-docs detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation typecheck:scripts verify:module-contract verify:dead-code verify:no-migration-dml",
     "verify:module-isolation": "bun scripts/verify-module-isolation.ts",
     "verify:no-migration-dml": "bun scripts/verify-no-migration-dml.ts",
     "verify:module-contract": "bun scripts/verify-module-contract.ts",
@@ -112,6 +112,8 @@
     "verify:openapi": "bun scripts/verify-openapi.ts",
     "verify:type-coverage": "type-coverage --project apps/web/tsconfig.json --strict --at-least 99 --ignore-files \"apps/web/src/api/schema.d.ts\"",
     "verify:compose-defaults": "bun scripts/verify-compose-defaults.ts",
+    "verify:release-version": "bun scripts/verify-release-version.ts",
+    "verify:env-docs": "bun scripts/verify-env-docs.ts",
     "openapi:baseline": "bun scripts/detect-breaking-changes.ts --update-baseline",
     "clean": "rm -rf node_modules/.cache .turbo .eslintcache apps/*/dist apps/web/.vite packages/*/dist coverage",
     "prepare": "husky"

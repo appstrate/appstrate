@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
@@ -7,7 +8,8 @@ import { RuntimeEventJournal } from "./runtime-event-journal.ts";
 import type { ApiCallBaseDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
-import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import { PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import {
   DEFAULT_API_CALL_CONCURRENCY,
   LLM_STREAM_IDLE_TIMEOUT_MS,
@@ -40,6 +42,45 @@ import { logger } from "./logger.ts";
 import { filterSensitiveHeaders, scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
+
+/**
+ * The one route the agent-auth middleware below exempts. Kept as a constant so
+ * the exemption is a single named fact rather than a string literal buried in a
+ * conditional.
+ */
+const HEALTH_PATH = "/health";
+
+/**
+ * Headers the agent stamps for the SIDECAR's benefit and that must never ride
+ * on to a vendor: the auth token (a live per-run secret) and the pi-ai build
+ * marker (`pi-messages` compatibility, meaningless upstream). Passed to
+ * `filterHeaders` as its extra skip set on both `/llm/*` forwarding paths.
+ */
+const SIDECAR_ONLY_REQUEST_HEADERS = new Set([SIDECAR_AUTH_HEADER, PI_SDK_VERSION_HEADER]);
+
+/**
+ * Constant-time check of an inbound {@link SIDECAR_AUTH_HEADER} against the
+ * run's configured token.
+ *
+ * Fails closed on BOTH halves: an absent header and an unconfigured sidecar are
+ * each a refusal. A sidecar with no token cannot tell the agent apart from the
+ * integration runners sharing its network, so "no token configured" is exactly
+ * the state in which it must answer nobody.
+ *
+ * The length check short-circuits before `timingSafeEqual` (which throws on
+ * mismatched lengths). That leaks the token's LENGTH, which is a fixed
+ * property of how the launcher mints it, not of its value.
+ */
+function isAuthorizedAgentRequest(
+  presented: string | undefined,
+  expected: string | undefined,
+): boolean {
+  if (!expected || !presented) return false;
+  const a = Buffer.from(presented, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 /**
  * `Bun.serve` idle-timeout (seconds) applied to the sidecar's HTTP
@@ -557,6 +598,42 @@ export function createApp(deps: AppDeps): Hono {
 
   const app = new Hono();
 
+  // ─── Agent authentication for the whole control surface ───
+  //
+  // DENY BY DEFAULT, with `/health` as the single exemption: a route added to
+  // this app later is protected without anyone remembering to say so, which is
+  // the opposite of how `/llm/*`, `/mcp`, `/integrations/boot-report` and
+  // `/runtime-events` each ended up open one at a time.
+  //
+  // `/health` is exempt because it is the container health gate — the
+  // orchestrator probes it before the run exists and it discloses one bit
+  // (ready / not ready) that reveals nothing about the run.
+  //
+  // Registered BEFORE every route below (Hono runs middleware in registration
+  // order and only for routes registered after it) and before the `mountMcp`
+  // call at the bottom of this function, which is why `/mcp` is covered too.
+  //
+  // Nothing runner-facing lives on this app: the per-integration egress / MITM
+  // listeners and the DNS responder are their own `Bun.serve` listeners
+  // (`integration-egress-listener.ts`, `integration-mitm-listener.ts`,
+  // `integration-dns-responder.ts`), and the forward proxy is a separate one
+  // bound on `PORT + 1` (`server.ts`). So there is no exemption to carve for
+  // integration runners — they are not supposed to reach this app at all.
+  app.use("*", async (c, next) => {
+    if (c.req.path === HEALTH_PATH) return next();
+    if (!isAuthorizedAgentRequest(c.req.header(SIDECAR_AUTH_HEADER), config.sidecarAuthToken)) {
+      // No hint about which half failed, and no `WWW-Authenticate` challenge:
+      // the only legitimate caller was handed the token at container start and
+      // has nothing to negotiate.
+      logger.warn("sidecar control surface: unauthenticated request refused", {
+        path: c.req.path,
+        method: c.req.method,
+      });
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    return next();
+  });
+
   // Health check for startup readiness (includes forward proxy readiness)
   app.get("/health", (c) => {
     if (!isReady()) {
@@ -570,11 +647,12 @@ export function createApp(deps: AppDeps): Hono {
   // the run when any declared integration failed to boot (`ok: false`). We
   // await the boot promise so the report is final before answering.
   //
-  // No inbound auth — same posture as `/mcp`. The agent container holds NO
-  // run token (zero-knowledge boundary: only the sidecar can call back to the
-  // platform), so a bearer check would lock the agent out. The security
-  // boundary is the per-run Docker network; the payload carries integration
-  // ids + diagnostic errors but never credentials.
+  // Authenticated like the rest of the control surface, by the
+  // `SIDECAR_AUTH_HEADER` middleware above. The agent container still holds NO
+  // run token — the zero-knowledge boundary is intact — but it does hold a
+  // sidecar-only token, because the per-run Docker network is NOT a boundary:
+  // integration runner containers sit on it too. The payload carries
+  // integration ids + diagnostic errors but never credentials.
   app.get("/integrations/boot-report", async (c) => {
     if (!deps.integrationBootReportProvider) {
       // No integrations were wired into this sidecar — nothing to fail on.
@@ -681,7 +759,7 @@ export function createApp(deps: AppDeps): Hono {
       );
     }
 
-    const filtered = filterHeaders(c.req.header());
+    const filtered = filterHeaders(c.req.header(), SIDECAR_ONLY_REQUEST_HEADERS);
     const forwardedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(filtered)) {
       forwardedHeaders[key] = value.includes(apiKeyConfig.placeholder)
@@ -783,10 +861,15 @@ export function createApp(deps: AppDeps): Hono {
     // drop any x-api-key (bearer-only) and force the real subscription bearer.
     // The SDK's own fingerprint (user-agent, anthropic-beta, chatgpt-account-id)
     // is preserved — the whole point of pass-through. `filterHeaders` first
-    // drops host/content-length/hop-by-hop; wrapping the result in a Headers
-    // normalises casing so the swap needs no manual authorization variant hunt.
+    // drops host/content-length/hop-by-hop plus the container→sidecar-only
+    // headers (the auth token must not travel to the provider); wrapping the
+    // result in a Headers normalises casing so the swap needs no manual
+    // authorization variant hunt.
     const buildHeaders = (accessToken: string): Headers =>
-      applyOauthBearerSwap(new Headers(filterHeaders(c.req.header())), accessToken);
+      applyOauthBearerSwap(
+        new Headers(filterHeaders(c.req.header(), SIDECAR_ONLY_REQUEST_HEADERS)),
+        accessToken,
+      );
 
     // Buffer the request body (inference JSON, bounded by
     // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
@@ -881,9 +964,10 @@ export function createApp(deps: AppDeps): Hono {
   // same blob store.
   // Runtime-event drain surface — the Pi runner pulls the
   // canonical events the sidecar journaled while executing runtime tools, and
-  // re-emits them on its single run-event sink. Same `Host: sidecar` posture as
-  // `/mcp` (the per-run Docker network is the boundary; no token). An empty
-  // journal (no runtime tools selected) answers an empty batch.
+  // re-emits them on its single run-event sink. Same posture as `/mcp`: the
+  // agent-auth middleware gates it, and the `Host` check on top is the
+  // DNS-rebinding defence. An empty journal (no runtime tools selected)
+  // answers an empty batch.
   app.get("/runtime-events", (c) => {
     const denied = validateMcpHostHeader(c.req.raw);
     if (denied) return denied;

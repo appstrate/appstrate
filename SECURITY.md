@@ -147,13 +147,14 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ║  │ - NO PLATFORM_API_URL │ ← no ExtraHosts  ║
     ║  │ - NO credentials      │                  ║
     ║  │ - NO SIDECAR_URL      │ ← deleted from   ║
-    ║  │                       │   env after boot ║
+    ║  │ - NO SIDECAR_AUTH_    │   env after boot ║
+    ║  │      TOKEN            │                  ║
     ║  │ - Runs LLM agent code │                  ║
     ║  └───────────────────────┘                  ║
     ╚═════════════════════════════════════════════╝
 ```
 
-**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`<provider>_call`, `run_history`), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` is `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
+**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`{ns}__api_call`, `run_history`, `recall_memory` — see [How the agent makes authenticated API calls](#how-the-agent-makes-authenticated-api-calls) for the naming), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` **and** `SIDECAR_AUTH_TOKEN` are `delete`d from `process.env` — the LLM-facing bash extension never sees either. Deleting the URL removes only the convenience (`NO_PROXY` still names the sidecar host); deleting the per-run bearer is what removes the capability. Full design: `docs/architecture/SIDECAR.md`. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
 
 **What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (deleted from env after runtime bootstrap).
 
@@ -565,7 +566,7 @@ All external inputs are validated using Zod schemas before processing:
 | File uploads         | Extension allowlist, size limit, count limit             | `schema.ts:validateFileInputs()`    |
 | Agent output         | Schema-typed `output` tool + AJV validation at ingestion | `schema.ts:validateOutput()`        |
 | Package imports      | Size limit, manifest validation, content validation      | `bundle-import.ts`                  |
-| Agent IDs            | Slug regex at DB level and Zod level                     | `schema.ts`, `001_initial.sql`      |
+| Agent IDs            | Slug regex at DB level and Zod level                     | `schema.ts`, `0000_init.sql`        |
 
 **Output validation:** When an agent defines `output.schema`, the schema becomes the input schema of the `output` runtime tool (`packages/core/src/runtime-tool-defs.ts`) — the model sees the exact JSON Schema in the tool definition and the tool call is AJV-validated in-container. At ingestion, the platform re-validates the result against the schema (`run-event-ingestion.ts`); on mismatch — or when the agent never called `output` despite required fields — the run is marked **failed**. This dual-layer approach (tool-level + platform-level) prevents malformed output from being persisted as a successful run.
 
@@ -577,13 +578,26 @@ All external inputs are validated using Zod schemas before processing:
 
 ### Rate limiting
 
-Token bucket rate limiting prevents abuse:
+Token bucket rate limiting prevents abuse. The authenticated limiter (`rateLimit`, `apps/api/src/middleware/rate-limit.ts`) keys on `method:path:identity`, where the identity is the API key id when one authenticated the request and the user id otherwise — so a budget is per route AND per credential, and rotating between an API key and a session does not merge the two. Public routes use `rateLimitByIp` instead.
 
-| Endpoint                   | Limit     | Scope    |
-| -------------------------- | --------- | -------- |
-| `POST /api/agents/:id/run` | 20/minute | Per user |
-| `POST /api/agents/import`  | 10/minute | Per user |
-| `POST /api/agents`         | 10/minute | Per user |
+Representative limits, all read from the route registrations:
+
+| Endpoint                                                                                    | Limit                                                   | Scope               |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------- |
+| `POST /api/agents/{scope}/{name}/run`                                                       | 20/minute                                               | Per user or API key |
+| `POST /api/packages/import` · `/import-bundle` · `/import-github`                           | 10/minute each                                          | Per user or API key |
+| `POST /api/agents/{scope}/{name}/schedules`                                                 | 10/minute                                               | Per user or API key |
+| `POST /api/runs/inline` · `/api/runs/inline/validate`                                       | `INLINE_RUN_LIMITS.rate_per_min` (60)                   | Per user or API key |
+| `POST /api/runs/remote`                                                                     | `PLATFORM_RUN_LIMITS.per_org_global_rate_per_min` (200) | Per user or API key |
+| `POST /api/uploads`                                                                         | 20/minute                                               | Per user or API key |
+| `PUT /api/uploads` (signed upload sink)                                                     | 60/minute                                               | Per IP              |
+| `POST /api/auth/bootstrap/redeem`                                                           | 5/minute                                                | Per IP              |
+| `POST /api/models/test` · `/api/model-provider-credentials/test` · `/api/proxies/{id}/test` | 5/minute                                                | Per user or API key |
+| `GET /api/runs/{id}/logs` · `GET /api/files/{id}/content`                                   | 120/minute                                              | Per user or API key |
+
+The two limits in parentheses are the schema defaults; both are operator-tunable through the `INLINE_RUN_LIMITS` / `PLATFORM_RUN_LIMITS` JSON env vars (`apps/api/src/services/run-limits.ts`).
+
+Package **creation** — `POST /api/packages/{agents|skills|integrations}`, the JSON-body editor path — carries no `rateLimit`. It is gated by `requirePermission(<type>, "write")` only. The rate-limited write paths are the three import routes above, which accept an arbitrary caller-supplied archive.
 
 ### Run timeout
 

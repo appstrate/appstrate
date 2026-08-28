@@ -34,6 +34,7 @@ import {
   derivePiCompactionSettings,
   prepareRequestedThinkingLevel,
   setPiRuntimeCredential,
+  type PiCodingAgentSdk,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
@@ -84,6 +85,58 @@ export interface PiChatInput {
   onError: (error: unknown) => string;
   /** Persist one metered `llm_usage` row for the turn (fire-and-forget). */
   recordUsage: (record: ChatUsageRecord) => void;
+  /**
+   * Build the Pi `AgentSession` this turn drives. Production omits it and the
+   * SDK's own `createAgentSession` is used — everything else about the turn
+   * (the MCP handshake, `ModelRuntime`, the resource loader, the projected
+   * history) is built for real either way.
+   *
+   * It earns its place because every teardown invariant this function owns —
+   * the subscription detach, the bounded abort, the MCP close, the concurrency
+   * slot — is only observable through a session that MISBEHAVES, and a real
+   * one never does: an `abort()` that never settles, an event emitted after
+   * `execute` returned. The alternative that stood here was a test that read
+   * this file's own source text and asserted on string literals, which cannot
+   * fail when the `finally` stops being reached — the exact defect it was
+   * meant to guard. One optional field is a smaller price than that.
+   */
+  createSession?: (
+    options: Parameters<PiCodingAgentSdk["createAgentSession"]>[0],
+  ) => Promise<{ session: unknown }>;
+}
+
+/**
+ * Grace given to a Pi session's wind-down before the turn tears down without it.
+ *
+ * No constant already in this file fits: `CHAT_TURN_DEADLINE_MS` is the ceiling
+ * on the WHOLE turn (10 minutes), and by the time this is spent the turn is
+ * already over — waiting a second ceiling's worth would be the leak, not the
+ * bound. A healthy wind-down is one aborted upstream request plus a microtask,
+ * so seconds is three orders of magnitude of headroom; five keeps the slot from
+ * flapping on a merely busy event loop while still being far below anything a
+ * user would attribute to the next message they send.
+ */
+const SESSION_ABORT_GRACE_MS = 5_000;
+
+/**
+ * Await `work`, but never longer than `ms`. Resolves `true` when it settled —
+ * fulfilled or rejected, either way the wind-down is over — and `false` when the
+ * grace expired and the caller must carry on without it.
+ *
+ * Both outcomes of `work` are handled before the race, so abandoning it cannot
+ * surface as an unhandled rejection, and the timer is cleared on every path so a
+ * fast wind-down leaves nothing armed.
+ */
+function settledWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
+  const settled = work.then(
+    () => true,
+    () => true,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  return Promise.race([settled, expired]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -169,6 +222,8 @@ export function runPiChat(input: PiChatInput): Response {
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
+      /** Detach handle for the Pi event subscription — released in `finally`. */
+      let unsubscribe: (() => void) | undefined;
       try {
         // Open the stream NOW, before any of the turn's construction work. This
         // chunk carries nothing but a message id, and it is what flips the
@@ -363,8 +418,10 @@ export function runPiChat(input: PiChatInput): Response {
           }),
         );
 
+        const buildSession: NonNullable<PiChatInput["createSession"]> =
+          input.createSession ?? createAgentSession;
         const { session } = await untilAborted(
-          createAgentSession({
+          buildSession({
             cwd: PI_CHAT_CWD,
             agentDir: PI_CHAT_AGENT_DIR,
             model: sessionModel,
@@ -398,7 +455,10 @@ export function runPiChat(input: PiChatInput): Response {
         });
         stepCap.attach(typedSession);
 
-        typedSession.subscribe((raw) => {
+        // Keep the detach handle: `write` targets a stream writer that closes
+        // when this producer returns, and a Pi event arriving after that
+        // answers `TypeError: Invalid state` from outside any try/catch here.
+        unsubscribe = typedSession.subscribe((raw) => {
           for (const chunk of mapper.map(raw as AgentSessionEvent)) write(chunk);
         });
 
@@ -428,7 +488,35 @@ export function runPiChat(input: PiChatInput): Response {
           // gracefully (the partial stream is already delivered) rather than
           // throwing into the client. A genuine engine error still flows to the
           // finish chunk via the mapper's captured stopReason.
-          void typedSession.abort?.().catch(() => {});
+          // AWAIT it: the concurrency slot is released when the response body
+          // drains, and returning while the Pi session is still winding down
+          // would hand that capacity to the next turn while this one still
+          // holds a live session (and can still emit).
+          //
+          // BOUNDED, because nothing else bounds it. `AgentSession.abort()` is
+          // `agent.abort(); await waitForIdle()`, and `waitForIdle` resolves
+          // only when the agent's run flag flips — it carries no timeout of its
+          // own. Nor does this call site have one: `untilAborted` is not around
+          // it, and the deadline timer that would have raced it is either
+          // already spent (the turn was stopped or timed out) or firing into an
+          // `abortPromise` with no consumer left (the prompt rejected on its
+          // own). So a provider or MCP call that never observes the abort wedges
+          // `execute` here forever — the same leak the construction race above
+          // exists to prevent, re-entered through the back door: the `finally`
+          // below never runs, `createUIMessageStream` never closes,
+          // `releaseOnClose` never fires, and `CHAT_PI_MAX_CONCURRENCY` such
+          // turns make every later chat 429 until the process restarts.
+          // Downstream of the stream it also strands
+          // `chat_sessions.active_stream_id`, since the persist drain is waiting
+          // on the same producer. Giving up on the wind-down is strictly better
+          // than holding the slot for the life of the process.
+          const winding = typedSession.abort?.();
+          if (winding && !(await settledWithin(winding, SESSION_ABORT_GRACE_MS))) {
+            logger.warn("Pi chat session abort did not settle — tearing the turn down anyway", {
+              chatSessionId: input.chatSessionId,
+              graceMs: SESSION_ABORT_GRACE_MS,
+            });
+          }
           if (!turnAbort.signal.aborted) throw err;
         }
 
@@ -514,6 +602,7 @@ export function runPiChat(input: PiChatInput): Response {
       } finally {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
+        unsubscribe?.();
         await mcpTools?.close();
       }
     },

@@ -37,7 +37,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedEndUser, seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { seedEndUser, seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import {
   createRun as createRunState,
@@ -265,6 +265,28 @@ describe("files service + routes", () => {
       doc.id,
     );
     expect(crossSpace).toBeNull();
+  });
+
+  // The case above proves the ACL on `getFileForActor` (the DETAIL read). The
+  // LIST is a separate query with its own `eq(files.spaceId, scope.spaceId)`
+  // term, and a member's visibility arm for run-contained files is deliberately
+  // org-wide — so that one predicate is the entire space boundary of the
+  // gallery. Drop it and every run's output in the org lists in every space,
+  // while the detail route keeps 404ing and hides it.
+  it("does not list a file from another space of the same org", async () => {
+    const bytes = new TextEncoder().encode("space A only");
+    const uploadId = await stageUpload(scope, ctx.user.id, "a.txt", bytes);
+    const runId = await seedRunRow(scope);
+    const doc = await createFileFromUpload(scope, userActor, uploadId, { runId });
+
+    const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Files Space B" });
+    const fromB = await listFilesForActor({ orgId: ctx.orgId, spaceId: spaceB.id }, userActor, {});
+    expect(fromB.data.map((d) => d.id)).not.toContain(doc.id);
+
+    // Control: the same actor, the same org, the owning space — listed. So the
+    // absence above is the space predicate, not the visibility arms.
+    const fromA = await listFilesForActor(scope, userActor, {});
+    expect(fromA.data.map((d) => d.id)).toContain(doc.id);
   });
 
   it("end-user only sees files on their own runs", async () => {

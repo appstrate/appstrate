@@ -105,15 +105,24 @@ export async function getOrgInvitations(orgId: string) {
  * between real expiry and the periodic `expireOldInvitations()` sweep that
  * flips the status to `expired`: without it an expired-but-not-yet-swept
  * invitation was still acceptable.
+ *
+ * `status` is the whole write. The row used to also record `accepted_by` /
+ * `accepted_at`, which nothing ever read back — see the `orgInvitations` table
+ * doc; both columns were dropped in `0055`. Who accepted and when is in the
+ * audit log, which outlives the invitation row: the `org.invitation_accepted`
+ * event written by `routes/invitations.ts` right after this call wins its
+ * claim, whose `actor_id` is the who and whose `created_at` is the when.
+ * That write did not exist when the columns were dropped, so the substitute
+ * was a claim and not a fact for one release; `test/integration/routes/
+ * invitations.test.ts` now asserts it.
  */
 export async function markInvitationAccepted(
   invitationId: string,
-  userId: string,
   tx: DbOrTx = db,
 ): Promise<boolean> {
   const claimed = await tx
     .update(orgInvitations)
-    .set({ status: "accepted", acceptedBy: userId, acceptedAt: new Date() })
+    .set({ status: "accepted" })
     .where(
       and(
         eq(orgInvitations.id, invitationId),

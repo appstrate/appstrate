@@ -2,15 +2,23 @@
 
 A small Hono server that runs in its own Docker container alongside every Appstrate agent run. The agent container talks to the sidecar over the run's private bridge network. Agent tool calls flow exclusively over the **Model Context Protocol** (Streamable HTTP, stateless); the in-container Pi SDK additionally reaches the sidecar over plain HTTP for chat completions, where it streams the LLM provider's native protocol back unchanged. The sidecar holds the credentials, talks to upstream provider/LLM APIs, and returns responses to the agent as MCP `tools/call` results, `resource_link` blocks, or — for `/llm/*` — a transparent stream-through.
 
-The agent container has no platform credentials, no access to `host.docker.internal`, and no `SIDECAR_URL` env var after bootstrap. All credential-bearing capabilities are exposed to the agent LLM as typed Pi tools — never as a bare URL.
+The agent container has no platform credentials, no access to `host.docker.internal`, and neither `SIDECAR_URL` nor `SIDECAR_AUTH_TOKEN` in its environment after bootstrap — [`entrypoint.ts`](../entrypoint.ts) deletes **both** once the MCP client, the runtime-event drainer and the Pi model record each hold their own copy, so the Pi bash extension cannot leak them via `env | grep SIDECAR`. The token goes with the URL rather than surviving it, and that is the point: together they are the capability to spend the org's provider credential through `/llm/*`. All credential-bearing capabilities are exposed to the agent LLM as typed Pi tools — never as a bare URL.
 
 ## HTTP surface
 
-The sidecar's external HTTP surface is intentionally small:
+The sidecar's external HTTP surface is intentionally small, and **authentication is deny-by-default across the whole of it**. An `app.use("*")` middleware in [`app.ts`](./app.ts) is registered before every route — and before the `mountMcp` call at the bottom of `createApp`, which is how `/mcp` is covered — and refuses any request that does not present the run's sidecar token on the `x-appstrate-sidecar-auth` header (`SIDECAR_AUTH_HEADER`, [`packages/core/src/sidecar-types.ts`](../../packages/core/src/sidecar-types.ts)). The refusal is a bare `401 { "error": "unauthorized" }`: no `WWW-Authenticate` challenge and no hint about which half failed, because the only legitimate caller was handed the token at container start and has nothing to negotiate. The comparison is constant-time and fails closed on both halves — an absent header AND an unconfigured sidecar are each a refusal, so a sidecar with no token answers nobody.
 
-- `GET /health` — Readiness probe. Returns 200 when ready, 503 (`{ status: "degraded" }`) otherwise.
-- `ALL /llm/*` — LLM reverse proxy consumed by the in-container Pi SDK as `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The sidecar substitutes the per-run placeholder embedded in SDK-generated headers for the real LLM API key, then streams the upstream response back zero-copy. SSRF-blocked against private/metadata addresses; bound by `LLM_PROXY_TIMEOUT_MS`.
-- `ALL /mcp` — JSON-RPC entrypoint mounted by `mountMcp`. Per-request transport, no session affinity. Authenticated via `Authorization: Bearer ${runToken}`. The Host header is validated against `{sidecar, 127.0.0.1, localhost}` regardless of port (DNS-rebinding defence).
+`GET /health` is the single exemption: it is the container health gate, the orchestrator probes it before the run exists, and it discloses one bit (ready / not ready).
+
+**The sidecar token is NOT the run token** and carries none of its authority. It is minted per run by the launcher and handed to both sides of the pair — the sidecar container's `SIDECAR_AUTH_TOKEN` and, via `buildRuntimePiEnv`, the agent container's — and it asserts exactly one thing: "I am the agent container talking to my own sidecar". The zero-knowledge boundary is unchanged: the agent still holds no token that can call the PLATFORM back, and this one cannot be used to derive one. It gets its own header rather than `Authorization` because on `/llm/*` that slot already carries the vendor credential placeholder the sidecar swaps for the real key.
+
+It exists because the per-run Docker network stopped being the boundary. `integration-runtime-adapter-docker.ts` attaches every third-party integration runner to the same bridge and hands it `http://sidecar:<port>`, so "on the network" no longer means "is the agent": without the token a `source.kind: "local"` integration reaches the LLM proxy with one `curl` and spends the org's provider credential unattributed. Deny-by-default rather than per-route opt-in because `/llm/*`, `/mcp`, `/integrations/boot-report` and `/runtime-events` each ended up open one at a time; a route added later is now protected without anyone remembering to say so. Nothing runner-facing lives on this app — the per-integration egress / MITM listeners, the DNS responder and the forward proxy are their own `Bun.serve` listeners — so there is no exemption to carve for integration runners. They are not supposed to reach this app at all.
+
+- `GET /health` — Readiness probe, and the only unauthenticated route. Returns 200 when ready, 503 (`{ status: "degraded" }`) otherwise.
+- `ALL /llm/*` — LLM reverse proxy consumed by the in-container Pi SDK as `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The sidecar substitutes the per-run placeholder embedded in SDK-generated headers for the real LLM API key, then streams the upstream response back zero-copy. SSRF-blocked against private/metadata addresses; bound by `LLM_PROXY_TIMEOUT_MS`. Both forwarding paths strip `x-appstrate-sidecar-auth` and its `x-appstrate-pi-sdk` sibling from the header set, so the agent's sidecar token never rides on to a vendor.
+- `ALL /mcp` — JSON-RPC entrypoint mounted by `mountMcp`. Per-request transport, no session affinity. On top of the token check, the Host header is validated against `{sidecar, 127.0.0.1, localhost}` regardless of port (DNS-rebinding defence).
+- `GET /integrations/boot-report` — the agent's bootloader polls this after the MCP handshake to relay the per-phase boot breadcrumbs into the run log and to abort the run when a declared integration failed to boot (`ok: false`). The payload carries integration ids and diagnostic errors, never credentials.
+- `GET /runtime-events` — the Pi runner drains the canonical events the sidecar journaled while executing runtime tools (`?after=<cursor>`) and re-emits them on its single run-event sink. Same `Host` check as `/mcp`. An empty journal answers an empty batch.
 
 Sidecars are spawned per-run with all runtime configuration (run token, platform URL, proxy URL, LLM config) injected via environment variables at container start. There is no runtime configuration endpoint.
 
@@ -18,10 +26,10 @@ Sidecars are spawned per-run with all runtime configuration (run token, platform
 
 The `/mcp` endpoint advertises two first-party tools, both backed by the platform's per-run-token internal endpoints:
 
-| Tool            | Purpose                                                                                                                                                                                            |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                              |
-| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section (ADR-012/013). |
+| Tool            | Purpose                                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                |
+| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section. |
 
 Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`), spawned alongside the first-party tools — see "AFPS Integrations runtime" in the platform-level `CLAUDE.md`.
 
@@ -63,29 +71,16 @@ The sidecar layers two token-aware checks on top of the byte caps (see `token-bu
 
 Token estimation uses the Anthropic-recommended **3.5 chars/token** heuristic — deterministic, allocation-free, suitable for the hot path of every `api_call`. The official `@anthropic-ai/tokenizer` is no longer accurate for Claude 3+ models, and a real tokenizer (tiktoken / `count_tokens` API) would add 5-50 ms per call to the credential-injection round-trip.
 
-Each text-path tool result carries a `dev.appstrate/token-budget` `_meta` payload so the agent runtime can surface accounting and react to structured truncation events:
+**The decision is not surfaced to the agent.** Text-path results used to carry a `dev.appstrate/token-budget` `_meta` payload describing the accounting; it was removed because it had no reader — `callToolResultToPi` drops `_meta` on the way to Pi, so nothing agent-side ever saw it, and an unread wire field is a contract nobody is holding. `dev.appstrate/upstream` (below) is now the only `_meta` key an `api_call` result carries.
 
-```jsonc
-{
-  "content": [{ "type": "text", "text": "<upstream body>" }],
-  "_meta": {
-    "dev.appstrate/token-budget": {
-      "estimatedTokens": 1234,
-      "consumedTokens": 5000,
-      "runBudgetTokens": 100000,
-      "inlineCapTokens": 8000,
-      "decision": "inline",
-      "reason": "under_inline_cap",
-    },
-  },
-}
-```
+What the agent observes is the outcome itself: a spilled result arrives as a `resource_link` block instead of inline text, and it reads the bytes on demand. The accounting stays in the sidecar's own structured logs (`mcp.ts`):
 
-`reason` is one of:
-
-- `under_inline_cap` / `exceeds_inline_cap` / `exceeds_run_budget` / `exceeds_context_window` — what the budget tracker decided (the last only when `contextWindowTokens` is wired — guards parallel fan-outs that individually fit but collectively blow the model's hard limit, #464).
-- `blob_store_full` — the budget said spill but the blob store rejected the put (cumulative cap reached); the agent gets the content inline as a last resort and the override is recorded in the meta.
-- `no_blob_store_configured` — the budget said spill but no blob store was wired (tests / embedders); same forced-inline outcome, but a distinct reason so operators can tell misconfiguration from saturation.
+| Log line                                                | Level | When                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token-budget decision`                                 | debug | Every text-path call. The only place the tracker's own `reason` appears: `under_inline_cap` / `exceeds_inline_cap` / `exceeds_run_budget` / `exceeds_context_window` (the last only when `contextWindowTokens` is wired — guards parallel fan-outs that individually fit but collectively blow the model's hard limit, #464). Carries `estimatedTokens` and `consumedTokens`. |
+| `token-budget: spilled to blob store`                   | info  | The budget said spill and the store accepted the put. Carries the blob `uri`.                                                                                                                                                                                                                                                                                                 |
+| `token-budget: blob store full, forced inline`          | warn  | The budget said spill but the blob store rejected the put (cumulative cap reached); the agent gets the content inline as a last resort and the tokens are recorded against the budget explicitly.                                                                                                                                                                             |
+| `token-budget: no blob store configured, forced inline` | warn  | The budget said spill but no blob store was wired (tests / embedders); same forced-inline outcome, but a distinct line so operators can tell misconfiguration from saturation.                                                                                                                                                                                                |
 
 ## The `body.fromFile` contract
 
@@ -178,6 +173,6 @@ Cancellation honours `ctx.signal` between chunks; on abort, the resolver issues 
 
 - The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/http-call-core.ts`](../../packages/afps-runtime/src/resolvers/http-call-core.ts).
 - The `api_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/api-upload-resolver.ts`](../mcp/api-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
-- The full reserved `dev.appstrate/*` `_meta` vocabulary — tool-descriptor routing markers, the `upstream` / `token-budget` result keys, the `events` channel, who sets and consumes each — is documented in [`docs/architecture/SIDECAR.md`](../../docs/architecture/SIDECAR.md) under "Reserved `_meta` vocabulary".
+- The full reserved `dev.appstrate/*` `_meta` vocabulary — tool-descriptor routing markers, the `upstream` result key, the `events` channel, who sets and consumes each — is documented in [`docs/architecture/SIDECAR.md`](../../docs/architecture/SIDECAR.md) under "Reserved `_meta` vocabulary".
 - Sidecar lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
 - Integration auth modes (`oauth2` / `api_key` / `basic` / `mtls` / `custom` — AFPS §7.2) and the `auths.{key}.delivery.{http | env | files}` injection contract live in `@appstrate/connect`.

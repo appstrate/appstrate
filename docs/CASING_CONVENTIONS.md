@@ -308,9 +308,9 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 
 #### 5c — Model/proxy/credential ID wire on standalone vs override endpoints
 
-**Standalone endpoints** (`/api/agents/:id/model`, `/api/agents/:id/proxy`, `/api/orgs/:id/models`) use **camelCase** wire fields: `modelId`, `proxyId`, `credentialId`.
+**Standalone endpoints** (`/api/agents/{scope}/{name}/model`, `/api/agents/{scope}/{name}/proxy`, and the org model surface `/api/models*`, which is org-scoped by the `X-Org-Id` header rather than by a path segment) use **camelCase** wire fields: `modelId`, `proxyId`, `credentialId`.
 
-**Schedule override endpoints** (`/api/schedules`, `/api/agents/:id/schedules`) use **snake_case** wire fields: `model_id_override`, `proxy_id_override`, `version_override`.
+**Schedule override endpoints** (`/api/schedules`, `/api/agents/{scope}/{name}/schedules`) use **snake_case** wire fields: `model_id_override`, `proxy_id_override`, `version_override`.
 
 End-to-end consistent within each endpoint family (backend Zod ↔ OpenAPI ↔ frontend hook all match). The asymmetry is historical — the override fields followed AFPS snake_case canon while the standalone fields predate the migration. These IDs appear on 4 types each (≤5 threshold for Carve-out 4b), so they don't qualify as universal DB convention.
 

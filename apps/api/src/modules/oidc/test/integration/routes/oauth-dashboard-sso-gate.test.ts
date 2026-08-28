@@ -122,7 +122,10 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
       const res = await app.request(`/api/oauth/clients/${clientId}`, {
         method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Renamed" }),
+        // A REAL field of this body. It used to send `{ name }`, which the
+        // schema has never carried and the spec never documented — silently
+        // stripped, so the request under test was an empty patch.
+        body: JSON.stringify({ disabled: true }),
       });
       expect(res.status).toBe(403);
     });
@@ -134,7 +137,10 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
       const res = await app.request(`/api/oauth/clients/${clientId}`, {
         method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Renamed" }),
+        // A REAL field of this body. It used to send `{ name }`, which the
+        // schema has never carried and the spec never documented — silently
+        // stripped, so the request under test was an empty patch.
+        body: JSON.stringify({ disabled: true }),
       });
       expect(res.status).toBe(200);
     });

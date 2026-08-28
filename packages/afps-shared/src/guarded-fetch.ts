@@ -54,8 +54,51 @@
 
 import { resolveAndCheckHost, type HostResolver } from "./ssrf-dns.ts";
 
+/**
+ * Redirect hops any guarded chain will chase before giving up — the ONE budget
+ * in the codebase, and the default of both followers.
+ *
+ * It used to be two unrelated numbers: `maxRedirects ?? 5` here and a hard
+ * `MAX_REDIRECTS = 10` in `@appstrate/afps-runtime`'s credential-proxy
+ * follower, neither aware of the other. 10 is the surviving value because it is
+ * the one with a reason: the credential proxy walks multi-step OAuth/CAS dances
+ * whose session cookie lands on an intermediate 302 (#473), and five hops does
+ * not always reach the end of one. Nothing is weakened by the raise — every hop
+ * is independently DNS-checked, allowlist-checked and credential-stripped, so
+ * the cap is a loop/DoS bound, not a trust boundary.
+ *
+ * Raising a SHARED default for one caller's benefit would be a poor trade, so
+ * here is the whole roster it applies to. The callers where a longer chain
+ * would be questionable — a signed payload, an inference endpoint, a
+ * registration POST — already pin their own budget and are untouched by the
+ * value here:
+ *
+ *   pinned `maxRedirects: 0`, unaffected
+ *     - `apps/api/src/modules/webhooks/service.ts` — a signed delivery payload
+ *       must never be re-sent to a `Location` target.
+ *     - `apps/api/src/services/llm-proxy/core.ts` — an inference endpoint has
+ *       no legitimate reason to redirect.
+ *     - `packages/connect/src/dcr.ts` — dynamic client registration is a
+ *       single POST to a discovered endpoint.
+ *
+ *   on this default, and all of them multi-step credential exchanges — the
+ *   exact population #473 is about
+ *     - `apps/api/src/services/credential-proxy/core.ts` — the out-of-container
+ *       twin of the `@appstrate/afps-runtime` follower this value came from;
+ *       same vendor auth dances, and it re-runs the caller's `validateHop`
+ *       allowlist assertion on every hop.
+ *     - `packages/connect/src/oauth-egress.ts` — OAuth discovery, token
+ *       exchange and userinfo.
+ *     - `apps/api/src/services/integration-connections.ts` — OAuth
+ *       protected-resource metadata discovery.
+ *     - `apps/api/src/services/org-models.ts` — model-catalog probes.
+ *     - `runtime-pi/sidecar/integrations-boot.ts` — remote MCP transport
+ *       egress.
+ */
+export const DEFAULT_MAX_REDIRECTS = 10;
+
 export interface GuardedFetchOptions {
-  /** Max redirect hops to follow before giving up. Default 5. */
+  /** Max redirect hops to follow before giving up. Default {@link DEFAULT_MAX_REDIRECTS}. */
   maxRedirects?: number;
   /**
    * Deadline in ms covering the redirect chain up to the final response's
@@ -188,7 +231,7 @@ export async function guardedFetch(
   init?: RequestInit,
   opts?: GuardedFetchOptions,
 ): Promise<Response> {
-  const maxRedirects = opts?.maxRedirects ?? 5;
+  const maxRedirects = opts?.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
 
   let current = stripUserInfoAndFragment(new URL(typeof input === "string" ? input : input.href));
   assertHttp(current);
@@ -338,12 +381,49 @@ export async function guardedFetch(
         }
       }
 
-      // Standard redirect method/body rewriting: 303 (and 301/302 for POST per
-      // browser convention) → GET with no body; 307/308 preserve method + body
-      // (already dropped above when crossing a host boundary).
-      if (res.status === 303 || ((res.status === 301 || res.status === 302) && method !== "HEAD")) {
-        method = method === "HEAD" ? "HEAD" : "GET";
+      // Standard redirect method/body rewriting, per WHATWG fetch
+      // (HTTP-redirect fetch step 11) + RFC 9110 §15.4:
+      //   - 301/302 downgrade POST → GET; every OTHER method is preserved.
+      //   - 303 downgrades everything except GET/HEAD → GET.
+      //   - 307/308 preserve method + body (already dropped above when
+      //     crossing a host boundary).
+      // The 301/302 clause used to read `method !== "HEAD"`, which turned a
+      // 302'd PUT/PATCH/DELETE into a bodyless GET — a request the caller never
+      // made, and a silent one. `@appstrate/afps-runtime`'s credential-proxy
+      // follower always had the conformant rule; this side did not, and the
+      // two disagreed about the same response.
+      const toGet =
+        ((res.status === 301 || res.status === 302) && method === "POST") ||
+        (res.status === 303 && method !== "GET" && method !== "HEAD");
+      if (toGet) {
+        method = "GET";
         dropBody();
+      }
+      // A `ReadableStream` body is single-use: hop 0 consumed it, so any hop
+      // that PRESERVES the body is about to re-send a locked stream. The
+      // runtime answers that with an opaque `TypeError: body already used`
+      // from inside `fetch`, naming neither the redirect nor the stream.
+      //
+      // Callers CAN reach this: `apps/api/src/services/credential-proxy/core.ts`
+      // forwards its caller's request body straight through, sets
+      // `duplex: "half"` for the stream case, and takes the default redirect
+      // budget. It has always been reachable via 307/308 (which preserve
+      // method + body unconditionally); making 301/302 conformant for
+      // PUT/PATCH/DELETE widened WHICH statuses land on it, so it is named
+      // here rather than left to surface as a transport-level type error.
+      //
+      // Fail loudly instead of dropping the body: a bodyless PUT the caller
+      // never made, sent silently, is the worse outcome — that is the exact
+      // shape the 301/302 conformance fix removed. Nothing replayable is
+      // affected (string / `Uint8Array` / `FormData` bodies re-send fine), and
+      // a hop that DROPS the body (`toGet` above, or the cross-host containment
+      // below) never gets here.
+      if (body instanceof ReadableStream) {
+        throw new TypeError(
+          `guardedFetch cannot follow a ${res.status} redirect to ${next.origin}: the request ` +
+            `body is a ReadableStream and was already consumed by the previous hop. Buffer the ` +
+            `body before the call, or pass maxRedirects: 0 and handle the redirect yourself.`,
+        );
       }
       current = next;
       pinnedAddress = nextPin;

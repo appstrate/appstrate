@@ -3,13 +3,13 @@
 import { expect, type Page } from "@playwright/test";
 
 /**
- * Page Object for the Spaces management page (/spaces).
+ * Page Object for the Spaces management page (/org-settings/spaces).
  */
 export class SpacesPage {
   constructor(private page: Page) {}
 
   async goto() {
-    await this.page.goto("/spaces");
+    await this.page.goto("/org-settings/spaces");
   }
 
   async waitForLoaded() {

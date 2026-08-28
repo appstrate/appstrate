@@ -132,6 +132,23 @@ export const notifications = pgTable(
       table.recipientId,
       table.spaceId,
     ),
+    // Space-LEADING, single column (migration 0055). `space_id` is the FK
+    // target of `ON DELETE CASCADE`, and Postgres indexes only the REFERENCED
+    // side of a foreign key — so `DELETE FROM spaces WHERE id = ?`
+    // (`services/spaces.ts`) had to seq-scan this whole table to find the rows
+    // to cascade. Neither index above can serve it: `idx_notifications_unread`
+    // is partial on `read_at IS NULL` (the cascade removes read rows too) and
+    // both are org-LEADING, while the cascade's only qual is `space_id`.
+    //
+    // Same class as `idx_notifications_recipient` (0050), which covered the
+    // member / end-user deletes and stopped there. And the same cost: the
+    // scan runs inside the transaction that already took `FOR UPDATE` on the
+    // organizations row, so its duration is lock hold time, not just a slow
+    // statement.
+    //
+    // One column, not a composite: the cascade states `space_id` and nothing
+    // else, and every other read path here is already org-leading.
+    index("idx_notifications_space").on(table.spaceId),
     // Defense-in-depth against a double fan-out: at most one notification of
     // a given type per (run, recipient). The fan-out path is already
     // exactly-once (finalizeRun CAS winner), so this never fires in practice

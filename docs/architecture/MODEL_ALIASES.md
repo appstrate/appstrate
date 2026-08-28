@@ -658,6 +658,7 @@ Everything an aliased run's container is handed, and nothing else:
 | `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `200000` / `64000`                  | the backing's exact numbers — narrows it        |
 | `MODEL_INPUT`                               | `["text","image"]`                  | already published by the read projection        |
 | success response body                       | `text_delta`, `done`                | closed pi-messages union — no vendor vocabulary |
+| signature fields on that body               | `redacted: true`                    | opaque values, but not every backing emits them |
 
 `MODEL_PROVIDER`, `MODEL_REASONING_LEVEL_MAP` and `MODEL_COST` are **not**
 emitted for an alias. The provider key and the native effort table name the
@@ -690,11 +691,55 @@ masking costs something real and buys nothing measurable:
   image input for the whole run, and the modality vector is already disclosed on
   purpose by the read projection.
 
+Five fields of the response body are **known residuals** — on the list because
+they must be, not because they are neutral:
+
+| field                           | emitted by                                                                                      | narrows the backing to                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `thinking_end.redacted`         | the Anthropic adapter alone — it is how safety-filtered thinking travels as `redacted_thinking` | `anthropic-messages` (1 of 5)                          |
+| `toolCall.thoughtSignature`     | `openai-completions`, and the Google shapes, which cannot back an alias                         | `openai-completions` (1 of 5)                          |
+| `text_end.contentSignature`     | the shared openai-responses adapter                                                             | `openai-responses` / `openai-codex-responses` (2 of 5) |
+| `toolCall.namespace`            | the same adapter                                                                                | the same two (2 of 5)                                  |
+| `thinking_end.contentSignature` | every backing shape but `mistral-conversations`                                                 | 4 of 5 — here the tell is its absence                  |
+
+Their VALUES are opaque blobs and nothing is read out of them; it is their mere
+PRESENCE that narrows the candidate vendor. That is the same argument by which
+`projectUsage` drops `Usage.cacheWrite1h` and `Usage.reasoning`, which are NOT
+kept. The difference is that these five round-trip: pi-ai's `pi-messages` reader
+writes each one back onto the container's own assistant message, the container
+replays that message in the next turn's context, and the sidecar re-originates it
+against the backing — where the Anthropic adapter reads `thinkingSignature` back
+out as `signature`, or as `redacted_thinking` when `redacted` is set. Dropping
+them does not mask the vendor, it fails multi-turn extended thinking upstream, at
+the vendor, with an error naming none of this.
+
+Closing this properly means relocating the fields rather than dropping them: the
+sidecar would hold each signature itself, keyed by `(sessionId, contentIndex)`,
+and hand the container an opaque handle in its place — swapping the real value
+back in when that content block returns in a later request. The container would
+then see one uniform handle shape whatever backs the alias, which is a real
+closure rather than a smaller leak. The cost is per-session sidecar state with a
+lifetime, an eviction policy, and a new failure mode — a handle the sidecar has
+forgotten — sitting on the path extended thinking depends on. It has not been
+done. This page says so rather than letting the closed union imply the reply
+carries nothing.
+
 What keeps tier 1 closed is not this page.
 `packages/runner-pi/test/alias-env-allowlist.test.ts` pins the COMPLETE set of
 variables an aliased container receives as an exact set, and pins the
 non-aliased set beside it so the assertion states the difference rather than one
 side of it. Any new variable fails it until someone adds it deliberately.
+
+That file also pins the one combination the env contract refuses outright:
+`buildRuntimePiEnv` throws on `aliased` + `noSidecar`, because the sidecar IS
+the masking and the no-sidecar path would otherwise put the backing's own
+hostname in `MODEL_BASE_URL`.
+
+`runtime-pi/sidecar/test/pi-messages-backend.test.ts` does the same for the
+reply: it pins the exact field set `projectAssistantEvent` emits for every member
+of the event union, in both directions. A new vendor-revealing field cannot join
+the residual list above without someone adding it there and answering for it, and
+a round-tripping one cannot silently vanish.
 
 ### Tier 2 — what an observer can infer (irreducible)
 

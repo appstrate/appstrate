@@ -21,15 +21,17 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { getSpaceScope, getOrgScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-export const createApiKeySchema = z.object({
-  name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
-  expiresAt: z.iso
-    .datetime({ message: "expiresAt must be a valid ISO 8601 date" })
-    .refine((d) => new Date(d) > new Date(), { message: "expiresAt must be in the future" })
-    .nullable()
-    .optional(),
-  scopes: z.array(z.string()).optional(),
-});
+export const createApiKeySchema = z
+  .object({
+    name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
+    expiresAt: z.iso
+      .datetime({ message: "expiresAt must be a valid ISO 8601 date" })
+      .refine((d) => new Date(d) > new Date(), { message: "expiresAt must be in the future" })
+      .nullable()
+      .optional(),
+    scopes: z.array(z.string()).optional(),
+  })
+  .strict();
 
 export function createApiKeysRouter() {
   const router = new Hono<AppEnv>();

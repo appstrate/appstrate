@@ -9,7 +9,9 @@
  * accounting. Cascade delete is NEVER used — a hard DELETE on a shadow
  * package would cascade to `runs` via FK.
  *
- * See docs/specs/INLINE_RUNS.md §8.
+ * Retention is driven by `INLINE_RUN_LIMITS.retention_days`
+ * (`apps/api/src/services/run-limits.ts`); there is no `docs/specs/` directory
+ * in this repo.
  */
 
 import { and, eq, lt, notInArray, sql, inArray } from "drizzle-orm";

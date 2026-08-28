@@ -18,11 +18,10 @@
  *     `runBeforeHooks` precedes `endpoint(...)` which executes `use:`).
  *
  * Without an explicit same-origin gate in `enforceMagicLinkSignupPolicy`,
- * an attacker who can place a `oidc_pending_client` cookie on the victim's
- * browser (e.g. by linking the victim through the OAuth login entry page
- * for a closed-signup client) and trick the victim into clicking a
- * magic-link URL with `errorCallbackURL=https://evil.example.com/x`
- * receives an authenticated open-redirect into `https://evil.example.com/x
+ * an attacker who tricks the victim into clicking a magic link issued for a
+ * closed-signup client (the `(token → client)` binding makes the hook fire)
+ * with `errorCallbackURL=https://evil.example.com/x` appended receives an
+ * authenticated open-redirect into `https://evil.example.com/x
  * ?error=signup_disabled`. Useful for branded "your sign-in failed,
  * please re-enter your password" phishing.
  *
@@ -42,18 +41,8 @@ import { db } from "@appstrate/db/client";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestContext } from "../../../../../../test/helpers/auth.ts";
 import { enforceMagicLinkSignupPolicy } from "../../../auth/guards.ts";
-import { signAuthHmac } from "../../../../../lib/auth-secrets.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
-
-// Mirrors `services/pending-client-cookie.ts` — signs via the shared
-// `signAuthHmac` so the cookie carries the prefixed `<kid>$<hmac>` form
-// that `verifyAuthHmac` requires (bare HMACs are rejected outright).
-function pendingClientCookie(clientId: string): string {
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  const payload = `${clientId}.${exp}`;
-  const sig = signAuthHmac(payload);
-  return `oidc_pending_client=${payload}.${sig}`;
-}
+import { persistMagicLinkClientBinding } from "../../../services/oauth-transaction-binding.ts";
 
 interface RedirectThrown {
   redirectTo: string;
@@ -66,7 +55,6 @@ interface RedirectThrown {
 // hence the explicit "did not throw" branch.
 function makeCtx(opts: {
   baseURL: string;
-  cookie: string;
   query: { token?: string; errorCallbackURL?: string; callbackURL?: string };
   email: string;
   emailExists: boolean;
@@ -83,9 +71,7 @@ function makeCtx(opts: {
   redirect: (url: string) => never;
 } {
   return {
-    request: new Request(`${opts.baseURL}/api/auth/magic-link/verify`, {
-      headers: { cookie: opts.cookie },
-    }),
+    request: new Request(`${opts.baseURL}/api/auth/magic-link/verify`),
     query: opts.query,
     context: {
       baseURL: opts.baseURL,
@@ -130,9 +116,9 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
 
   it("rewrites an off-origin errorCallbackURL to a safe in-origin redirect", async () => {
     const evil = "https://evil.example.com/exfil";
+    await persistMagicLinkClientBinding("magic_redir_off", closedOrgClientId);
     const ctx = makeCtx({
       baseURL,
-      cookie: pendingClientCookie(closedOrgClientId),
       query: { token: "magic_redir_off", errorCallbackURL: evil, callbackURL: `${baseURL}/cb` },
       email: `fresh-${Date.now()}@example.com`,
       emailExists: false,
@@ -172,9 +158,9 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
     // surface — fail-closing on this would break every closed-signup
     // OAuth client in production.
     const safe = `${baseURL}/api/oauth/login?client_id=${encodeURIComponent(closedOrgClientId)}`;
+    await persistMagicLinkClientBinding("magic_redir_in", closedOrgClientId);
     const ctx = makeCtx({
       baseURL,
-      cookie: pendingClientCookie(closedOrgClientId),
       query: { token: "magic_redir_in", errorCallbackURL: safe, callbackURL: `${baseURL}/cb` },
       email: `inorigin-${Date.now()}@example.com`,
       emailExists: false,
@@ -202,9 +188,9 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
     // for an attacker who can plant the pending-client cookie. Post-
     // fix: the URIError is caught and we emit the same in-origin
     // `?error=signup_disabled` redirect as the off-origin branch.
+    await persistMagicLinkClientBinding("magic_redir_malformed", closedOrgClientId);
     const ctx = makeCtx({
       baseURL,
-      cookie: pendingClientCookie(closedOrgClientId),
       query: {
         token: "magic_redir_malformed",
         errorCallbackURL: "%ZZ",
@@ -238,9 +224,9 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
     // (TypeError vs URIError) and a `catch (err: URIError)`-style
     // narrowing mistake in the fix would fail this test but not the
     // one above.
+    await persistMagicLinkClientBinding("magic_redir_unparseable", closedOrgClientId);
     const ctx = makeCtx({
       baseURL,
-      cookie: pendingClientCookie(closedOrgClientId),
       query: {
         token: "magic_redir_unparseable",
         errorCallbackURL: "https://[",
@@ -263,13 +249,12 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
     expect(target.searchParams.get("error")).toBe("signup_disabled");
   });
 
-  it("pass-through when no pending-client cookie is present", async () => {
+  it("pass-through when the verify carries no client binding", async () => {
     // Sanity: outside an OIDC flow, the hook is a no-op. If this ever
     // starts redirecting, the gate has accidentally widened to apply
     // to every magic-link signup, breaking the platform sign-up UX.
     const ctx = makeCtx({
       baseURL,
-      cookie: "",
       query: {
         token: "magic_no_cookie",
         errorCallbackURL: "https://evil.example.com/x",

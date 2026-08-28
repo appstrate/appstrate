@@ -8,7 +8,11 @@
  * 2. Structural validation — @readme/openapi-parser (OpenAPI 3.1 schema conformance)
  * 3. Best practices lint — @redocly/openapi-core (recommended ruleset)
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
- *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
+ *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas.
+ *    Covers both the DECLARED fields (required, property names, types, nullability, scalar
+ *    constraints, items, minItems) and the body's STRICTNESS — the Zod schema's `.strict()`
+ *    and the spec's top-level `additionalProperties` must agree in BOTH directions, per
+ *    `oneOf` branch for a discriminated union.
  * 4b. Step 4 coverage — every endpoint whose spec declares an application/json request body
  *    must be registered (core registry or a module's openApiSchemas()) or listed in
  *    EXEMPT_REQUEST_BODIES with a stated reason; a stale exemption fails too
@@ -150,6 +154,31 @@ try {
       // Public endpoints (health, OAuth callback, OpenAPI spec, docs) intentionally
       // have no 4xx responses — they are unauthenticated and always succeed or 5xx
       "operation-4xx-response": "off",
+      // Everything else `recommended` ships is promoted from `warn` to `error`.
+      // This section fails on `error` only, so a `warn` rule here is not a
+      // lenient rule — it is an OFF rule that prints a line, and the
+      // LINT_ALLOWLIST below (whose whole premise is "keep rules globally ON so
+      // any NEW violation still surfaces") was decorative for exactly as long as
+      // that held. Two of these were being violated at the time of the promotion
+      // and the gate reported ALL CHECKS PASSED. Every rule listed here was
+      // verified clean before being promoted; a genuine deviation earns a
+      // narrow, justified pointer entry in LINT_ALLOWLIST, never a downgrade
+      // back to `warn`. The two rules turned `off` above are the only blanket
+      // exemptions, and both state their reason.
+      "info-license": "error",
+      "info-license-strict": "error",
+      "no-duplicated-tag-names": "error",
+      "no-invalid-media-type-examples": "error",
+      "no-invalid-parameter-examples": "error",
+      "no-invalid-schema-examples": "error",
+      "no-mixed-number-range-constraints": "error",
+      "no-required-schema-properties-undefined": "error",
+      "no-server-example.com": "error",
+      "no-unused-components": "error",
+      "operation-2xx-response": "error",
+      "operation-operationId": "error",
+      "security-scopes-defined": "error",
+      "tag-description": "error",
     },
   });
 
@@ -191,6 +220,13 @@ try {
     // would be a lie. Documenting the 405 behaviour is still useful for
     // clients. Scoped to GET /api/mcp/o/{org} only.
     "operation-2xx-response@#/paths/~1api~1mcp~1o~1{org}/get/responses",
+    // GET /api/integrations/connect/start is the public entry the hosted
+    // connect URL points at. It is a dispatcher, not a resource: a valid token
+    // 302s to the provider OAuth screen or the hosted form, and every failure
+    // renders an HTML error page under its own 4xx/5xx. It never returns
+    // content, so a 2xx would be a lie — the same shape as POST /activate
+    // above. Scoped to GET /api/integrations/connect/start only.
+    "operation-2xx-response@#/paths/~1api~1integrations~1connect~1start/get/responses",
   ]);
   const problems = rawProblems.filter((p) => {
     const pointer = p.location?.[0]?.pointer ?? "";
@@ -530,6 +566,104 @@ function compareValueConstraints(
   }
 }
 
+/**
+ * Does this schema REFUSE members it does not declare?
+ *
+ * Zod emits `additionalProperties: false` for `.strict()` and nothing at all
+ * for a plain `z.object()`; the hand-written spec declares the same keyword.
+ * Everything else — absent, `true`, or a value schema (`z.record()`) — is open.
+ */
+function refusesUnknownFields(schema: Record<string, unknown> | undefined): boolean {
+  return schema?.additionalProperties === false;
+}
+
+/**
+ * The `oneOf` / `anyOf` branches of a schema, deref'd, or `undefined` when the
+ * schema is not a union. A discriminated union (`z.discriminatedUnion`) carries
+ * its closure per branch — the top level of such a schema has no
+ * `additionalProperties` on EITHER side, so comparing only the top level would
+ * read every union body as "agreed and open" and see nothing.
+ */
+function unionBranches(
+  schema: Record<string, unknown> | undefined,
+): Record<string, unknown>[] | undefined {
+  const branches = schema?.oneOf ?? schema?.anyOf;
+  if (!Array.isArray(branches)) return undefined;
+  return branches.map((branch) => {
+    const obj = asSchemaObject(branch);
+    if (obj && typeof obj.$ref === "string") return resolveRef(obj.$ref) ?? obj;
+    return obj ?? {};
+  });
+}
+
+/**
+ * Compare STRICTNESS: the Zod schema's `.strict()` and the spec's
+ * `additionalProperties: false` must agree, in BOTH directions.
+ *
+ * This is the one top-level fact the rest of Step 4 never read. Everything else
+ * it compares — `required`, the property-name sets, types, nullability, scalar
+ * constraints, `items`, `minItems`, nested `additionalProperties` VALUE schemas
+ * — describes fields the body DECLARES. None of them can see the answer to
+ * "what happens to a field the body does not declare", so ~65 request bodies
+ * were closed in code (`.strict()`, an unknown field is a 400) while the
+ * published spec still said extra keys were accepted, and this gate reported
+ * `all Zod schemas match their OpenAPI counterparts`.
+ *
+ * Both directions are errors:
+ *   - strict Zod + open spec — the spec invites a body the API answers 400 to;
+ *   - open Zod + closed spec — the spec forbids a body the API accepts, so a
+ *     generated client or a spec-driven validator rejects a legal request.
+ */
+function compareStrictness(
+  zodSchema: Record<string, unknown>,
+  oaSchema: Record<string, unknown>,
+  issues: string[],
+): void {
+  const zodBranches = unionBranches(zodSchema);
+  const oaBranches = unionBranches(oaSchema);
+
+  if (zodBranches && oaBranches) {
+    if (zodBranches.length !== oaBranches.length) {
+      // The branch-count mismatch is itself the finding: without a stable
+      // pairing there is nothing to compare, and the union has drifted anyway.
+      issues.push(
+        `Union branches: Zod=${zodBranches.length}, OpenAPI=${oaBranches.length} — cannot compare strictness`,
+      );
+      return;
+    }
+    for (let i = 0; i < zodBranches.length; i++) {
+      compareStrictnessOfObject(`oneOf[${i}] `, zodBranches[i]!, oaBranches[i]!, issues);
+    }
+    return;
+  }
+
+  if (zodBranches || oaBranches) {
+    issues.push(
+      `Union shape: Zod=${zodBranches ? "union" : "object"}, OpenAPI=${oaBranches ? "union" : "object"} — cannot compare strictness`,
+    );
+    return;
+  }
+
+  compareStrictnessOfObject("", zodSchema, oaSchema, issues);
+}
+
+function compareStrictnessOfObject(
+  prefix: string,
+  zodSchema: Record<string, unknown>,
+  oaSchema: Record<string, unknown>,
+  issues: string[],
+): void {
+  const zodClosed = refusesUnknownFields(zodSchema);
+  const oaClosed = refusesUnknownFields(oaSchema);
+  if (zodClosed === oaClosed) return;
+
+  issues.push(
+    zodClosed
+      ? `${prefix}Unknown fields: Zod=rejected (\`.strict()\`), OpenAPI=accepted — add \`additionalProperties: false\` to the requestBody schema`
+      : `${prefix}Unknown fields: Zod=accepted, OpenAPI=rejected (\`additionalProperties: false\`) — drop it from the requestBody schema, or make the Zod schema \`.strict()\``,
+  );
+}
+
 function getOpenApiRequestBodySchema(
   specPath: string,
   method: string,
@@ -643,6 +777,9 @@ for (const entry of zodSchemaRegistry) {
 
   comparedCount++;
   const issues: string[] = [];
+
+  // --- Compare strictness (top-level `additionalProperties`) ---
+  compareStrictness(zodJsonSchema, openApiSchema, issues);
 
   // --- Compare required fields ---
   const zodRequired = new Set<string>(

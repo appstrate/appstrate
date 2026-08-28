@@ -47,6 +47,7 @@ export const endUsersPaths = {
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
+              additionalProperties: false,
             },
             example: {
               name: "Alice Martin",
@@ -312,6 +313,7 @@ export const endUsersPaths = {
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },

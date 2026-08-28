@@ -664,7 +664,7 @@ export function createRunsRouter() {
   });
 
   // POST /api/runs/inline — execute an inline (no persisted package) agent.
-  // See docs/specs/INLINE_RUNS.md. The manifest + prompt travel in the
+  // The manifest + prompt travel in the
   // request body; the platform creates a transient shadow package
   // (ephemeral = true), runs it through the existing pipeline, and
   // returns 201 + the bare created run resource (the shadow package id is

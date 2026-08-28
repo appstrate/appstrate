@@ -400,7 +400,11 @@ describe("run watchdog — unified stall detection", () => {
       // Fresh heartbeat: the pump was still vouching for it right up to the
       // ceiling, so ONLY the boot-deadline predicate can catch this row.
       lastHeartbeatAt: new Date(),
-      startedAt: new Date(Date.now() - 310_000),
+      // 120s apart, DELIBERATELY not the 300s `RUN_BOOT_DEADLINE_SECONDS`
+      // default: a per-row budget and an env-read budget agree at 300s, so a
+      // 300s fixture cannot tell them apart and the assertion below would
+      // hold either way.
+      startedAt: new Date(Date.now() - 130_000),
       bootDeadlineAt: new Date(Date.now() - 10_000),
     });
 
@@ -420,8 +424,10 @@ describe("run watchdog — unified stall detection", () => {
     expect(row?.error).toContain("never started executing");
     expect(row?.error).not.toContain("Runner stopped reporting");
     // Budget is derived per-row (deadline − started_at), so the message
-    // stays true for rows created under a different env setting.
-    expect(row?.error).toContain("300s");
+    // stays true for rows created under a different env setting. The row was
+    // given 120s; reading the current env would print the 300s default.
+    expect(row?.error).toContain("120s");
+    expect(row?.error).not.toContain("300s");
   });
 
   it("still reports a stall (not a boot failure) once the runner has reported", async () => {
@@ -485,6 +491,40 @@ describe("run watchdog — unified stall detection", () => {
 
       expect(finalizedCount).toBe(1);
       expect(stoppedRunIds).toEqual([runId]);
+    } finally {
+      _setOrchestratorForTesting(null);
+    }
+  });
+
+  it("still finalizes a stalled run whose workload stop never acknowledges", async () => {
+    // Liveness half of the same credential-window trade-off: the stop is
+    // awaited, but a runtime that cannot be stopped must NOT leave the run
+    // pinned in `running` forever with an open sink. Every other orchestrator
+    // stub in this file acks, so `stopWorkloadAndWait` returning false is a
+    // branch nothing else reaches — turn the caller's `if (!stopped)` warn
+    // into an early return and this is the only test that notices.
+    _setOrchestratorForTesting({
+      ...createRecordingOrchestrator([]),
+      stopByRunId: async (): Promise<StopResult> => {
+        throw new Error("runtime host unreachable");
+      },
+    });
+    try {
+      const runId = await seedRun(ctx, "@test/watchdog-agent", {
+        status: "running",
+        lastHeartbeatAt: new Date(Date.now() - 3600_000),
+      });
+
+      const finalizedCount = await runWatchdogTick({
+        intervalSeconds: 30,
+        stallThresholdSeconds: 60,
+        maxFinalizesPerTick: 100,
+      });
+
+      expect(finalizedCount).toBe(1);
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("failed");
+      expect(row?.sinkClosedAt).not.toBeNull();
     } finally {
       _setOrchestratorForTesting(null);
     }

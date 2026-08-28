@@ -444,12 +444,16 @@ const config: KnipConfig = {
      * `includeEntryExports` note above for the evidence and for what that
      * costs. `includeEntryExports` is therefore UNSET here on purpose and NOT
      * because the published-package exemption applies: turning it on reports
-     * 176 findings (79 exports + 97 exported types, 122 distinct names), 159 of
+     * 166 findings (74 exports + 92 exported types, 121 distinct names), most of
      * them lines in the `src/index.ts` and `src/bundle/index.ts` barrels. Their
      * disposition is one product question — does an unpublished package keep a
-     * portable public API — not 159 hygiene calls, so it is deferred to its own
-     * pass rather than triaged in a sweep. Measured 2026-08-25; re-measure
-     * before acting.
+     * portable public API — not ~150 hygiene calls, so it is deferred to its own
+     * pass rather than triaged in a sweep. Re-measured 2026-08-27 after the
+     * `src/resolvers/index.ts` barrel lost its four unread re-exports
+     * (`defaultInlineLimit`, `isReproducibleBody`, `resolveBodyForFetch`,
+     * `serializeFetchResponse`) — those were removed by hand, since knip cannot
+     * see them either way: `src/index.ts` does `export *` from the resolvers
+     * barrel, so every name in it counts as read. Re-measure before acting.
      */
     "packages/afps-runtime": {
       entry: [
@@ -532,13 +536,14 @@ const config: KnipConfig = {
     "packages/ui": {
       includeEntryExports: true,
       // The `./components/*` wildcard target is deliberately NOT an entry.
-      // `packages/ui` is private with exactly one in-repo consumer
-      // (`apps/web`), so the published-package carve-out does not apply and
-      // "no in-repo reader" *is* evidence of death — but declaring the
-      // wildcard as an entry made every design-system component reachable
-      // without an importer, so a component nobody renders could never be
-      // reported. apps/web imports each component by its own subpath, which
-      // puts the live ones in the graph on their own.
+      // `packages/ui` is private, and its only in-repo consumers are
+      // `apps/web` and `packages/module-chat` — so the published-package
+      // carve-out does not apply and "no in-repo reader" *is* evidence of
+      // death. Declaring the wildcard as an entry made every design-system
+      // component reachable without an importer, so a component nobody
+      // renders could never be reported. Both consumers import each component
+      // by its own subpath, which puts the live ones in the graph on their
+      // own.
       entry: [...manifestEntries("packages/ui", ["./components/*"])],
     },
     // Playwright specs, discovered by the runner, not imported.

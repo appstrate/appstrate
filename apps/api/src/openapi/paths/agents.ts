@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 /**
  * Agents paths — includes both agents.ts and user-agents.ts endpoints
@@ -82,6 +83,7 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -102,7 +104,19 @@ export const agentsPaths = {
         required: true,
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/AgentInputSettings" },
+            // Spelled out rather than `$ref: AgentInputSettings`, and CLOSED:
+            // `agentInputSettingsSchema` (`routes/agents.ts`) is `.strict()`,
+            // so an unknown field is a 400. The component cannot carry the
+            // closure — `AgentDetail.input` composes it with three more members
+            // through `allOf`, and `additionalProperties` does not compose.
+            schema: {
+              type: "object",
+              required: ["values", "locked_fields"],
+              description:
+                "The input settings to store for this space. Both members are full replacements — an omitted key means cleared, never unchanged.",
+              properties: AGENT_INPUT_SETTINGS_PROPERTIES,
+              additionalProperties: false,
+            },
           },
         },
       },
@@ -155,6 +169,7 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -183,6 +198,7 @@ export const agentsPaths = {
                   description: 'Proxy ID, "none" to opt out, or null for org default',
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -496,6 +512,7 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -530,6 +547,7 @@ export const agentsPaths = {
                   ],
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -593,6 +611,7 @@ export const agentsPaths = {
                   },
                 },
               },
+              additionalProperties: false,
             },
           },
         },

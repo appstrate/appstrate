@@ -89,7 +89,10 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
     // 23505 = unique_violation. Extremely unlikely with a 128-bit UUID, but
     // surface a clean error instead of an opaque FK/PK message.
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "23505") {
-      throw new Error("Shadow package id collision — retry the request.");
+      // The pg driver error carries the constraint name and detail; the
+      // message above deliberately does not, so attach it as `cause` rather
+      // than drop it.
+      throw new Error("Shadow package id collision — retry the request.", { cause: err });
     }
     throw err;
   }

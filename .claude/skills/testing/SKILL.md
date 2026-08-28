@@ -21,11 +21,12 @@ Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — star
 
 Single root `bunfig.toml` drives core tests; each module has its own pointing at the same root preload. Root preload (`test/setup/preload.ts`) runs Docker Compose, sets env, applies core migrations, then auto-discovers built-in modules (`apps/api/src/modules/*/`) **and** workspace modules (`packages/module-*/src/`) and wires:
 
-- `drizzle/migrations/*.sql` → applied alphabetically via `apply-module-migration.ts`
 - `index.ts` → dynamic-imported, registered in `test-modules.ts` for `getTestApp()`
 - `test/tables.ts` → `string[]` registered via `registerTruncationTables()`
 
-Adding a built-in module is mechanical: drop directory with `index.ts`, `drizzle/migrations/`, `test/tables.ts`. No edits to core test infra.
+There is no per-module migration step: **modules own no tables**, so a module's tables are created by the core migration step above. `apps/api/src/modules/README.md` ("Database ownership rules") owns that rule and the reasoning behind it.
+
+Adding a built-in module is mechanical: drop a directory with `index.ts` and `test/tables.ts`. No edits to core test infra.
 
 **Zero-footprint invariant**: core tests have zero knowledge of any module. `getTestApp()` takes optional `{ modules }` — core calls with none, module helpers pass their own. Cross-module behavior covered by e2e, not by loading multiple modules in one process.
 

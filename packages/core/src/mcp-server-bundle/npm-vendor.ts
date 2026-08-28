@@ -33,11 +33,19 @@ import { join, posix, relative, sep } from "node:path";
 import type { SourceResolution, VendorResult } from "./types.ts";
 
 export class BundlerError extends Error {
+  /**
+   * @param message - Human-readable error description
+   * @param code - Machine-readable code (e.g. "INSTALL_TREE_MISSING")
+   * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising
+   *   this from a `catch` so the underlying IO/parse error is not discarded.
+   *   `preserve-caught-error` cannot see custom classes, so this is on us.
+   */
   constructor(
     message: string,
     readonly code: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "BundlerError";
   }
 }
@@ -256,29 +264,40 @@ export async function vendorNpmPackage(
     let manifestRaw: string;
     try {
       manifestRaw = await readFile(join(installedRoot, "package.json"), "utf8");
-    } catch {
+    } catch (err) {
+      // The message ASSERTS a cause ("npm install did not produce…") that only
+      // holds for ENOENT. An EACCES or EMFILE reads the same and sends the
+      // operator after the wrong thing, so keep the real errno.
       throw new BundlerError(
         `npm install did not produce ${input.identifier}/package.json under ${workDir}`,
         "INSTALL_TREE_MISSING",
+        { cause: err },
       );
     }
     let pkgJson: NpmRegistryVersion;
     try {
       pkgJson = JSON.parse(manifestRaw) as NpmRegistryVersion;
-    } catch {
+    } catch (err) {
+      // "is not valid JSON" names the file, not the defect. The SyntaxError
+      // names the defect (offset, unexpected token) — a truncated download and
+      // a registry serving HTML read alike without it.
       throw new BundlerError(
         `installed package.json for ${input.identifier} is not valid JSON`,
         "INSTALL_TREE_PARSE",
+        { cause: err },
       );
     }
     const binRel = pickNpmEntryPoint(pkgJson);
     const entryAbs = join(installedRoot, binRel);
     try {
       await stat(entryAbs);
-    } catch {
+    } catch (err) {
+      // Same asserted-cause problem as INSTALL_TREE_MISSING: `stat` fails for
+      // more reasons than "does not exist".
       throw new BundlerError(
         `resolved entry point does not exist on disk: ${binRel}`,
         "ENTRY_MISSING",
+        { cause: err },
       );
     }
 

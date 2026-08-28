@@ -4,7 +4,7 @@ import { llmProxyUrlPath } from "@appstrate/runner-pi";
 
 /**
  * LLM proxy endpoints — server-side model injection for remote-backed
- * AFPS runs (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md §Phase 3).
+ * AFPS runs. Route implementation: `apps/api/src/routes/llm-proxy.ts`.
  *
  * Three protocol families ship today; each gets its own concrete endpoint
  * so callers hit the upstream shape they already know (OpenAI Chat

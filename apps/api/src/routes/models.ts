@@ -83,6 +83,7 @@ export const createModelSchema = z
      */
     aliased: z.boolean().optional(),
   })
+  .strict()
   .refine(
     // Canonical model invariant: `input + output <= context`, so a response
     // cap can never reach the full window. Reject impossible overrides at the
@@ -104,30 +105,37 @@ export const updateModelSchema = z
     cost: modelCostSchema.nullable().optional(),
     aliased: z.boolean().optional(),
   })
+  .strict()
   .refine(
     // See createModelSchema: `max_output_tokens < context_window` always holds.
     (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
     { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
   );
 
-export const setDefaultSchema = z.object({
-  modelId: z.string().nullable(),
-});
+export const setDefaultSchema = z
+  .object({
+    modelId: z.string().nullable(),
+  })
+  .strict();
 
-export const seedModelsSchema = z.object({
-  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
-  modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
-});
+export const seedModelsSchema = z
+  .object({
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
+    modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
+  })
+  .strict();
 
 // The inline test endpoint validates a model config before the user saves it.
 // Callers identify the provider via `credentialId` — the registry resolves
 // `apiShape` and `baseUrl` server-side, so the wire payload doesn't carry them.
-export const testInlineSchema = z.object({
-  credentialId: z.string().min(1, "credentialId is required"),
-  modelId: z.string().min(1),
-  apiKey: z.string().optional(),
-  existingModelId: z.string().optional(),
-});
+export const testInlineSchema = z
+  .object({
+    credentialId: z.string().min(1, "credentialId is required"),
+    modelId: z.string().min(1),
+    apiKey: z.string().optional(),
+    existingModelId: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Map an alias-invariant violation to its 400 — shared by the create and

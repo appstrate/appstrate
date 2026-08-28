@@ -7,9 +7,11 @@ import { forbidden, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { setDisplayName } from "../services/profile.ts";
 
-export const welcomeSetupSchema = z.object({
-  displayName: z.string().max(100).optional(),
-});
+export const welcomeSetupSchema = z
+  .object({
+    displayName: z.string().max(100).optional(),
+  })
+  .strict();
 
 const router = new Hono<AppEnv>();
 

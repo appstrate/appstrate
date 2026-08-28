@@ -53,6 +53,25 @@ describe("resolveDefaultSpaceId", () => {
     expect(await resolveDefaultSpaceId(ORIGIN, {}, orgId, fn)).toBe("spc_3");
   });
 
+  /**
+   * `/api/spaces` answers with the list ENVELOPE and only ever has (apps/api
+   * `listResponse`; the OpenAPI schema declares `data` required). The reader
+   * used to accept a bare array too — a second accepted shape for a producer
+   * that cannot emit it. A bare array is now off-contract: no id, and not
+   * cached, so the next turn re-reads instead of running on a guess.
+   */
+  it("refuses a bare array — the envelope is the only shape", async () => {
+    const orgId = `org_${Math.random().toString(36).slice(2)}`;
+    const { fn } = seqFetch([
+      () => Response.json([{ id: "spc_bare", isDefault: true }]),
+      () => Response.json({ data: [{ id: "spc_4", isDefault: true }] }),
+    ]);
+
+    expect(await resolveDefaultSpaceId(ORIGIN, {}, orgId, fn)).toBeUndefined();
+    // …and the off-contract answer was not cached either.
+    expect(await resolveDefaultSpaceId(ORIGIN, {}, orgId, fn)).toBe("spc_4");
+  });
+
   it("caches a resolved id (no second fetch)", async () => {
     const orgId = `org_${Math.random().toString(36).slice(2)}`;
     const { fn, calls } = seqFetch([

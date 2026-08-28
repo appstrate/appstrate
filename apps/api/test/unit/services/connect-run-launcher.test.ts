@@ -40,6 +40,10 @@ import {
 } from "../../../src/services/connect/connect-run-launcher.ts";
 import type { ConnectToolExecution } from "../../../src/services/connect/orchestrated-strategy.ts";
 import {
+  readConnectRunGrant,
+  type ConnectRunGrant,
+} from "../../../src/services/connect/connect-run-grant.ts";
+import {
   localIntegrationManifest,
   httpHeaderDelivery,
   connectToolBlock,
@@ -72,9 +76,20 @@ const MANIFEST: IntegrationManifest = localIntegrationManifest({
 
 // The local-source integration references an mcp-server package; the launcher
 // resolves its runnable server config. Injected here so the unit test needs no DB.
-const fakeMcpResolver: McpServerResolver = async () => ({
-  server: { type: "python", entry_point: "./server.py" },
-});
+const SERVER_ID = "@scope/connect-it";
+const SERVER_VERSION = "1.4.2";
+const resolverCalls: { packageId: string; orgId: string; pin: string | null }[] = [];
+// The real resolver honours the `source.server.version` RANGE and answers with
+// a CONCRETE published version; the fixture mirrors that contract (a resolver
+// that echoed the range back would produce a `?version=^1.0.0` the byte route
+// 404s).
+const fakeMcpResolver: McpServerResolver = async (packageId, orgId, pin) => {
+  resolverCalls.push({ packageId, orgId, pin });
+  return {
+    server: { type: "python", entry_point: "./server.py" },
+    version: SERVER_VERSION,
+  };
+};
 
 /**
  * Mirror of the sidecar's result-channel encryption
@@ -109,6 +124,13 @@ interface MockCalls {
   started: number;
   removedWorkloads: number;
   removedBoundaries: number;
+  /**
+   * The authorization grant as READ FROM THE REAL STORE at the moment
+   * `createSidecar` was called — i.e. the earliest point the sidecar could
+   * make its first `/internal/*` call. A `null` here means the connect run
+   * would boot unauthorised.
+   */
+  grantAtSidecar: (ConnectRunGrant | null)[];
 }
 
 /**
@@ -134,6 +156,7 @@ function mockOrchestrator(opts: {
     started: 0,
     removedWorkloads: 0,
     removedBoundaries: 0,
+    grantAtSidecar: [],
   };
   let stopped = false;
   let capturedResultKey: Buffer | undefined;
@@ -159,6 +182,7 @@ function mockOrchestrator(opts: {
       spec: SidecarLaunchSpec,
     ): Promise<WorkloadHandle> {
       calls.sidecarSpecs.push(spec);
+      calls.grantAtSidecar.push(await readConnectRunGrant(runId));
       if (spec.connectResultKey) {
         capturedResultKey = Buffer.from(spec.connectResultKey, "base64");
       }
@@ -209,8 +233,22 @@ describe("buildConnectLoginSpec", () => {
     const spec = await buildConnectLoginSpec(execution(), fakeMcpResolver);
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
-    // The runnable server config comes from the referenced mcp-server package.
-    expect(spec.manifest.server).toEqual({ type: "python", entry_point: "./server.py" });
+    // The runnable server config comes from the referenced mcp-server package —
+    // INCLUDING which package it is and which concrete version, without which
+    // the sidecar cannot fetch the bytes (it hard-fails a local spec that names
+    // no `packageId`, and the byte route rejects an absent `?version=`).
+    expect(spec.manifest.server).toEqual({
+      type: "python",
+      entry_point: "./server.py",
+      packageId: SERVER_ID,
+      version: SERVER_VERSION,
+    });
+    // The pin handed to the resolver is the manifest RANGE, scoped to the run's org.
+    expect(resolverCalls.at(-1)).toEqual({
+      packageId: SERVER_ID,
+      orgId: "o",
+      pin: "^1.0.0",
+    });
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
       toolName: "login",
@@ -249,6 +287,19 @@ describe("buildConnectLoginSpec", () => {
     };
     ex.manifest = remote as unknown as IntegrationManifest;
     await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no spawnable server/);
+  });
+
+  it("omits server.version for a system mcp-server (byte route serves it by id alone)", async () => {
+    const systemResolver: McpServerResolver = async () => ({
+      server: { type: "python", entry_point: "./server.py" },
+      version: null,
+    });
+    const spec = await buildConnectLoginSpec(execution(), systemResolver);
+    expect(spec.manifest.server).toEqual({
+      type: "python",
+      entry_point: "./server.py",
+      packageId: SERVER_ID,
+    });
   });
 
   it("throws when the referenced mcp-server cannot be resolved", async () => {
@@ -418,6 +469,77 @@ describe("createConnectRunExecutor.run", () => {
     // Teardown ran.
     expect(calls.removedWorkloads).toBe(1);
     expect(calls.removedBoundaries).toBe(1);
+  });
+
+  // ─── authorization grant lifecycle ───
+  // A connect run has no `runs` row and no agent, so nothing the run-token
+  // pipeline reads can authorise its sidecar. The grant IS its authorization
+  // (see `services/connect/connect-run-grant.ts`); these tests pin that it
+  // exists before the sidecar can call, names only what the spec resolved, and
+  // is gone the moment the run ends — on every exit path.
+
+  it("publishes the grant BEFORE createSidecar, naming exactly the resolved integration + mcp-server + version", async () => {
+    // Catches: never writing the grant (the connect run then 404s on its first
+    // `/internal/*` call — the pre-existing gap), writing it AFTER
+    // `createSidecar` (a race the sidecar loses on a fast boot), and widening
+    // it beyond the single package/version the spec resolved.
+    const { orch, calls } = mockOrchestrator({
+      resultBundle: { outputs: { session_token: "sess-1" }, expiresAt: null },
+    });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      resolveMcpServer: fakeMcpResolver,
+    });
+
+    await executor.run(execution());
+
+    expect(calls.grantAtSidecar).toHaveLength(1);
+    expect(calls.grantAtSidecar[0]).toEqual({
+      orgId: "o",
+      integrationId: "@scope/connect-it",
+      mcpServerId: SERVER_ID,
+      mcpServerVersion: SERVER_VERSION,
+    });
+    // …and it is keyed by the id the run token is signed over, not by anything
+    // else the sidecar could not present.
+    const connectId = calls.createdBoundaries[0]!;
+    expect(connectId.startsWith("connect_")).toBe(true);
+    // Revoked on the success path.
+    expect(await readConnectRunGrant(connectId)).toBeNull();
+  });
+
+  it("revokes the grant when the connect run FAILS", async () => {
+    // Catches: revoking only on the happy path, which would leave a failed
+    // run's token authorised until its TTL expired.
+    const { orch, calls } = mockOrchestrator({
+      stdoutLines: ["APPSTRATE_CONNECT_ERROR:upstream rejected the secret"],
+      exitCode: 1,
+    });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      resolveMcpServer: fakeMcpResolver,
+    });
+
+    await expect(executor.run(execution())).rejects.toThrow(/upstream rejected the secret/);
+    // Positive control: the grant WAS live while the sidecar ran, so the null
+    // below is a revocation and not a grant that was never written.
+    expect(calls.grantAtSidecar[0]).not.toBeNull();
+    expect(await readConnectRunGrant(calls.createdBoundaries[0]!)).toBeNull();
+  });
+
+  it("revokes the grant when the connect run TIMES OUT", async () => {
+    // The path most likely to leak: the sidecar is killed from outside, so
+    // nothing in the normal return sequence runs. Only the `finally` does.
+    const { orch, calls } = mockOrchestrator({ stdoutLines: [], hang: true });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      timeoutMs: 30,
+      resolveMcpServer: fakeMcpResolver,
+    });
+
+    await expect(executor.run(execution())).rejects.toThrow();
+    expect(calls.grantAtSidecar[0]).not.toBeNull();
+    expect(await readConnectRunGrant(calls.createdBoundaries[0]!)).toBeNull();
   });
 
   it("throws on the error sentinel and still tears down", async () => {

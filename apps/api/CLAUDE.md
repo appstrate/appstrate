@@ -17,7 +17,7 @@ Conventions for `apps/api`. Root guide: `../../CLAUDE.md`. Module authoring: `sr
 - **Package types**: `agent`, `skill`, `mcp-server`, `integration`. System tools (`output`/`log`/`note`/`pin`/`publish_file`) are transport-neutral MCP definitions in `packages/core/src/runtime-tool-defs.ts` (served sidecar-side), opt-in per agent via manifest `runtime_tools: string[]` (catalog `@appstrate/core/runtime-tools-catalog`). `output` required only when agent declares `output.schema` (enforced by `agentManifestSchema` superRefine). Outbound third-party API access flows exclusively through **integrations**.
 - **System agents**: all agents (system + local) live in DB. System agents loaded from `system-packages/` ZIPs at boot and synced with `orgId: null` (`lib/boot.ts` `syncSystemPackagesToDb()`).
 - **Graceful shutdown**: `run-tracker.ts` — stop scheduler → reject new POST → wait in-flight (max 30s) → exit.
-- **Validation (Zod)**: all route bodies validated with `parseBody(schema, body)` from `lib/errors.ts` (`.safeParse()` → throws `invalidRequest()`). Naming `{concept}Schema` / `{Concept}` (`z.infer`). JSONB reads use safe narrowing (null/typeof/Array.isArray), not raw `as`. Query params: `z.coerce.number().int().min().max().catch(default).parse()`. **Zod 4** — `z.url()` NOT `z.string().url()`, `z.uuid()`. Reference: `routes/models.ts`, `routes/webhooks.ts`, `routes/organizations.ts`.
+- **Validation (Zod)**: read every JSON body with `readJsonBody(c, schema)` from `lib/request-body.ts` — NOT a bare `c.req.json()` + cast, which turns malformed JSON and wrong-shape bodies into 500s. It catches the parse error as a 400 and then runs `parseBody(schema, body)` (`.safeParse()` → throws `invalidRequest()` with RFC-9457 `errors[]`). Pass `{ allowEmpty: true }` only when an empty body genuinely means "no changes". **Body schemas are `.strict()`**: an unknown field is a 400, never a silently dropped value. Naming `{concept}Schema` / `{Concept}` (`z.infer`). JSONB reads use safe narrowing (null/typeof/Array.isArray), not raw `as`. Query params: `z.coerce.number().int().min().max().catch(default).parse()`. **Zod 4** — `z.url()` NOT `z.string().url()`, `z.uuid()`. Reference: `routes/models.ts`, `routes/webhooks.ts`, `routes/organizations.ts`.
 - **Validation (AJV)**: `validateAgainstSchema()`/`validateInput()`/`validateOutput()` for **dynamic** manifest schemas only. One AJV instance, `coerceTypes: true`, extra fields allowed.
 
 ## Headless Developer Platform
@@ -40,6 +40,6 @@ Headless API for embedding agents. Patterns mirror Stripe.
 
 - **Source**: `src/openapi/` — modular TS files assembled at build time. Module endpoints contribute via `AppstrateModule.openApiPaths()`.
 - **Live spec**: `GET /api/openapi.json` (public). **Docs**: `GET /api/docs` (Swagger UI, public).
-- **Validation**: `bun run verify:openapi` — coverage, structural, lint, Zod↔spec bodies, Code ⊆ Spec static analysis (ADR-004).
+- **Validation**: `bun run verify:openapi` — coverage, structural, lint, Zod↔spec bodies, Code ⊆ Spec static analysis. The rule it enforces is "OpenAPI is the source of truth": every code-registered endpoint must be documented and vice versa. (There is no ADR directory in this repo — `scripts/verify-openapi.ts` is the authority.)
 
 When working on routes, consult the corresponding file in `src/openapi/paths/`.

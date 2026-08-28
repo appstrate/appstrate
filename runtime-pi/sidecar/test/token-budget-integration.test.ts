@@ -18,15 +18,16 @@
  *   - 50× small-call cumulative pressure forces spill once the run
  *     budget is exhausted, without any single call hitting the
  *     per-call cap (issue #390 secondary scenario).
- *   - `_meta` payload carries the budget accounting so the agent
- *     runtime can react to structured truncation events.
+ *   - the budget tracker's own accounting (`consumedTokens`) reflects
+ *     what was inlined and what was spilled.
  *   - `run_history` and `recall_memory` honour the same gate as
  *     `api_call`.
  */
 
 import { describe, it, expect, mock } from "bun:test";
 import { Hono } from "hono";
-import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { mountMcp } from "../mcp.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { BlobStore } from "../blob-store.ts";
@@ -54,7 +55,7 @@ const defaultFetchCredentials = async (): Promise<CredentialsResponse> => ({
 });
 
 async function rpc(
-  app: ReturnType<typeof createApp>,
+  app: ReturnType<typeof createTestApp>,
   body: { method: string; params?: unknown },
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const res = await app.request("/mcp", {
@@ -70,22 +71,6 @@ async function rpc(
   return { status: res.status, json: JSON.parse(text) };
 }
 
-const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
-
-interface BudgetMeta {
-  estimatedTokens: number;
-  consumedTokens: number;
-  runBudgetTokens: number;
-  inlineCapTokens: number;
-  decision: "inline" | "spill";
-  reason:
-    | "under_inline_cap"
-    | "exceeds_inline_cap"
-    | "exceeds_run_budget"
-    | "blob_store_full"
-    | "no_blob_store_configured";
-}
-
 interface ContentBlock {
   type: string;
   text?: string;
@@ -97,7 +82,6 @@ interface ContentBlock {
 interface CallToolResult {
   content: ContentBlock[];
   isError?: boolean;
-  _meta?: Record<string, unknown>;
 }
 
 /**
@@ -177,12 +161,12 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     expect(result.content[0]!.type).toBe("resource_link");
     expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
 
-    const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta | undefined;
-    expect(meta).toBeDefined();
-    expect(meta!.decision).toBe("spill");
-    expect(meta!.reason).toBe("exceeds_inline_cap");
-    expect(meta!.estimatedTokens).toBeGreaterThan(4_000);
-    expect(meta!.inlineCapTokens).toBe(4_000);
+    // Spilled because this single body exceeds the per-call inline cap,
+    // not because the run budget was under pressure.
+    expect(estimateTokens(denseJson)).toBeGreaterThan(4_000);
+    // tryReserve() does NOT record on the spill path — the agent never
+    // paid the context cost, so the run budget is untouched.
+    expect(tokenBudget.consumedTokens()).toBe(0);
   });
 
   it("inlines small JSON that comfortably fits the per-call cap", async () => {
@@ -214,11 +198,9 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     expect(result.content[0]!.type).toBe("text");
     expect(result.content[0]!.text).toBe(smallJson);
 
-    const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta | undefined;
-    expect(meta).toBeDefined();
-    expect(meta!.decision).toBe("inline");
-    expect(meta!.reason).toBe("under_inline_cap");
-    expect(meta!.estimatedTokens).toBeGreaterThanOrEqual(1);
+    expect(estimateTokens(smallJson)).toBeLessThan(4_000);
+    // Inlined output IS recorded against the run budget.
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens(smallJson));
   });
 });
 
@@ -250,7 +232,7 @@ describe("token-aware spill — cumulative pressure (issue #390 secondary)", () 
 
     let inlineCount = 0;
     let spillCount = 0;
-    let firstSpillReason: string | undefined;
+    let consumedAtFirstSpill: number | undefined;
 
     for (let i = 0; i < 30; i++) {
       const res = await rpc(app, {
@@ -264,28 +246,30 @@ describe("token-aware spill — cumulative pressure (issue #390 secondary)", () 
         },
       });
       const result = res.json.result as CallToolResult;
-      const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta | undefined;
       if (result.content[0]!.type === "text") {
         inlineCount++;
-        expect(meta!.decision).toBe("inline");
       } else {
         spillCount++;
-        if (!firstSpillReason) firstSpillReason = meta!.reason;
-        expect(meta!.decision).toBe("spill");
+        // Spilling does not record, so this reads the total the earlier
+        // inlined calls accumulated.
+        consumedAtFirstSpill ??= tokenBudget.consumedTokens();
       }
     }
 
     // Some calls should inline (early), others spill (late).
     expect(inlineCount).toBeGreaterThan(0);
     expect(spillCount).toBeGreaterThan(0);
-    // The first spill should be due to the cumulative budget — no
-    // single call exceeds the per-call cap.
-    expect(firstSpillReason).toBe("exceeds_run_budget");
+    // The first spill was due to the CUMULATIVE budget, not the per-call
+    // cap: no single call exceeds the cap (asserted above), and at the
+    // moment it spilled one more call would have pushed the run total
+    // past the 20 K ceiling.
+    expect(consumedAtFirstSpill).toBeDefined();
+    expect(consumedAtFirstSpill! + estimateTokens(perCallPayload)).toBeGreaterThan(20_000);
   });
 });
 
-describe("token-aware spill — `_meta` accounting", () => {
-  it("attaches token-budget meta to every tool result (text path)", async () => {
+describe("token-aware spill — run-budget accounting", () => {
+  it("records an inlined tool result against the run budget (text path)", async () => {
     const fetchFn = mock(
       async () =>
         new Response('{"hello":"world"}', {
@@ -310,17 +294,14 @@ describe("token-aware spill — `_meta` accounting", () => {
       },
     });
     const result = res.json.result as CallToolResult;
-    const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta | undefined;
-    expect(meta).toBeDefined();
-    expect(meta!.runBudgetTokens).toBe(100_000);
-    expect(meta!.inlineCapTokens).toBe(4_000);
-    expect(meta!.estimatedTokens).toBeGreaterThan(0);
-    // tryReserve records on inline before returning the snapshot, so
-    // consumedTokens reflects the post-record total (this call included).
-    expect(meta!.consumedTokens).toBe(meta!.estimatedTokens);
+    expect(result.content[0]!.type).toBe("text");
+    // tryReserve records on the inline path, so the run total after one
+    // call is exactly that call's estimate.
+    expect(tokenBudget.consumedTokens()).toBeGreaterThan(0);
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens('{"hello":"world"}'));
   });
 
-  it("reports increasing consumedTokens across successive inline calls", async () => {
+  it("accumulates consumedTokens across successive inline calls", async () => {
     const payload = '{"hello":"world","data":"' + "x".repeat(100) + '"}';
     const fetchFn = mock(
       async () =>
@@ -348,44 +329,14 @@ describe("token-aware spill — `_meta` accounting", () => {
         },
       });
       const result = res.json.result as CallToolResult;
-      const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
-      consumed.push(meta.consumedTokens);
+      expect(result.content[0]!.type).toBe("text");
+      consumed.push(tokenBudget.consumedTokens());
     }
-    // tryReserve records before returning the snapshot, so each meta
-    // includes its own call's contribution. Call N's reported
-    // consumedTokens equals the running total through call N.
+    // tryReserve records before returning, so the total read after call N
+    // includes call N's own contribution.
     expect(consumed[0]).toBeGreaterThan(0);
     expect(consumed[1]).toBeGreaterThan(consumed[0]!);
     expect(consumed[2]).toBeGreaterThan(consumed[1]!);
-  });
-
-  // AFPS (Phase F1 follow-up): `_meta` keys must match Appendix B's
-  // `META_NAMESPACE_KEY` regex — either a bare token or `<reverse-dns>/<id>`.
-  // Writers always emit `dev.appstrate/token-budget`.
-  it("writers emit the AFPS reverse-DNS key", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"hello":"world"}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = await buildTestApp({
-      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
-      tokenBudget,
-    });
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "test__api_call",
-        arguments: { target: "https://api.example.com/items", method: "GET" },
-      },
-    });
-    const result = res.json.result as CallToolResult;
-    // Canonical key present.
-    expect(result._meta?.[TOKEN_BUDGET_META_KEY]).toBeDefined();
   });
 });
 
@@ -411,9 +362,9 @@ describe("token-aware spill — applied to all platform tools", () => {
     });
     const result = res.json.result as CallToolResult;
     expect(result.content[0]!.type).toBe("resource_link");
-    const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
-    expect(meta.decision).toBe("spill");
-    expect(meta.reason).toBe("exceeds_inline_cap");
+    // Spilled on the per-call cap; nothing recorded against the run budget.
+    expect(estimateTokens(oversized)).toBeGreaterThan(4_000);
+    expect(tokenBudget.consumedTokens()).toBe(0);
   });
 
   it("recall_memory is gated by the token budget", async () => {
@@ -437,8 +388,7 @@ describe("token-aware spill — applied to all platform tools", () => {
     });
     const result = res.json.result as CallToolResult;
     expect(result.content[0]!.type).toBe("resource_link");
-    const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
-    expect(meta.decision).toBe("spill");
+    expect(tokenBudget.consumedTokens()).toBe(0);
   });
 });
 
@@ -478,7 +428,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
         ],
         runtimeDeps,
       );
-      const app = createApp({
+      const app = createTestApp({
         ...appDeps,
         runtimeDeps,
         additionalMcpToolsProvider: () => host.buildTools(),
@@ -496,9 +446,8 @@ describe("token-aware spill — env-var configuration via createApp", () => {
       const result = res.json.result as CallToolResult;
       // 2000 chars / 3.5 ≈ 572 tokens — above the 100-token cap.
       expect(result.content[0]!.type).toBe("resource_link");
-      const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
-      expect(meta.inlineCapTokens).toBe(100);
-      expect(meta.runBudgetTokens).toBe(1000);
+      expect(runtimeDeps.tokenBudget.inlineCapTokens).toBe(100);
+      expect(runtimeDeps.tokenBudget.runBudgetTokens).toBe(1000);
     } finally {
       // Restore env so we don't leak state into the next test file.
       if (original.inline === undefined) delete process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
@@ -512,7 +461,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
     const original = process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
     process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = "not-a-number";
     try {
-      expect(() => createApp(makeDeps())).toThrow(/positive integer/);
+      expect(() => createTestApp(makeDeps())).toThrow(/positive integer/);
     } finally {
       if (original === undefined) delete process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
       else process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = original;
@@ -560,7 +509,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
 });
 
 describe("token-aware spill — fallback when blob store is full", () => {
-  it("falls back to inline with blob_store_full reason when blob store is full", async () => {
+  it("falls back to inline and records the tokens when the blob store is full", async () => {
     // Blob store with cumulative cap of 100 bytes; first put exhausts.
     const blobStore = new BlobStore("run-test", { maxTotalBytes: 100 });
     blobStore.put(new Uint8Array(95)); // leave only 5 bytes
@@ -593,11 +542,9 @@ describe("token-aware spill — fallback when blob store is full", () => {
     const result = res.json.result as CallToolResult;
     // Spill failed → forced inline.
     expect(result.content[0]!.type).toBe("text");
-    const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
-    expect(meta.decision).toBe("inline");
-    expect(meta.reason).toBe("blob_store_full");
-    // The forced-inline tokens are still recorded against the budget
-    // — the agent paid the context cost.
-    expect(tokenBudget.consumedTokens()).toBe(meta.estimatedTokens);
+    // The forced-inline tokens ARE recorded against the budget — the
+    // agent paid the context cost. This is what separates a failed spill
+    // from a successful one, which records nothing.
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens(payload));
   });
 });

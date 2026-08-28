@@ -81,8 +81,8 @@ describe("/api/spaces/:id/smtp-config", () => {
     expect(res.status).toBe(400);
   });
 
-  it("404s for an app that does not belong to the caller's org", async () => {
-    const res = await app.request(`/api/spaces/spc_doesnotexist/smtp-config`, {
+  it("404s for a space that does not belong to the caller's org", async () => {
+    const res = await app.request(`/api/spaces/spc_${crypto.randomUUID()}/smtp-config`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -94,6 +94,27 @@ describe("/api/spaces/:id/smtp-config", () => {
       }),
     });
     expect(res.status).toBe(404);
+  });
+
+  // These routes ran their own space-ownership SELECT with NO id-shape guard,
+  // so a retired `app_` id answered a generic 404 — indistinguishable from
+  // "that space is not yours", and silent about the real cause. They now go
+  // through the canonical `validateSpaceInOrg`, which asserts the shape first.
+  it("400s with the migration diagnostic for a retired `app_` id", async () => {
+    const res = await app.request(`/api/spaces/app_${crypto.randomUUID()}/smtp-config`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("app_` → `spc_");
+  });
+
+  it("400s for a malformed space id", async () => {
+    const res = await app.request(`/api/spaces/spc_doesnotexist/smtp-config`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Malformed space id");
   });
 
   it("POST /test delivers via the stored config (jsonTransport)", async () => {

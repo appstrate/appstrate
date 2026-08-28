@@ -60,8 +60,14 @@ export class RefreshError extends Error {
     public readonly kind: "revoked" | "transient",
     public readonly status?: number,
     public readonly body?: string,
+    /**
+     * Standard `ErrorOptions`; pass `{ cause }` when raising this from a
+     * `catch` so the underlying network/parse error is not discarded.
+     * `preserve-caught-error` cannot see custom classes, so this is on us.
+     */
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "RefreshError";
   }
 }
@@ -158,8 +164,16 @@ export async function performRefreshTokenExchange(
   let raw: Record<string, unknown>;
   try {
     raw = (await response.json()) as Record<string, unknown>;
-  } catch {
-    throw new RefreshError(`${opts.label} returned non-JSON response`, "transient");
+  } catch (err) {
+    // Same as the exchange path: `json()` consumed the stream, so the
+    // SyntaxError is the only surviving description of what came back.
+    throw new RefreshError(
+      `${opts.label} returned non-JSON response`,
+      "transient",
+      response.status,
+      undefined,
+      { cause: err },
+    );
   }
 
   // No access-token fallback: a 2xx body without `access_token` is a FAILED

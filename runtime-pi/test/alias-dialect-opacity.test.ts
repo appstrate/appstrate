@@ -136,6 +136,7 @@ function containerModelFor(
     agentPrompt: "You are a helpful agent.",
     runId: "run_1",
     sidecarUrl: "http://sidecar:8080",
+    sidecarAuthToken: "sidecar-auth-token",
     sidecarProxyLlmUrl: SIDECAR_LLM_URL,
     sink: SINK,
   });

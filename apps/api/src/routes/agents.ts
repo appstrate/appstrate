@@ -38,7 +38,11 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
-import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
+import {
+  assertExplicitModelExists,
+  resolveModel,
+  validateGenerationOverride,
+} from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
@@ -50,16 +54,16 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
-  ModelGenerationError,
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
-  resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
-export const modelIdSchema = z.object({
-  modelId: z.string().nullable(),
-  generation: modelGenerationSettingsSchema.nullable().optional(),
-});
+export const proxyIdSchema = z.object({ proxyId: z.string().nullable() }).strict();
+export const modelIdSchema = z
+  .object({
+    modelId: z.string().nullable(),
+    generation: modelGenerationSettingsSchema.nullable().optional(),
+  })
+  .strict();
 
 /**
  * Body of `PUT /api/agents/{scope}/{name}/input-settings` — the agent's stored
@@ -167,7 +171,7 @@ export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/agents — list agents accessible to the current space
-  router.get("/", async (c) => {
+  router.get("/", requirePermission("agents", "read"), async (c) => {
     const scope = getSpaceScope(c);
 
     // Single query: system packages + installed packages via LEFT JOIN
@@ -287,14 +291,22 @@ export function createAgentsRouter() {
     },
   );
 
-  // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/proxy`, requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const spaceId = c.get("spaceId");
-    const { proxyId } = await getInstalledPackageSettings(spaceId, agent.id);
+  // GET /api/agents/:scope/:name/proxy — get agent proxy configuration.
+  // Permission BEFORE `requireAgent()`: that middleware 404s on an unknown
+  // agent, so the reverse order answers "does this agent exist?" to a caller
+  // that is not allowed to read agents at all.
+  router.get(
+    `/${SCOPED_PACKAGE_ROUTE}/proxy`,
+    requirePermission("agents", "read"),
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      const spaceId = c.get("spaceId");
+      const { proxyId } = await getInstalledPackageSettings(spaceId, agent.id);
 
-    return c.json({ proxyId, resolved: proxyId !== "none" });
-  });
+      return c.json({ proxyId, resolved: proxyId !== "none" });
+    },
+  );
 
   // GET /api/agents/:scope/:name/connection-readiness — bulk integration
   // connection readiness for the agent: authoritative run-blocking verdict
@@ -344,14 +356,20 @@ export function createAgentsRouter() {
     },
   );
 
-  // GET /api/agents/:scope/:name/model — get agent model configuration
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const spaceId = c.get("spaceId");
-    const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
+  // GET /api/agents/:scope/:name/model — get agent model configuration.
+  // Permission-first, same reason as `…/proxy` above.
+  router.get(
+    `/${SCOPED_PACKAGE_ROUTE}/model`,
+    requirePermission("agents", "read"),
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      const spaceId = c.get("spaceId");
+      const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
 
-    return c.json({ modelId, generation: generationConfig });
-  });
+      return c.json({ modelId, generation: generationConfig });
+    },
+  );
 
   // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
   router.put(
@@ -370,23 +388,11 @@ export function createAgentsRouter() {
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
       let generation = data.generation;
       if (generation && Object.keys(generation).length > 0) {
-        if (!selectedModel) {
-          throw invalidRequest(
-            "A model must be configured before generation settings can be saved",
-          );
-        }
-        try {
-          generation = resolveModelGenerationSettings({
-            capabilities: selectedModel.generation,
-            override: generation,
-          });
-        } catch (error) {
-          if (error instanceof ModelGenerationError) {
-            throw invalidRequest(error.message, "generation");
-          }
-          throw error;
-        }
+        generation = validateGenerationOverride(generation, selectedModel, "generation");
       } else if (generation === undefined && current.generationConfig) {
+        // `modelId` is REQUIRED on this body, so "the model may have changed"
+        // — the precondition the other two routes spell out as
+        // `modelId !== undefined` — always holds here. See `spaces.ts`.
         generation = reconcileModelGenerationSettings(
           current.generationConfig,
           selectedModel?.generation,

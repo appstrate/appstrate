@@ -131,12 +131,13 @@ export async function resolvePendingClientBinding(
   if (token) {
     const boundClientId = await findMagicLinkClientBinding(token);
     if (boundClientId) return { kind: "bound", clientId: boundClientId, source: "magic-link" };
-    // No server-side binding: either a direct (non-OIDC) call against BA's
-    // public `/sign-in/magic-link` endpoint, or a link issued before this
-    // mechanism deployed (links live ≤15 min). Fall through to the cookie
-    // so in-flight links keep working across a deploy; a stripped cookie
-    // then resolves to `none` — the same posture a direct BA magic-link
-    // signup legitimately gets (platform rules + platform signup gates).
+    // No server-side binding → a direct (non-OIDC) call against BA's public
+    // `/sign-in/magic-link` endpoint. Do NOT fall back to the ambient cookie,
+    // for the same reason the social leg above does not: a concurrent OIDC tab
+    // must not leak its client into this unrelated transaction. Platform rules
+    // + platform signup gates, which is what a direct BA magic-link signup
+    // legitimately gets.
+    return { kind: "none" };
   }
 
   // ── 3. Cookie: authoritative on the server-driven register path (re-minted

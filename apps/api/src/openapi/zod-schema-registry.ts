@@ -40,7 +40,7 @@ import {
 } from "../routes/organizations.ts";
 
 // --- Org settings schema (services/organizations.ts) ---
-import { orgSettingsSchema } from "../services/organizations.ts";
+import { orgSettingsPatchSchema } from "../services/organizations.ts";
 
 // --- User-agent schemas (routes/user-agents.ts) ---
 import { updateSkillsSchema } from "../routes/user-agents.ts";
@@ -290,7 +290,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PUT",
     path: "/api/orgs/{orgId}/settings",
-    jsonSchema: toJsonSchema(orgSettingsSchema.partial()),
+    jsonSchema: toJsonSchema(orgSettingsPatchSchema),
     description: "Update org settings",
   },
 
