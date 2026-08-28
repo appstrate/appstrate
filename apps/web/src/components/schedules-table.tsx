@@ -26,9 +26,12 @@ import { formatDateField } from "../lib/markdown";
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({
   agentName,
+  showAgentName = true,
 }: {
   /** What to call the agent a schedule fires. */
   agentName: (schedule: EnrichedSchedule) => string;
+  /** Embedded agent detail already supplies this context in the page heading. */
+  showAgentName?: boolean;
 }): DataColumn<EnrichedSchedule>[] {
   const { t } = useTranslation(["settings", "agents", "common"]);
 
@@ -50,7 +53,9 @@ export function useScheduleColumns({
           {/* Which agent it fires: the whole point of a schedule, and the card
               only showed it inside the next-run strip, so a disabled schedule
               did not say it at all. */}
-          <span className="text-muted-foreground truncate text-xs">{agentName(schedule)}</span>
+          {showAgentName && (
+            <span className="text-muted-foreground truncate text-xs">{agentName(schedule)}</span>
+          )}
         </div>
       ),
     },
@@ -140,6 +145,7 @@ export function SchedulesTable({
   isError,
   empty,
   columnMode,
+  surface,
 }: {
   schedules: EnrichedSchedule[];
   /** From {@link useScheduleColumns}, minus whatever the reader hid. */
@@ -149,6 +155,8 @@ export function SchedulesTable({
   empty?: React.ReactNode;
   /** Level-one collections keep every reader-selected column reachable. */
   columnMode?: "tiered" | "scroll";
+  /** Embedded lists share their parent white surface and do not draw a second frame. */
+  surface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
 
@@ -157,6 +165,7 @@ export function SchedulesTable({
       label={t("schedules.tableLabel")}
       columns={columns}
       columnMode={columnMode}
+      surface={surface}
       rows={schedules}
       isLoading={isLoading}
       isError={isError}

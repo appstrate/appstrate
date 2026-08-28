@@ -17,13 +17,14 @@ import {
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
 import { RunList } from "../run-list";
-import { ScheduleCard } from "../schedule-card";
+import { SchedulesTable, useScheduleColumns } from "../schedules-table";
 import { RunAgentButton } from "../run-agent-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
-import { Ban, CalendarClock, Play } from "lucide-react";
+import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
 import { EmptyState } from "../page-states";
+import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { openAsModal } from "../../lib/modal-route";
-import type { RunStatus } from "@appstrate/shared-types";
+import { runStatusValues, type RunStatus } from "@appstrate/shared-types";
 
 export function AgentRunsTab({
   packageId,
@@ -36,11 +37,27 @@ export function AgentRunsTab({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const location = useLocation();
+  const requestedStatus = new URLSearchParams(location.search).get("agentRunStatus");
+  const [search, setSearch] = useState("");
+  const [statuses, setStatuses] = useState<RunStatus[]>(() =>
+    (requestedStatus?.split(",") ?? []).filter((value): value is RunStatus =>
+      runStatusValues.includes(value as RunStatus),
+    ),
+  );
   const { data: detail } = usePackageDetail("agent", packageId);
   const readiness = useAgentReadiness(detail, undefined, undefined, configSchemaOverride);
-  const requestedStatus = new URLSearchParams(location.search).get("agentRunStatus");
-  const status: RunStatus[] | undefined =
-    requestedStatus === "failed,timeout" ? ["failed", "timeout"] : undefined;
+  const filters: FilterSpec[] = [
+    {
+      id: "status",
+      label: t("runs.filterStatus"),
+      values: statuses,
+      options: runStatusValues.map((value) => ({
+        value,
+        label: t(`status.${value}`, { ns: "common" }),
+      })),
+      onChange: (values) => setStatuses(values as RunStatus[]),
+    },
+  ];
 
   if (!detail) return null;
 
@@ -51,19 +68,40 @@ export function AgentRunsTab({
     <RunList
       packageId={packageId}
       pageSize={12}
-      status={status}
+      status={statuses}
+      search={search}
       hideAgentName
       tableSurface="integrated"
+      toolbar={() => (
+        <ListToolbar
+          placement="panel"
+          panelFiltersAdjacent
+          search={{
+            value: search,
+            onChange: setSearch,
+            placeholder: t("detail.runsSearch"),
+          }}
+          filters={filters}
+          onReset={() => {
+            setSearch("");
+            setStatuses([]);
+          }}
+        />
+      )}
       emptyState={
-        <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
-          <RunAgentButton
-            packageId={packageId}
-            detail={detail}
-            version={versionLabel}
-            disabled={runDisabled}
-            showLabel
-          />
-        </EmptyState>
+        search || statuses.length > 0 ? (
+          <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact />
+        ) : (
+          <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
+            <RunAgentButton
+              packageId={packageId}
+              detail={detail}
+              version={versionLabel}
+              disabled={runDisabled}
+              showLabel
+            />
+          </EmptyState>
+        )
       }
     />
   );
@@ -73,12 +111,38 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: schedules } = useSchedules(packageId);
+  const [search, setSearch] = useState("");
+  const [states, setStates] = useState<string[]>([]);
+  const columns = useScheduleColumns({ agentName: () => packageId, showAgentName: false });
 
   if (!detail) return null;
 
   if (schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
   }
+
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const filteredSchedules = (schedules ?? []).filter((schedule) => {
+    const state = schedule.enabled ? "active" : "disabled";
+    const matchesState = states.length === 0 || states.includes(state);
+    const matchesSearch =
+      normalizedSearch === "" ||
+      (schedule.name ?? schedule.id).toLocaleLowerCase().includes(normalizedSearch) ||
+      schedule.cron_expression.toLocaleLowerCase().includes(normalizedSearch);
+    return matchesState && matchesSearch;
+  });
+  const filters: FilterSpec[] = [
+    {
+      id: "state",
+      label: t("detail.schedulesTable.filterState"),
+      values: states,
+      options: [
+        { value: "active", label: t("schedule.statusActive") },
+        { value: "disabled", label: t("schedule.statusDisabled") },
+      ],
+      onChange: setStates,
+    },
+  ];
 
   return (
     <>
@@ -89,18 +153,46 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
           </Button>
         </EmptyState>
       ) : (
-        <div className="divide-y">
-          {schedules.map((sched) => (
-            <ScheduleCard key={sched.id} schedule={sched} variant="integrated" />
-          ))}
-        </div>
+        <>
+          <ListToolbar
+            placement="panel"
+            panelFiltersAdjacent
+            search={{
+              value: search,
+              onChange: setSearch,
+              placeholder: t("detail.schedulesTable.search"),
+            }}
+            filters={filters}
+            onReset={() => {
+              setSearch("");
+              setStates([]);
+            }}
+          />
+          <SchedulesTable
+            schedules={filteredSchedules}
+            columns={columns}
+            columnMode="scroll"
+            surface="integrated"
+            empty={
+              <EmptyState
+                message={t("detail.schedulesTable.noMatch")}
+                icon={CalendarClock}
+                compact
+              />
+            }
+          />
+        </>
       )}
     </>
   );
 }
 
 export function AgentMemoryTab({ packageId }: { packageId: string }) {
-  return <MemoryPanel packageId={packageId} />;
+  const location = useLocation();
+  const requestedType = new URLSearchParams(location.search).get("agentMemory");
+  const initialTypes: Array<"pinned" | "archive"> =
+    requestedType === "pinned" || requestedType === "archive" ? [requestedType] : [];
+  return <MemoryPanel packageId={packageId} initialTypes={initialTypes} />;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────

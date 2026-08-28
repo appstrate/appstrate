@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "./spinner";
 import { Modal } from "./modal";
 import { LoadingState } from "./page-states";
@@ -168,12 +169,18 @@ export function RunAgentButton({
       {showLabel ? (
         <Button
           variant={variant}
+          size={size}
           onClick={handleClick}
           disabled={isDisabled}
           title={disabled ? disabledTitle : t("detail.run")}
-          className="relative"
+          className={cn("relative", className)}
         >
-          {isPending ? <Spinner /> : t("detail.run")}
+          {isPending ? (
+            <Spinner />
+          ) : (
+            <Play className={cn("size-3.5", variant === "outline" && "text-primary")} />
+          )}
+          {t("detail.run")}
           {warningDot}
         </Button>
       ) : (

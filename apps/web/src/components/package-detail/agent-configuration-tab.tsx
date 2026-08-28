@@ -62,10 +62,12 @@ export function ConfigSection({
   packageId,
   schema,
   isHistorical,
+  showDescription = true,
 }: {
   packageId: string;
   schema: JSONSchemaObject;
   isHistorical?: boolean;
+  showDescription?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
@@ -99,7 +101,11 @@ export function ConfigSection({
 
   return (
     <div className="max-w-2xl space-y-3 py-4">
-      <p className="text-muted-foreground text-sm">{t("detail.configuration.inputsDescription")}</p>
+      {showDescription && (
+        <p className="text-muted-foreground text-sm">
+          {t("detail.configuration.inputsDescription")}
+        </p>
+      )}
       <SchemaForm
         wrapper={wrapper}
         formData={values}
@@ -447,11 +453,13 @@ export function AgentConfigurationTab({
   configSchemaOverride,
   isHistorical,
   section,
+  showSectionDescription = true,
 }: {
   packageId: string;
   configSchemaOverride?: JSONSchemaObject;
   isHistorical?: boolean;
   section: "model" | "proxy" | "inputs";
+  showSectionDescription?: boolean;
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: detail } = usePackageDetail("agent", packageId);
@@ -482,5 +490,12 @@ export function AgentConfigurationTab({
   if (!hasConfigSchema || !schema) {
     return <p className="text-muted-foreground text-sm">{t("detail.emptyConfig")}</p>;
   }
-  return <ConfigSection packageId={packageId} schema={schema} isHistorical={isHistorical} />;
+  return (
+    <ConfigSection
+      packageId={packageId}
+      schema={schema}
+      isHistorical={isHistorical}
+      showDescription={showSectionDescription}
+    />
+  );
 }

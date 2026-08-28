@@ -298,7 +298,8 @@ export const runsPaths = {
           description: "One run status or a comma-separated set, for example failed,timeout.",
           schema: {
             type: "string",
-            pattern: "^(pending|running|success|failed|timeout|cancelled)(,(pending|running|success|failed|timeout|cancelled))*$",
+            pattern:
+              "^(pending|running|success|failed|timeout|cancelled)(,(pending|running|success|failed|timeout|cancelled))*$",
           },
         },
       ],
@@ -428,14 +429,7 @@ export const runsPaths = {
                   failed: { type: "integer", minimum: 0 },
                   timeout: { type: "integer", minimum: 0 },
                 },
-                required: [
-                  "window_days",
-                  "window_start",
-                  "total",
-                  "success",
-                  "failed",
-                  "timeout",
-                ],
+                required: ["window_days", "window_start", "total", "success", "failed", "timeout"],
               },
             },
           },

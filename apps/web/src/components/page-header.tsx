@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, type ReactNode } from "react";
+import { cn } from "@appstrate/ui/cn";
 import { useBreadcrumbStore, type BreadcrumbEntry } from "@/stores/breadcrumb-store";
 
 export type { BreadcrumbEntry };
 
 interface PageHeaderProps {
   title: string;
+  titleClassName?: string;
+  /** Status or other compact metadata that semantically qualifies the title. */
+  titleTrailing?: ReactNode;
   emoji?: string;
   /** Custom leading icon node; takes precedence over `emoji` when provided. */
   icon?: ReactNode;
@@ -19,6 +23,8 @@ interface PageHeaderProps {
 
 export function PageHeader({
   title,
+  titleClassName,
+  titleTrailing,
   emoji,
   icon,
   breadcrumbs,
@@ -47,9 +53,10 @@ export function PageHeader({
             : "flex min-h-9 items-center justify-between gap-4"
         }
       >
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <h2 className={cn("flex items-center gap-2 text-lg font-semibold", titleClassName)}>
           {icon ?? (emoji && <span>{emoji}</span>)}
           {title}
+          {titleTrailing}
         </h2>
         {actions && (
           <div data-page-actions className="flex shrink-0 items-center gap-2">

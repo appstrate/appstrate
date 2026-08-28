@@ -143,6 +143,7 @@ export function AgentActions({
           })
         }
         onRunWithOptions={() => setRunOptionsOpen(true)}
+        labelledTrigger
       />
       <RunWithOptionsModal
         open={runOptionsOpen}

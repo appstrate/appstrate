@@ -18,11 +18,18 @@
 import { useState, useEffect } from "react";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/shared-types";
 import { formatDuration } from "@appstrate/core/format";
+import { cn } from "@appstrate/ui/cn";
 
 /** The statuses that mean "still going" are owned by the wire contract. */
 const ACTIVE = ACTIVE_RUN_STATUSES as ReadonlySet<string>;
 
-export function ElapsedDuration({ startedAt }: { startedAt: string }) {
+export function ElapsedDuration({
+  startedAt,
+  className,
+}: {
+  startedAt: string;
+  className?: string;
+}) {
   const [elapsed, setElapsed] = useState(() => Date.now() - new Date(startedAt).getTime());
 
   useEffect(() => {
@@ -36,7 +43,11 @@ export function ElapsedDuration({ startedAt }: { startedAt: string }) {
   // A run that has not measurably started yet renders nothing rather than a
   // flickering `0.0s`.
   if (!elapsed) return null;
-  return <span className="text-muted-foreground font-mono text-xs">{formatDuration(elapsed)}</span>;
+  return (
+    <span className={cn("text-muted-foreground font-mono text-xs", className)}>
+      {formatDuration(elapsed)}
+    </span>
+  );
 }
 
 /**
@@ -48,14 +59,20 @@ export function RunDuration({
   status,
   startedAt,
   duration,
+  className,
 }: {
   status: string;
   startedAt: string | null;
   duration: number | null;
+  className?: string;
 }) {
-  if (ACTIVE.has(status) && startedAt != null) return <ElapsedDuration startedAt={startedAt} />;
+  if (ACTIVE.has(status) && startedAt != null) {
+    return <ElapsedDuration startedAt={startedAt} className={className} />;
+  }
   if (!duration) return null;
   return (
-    <span className="text-muted-foreground font-mono text-xs">{formatDuration(duration)}</span>
+    <span className={cn("text-muted-foreground font-mono text-xs", className)}>
+      {formatDuration(duration)}
+    </span>
   );
 }

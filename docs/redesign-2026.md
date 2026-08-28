@@ -2577,11 +2577,12 @@ never reads the Agent's current Configuration.
 
 Results groups generated files, structured output and only the persistence
 rows written by that Run. Successful Runs with production open there by
-default. Active Runs keep Results disabled with an explicit explanation;
-failed, cancelled and successful Runs without production open Execution. A
-terminal failed or cancelled Run may still expose Results when partial output
-exists. `Run` remains the historical record: no new persistence model, schema
-or synthetic production object was added.
+default. Results remains visible and addressable while a Run is active, with a
+pending empty state that says production will appear there. Failed, cancelled
+and successful Runs without production still open Journal, but their Results
+destination remains available with an honest empty state. A terminal failed or
+cancelled Run may expose partial output. `Run` remains the historical record:
+no new persistence model, schema or synthetic production object was added.
 
 The snapshot lists input files separately from input values. Results never
 translate a documents-endpoint failure into “no result”: an API error remains
@@ -2631,11 +2632,186 @@ and the immutable launch facts in edge-to-edge accordions on the right. Only
 Execution opens initially. Search and filters operate locally on the loaded log
 entries and combine across message text, level and event type. Results reuses
 the Agent split-navigation grammar for Productions, structured output and
-Memory, and omits destinations that have no retained content.
+Memory, and omits destinations that have no retained content. The destination
+itself no longer disappears: an active Run shows a pending state there and a
+terminal Run without production shows an empty state.
+
+The Run header is now one compact metadata sentence instead of three labelled
+fact columns. Status sits beside the Run number because it qualifies that exact
+record. The second line repeats the Agent name because the Run must remain
+identifiable outside the breadcrumb, then puts version immediately after that
+identity before trigger, actor, start, live or final duration and cost. Labels
+are bold and values regular so the line remains scannable after it wraps. The
+shared duration leaf accepts a local class override here instead of leaking its
+table-specific monospaced, extra-small treatment into the page head. Trigger is
+text rather than another badge; status is the only state pill in this head.
+The right-hand Execution inspector separates launch provenance, launch actor
+and execution infrastructure; `Runner Appstrate Montréal · Olivier Tarbès` is
+no longer presented as one person. Schedule, CLI, API, end-user and manual
+provenance are derivable from the current Run response. Chat attribution exists
+in persistence but is not exposed by that response, while MCP has no dedicated
+persisted provenance yet, so the UI does not guess either from a Docker runner.
 
 This consolidation is still a visual review surface. Its focused component and
 Lab checks run during iteration, but the repository gates remain deliberately
 deferred until the combined Agent map is accepted.
+
+**System Agent provenance and the Map chrome, 28 August.** A system Agent is
+not a wholly read-only installation. Appstrate owns and maintains its portable
+bundle, while the workspace can still run it and configure its model, proxy,
+connections, input values, schedules and memory. The former full-width notice
+sat above every Agent destination and therefore made that boundary read as if
+the entire Agent were locked. System Agents now carry a compact provenance
+badge in the page header with that distinction in its explanation. The
+existing Duplicate action remains the route to an independent,
+organisation-owned bundle. Its label collapses to the shield below `sm`, where
+keeping the Run action reachable matters more than repeating the provenance
+word beside the same icon.
+
+The Agent Map no longer spends a permanent footer on its relationship legend.
+The clickable diagnostics count and the three edge meanings now live in one
+compact header above the canvas, inside the Map surface. The diagnostics count
+uses the same warning badge as Agent health. A first attempt used a React Flow
+`Panel`, but that component is an overlay and visibly covered the map even when
+the fit reserved extra space for it. The real header participates in layout,
+survives full-screen mode and lets the graph keep its symmetric fit. The former
+`Working copy` label is omitted because the page and version controls already
+establish which definition is being inspected.
+
+**Agent diagnostics have one business interface, 28 August.** Overview and the
+launch header already consumed `GET /api/agents/{scope}/{name}/diagnostics`, but
+the Map still consumed a second, poorer `diagnostics[]` projection embedded in
+its own response. The Lab made the divergence visible: the same Agent could
+show two schedule warnings in Overview and nine unrelated points in the Map,
+including neutral facts such as an inherited proxy and an optional output.
+`/diagnostics` is now the only active verdict. Overview, launch and Map use its
+status, counts, severity, explanation, correction and semantic target without
+recomputing readiness.
+
+One shared diagnostics dialog opens from the Overview health badge and the Map
+header badge. `correction` selects the owning bundle, configuration or schedule
+surface; no visual card id is allowed to invent that route. `target.node` and
+`target.item` are a separate locating concern. A small frontend adapter maps
+the semantic node names to the current React Flow ids, selects and centres the
+requested card, and keeps repeated diagnostic codes addressable by their field.
+The existing `agentDiagnostics=all` and `agentIssue` support URLs now perform
+those actions instead of merely changing the URL.
+
+The Map endpoint still exposes its legacy `diagnostics[]` field because removing
+it changes the generated schema and the backend integration contract. The SPA
+ignores it, and the Lab map fixture keeps it empty. Removing that wire field and
+its duplicate backend calculation is explicit contract debt, not permission to
+restore a second active verdict. Lab health fixtures remain Agent-specific and
+cover healthy, warning and blocking Agents in both Overview and Map.
+
+**Run detail opens on an operational Overview, 28 August.** The historical
+snapshot formerly labelled Details is now the first Run destination and uses
+the same Overview vocabulary as Agent detail. It keeps the immutable execution,
+input, usage, connection and configuration facts, then adds two compact
+summaries derived from the already loaded Run data: Journal events, tool calls,
+warnings and errors; and output files, structured fields and memory changes.
+Their links open Journal or Results directly. The counts do not introduce a
+second result model, and Results remains addressable while production is empty
+or pending. At desktop width the immutable Execution, Activity and Results
+surfaces occupy a two-thirds reading column. Usage, Inputs, Connections,
+Configuration and the optional technical facts form a one-third launch-context
+rail, with Usage first because it is the primary operational reading. Activity
+and Results reuse the Agent Overview grammar: bordered internal cells and
+larger tabular figures. The layout returns to one column before that rail
+becomes too narrow.
+
+**Agent construction is one Settings destination, 28 August.** Map, Files and
+Configuration no longer compete with operational destinations in the Agent's
+top navigation. That navigation is now Overview, Runs, Memory, then Settings.
+Settings owns a left rail with two explicit groups. Configuration contains
+Model, Proxy, Inputs, Connections and Schedules; Structure contains Map and
+Files. Existing deep links are migrated into the selected Settings section,
+and diagnostics correction and localisation targets use the same routes.
+
+**Detail navigation uses stock grouped shadcn tabs, 28 August.** The accepted
+Agent and Run navigation is one compact muted track whose active destination is
+a white tab. The underlined and detached-pill experiments are removed, along
+with their query parameter and development switcher. The navigation remains
+detached from the content surface. Agent Overview, Runs, Memory and Settings
+each receive one main white card aligned to the page content bounds. Run
+Overview, Journal and Results use the same rule. Both Overview destinations
+keep their internal sections as border-only cards. Their titles live in a
+light-grey header band so the nested hierarchy reads without adding another
+shadow or a second canvas. The white body starts with rounded top corners over
+the grey band, leaving the same quiet edge treatment as the Cloudflare
+reference. A detached-card comparison was tried again and rejected: the main
+white card is necessary to make the Overview read as one surface. Inside Agent
+Overview, its 24 px inset and the gaps between the three operational cards are
+the same size; a larger 32 px gap made the internal spacing look wider than the
+outer margin and visually weakened the frame.
+
+The prototype exposed two card-grammar defects. The Run surface inherited a
+descendant rule that removed the shadow from its own new containing card; that
+shadow suppression now remains limited to the accepted nested-card surface.
+Operational links also had three shapes: an inline text link, a padded footer
+and a button inside the body. Overview metrics now make the whole non-empty
+cell interactive. A pale grey arrow identifies the destination before hover;
+hover adds only a very light grey veil, turns that arrow blue and nudges it
+without moving the value. The cell veil stays deliberately quieter than the
+solid header hover. Zero and empty metrics remain static, so the UI never implies
+a destination with nothing to inspect. Agent Last Run and Next Execution use
+the same full-row behaviour. Activity, Results and Memory add a single arrow in
+their grey header when the category also has an unfiltered destination, as in
+the Cloudflare reference. Metric links carry their selected status or memory
+type into the destination filter through the URL. The whole grey header is the
+target when that arrow exists: hover changes its surface to a clearly visible,
+solid light grey, then turns and nudges the arrow. It must not turn white or
+make the header appear to disappear. This matches the Cloudflare interaction
+without leaving a tiny isolated target.
+The Usage per-turn action keeps its footer because it opens a distinct
+drill-down rather than the same category. Per-diagnostic correction remains
+attached to its row, at the right when space permits and below the explanation
+when it does not.
+
+Run Journal now follows the same collection grammar as Runs inside an Agent.
+Its search field is visible by default, the shared filter control owns level,
+event type, timestamps and tool visibility, and a standard Actions menu owns
+copy and auto-scroll. The log stream starts with a real table header for time,
+type, event and duration, while retaining virtualised rows and the click-to-
+inspect panel. The former Journal title and its row of isolated utility icons
+are removed. Execution uses the live-or-frozen shared duration leaf and calls
+its provenance field Trigger rather than Trigger type. Overview figures are
+explicitly left-aligned. The per-turn Usage footer keeps the same always-
+visible pale arrow as other clickable card regions, turning blue on hover.
+
+The tab group starts lower below the page identity. Agent health also uses the
+same card grammar: title and diagnostic badge in the grey header, findings in
+the white body. A Run with no inputs keeps its Inputs card and states the
+absence explicitly; hiding immutable launch information would make the
+historical record ambiguous.
+
+Agent and Run detail now share one header hierarchy. Their 20 px title remains
+free of badges. Stable identity and description stay on the left; version,
+working-copy state and lifecycle or readiness status form one compact cluster
+on the right, directly before the actions. This avoids two competing status
+rows. One immediate lifecycle deed remains exposed: Run for an Agent, Rerun for
+a completed Run, Cancel for an active Run. These controls use a white outline
+button with a semantic coloured icon, not a filled status colour. Secondary
+Agent deeds live behind the labelled Actions trigger and are grouped by intent:
+Agent, Execution, Export and Administration. The groups do not change
+permissions or availability; they only make a long existing menu scannable.
+Run does not render an empty Actions trigger while it has no secondary deeds.
+
+The editable Agent surface says Draft rather than showing the manifest version
+and a separate Modified badge. The manifest must carry a version for AFPS, but
+when that value still equals the latest immutable version it is not the future
+version: Create version asks for patch, minor or major and updates the manifest
+only then. Exposing that internal value beside Modified falsely presented two
+states and implied that the next version had already been chosen. Draft now has
+a tooltip naming the latest version it is based on. A historical route instead
+shows one combined `vX · Read only` badge. System Agents retain their concrete
+version because they have no editable working copy.
+
+Every badge in the Agent and Run header uses the same shared geometry: medium
+radius, transparent border, 10 px horizontal padding, 2 px vertical padding
+and 12 px medium text. Draft, readiness, Run status, inline provenance and
+read-only history vary by colour and content only. A custom readiness control
+must not shrink into a second badge language merely because it opens a popover.
 
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
@@ -2873,6 +3049,21 @@ colour and logo (deferred by decision, twice — do not start it).
   main body is one collection, so its cards/table switch is honest. It uses a
   dedicated integration column set because Origin, Version and activation
   Status are integration facts, not the package family's running state.
+- **Detail breadcrumbs include every local destination.** An Agent publishes
+  `Agents / Agent / Overview|Runs|Memory|Settings`; a persisted Run publishes
+  `Agents / Agent / Runs / Run #… / Overview|Journal|Results`. The Agent name,
+  Runs collection and Run number remain links to their parent levels. Overview
+  is explicit rather than an invisible root exception: every visible tab is a
+  destination, and a user who arrived through a direct Run URL must still have
+  a way back to each level that owns it.
+- **Embedded Agent rails keep the card gutter.** The Settings rail uses the
+  same 24px inset as its content pane. Its earlier 12px inset made the local
+  navigation look pinned to the card edge even though both panes belonged to
+  the same surface.
+- **Boolean menu actions use the stock shadcn checkbox item.** The shared
+  dropdown wrapper now exports `DropdownMenuCheckboxItem`; Journal auto-scroll
+  uses it instead of drawing a check inside a regular action item. This is both
+  the correct Radix interaction semantics and the documented shadcn composition.
 
 ## Chat
 

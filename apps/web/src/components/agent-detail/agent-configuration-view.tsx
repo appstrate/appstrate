@@ -9,20 +9,46 @@ import { RailLink } from "../settings/rail-link";
 import { AgentConfigurationTab } from "../package-detail/agent-configuration-tab";
 import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
 import { AgentSchedulesTab } from "../package-detail/agent-tabs";
-import { AgentDetailSplit } from "./agent-detail-split";
+import { AgentDetailSectionHeader, AgentDetailSplit } from "./agent-detail-split";
 
-type ConfigurationSection = "model" | "proxy" | "inputs" | "connections" | "schedules";
+export type ConfigurationSection = "model" | "proxy" | "inputs" | "connections" | "schedules";
 
 const CONFIGURATION_SECTIONS: Array<{
   id: ConfigurationSection;
   icon: typeof BrainCircuit;
   labelKey: string;
+  descriptionKey: string;
 }> = [
-  { id: "model", icon: BrainCircuit, labelKey: "detail.configuration.model" },
-  { id: "proxy", icon: Globe, labelKey: "detail.configSectionProxy" },
-  { id: "inputs", icon: SlidersHorizontal, labelKey: "detail.configuration.inputsShort" },
-  { id: "connections", icon: Plug, labelKey: "detail.configuration.connections" },
-  { id: "schedules", icon: CalendarClock, labelKey: "detail.configuration.schedulesShort" },
+  {
+    id: "model",
+    icon: BrainCircuit,
+    labelKey: "detail.configuration.model",
+    descriptionKey: "detail.configuration.modelIntro",
+  },
+  {
+    id: "proxy",
+    icon: Globe,
+    labelKey: "detail.configSectionProxy",
+    descriptionKey: "detail.configuration.proxyIntro",
+  },
+  {
+    id: "inputs",
+    icon: SlidersHorizontal,
+    labelKey: "detail.configuration.inputsShort",
+    descriptionKey: "detail.configuration.inputsDescription",
+  },
+  {
+    id: "connections",
+    icon: Plug,
+    labelKey: "detail.configuration.connections",
+    descriptionKey: "detail.configuration.connectionsDescription",
+  },
+  {
+    id: "schedules",
+    icon: CalendarClock,
+    labelKey: "detail.configuration.schedulesShort",
+    descriptionKey: "detail.configuration.schedulesDescription",
+  },
 ];
 
 export function AgentConfigurationView({
@@ -30,30 +56,38 @@ export function AgentConfigurationView({
   detail,
   configSchemaOverride,
   isHistorical,
+  section,
+  embedded = false,
 }: {
   packageId: string;
   detail: AgentDetail;
   configSchemaOverride?: JSONSchemaObject;
   isHistorical?: boolean;
+  section?: ConfigurationSection;
+  embedded?: boolean;
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
   const requestedSection = new URLSearchParams(location.search).get("agentConfig");
-  const activeSection = CONFIGURATION_SECTIONS.some((item) => item.id === requestedSection)
-    ? (requestedSection as ConfigurationSection)
-    : "model";
+  const activeSection =
+    section ??
+    (CONFIGURATION_SECTIONS.some((item) => item.id === requestedSection)
+      ? (requestedSection as ConfigurationSection)
+      : "model");
   const sharedConfigurationProps = {
     packageId,
     configSchemaOverride: isHistorical ? configSchemaOverride : detail.input?.schema,
     isHistorical,
+    showSectionDescription: false,
   };
 
   const sectionHref = (section: ConfigurationSection) => {
     const search = new URLSearchParams(location.search);
-    if (section === "model") search.delete("agentConfig");
-    else search.set("agentConfig", section);
+    if (section === "model") search.delete("agentSettings");
+    else search.set("agentSettings", section);
+    search.delete("agentConfig");
     const query = search.toString();
-    return `${location.pathname}${query ? `?${query}` : ""}#configuration`;
+    return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };
 
   const sectionBody = (() => {
@@ -73,9 +107,6 @@ export function AgentConfigurationView({
         </p>
       ) : (
         <div className="space-y-4">
-          <p className="text-muted-foreground max-w-2xl text-sm">
-            {t("detail.configuration.connectionsDescription")}
-          </p>
           <AgentConnectionsSection packageId={packageId} detail={detail} />
         </div>
       );
@@ -86,15 +117,24 @@ export function AgentConfigurationView({
       </p>
     ) : (
       <div className="space-y-4">
-        <p className="text-muted-foreground max-w-2xl text-sm">
-          {t("detail.configuration.schedulesDescription")}
-        </p>
         <AgentSchedulesTab packageId={packageId} />
       </div>
     );
   })();
 
-  const activeLabel = t(CONFIGURATION_SECTIONS.find((item) => item.id === activeSection)!.labelKey);
+  const activeItem = CONFIGURATION_SECTIONS.find((item) => item.id === activeSection)!;
+
+  const content = (
+    <section className="min-w-0 p-6">
+      <AgentDetailSectionHeader
+        title={t(activeItem.labelKey)}
+        description={t(activeItem.descriptionKey)}
+      />
+      <div>{sectionBody}</div>
+    </section>
+  );
+
+  if (embedded) return content;
 
   return (
     <AgentDetailSplit
@@ -120,11 +160,7 @@ export function AgentConfigurationView({
         </nav>
       }
     >
-      <section className="min-w-0 p-6">
-        <h2 className="text-lg font-semibold">{activeLabel}</h2>
-        <div className="border-border mt-2 border-b" />
-        <div className="pt-2">{sectionBody}</div>
-      </section>
+      {content}
     </AgentDetailSplit>
   );
 }

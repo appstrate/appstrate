@@ -742,7 +742,6 @@
   "integrations.title": "Intégrations",
   "integrations.subtitle": "Gérez les intégrations système activées et les intégrations personnalisées de l'organisation.",
   "integrations.create": "Nouvelle intégration",
-  "integrations.actions": "Actions",
   "creation.title.agent": "Créer un nouvel agent",
   "creation.title.skill": "Créer un nouveau skill",
   "creation.title.integration": "Créer une nouvelle intégration",

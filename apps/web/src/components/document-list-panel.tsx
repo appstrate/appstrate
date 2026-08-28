@@ -13,9 +13,11 @@ import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { FileText } from "lucide-react";
+import { Download, Eye, FileText, Pin, Trash2 } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   useDeleteDocument,
   useDocumentDownload,
@@ -30,6 +32,7 @@ import { DocumentTile } from "./document-tile";
 import { useDocumentColumns } from "./document-columns";
 import { DocumentPreview } from "./document-preview";
 import { ConfirmModal } from "./confirm-modal";
+import { TableRowActions } from "./table-row-actions";
 import { documentPreviewHref } from "../lib/documents";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 
@@ -83,7 +86,7 @@ export function DocumentListPanel({
    */
   onKept?: (id: string) => void;
   /** The main Documents page offers both; compact run tabs keep the gallery. */
-  display?: "cards" | "table";
+  display?: "cards" | "table" | "compact";
   /** The main page puts this dimension in ListToolbar instead of a tab strip. */
   showPurposeTabs?: boolean;
   /** Apparatus owned by the caller, built from the table's real columns. */
@@ -204,7 +207,77 @@ export function DocumentListPanel({
       )}
 
       <div className="flex flex-col gap-3">
-        {display === "table" ? (
+        {display === "compact" ? (
+          isLoading ? (
+            <Skeleton className="h-7 w-full" />
+          ) : error ? (
+            <ErrorState message={getErrorMessage(error)} compact />
+          ) : documents.length === 0 ? (
+            emptyState
+          ) : (
+            <ul className="grid gap-1">
+              {documents.map((doc) => {
+                const canKeep = doc.capabilities.keep && Boolean(doc.expiresAt);
+                const hasMenu = Boolean(
+                  doc.capabilities.preview ||
+                  doc.capabilities.download ||
+                  canKeep ||
+                  doc.capabilities.delete,
+                );
+                const hasNonDestructiveAction = Boolean(
+                  doc.capabilities.preview || doc.capabilities.download || canKeep,
+                );
+
+                return (
+                  <li key={doc.id} className="flex min-w-0 items-center gap-2 py-0.5">
+                    <span className="min-w-0 flex-1 truncate text-sm" title={doc.name}>
+                      {doc.name}
+                    </span>
+                    <TableRowActions
+                      menuLabel={hasMenu ? t("row.moreActions", { name: doc.name }) : undefined}
+                      isPending={pendingKeepId === doc.id}
+                    >
+                      {hasMenu ? (
+                        <>
+                          {doc.capabilities.preview && (
+                            <DropdownMenuItem onSelect={() => setPreviewParam(doc.id)}>
+                              <Eye />
+                              {t("row.preview")}
+                            </DropdownMenuItem>
+                          )}
+                          {doc.capabilities.download && (
+                            <DropdownMenuItem onSelect={() => void download(doc.id, doc.name)}>
+                              <Download />
+                              {t("row.download")}
+                            </DropdownMenuItem>
+                          )}
+                          {canKeep && (
+                            <DropdownMenuItem onSelect={() => onKeep(doc)}>
+                              <Pin />
+                              {t("row.keep")}
+                            </DropdownMenuItem>
+                          )}
+                          {doc.capabilities.delete && (
+                            <>
+                              {hasNonDestructiveAction && <DropdownMenuSeparator />}
+                              <DropdownMenuItem
+                                onSelect={() => onDelete(doc)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 />
+                                {t("row.delete")}
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </>
+                      ) : undefined}
+                    </TableRowActions>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        ) : display === "table" ? (
           <DataTable
             label={tableLabel ?? t("tableLabel")}
             columns={columns}

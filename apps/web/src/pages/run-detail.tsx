@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
@@ -26,16 +26,17 @@ import { formatDateField } from "../lib/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
-import type { RunDetailTab } from "../lib/run-detail-tabs";
+import { RUN_DETAIL_TABS, type RunDetailTab } from "../lib/run-detail-tabs";
 import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
 import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
+import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
 import { Button } from "@appstrate/ui/components/button";
 import { ArrowRight } from "lucide-react";
-import {
-  AgentLocalTabsList,
-  AgentLocalTabsTrigger,
-} from "../components/agent-detail/agent-local-tabs";
+import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import { Badge } from "../components/status-badge";
+import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import type { JournalOverviewFilter } from "../components/log-viewer";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -48,12 +49,20 @@ export function RunDetailPage() {
   // filtered from catalog endpoints so the query would 404 on every view.
   const isInlinePath = packageId.startsWith("@inline/");
   const location = useLocation();
+  const navigate = useNavigate();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
+  const requestedJournalFilter = new URLSearchParams(location.search).get("journalFilter");
+  const journalFilter: JournalOverviewFilter | undefined =
+    requestedJournalFilter === "tools" ||
+    requestedJournalFilter === "warnings" ||
+    requestedJournalFilter === "errors"
+      ? requestedJournalFilter
+      : undefined;
 
   // `useGlobalRunSync` (mounted in MainLayout) patches `run.status` directly
   // into the React Query cache from the LISTEN/NOTIFY stream, so reading
@@ -198,13 +207,12 @@ export function RunDetailPage() {
   const hasInlineName = !!enrichedRun.agent_name?.trim();
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
-  // For inline runs the agent crumb *is* the last crumb (the run itself),
-  // so omit href — PageHeader renders it as the current-page indicator.
   const agentCrumb = isInline
     ? {
         label: hasInlineName
           ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
           : inlineName,
+        href: location.pathname,
       }
     : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
 
@@ -216,34 +224,53 @@ export function RunDetailPage() {
     inlineName,
     numberedTitle: runCrumbLabel,
   });
+  const requestedRunTab = location.hash.replace(/^#/, "");
+  const breadcrumbTab: RunDetailTab = RUN_DETAIL_TABS.includes(requestedRunTab as RunDetailTab)
+    ? (requestedRunTab as RunDetailTab)
+    : "overview";
+  const breadcrumbTabLabel: Record<RunDetailTab, string> = {
+    overview: t("run.tabOverview"),
+    journal: t("run.tabJournal"),
+    results: t("run.tabResults"),
+  };
 
-  // Inline agents are 1:1 with their single run — the agent crumb already
-  // identifies the run, so a trailing "Run #N" crumb is redundant.
   const breadcrumbs = [
     { label: t("detail.breadcrumb"), href: "/agents" },
     agentCrumb,
-    ...(isInline ? [] : [{ label: runCrumbLabel }]),
+    ...(isInline
+      ? []
+      : [
+          { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
+          { label: runCrumbLabel, href: location.pathname },
+        ]),
+    { label: breadcrumbTabLabel[breadcrumbTab] },
   ];
 
   return (
     <div>
       <PageHeader
         title={title}
+        titleClassName="text-xl"
         breadcrumbs={breadcrumbs}
         wrapActions
         actions={
-          <RunHeaderActions
-            run={enrichedRun}
-            canRerun={!isRunning && !isInline && !!agent}
-            canCancel={isRunning && enrichedRun.runOrigin !== "remote"}
-            rerunPending={runAgent.isPending}
-            cancelPending={cancelRun.isPending}
-            onRerun={() => setInputOpen(true)}
-            onCancel={() => cancelRun.mutate(runId!)}
-          />
+          <>
+            <Badge status={enrichedRun.status} unread={enrichedRun.unread} />
+            {enrichedRun.package_ephemeral && (
+              <UIBadge variant="secondary">{t("runs.inlineBadge")}</UIBadge>
+            )}
+            <RunHeaderActions
+              canRerun={!isRunning && !isInline && !!agent}
+              canCancel={isRunning && enrichedRun.runOrigin !== "remote"}
+              rerunPending={runAgent.isPending}
+              cancelPending={cancelRun.isPending}
+              onRerun={() => setInputOpen(true)}
+              onCancel={() => cancelRun.mutate(runId!)}
+            />
+          </>
         }
       >
-        <RunHeaderSummary run={enrichedRun} isRunning={isRunning} />
+        <RunHeaderSummary run={enrichedRun} />
       </PageHeader>
 
       {agent && (
@@ -276,24 +303,57 @@ export function RunDetailPage() {
       >
         {({ activeTab, setActiveTab }) => (
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
-            <div
-              className="bg-card overflow-hidden rounded-lg border shadow-sm [&_.shadow-md]:shadow-none [&_.shadow-sm]:shadow-none"
-              data-run-detail-surface
-            >
-              <AgentLocalTabsList>
-                <AgentLocalTabsTrigger value="journal">{t("run.tabJournal")}</AgentLocalTabsTrigger>
-                {isTerminal && hasDurableResults && (
-                  <AgentLocalTabsTrigger value="results">
-                    {t("run.tabResults")}
-                  </AgentLocalTabsTrigger>
-                )}
-              </AgentLocalTabsList>
+            <div className="overflow-visible" data-run-detail-surface>
+              <DetailTabsList className="mt-6 mb-3">
+                <DetailTabsTrigger value="overview">{t("run.tabOverview")}</DetailTabsTrigger>
+                <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
+                <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>
+              </DetailTabsList>
 
-              <TabsContent value="journal" className="mt-0">
+              <TabsContent
+                value="overview"
+                className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+              >
+                <RunSnapshotInspector
+                  run={enrichedRun}
+                  turns={turnRows}
+                  logs={allLogs}
+                  structuredOutput={finalOutput}
+                  memoryChangeCount={runMemoryCount}
+                  onOpenJournal={(filter) => {
+                    const search = new URLSearchParams(location.search);
+                    if (filter) search.set("journalFilter", filter);
+                    else search.delete("journalFilter");
+                    const query = search.toString();
+                    navigate({
+                      pathname: location.pathname,
+                      search: query ? `?${query}` : "",
+                      hash: "#journal",
+                    });
+                  }}
+                  onOpenResults={() => {
+                    const search = new URLSearchParams(location.search);
+                    search.delete("journalFilter");
+                    const query = search.toString();
+                    navigate({
+                      pathname: location.pathname,
+                      search: query ? `?${query}` : "",
+                      hash: "#results",
+                    });
+                  }}
+                  cardHeaders
+                  contained
+                />
+              </TabsContent>
+
+              <TabsContent
+                value="journal"
+                className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+              >
                 <RunExecutionView
                   run={enrichedRun}
                   logs={allLogs}
-                  turns={turnRows}
+                  initialFilter={journalFilter}
                   headerActions={
                     run.status === "success" && hasDurableResults ? (
                       <Button variant="outline" size="sm" onClick={() => setActiveTab("results")}>
@@ -311,12 +371,16 @@ export function RunDetailPage() {
                 />
               </TabsContent>
 
-              <TabsContent value="results" className="mt-0">
+              <TabsContent
+                value="results"
+                className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+              >
                 <RunResultsView
                   run={enrichedRun}
                   packageId={packageId}
                   output={finalOutput}
                   hasRunMemory={hasRunMemory}
+                  isRunning={isRunning}
                 />
               </TabsContent>
             </div>

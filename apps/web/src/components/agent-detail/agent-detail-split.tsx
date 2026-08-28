@@ -46,3 +46,19 @@ export function AgentDetailPaneHeader({ className, ...props }: HTMLAttributes<HT
     />
   );
 }
+
+/** Editorial heading for the content selected in a split surface's left rail. */
+export function AgentDetailSectionHeader({
+  title,
+  description,
+}: {
+  title: ReactNode;
+  description: ReactNode;
+}) {
+  return (
+    <header className="mb-6">
+      <h2 className="text-xl font-semibold">{title}</h2>
+      <p className="text-muted-foreground mt-1 max-w-2xl text-sm leading-relaxed">{description}</p>
+    </header>
+  );
+}

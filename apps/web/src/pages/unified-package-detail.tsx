@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Fragment, lazy, Suspense, useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useParams, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -14,6 +14,7 @@ import {
   usePackageDownload,
   useDeletePackage,
   useAgents,
+  useVersionInfo,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -42,28 +43,15 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
-import { AgentConfigurationView } from "../components/agent-detail/agent-configuration-view";
-import {
-  AgentLocalTabsList,
-  AgentLocalTabsSeparator,
-  AgentLocalTabsTrigger,
-} from "../components/agent-detail/agent-local-tabs";
+import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
+import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 
 type DetailTab =
-  | "overview"
-  | "map"
-  | "files"
-  | "runs"
-  | "configuration"
-  | "memory"
-  | "versions"
-  | "diff"
-  | "content"
-  | "usedBy";
+  "overview" | "runs" | "settings" | "memory" | "versions" | "diff" | "content" | "usedBy";
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
 const AgentBundleEditorModal = lazy(() =>
@@ -72,7 +60,7 @@ const AgentBundleEditorModal = lazy(() =>
 
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
-function AgentRunButtonInline({
+function AgentReadinessBadge({
   packageId,
   versionLabel,
 }: {
@@ -80,16 +68,8 @@ function AgentRunButtonInline({
   versionLabel: string | undefined;
 }) {
   const { t } = useTranslation("agents");
-  const { data: detail } = usePackageDetail("agent", packageId);
   const diagnostics = useAgentDiagnostics(packageId, versionLabel);
-
-  if (!detail) return null;
-
   const result = diagnostics.data;
-  const runDisabled = diagnostics.isLoading || !diagnosticsAllowLaunch(result);
-  const runDisabledTitle = result?.diagnostics.find(
-    (item) => item.severity === "blocking" && !item.recoverable_on_launch,
-  )?.explanation;
   const status = diagnostics.isLoading ? "loading" : (result?.status ?? "warning");
   const statusLabel = diagnostics.isLoading
     ? t("detail.diagnostics.assessing")
@@ -98,53 +78,74 @@ function AgentRunButtonInline({
       : result?.status === "blocking"
         ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
         : t("detail.diagnostics.warningTitle", { count: result?.warning_count ?? 0 });
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "focus:ring-ring inline-flex items-center rounded-md border border-transparent px-2.5 py-0.5 text-xs font-medium transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none",
+            status === "healthy"
+              ? "bg-success/20 text-success hover:bg-success/25"
+              : status === "blocking"
+                ? "bg-destructive/20 text-destructive hover:bg-destructive/25"
+                : "bg-warning/20 text-warning hover:bg-warning/25",
+          )}
+        >
+          {statusLabel}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-4">
+        <p className="text-sm font-semibold">{t("detail.diagnostics.title")}</p>
+        <p className="text-muted-foreground mt-1 text-xs">{statusLabel}</p>
+        {result && result.diagnostics.length > 0 && (
+          <ul className="mt-3 space-y-2">
+            {result.diagnostics.slice(0, 4).map((item) => (
+              <li key={`${item.code}:${item.field}`} className="text-xs">
+                {item.title}
+              </li>
+            ))}
+          </ul>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function AgentRunButtonInline({
+  packageId,
+  detail,
+  versionLabel,
+}: {
+  packageId: string;
+  detail: AgentDetail;
+  versionLabel: string | undefined;
+}) {
+  const diagnostics = useAgentDiagnostics(packageId, versionLabel);
+  const result = diagnostics.data;
+  const runDisabled = diagnostics.isLoading || !diagnosticsAllowLaunch(result);
+  const runDisabledTitle = result?.diagnostics.find(
+    (item) => item.severity === "blocking" && !item.recoverable_on_launch,
+  )?.explanation;
   const connectionWarning =
     result?.diagnostics.some(
       (item) => item.severity === "blocking" && item.recoverable_on_launch,
     ) ?? false;
 
   return (
-    <>
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              "rounded px-1.5 py-0.5 text-[0.65rem] font-medium focus-visible:ring-2 focus-visible:outline-none",
-              status === "healthy"
-                ? "bg-success/10 text-success hover:bg-success/15"
-                : status === "blocking"
-                  ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
-                  : "bg-warning/15 text-warning hover:bg-warning/20",
-            )}
-          >
-            {statusLabel}
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-80 p-4">
-          <p className="text-sm font-semibold">{t("detail.diagnostics.title")}</p>
-          <p className="text-muted-foreground mt-1 text-xs">{statusLabel}</p>
-          {result && result.diagnostics.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {result.diagnostics.slice(0, 4).map((item) => (
-                <li key={`${item.code}:${item.field}`} className="text-xs">
-                  {item.title}
-                </li>
-              ))}
-            </ul>
-          )}
-        </PopoverContent>
-      </Popover>
-      <RunAgentButton
-        packageId={packageId}
-        detail={detail}
-        version={versionLabel}
-        disabled={runDisabled}
-        disabledTitle={runDisabledTitle}
-        connectionWarning={!runDisabled && connectionWarning}
-        showLabel
-      />
-    </>
+    <RunAgentButton
+      packageId={packageId}
+      detail={detail}
+      version={versionLabel}
+      disabled={runDisabled}
+      disabledTitle={runDisabledTitle}
+      connectionWarning={!runDisabled && connectionWarning}
+      variant="outline"
+      size="sm"
+      className="bg-card"
+      showLabel
+    />
   );
 }
 
@@ -164,6 +165,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
+  const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
 
   // Agents list for "Used by" tab enrichment
   const { data: allAgents } = useAgents();
@@ -236,6 +238,32 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         ? "content"
         : "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
+  const openAgentSettings = (section: "map" | "files" | "model") => {
+    const search = new URLSearchParams(location.search);
+    if (section === "model") search.delete("agentSettings");
+    else search.set("agentSettings", section);
+    search.delete("agentConfig");
+    void navigate(
+      { pathname: location.pathname, search: search.toString(), hash: "settings" },
+      { replace: true },
+    );
+  };
+
+  useEffect(() => {
+    if (type !== "agent") return;
+    const legacyTab = location.hash.replace(/^#/, "");
+    if (legacyTab !== "map" && legacyTab !== "files" && legacyTab !== "configuration") return;
+    const search = new URLSearchParams(location.search);
+    const section =
+      legacyTab === "configuration" ? search.get("agentConfig") || "model" : legacyTab;
+    if (section === "model") search.delete("agentSettings");
+    else search.set("agentSettings", section);
+    search.delete("agentConfig");
+    void navigate(
+      { pathname: location.pathname, search: search.toString(), hash: "settings" },
+      { replace: true },
+    );
+  }, [location.hash, location.pathname, location.search, navigate, type]);
   // Reset tab if it becomes invalid
   useEffect(() => {
     if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
@@ -344,11 +372,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
     overview: t("detail.overview.summary"),
-    map: t("detail.overview.map"),
-    files: t("detail.overview.explorer"),
     runs: t("detail.tabRuns"),
-    configuration: t("detail.tabConfiguration"),
     memory: t("detail.tabMemory"),
+    settings: t("detail.tabSettings"),
   };
   const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.map((id) => ({
     id,
@@ -382,9 +408,26 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
         hasUnarchivedChanges={hasArchivableChanges}
-        actionsLeft={
+        latestPublishedVersion={versionInfo?.latest_published_version}
+        activeSubpage={
+          type === "agent"
+            ? {
+                label: agentTabLabels[tab as (typeof AGENT_DETAIL_TABS)[number]],
+              }
+            : undefined
+        }
+        statusBadges={
           type === "agent" ? (
-            <AgentRunButtonInline packageId={packageId} versionLabel={versionLabel} />
+            <AgentReadinessBadge packageId={packageId} versionLabel={versionLabel} />
+          ) : undefined
+        }
+        actionsLeft={
+          type === "agent" && agentDetail ? (
+            <AgentRunButtonInline
+              packageId={packageId}
+              detail={agentDetail}
+              versionLabel={versionLabel}
+            />
           ) : undefined
         }
         actionsRight={
@@ -456,7 +499,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         activeUrl={packageDetailPath(type, packageId)}
       />
 
-      {!isOwned && (
+      {!isOwned && type !== "agent" && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">
           <span className="text-blue-400">{t("ownership.readOnly")}</span>
           {forkedFrom && (
@@ -487,21 +530,20 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {type === "agent" && agentDetail && (
-        <div
-          className="bg-card overflow-hidden rounded-lg border shadow-sm"
-          data-agent-detail-surface
-        >
+        <div className="overflow-visible" data-agent-detail-surface>
           <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)}>
-            <AgentLocalTabsList>
+            <DetailTabsList className="mt-6 mb-3">
               {agentTabs.map((item) => (
-                <Fragment key={item.id}>
-                  {item.id === "map" && <AgentLocalTabsSeparator />}
-                  <AgentLocalTabsTrigger value={item.id}>{item.label}</AgentLocalTabsTrigger>
-                </Fragment>
+                <DetailTabsTrigger key={item.id} value={item.id}>
+                  {item.label}
+                </DetailTabsTrigger>
               ))}
-            </AgentLocalTabsList>
+            </DetailTabsList>
 
-            <TabsContent value="overview" className="mt-0">
+            <TabsContent
+              value="overview"
+              className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+            >
               <AgentOverviewTab
                 packageId={packageId}
                 detail={agentDetail}
@@ -510,49 +552,39 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 currentManifest={currentManifest}
                 currentContent={currentContent}
                 surface="summary"
-                onOpenFiles={() => setTab("files")}
+                onOpenFiles={() => openAgentSettings("files")}
+                cardHeaders
+                contained
               />
             </TabsContent>
-            <TabsContent value="map" className="mt-0">
-              <AgentOverviewTab
-                packageId={packageId}
-                detail={agentDetail}
-                version={versionLabel}
-                isHistorical={isHistoricalVersion}
-                currentManifest={currentManifest}
-                currentContent={currentContent}
-                surface="map"
-                onOpenFiles={() => setTab("files")}
-              />
-            </TabsContent>
-            <TabsContent value="files" className="mt-0">
-              <AgentOverviewTab
-                packageId={packageId}
-                detail={agentDetail}
-                version={versionLabel}
-                isHistorical={isHistoricalVersion}
-                currentManifest={currentManifest}
-                currentContent={currentContent}
-                surface="files"
-                onOpenFiles={() => setTab("files")}
-              />
-            </TabsContent>
-            <TabsContent value="runs" className="mt-0 p-6">
+            <TabsContent
+              value="runs"
+              className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+            >
               <AgentRunsTab
                 packageId={packageId}
                 versionLabel={versionLabel}
                 configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
               />
             </TabsContent>
-            <TabsContent value="configuration" className="mt-0">
-              <AgentConfigurationView
+            <TabsContent
+              value="settings"
+              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+            >
+              <AgentSettingsView
                 packageId={packageId}
                 detail={agentDetail}
+                version={versionLabel}
                 configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
                 isHistorical={isHistoricalVersion}
+                currentManifest={currentManifest}
+                currentContent={currentContent}
               />
             </TabsContent>
-            <TabsContent value="memory" className="mt-0">
+            <TabsContent
+              value="memory"
+              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+            >
               <AgentMemoryTab packageId={packageId} />
             </TabsContent>
           </Tabs>

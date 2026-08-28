@@ -5,8 +5,8 @@
  *
  * One component per server-declared node type. They render `data` verbatim —
  * no fetching, no derivation, no verdict of their own. `data.diagnostics`
- * arrives pre-routed by the server (see `services/agent-map.ts`), so a row
- * badge is a lookup by `item_id`, never a recomputation.
+ * is the canonical Agent diagnostic interface projected onto the visual node
+ * by `agent-map-view.tsx`; a row badge is only a lookup by `target.item`.
  *
  * The type→component map lives in `agent-map-view.tsx` as a module constant:
  * React Flow requires a stable identity, and keeping this file
@@ -23,6 +23,7 @@ import {
   Bot,
   Brain,
   ChevronRight,
+  CircleX,
   Clock,
   Cpu,
   Globe,
@@ -39,7 +40,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import type { AgentMapDiagnostic } from "./use-agent-map";
+import type { AgentDiagnostic } from "../../hooks/use-agent-diagnostics";
 import { packageDetailPath } from "../../lib/package-paths";
 import { Modal } from "../../components/modal";
 import {
@@ -62,23 +63,22 @@ import type { MapPanelKind } from "./map-panel-dialog";
  */
 const PREVIEW_ROW_COUNT = 3;
 
-function diagnosticsFor(
-  diagnostics: AgentMapDiagnostic[],
-  itemId: string | null,
-): AgentMapDiagnostic[] {
-  return diagnostics.filter((d) => d.item_id === itemId);
+function diagnosticsFor(diagnostics: AgentDiagnostic[], itemId: string | null): AgentDiagnostic[] {
+  return diagnostics.filter((d) => d.target.item === itemId);
 }
 
-/** Row-level warning marker. Title carries the server's message verbatim. */
-function DiagnosticBadge({ diagnostics }: { diagnostics: AgentMapDiagnostic[] }) {
+/** Row-level marker. Tone and copy are carried by the canonical diagnostic. */
+function DiagnosticBadge({ diagnostics }: { diagnostics: AgentDiagnostic[] }) {
   if (diagnostics.length === 0) return null;
+  const blocking = diagnostics.some((diagnostic) => diagnostic.severity === "blocking");
+  const Icon = blocking ? CircleX : AlertTriangle;
   return (
     <span
-      className="text-warning shrink-0"
-      title={diagnostics.map((d) => d.message).join("\n")}
-      aria-label={diagnostics[0]!.message}
+      className={blocking ? "text-destructive shrink-0" : "text-warning shrink-0"}
+      title={diagnostics.map((d) => d.explanation).join("\n")}
+      aria-label={diagnostics[0]!.explanation}
     >
-      <AlertTriangle className="size-3.5" />
+      <Icon className="size-3.5" />
     </span>
   );
 }
@@ -534,8 +534,8 @@ function items<T>(data: Record<string, unknown>): T[] {
   return Array.isArray(data.items) ? (data.items as T[]) : [];
 }
 
-function diagnostics(data: Record<string, unknown>): AgentMapDiagnostic[] {
-  return Array.isArray(data.diagnostics) ? (data.diagnostics as AgentMapDiagnostic[]) : [];
+function diagnostics(data: Record<string, unknown>): AgentDiagnostic[] {
+  return Array.isArray(data.diagnostics) ? (data.diagnostics as AgentDiagnostic[]) : [];
 }
 
 /**
@@ -579,6 +579,7 @@ function relationProps(data: Record<string, unknown>, id: string) {
 export function SchedulesNode({ data }: NodeProps) {
   const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<ScheduleItem>(data);
+  const diags = diagnostics(data);
   return (
     <Card
       icon={<Clock />}
@@ -608,9 +609,12 @@ export function SchedulesNode({ data }: NodeProps) {
           dimmed={!item.enabled}
           href={`/schedules/${item.id}`}
           right={
-            !item.enabled ? (
-              <span className="text-muted-foreground text-[10px]">{t("agent-map:disabled")}</span>
-            ) : undefined
+            <span className="flex items-center gap-1">
+              {!item.enabled && (
+                <span className="text-muted-foreground text-[10px]">{t("agent-map:disabled")}</span>
+              )}
+              <DiagnosticBadge diagnostics={diagnosticsFor(diags, item.id)} />
+            </span>
           }
         />
       ))}
@@ -621,7 +625,7 @@ export function SchedulesNode({ data }: NodeProps) {
 export function AgentNode({ data }: NodeProps) {
   const { t } = useTranslation(["agents", "agent-map"]);
   const d = data as unknown as AgentData & {
-    diagnostics?: AgentMapDiagnostic[];
+    diagnostics?: AgentDiagnostic[];
   };
   const diags = diagnostics(data);
   const edit = cardAction(data, "onEdit", "prompt", t("agent-map:editPrompt"), "edit");
@@ -791,6 +795,7 @@ export function SkillsNode({ data }: NodeProps) {
 export function ModelNode({ data }: NodeProps) {
   const { t } = useTranslation(["agents", "agent-map"]);
   const d = data as unknown as ModelData;
+  const diags = diagnostics(data);
   // One model, changed rather than added — a pencil, and the row itself opens
   // the same picker so the content is clickable.
   const choose = cardAction(data, "onPanel", "model", t("agent-map:chooseModel"), "edit");
@@ -818,11 +823,14 @@ export function ModelNode({ data }: NodeProps) {
         dimmed={!d.resolved}
         onClick={choose?.onClick}
         right={
-          d.resolved ? undefined : (
-            <span className="text-warning shrink-0" title={t("agent-map:noModelHint")}>
-              <AlertTriangle className="size-3.5" />
-            </span>
-          )
+          <span className="flex items-center gap-1">
+            {!d.resolved && diags.length === 0 && (
+              <span className="text-warning shrink-0" title={t("agent-map:noModelHint")}>
+                <AlertTriangle className="size-3.5" />
+              </span>
+            )}
+            <DiagnosticBadge diagnostics={diags} />
+          </span>
         }
       />
     </Card>

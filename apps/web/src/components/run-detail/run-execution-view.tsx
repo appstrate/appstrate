@@ -1,30 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { EnrichedRun } from "@appstrate/shared-types";
-import { LogViewer } from "../log-viewer";
-import type { ExecutionEntry, RunTurnRow } from "../log-utils";
-import { RunSnapshotInspector } from "./run-snapshot-inspector";
+import { cn } from "@appstrate/ui/cn";
+import { LogEntryInspector, LogViewer } from "../log-viewer";
+import type { JournalOverviewFilter } from "../log-viewer";
+import type { ExecutionEntry } from "../log-utils";
 
 export function RunExecutionView({
   run,
   logs,
-  turns,
   headerActions,
   notices,
+  initialFilter,
 }: {
   run: EnrichedRun;
   logs: ExecutionEntry[];
-  turns: RunTurnRow[];
   headerActions?: ReactNode;
   notices?: ReactNode;
+  initialFilter?: JournalOverviewFilter;
 }) {
   const { t } = useTranslation("agents");
+  const [selectedEntry, setSelectedEntry] = useState<ExecutionEntry | null>(null);
 
   return (
     <div
-      className="grid min-w-0 lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]"
+      className={cn(
+        "grid min-w-0",
+        selectedEntry && "lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]",
+      )}
       data-run-journal-split
     >
       <section className="min-w-0">
@@ -36,12 +41,17 @@ export function RunExecutionView({
             variant="integrated"
             heading={t("run.executionStream")}
             headerActions={headerActions}
+            selectedEntryId={selectedEntry?.id}
+            onSelectEntry={setSelectedEntry}
+            initialFocus={initialFilter}
           />
         </div>
       </section>
-      <aside className="border-border min-w-0 border-t lg:border-t-0 lg:border-l">
-        <RunSnapshotInspector run={run} turns={turns} />
-      </aside>
+      {selectedEntry && (
+        <aside className="border-border min-w-0 border-t lg:border-t-0 lg:border-l">
+          <LogEntryInspector entry={selectedEntry} onClose={() => setSelectedEntry(null)} />
+        </aside>
+      )}
     </div>
   );
 }

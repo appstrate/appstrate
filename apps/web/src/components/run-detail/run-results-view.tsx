@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, Braces, FileOutput } from "lucide-react";
+import { BrainCircuit, Braces, FileOutput, LoaderCircle } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { useDocuments } from "../../hooks/use-documents";
 import { classifyRunResults } from "../../lib/run-results";
-import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
+import { AgentDetailSectionHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { DocumentListPanel } from "../document-list-panel";
 import { JsonView } from "../json-view";
 import { EmptyState } from "../page-states";
@@ -24,11 +24,13 @@ export function RunResultsView({
   packageId,
   output,
   hasRunMemory,
+  isRunning,
 }: {
   run: EnrichedRun;
   packageId: string;
   output: Record<string, unknown> | null;
   hasRunMemory: boolean;
+  isRunning: boolean;
 }) {
   const { t } = useTranslation("agents");
   const [requestedSection, setRequestedSection] = useState<ResultsSectionId>("production");
@@ -56,6 +58,7 @@ export function RunResultsView({
             id: "production" as const,
             icon: FileOutput,
             label: t("run.resultsProduction"),
+            description: t("run.resultsProductionDescription"),
           },
         ]
       : []),
@@ -65,6 +68,7 @@ export function RunResultsView({
             id: "structured" as const,
             icon: Braces,
             label: t("run.resultsStructuredOutput"),
+            description: t("run.resultsStructuredOutputDescription"),
           },
         ]
       : []),
@@ -74,6 +78,7 @@ export function RunResultsView({
             id: "memory" as const,
             icon: BrainCircuit,
             label: t("run.resultsMemoryChanges"),
+            description: t("run.resultsMemoryChangesDescription"),
           },
         ]
       : []),
@@ -85,9 +90,9 @@ export function RunResultsView({
     return (
       <div className="p-6">
         <EmptyState
-          icon={FileOutput}
-          message={t("run.resultsEmpty")}
-          hint={t("run.resultsEmptyHint")}
+          icon={isRunning ? LoaderCircle : FileOutput}
+          message={isRunning ? t("run.resultsPending") : t("run.resultsEmpty")}
+          hint={isRunning ? t("run.resultsPendingHint") : t("run.resultsEmptyHint")}
         />
       </div>
     );
@@ -146,9 +151,11 @@ export function RunResultsView({
       }
     >
       <section className="min-w-0 p-6">
-        <h2 className="text-lg font-semibold">{activeSection.label}</h2>
-        <div className="border-border mt-2 border-b" />
-        <div className="space-y-4 pt-2">
+        <AgentDetailSectionHeader
+          title={activeSection.label}
+          description={activeSection.description}
+        />
+        <div className="space-y-4">
           {isPartial && (
             <Alert>
               <FileOutput />

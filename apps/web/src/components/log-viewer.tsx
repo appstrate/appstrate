@@ -7,6 +7,7 @@ import {
   Copy,
   Check,
   CheckCircle2,
+  ChevronDown,
   Clock,
   ArrowDown,
   Info,
@@ -27,6 +28,13 @@ import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@appstrate/ui/components/dropdown-menu";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
@@ -38,6 +46,7 @@ import {
   type ToolExecutionStatus,
 } from "./log-utils";
 import { Modal } from "./modal";
+import { ListToolbar, type FilterSpec } from "./list-toolbar";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
@@ -184,8 +193,12 @@ interface LogViewerProps {
   heading?: string;
   description?: string;
   headerActions?: ReactNode;
+  selectedEntryId?: string | null;
+  onSelectEntry?: (entry: ExecutionEntry | null) => void;
+  initialFocus?: JournalOverviewFilter;
 }
 
+export type JournalOverviewFilter = "tools" | "warnings" | "errors";
 type JournalLevelFilter = "info" | "warn" | "error";
 type JournalTypeFilter = "message" | "tool_call" | "tool_result" | "diagnostic";
 
@@ -222,21 +235,48 @@ export function LogViewer({
   heading,
   description,
   headerActions,
+  selectedEntryId,
+  onSelectEntry,
+  initialFocus,
 }: LogViewerProps) {
   const { t, i18n } = useTranslation("agents");
   const scrollRef = useRef<HTMLDivElement>(null);
   const positionedRef = useRef(false);
 
-  const [showTimestamps, setShowTimestamps] = useState(false);
-  const [showTools, setShowTools] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [showTimestamps, setShowTimestamps] = useState(false);
+  const [showTools, setShowTools] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [levelFilters, setLevelFilters] = useState<JournalLevelFilter[]>([]);
   const [typeFilters, setTypeFilters] = useState<JournalTypeFilter[]>([]);
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const displayFilters = [
+    ...(showTimestamps ? ["timestamps"] : []),
+    ...(!showTools ? ["hide_tools"] : []),
+  ];
+
+  useEffect(() => {
+    if (initialFocus === "tools") {
+      setLevelFilters([]);
+      setTypeFilters(["tool_call", "tool_result"]);
+      return;
+    }
+    if (initialFocus === "warnings") {
+      setLevelFilters(["warn"]);
+      setTypeFilters([]);
+      return;
+    }
+    if (initialFocus === "errors") {
+      setLevelFilters(["error"]);
+      setTypeFilters([]);
+      return;
+    }
+    setLevelFilters([]);
+    setTypeFilters([]);
+  }, [initialFocus]);
   const normalizedQuery = query.trim().toLocaleLowerCase(i18n.language);
   const visibleEntries = useMemo(() => {
     return entries.filter((entry) => {
@@ -258,9 +298,52 @@ export function LogViewer({
   const availableTypes = (["message", "tool_call", "tool_result", "diagnostic"] as const).filter(
     (value) => entries.some((entry) => journalType(entry) === value),
   );
-  const activeFilterCount = levelFilters.length + typeFilters.length;
   const hasJournalFilters = availableLevels.length > 1 || availableTypes.length > 1;
+  const activeFilterCount = levelFilters.length + typeFilters.length + displayFilters.length;
   const hasActiveQueryOrFilters = normalizedQuery !== "" || activeFilterCount > 0;
+  const filters: FilterSpec[] = [
+    ...(availableLevels.length > 1
+      ? [
+          {
+            id: "level",
+            label: t("log.filterLevel"),
+            values: levelFilters,
+            options: availableLevels.map((value) => ({
+              value,
+              label: t(`log.level.${value}`),
+            })),
+            onChange: (values: string[]) => setLevelFilters(values as JournalLevelFilter[]),
+          },
+        ]
+      : []),
+    ...(availableTypes.length > 1
+      ? [
+          {
+            id: "type",
+            label: t("log.filterType"),
+            values: typeFilters,
+            options: availableTypes.map((value) => ({
+              value,
+              label: t(`log.type.${value}`),
+            })),
+            onChange: (values: string[]) => setTypeFilters(values as JournalTypeFilter[]),
+          },
+        ]
+      : []),
+    {
+      id: "display",
+      label: t("log.filterDisplay"),
+      values: displayFilters,
+      options: [
+        { value: "timestamps", label: t("log.toggleTimestamps") },
+        { value: "hide_tools", label: t("log.hideTools") },
+      ],
+      onChange: (values: string[]) => {
+        setShowTimestamps(values.includes("timestamps"));
+        setShowTools(!values.includes("hide_tools"));
+      },
+    },
+  ];
   const selectedTool =
     entries.find((entry): entry is ToolExecutionEntry => {
       return entry.kind === "tool" && entry.id === selectedToolId;
@@ -344,7 +427,194 @@ export function LogViewer({
     setQuery("");
     setLevelFilters([]);
     setTypeFilters([]);
+    setShowTimestamps(false);
+    setShowTools(true);
   };
+
+  if (variant === "integrated") {
+    const journalGrid = showTimestamps
+      ? "grid-cols-[7rem_10rem_minmax(22rem,1fr)_6rem]"
+      : "grid-cols-[10rem_minmax(22rem,1fr)_6rem]";
+
+    return (
+      <div className="bg-card overflow-hidden" data-log-viewer-variant={variant}>
+        <ListToolbar
+          placement="panel"
+          panelFiltersAdjacent
+          search={{ value: query, onChange: setQuery, placeholder: t("log.search") }}
+          filters={filters}
+          onReset={clearJournalFilters}
+          actions={
+            <div className="flex items-center gap-2">
+              {headerActions}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 bg-transparent shadow-none">
+                    {t("common:pageActions.label")}
+                    <ChevronDown />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={handleCopy}>
+                    {copied ? <Check /> : <Copy />}
+                    {copied ? t("log.copied") : t("log.copyLogs")}
+                  </DropdownMenuItem>
+                  <DropdownMenuCheckboxItem
+                    checked={autoScroll}
+                    onCheckedChange={(checked) => {
+                      setAutoScroll(checked);
+                      if (checked && visibleEntries.length > 0) {
+                        virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
+                      }
+                    }}
+                  >
+                    {t("log.autoScroll")}
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          }
+        />
+
+        <div className="overflow-x-auto">
+          <div className={cn("min-w-[640px]", showTimestamps && "min-w-[760px]")}>
+            <div
+              role="row"
+              className={cn(
+                "border-border bg-muted/20 text-muted-foreground grid items-center gap-4 border-y px-4 py-2 text-xs font-semibold tracking-wide uppercase",
+                journalGrid,
+              )}
+            >
+              {showTimestamps && <span role="columnheader">{t("log.timestamp")}</span>}
+              <span role="columnheader">{t("log.filterType")}</span>
+              <span role="columnheader">{t("log.columnEvent")}</span>
+              <span role="columnheader">{t("log.columnDuration")}</span>
+            </div>
+
+            <div className="h-[400px] overflow-y-auto" ref={scrollRef} role="rowgroup">
+              {visibleEntries.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                  <SearchX className="text-muted-foreground mb-3 size-7" />
+                  <p className="text-sm font-medium">{t("log.noMatches")}</p>
+                  <p className="text-muted-foreground mt-1 max-w-sm text-xs">
+                    {t("log.noMatchesHint")}
+                  </p>
+                  {hasActiveQueryOrFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2"
+                      onClick={clearJournalFilters}
+                    >
+                      {t("log.clearAll")}
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    height: virtualizer.getTotalSize(),
+                    width: "100%",
+                    position: "relative",
+                  }}
+                >
+                  {virtualizer.getVirtualItems().map((virtualRow) => {
+                    const entry = visibleEntries[virtualRow.index]!;
+                    const hasToolDetails =
+                      entry.kind === "tool" &&
+                      (entry.args !== undefined || entry.result !== undefined);
+                    const isSelected = selectedEntryId === entry.id;
+                    const isInteractive = Boolean(onSelectEntry) || hasToolDetails;
+                    return (
+                      <div
+                        key={entry.id}
+                        data-index={virtualRow.index}
+                        ref={virtualizer.measureElement}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                      >
+                        <div
+                          role="row"
+                          className={cn(
+                            "hover:bg-muted/20 grid min-h-10 items-center gap-4 px-4 py-2 text-sm transition-colors",
+                            journalGrid,
+                            isInteractive && "cursor-pointer",
+                            isSelected && "bg-muted/40",
+                          )}
+                          onClick={() => {
+                            if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
+                            else if (hasToolDetails) setSelectedToolId(entry.id);
+                          }}
+                          onKeyDown={(event) => {
+                            if (isInteractive && (event.key === "Enter" || event.key === " ")) {
+                              event.preventDefault();
+                              if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
+                              else if (hasToolDetails) setSelectedToolId(entry.id);
+                            }
+                          }}
+                          tabIndex={isInteractive ? 0 : undefined}
+                          aria-pressed={onSelectEntry ? isSelected : undefined}
+                        >
+                          {showTimestamps && (
+                            <span className="text-muted-foreground font-mono text-xs">
+                              {formatTimestamp(entry.createdAt, i18n.language)}
+                            </span>
+                          )}
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="flex size-4 shrink-0 items-center justify-center">
+                              {entry.kind === "tool" ? (
+                                <ToolStatus status={entry.status} />
+                              ) : (
+                                <ExecutionEntryIcon entry={entry} />
+                              )}
+                            </span>
+                            <span className="text-muted-foreground truncate text-xs">
+                              {t(`log.type.${journalType(entry)}`)}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              "text-foreground min-w-0 truncate",
+                              entry.level && levelColors[entry.level],
+                            )}
+                          >
+                            {entry.kind === "tool" ? (
+                              <>
+                                <span className="font-medium">{entry.tool}</span>
+                                {entry.detail && (
+                                  <span className="text-muted-foreground"> · {entry.detail}</span>
+                                )}
+                              </>
+                            ) : (
+                              entry.message
+                            )}
+                          </span>
+                          <span className="text-muted-foreground text-right text-xs tabular-nums">
+                            {entry.kind === "tool" && entry.durationMs !== undefined
+                              ? formatDuration(entry.durationMs)
+                              : ""}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <ToolDetailsModal
+          entry={onSelectEntry ? null : selectedTool}
+          onClose={() => setSelectedToolId(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -534,10 +804,7 @@ export function LogViewer({
         </div>
       </div>
 
-      <div
-        className={cn("h-[400px] overflow-auto", variant === "integrated" && "pt-2")}
-        ref={scrollRef}
-      >
+      <div className="h-[400px] overflow-auto" ref={scrollRef}>
         {visibleEntries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <SearchX className="text-muted-foreground mb-3 size-7" />
@@ -561,6 +828,8 @@ export function LogViewer({
               const entry = visibleEntries[virtualRow.index]!;
               const hasToolDetails =
                 entry.kind === "tool" && (entry.args !== undefined || entry.result !== undefined);
+              const isSelected = selectedEntryId === entry.id;
+              const isInteractive = Boolean(onSelectEntry) || hasToolDetails;
               return (
                 <div
                   key={entry.id}
@@ -577,27 +846,29 @@ export function LogViewer({
                   <div
                     className={cn(
                       "text-muted-foreground hover:bg-muted/50 flex font-mono text-sm select-none",
-                      variant === "integrated"
-                        ? "min-h-8 px-2 leading-8"
-                        : "min-h-7 px-3 leading-7",
+                      "min-h-7 px-3 leading-7",
                       entry.kind === "tool"
                         ? "items-center gap-1.5 truncate"
                         : "items-start gap-1.5 break-words whitespace-normal",
                       entry.level && levelColors[entry.level],
-                      hasToolDetails && "cursor-pointer",
+                      isInteractive && "cursor-pointer",
+                      isSelected && "bg-muted/70",
                     )}
                     onClick={() => {
-                      if (hasToolDetails) setSelectedToolId(entry.id);
+                      if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
+                      else if (hasToolDetails) setSelectedToolId(entry.id);
                     }}
                     onKeyDown={(event) => {
-                      if (hasToolDetails && (event.key === "Enter" || event.key === " ")) {
+                      if (isInteractive && (event.key === "Enter" || event.key === " ")) {
                         event.preventDefault();
-                        setSelectedToolId(entry.id);
+                        if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
+                        else if (hasToolDetails) setSelectedToolId(entry.id);
                       }
                     }}
-                    role={hasToolDetails ? "button" : undefined}
-                    tabIndex={hasToolDetails ? 0 : undefined}
-                    aria-haspopup={hasToolDetails ? "dialog" : undefined}
+                    role={isInteractive ? "button" : undefined}
+                    tabIndex={isInteractive ? 0 : undefined}
+                    aria-pressed={onSelectEntry ? isSelected : undefined}
+                    aria-haspopup={!onSelectEntry && hasToolDetails ? "dialog" : undefined}
                   >
                     {entry.kind === "tool" ? (
                       <>
@@ -646,8 +917,114 @@ export function LogViewer({
           </div>
         )}
       </div>
-      <ToolDetailsModal entry={selectedTool} onClose={() => setSelectedToolId(null)} />
+      <ToolDetailsModal
+        entry={onSelectEntry ? null : selectedTool}
+        onClose={() => setSelectedToolId(null)}
+      />
     </div>
+  );
+}
+
+export function LogEntryInspector({
+  entry,
+  onClose,
+}: {
+  entry: ExecutionEntry;
+  onClose: () => void;
+}) {
+  const { t, i18n } = useTranslation("agents");
+  const type = journalType(entry);
+
+  return (
+    <div className="flex h-full min-h-[400px] flex-col">
+      <div className="border-border flex h-14 shrink-0 items-center gap-3 border-b px-4">
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("log.inspectorTitle")}</h2>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground size-7"
+          onClick={onClose}
+          aria-label={t("common:btn.close")}
+        >
+          <X />
+        </Button>
+      </div>
+
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-5 p-4">
+          <dl className="grid gap-3">
+            <InspectorFact label={t("log.filterType")} value={t(`log.type.${type}`)} />
+            {entry.createdAt && (
+              <InspectorFact
+                label={t("log.timestamp")}
+                value={formatTimestamp(entry.createdAt, i18n.language)}
+              />
+            )}
+            {entry.level && <InspectorFact label={t("log.filterLevel")} value={entry.level} />}
+            {entry.kind === "tool" && (
+              <>
+                <InspectorFact label={t("log.tool")} value={entry.tool} />
+                <InspectorFact
+                  label={t("log.status")}
+                  value={<ToolStatus status={entry.status} showLabel />}
+                />
+                {entry.durationMs !== undefined && (
+                  <InspectorFact
+                    label={t("run.infoDuration")}
+                    value={formatDuration(entry.durationMs)}
+                  />
+                )}
+              </>
+            )}
+          </dl>
+
+          {entry.kind === "tool" ? (
+            <>
+              {entry.args !== undefined && (
+                <InspectorCode label={t("log.arguments")} value={entry.args} />
+              )}
+              {entry.result !== undefined && (
+                <InspectorCode label={t("log.result")} value={entry.result} />
+              )}
+              {entry.detail && entry.args === undefined && (
+                <InspectorText label={t("log.details")} value={entry.detail} />
+              )}
+            </>
+          ) : (
+            <InspectorText label={t("log.message")} value={entry.message} />
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+function InspectorFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div>
+      <dt className="text-muted-foreground text-xs">{label}</dt>
+      <dd className="mt-1 text-sm">{value}</dd>
+    </div>
+  );
+}
+
+function InspectorText({ label, value }: { label: string; value: string }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">{label}</h3>
+      <p className="text-foreground/80 text-sm break-words whitespace-pre-wrap">{value}</p>
+    </section>
+  );
+}
+
+function InspectorCode({ label, value }: { label: string; value: unknown }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">{label}</h3>
+      <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
+        {formatStructuredValue(value)}
+      </pre>
+    </section>
   );
 }
 

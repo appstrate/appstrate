@@ -22,12 +22,12 @@ export const agentMapQueryKeyPrefix = ["get", MAP_PATH] as const;
 export type AgentMap =
   paths["/api/agents/{scope}/{name}/map"]["get"]["responses"]["200"]["content"]["application/json"];
 export type AgentMapNode = AgentMap["nodes"][number];
-export type AgentMapDiagnostic = AgentMap["diagnostics"][number];
 
 /**
- * Visual map of an agent — its manifest projected as positioned nodes and
- * edges, crossed with the installation state, plus readiness diagnostics
- * already routed to the node and row they describe.
+ * Visual map of an agent, its manifest projected as positioned nodes and
+ * edges, crossed with the installation state. Agent readiness comes only from
+ * `useAgentDiagnostics`; the legacy diagnostics field still present in this
+ * DTO is intentionally ignored until the backend contract is removed.
  *
  * Server-computed on purpose: resolving versions, connections and schedules
  * needs the database, and the layout must be identical for every client.

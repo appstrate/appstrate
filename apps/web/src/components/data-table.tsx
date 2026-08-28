@@ -244,7 +244,7 @@ export function DataTable<T>({
             <tr
               role="row"
               data-data-table-row
-              className={cn(rowGrid, "border-border h-10 border-b")}
+              className={cn(rowGrid, "border-border h-10 border-y")}
             >
               {columns.map((col) => (
                 <th

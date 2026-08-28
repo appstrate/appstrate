@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
 import {
   useActivateIntegration,
   useIntegrations,
@@ -17,6 +19,8 @@ import {
 import { connectionDisplayLabel } from "../integration-connect/connection-label";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "../integration-connect/integration-run-readiness";
+import { DataTable, type DataColumn } from "../data-table";
+import { ListToolbar, type FilterSpec } from "../list-toolbar";
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
@@ -45,6 +49,9 @@ interface AgentIntegrationsBlockProps {
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
+  const { t } = useTranslation(["agents", "settings"]);
+  const [search, setSearch] = useState("");
+  const [states, setStates] = useState<string[]>([]);
   // The list carries `active` (installed + enabled in this app). An agent can
   // declare an integration that was never activated here (or got disabled);
   // those cards render a read-only "not active" state instead of a connect
@@ -56,21 +63,110 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
 
   if (entries.length === 0) return null;
 
-  return (
-    <div className="divide-y">
-      {entries.map((entry) => (
-        <IntegrationConnectionCard
-          key={entry.id}
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const rows = entries
+    .map((entry) => {
+      const summary = integrations?.find((integration) => integration.id === entry.id);
+      return {
+        entry,
+        displayName: summary?.manifest.display_name ?? entry.id,
+        // Optimistic while the list loads so the table does not flash an inactive state.
+        appActive: activeIds ? activeIds.has(entry.id) : true,
+      };
+    })
+    .filter((row) => {
+      const state = row.appActive ? "active" : "inactive";
+      const matchesState = states.length === 0 || states.includes(state);
+      const matchesSearch =
+        normalizedSearch === "" ||
+        row.entry.id.toLocaleLowerCase().includes(normalizedSearch) ||
+        row.displayName.toLocaleLowerCase().includes(normalizedSearch);
+      return matchesState && matchesSearch;
+    });
+  type Row = (typeof rows)[number];
+  const columns: DataColumn<Row>[] = [
+    {
+      id: "integration",
+      header: t("detail.connectionsTable.integration"),
+      width: "minmax(200px,1.2fr)",
+      cell: ({ entry }) => <IntegrationIdentityCell packageId={entry.id} />,
+    },
+    {
+      id: "access",
+      header: t("detail.connectionsTable.access"),
+      width: "minmax(150px,0.8fr)",
+      cell: ({ entry }) => <IntegrationAccessCell packageId={entry.id} />,
+    },
+    {
+      id: "account",
+      header: t("detail.connectionsTable.account"),
+      width: "minmax(260px,1.4fr)",
+      cell: ({ entry, appActive }) => (
+        <IntegrationConnectionCell
           packageId={entry.id}
           agentTools={entry.tools}
           agentScopes={entry.scopes}
-          // Optimistic while the list loads (null) so the card doesn't flash
-          // a "not active" state; once loaded, gate strictly on membership.
-          appActive={activeIds ? activeIds.has(entry.id) : true}
+          appActive={appActive}
           {...(agentPackageId ? { agentPackageId } : {})}
         />
-      ))}
-    </div>
+      ),
+    },
+    {
+      id: "status",
+      header: t("detail.connectionsTable.status"),
+      width: "130px",
+      cell: ({ entry, appActive }) => (
+        <IntegrationStatusCell
+          packageId={entry.id}
+          appActive={appActive}
+          agentPackageId={agentPackageId}
+        />
+      ),
+    },
+  ];
+  const filters: FilterSpec[] = [
+    {
+      id: "activation",
+      label: t("detail.connectionsTable.filterActivation"),
+      values: states,
+      options: [
+        { value: "active", label: t("detail.connectionsTable.active") },
+        { value: "inactive", label: t("detail.connectionsTable.inactive") },
+      ],
+      onChange: setStates,
+    },
+  ];
+
+  return (
+    <>
+      <ListToolbar
+        placement="panel"
+        panelFiltersAdjacent
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: t("detail.connectionsTable.search"),
+        }}
+        filters={filters}
+        onReset={() => {
+          setSearch("");
+          setStates([]);
+        }}
+      />
+      <DataTable
+        label={t("detail.connectionsTable.label")}
+        columns={columns}
+        columnMode="scroll"
+        surface="integrated"
+        rows={rows}
+        rowKey={({ entry }) => entry.id}
+        empty={
+          <p className="text-muted-foreground px-3 py-6 text-sm">
+            {t("detail.connectionsTable.noMatch")}
+          </p>
+        }
+      />
+    </>
   );
 }
 
@@ -83,7 +179,7 @@ interface IntegrationConnectionCardProps {
   agentPackageId?: string;
 }
 
-function IntegrationConnectionCard({
+function IntegrationConnectionCell({
   packageId,
   agentTools,
   agentScopes,
@@ -93,16 +189,9 @@ function IntegrationConnectionCard({
   const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
   const activate = useActivateIntegration();
-  const displayName = detail?.manifest.display_name ?? packageId;
 
   if (detailPending || !detail) {
-    return (
-      <CardShell
-        icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
-        title={displayName}
-        subtitle={packageId}
-      />
-    );
+    return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
   }
 
   // Not active in this application → no connection is possible. Show a
@@ -110,39 +199,26 @@ function IntegrationConnectionCard({
   // reject with `integration_not_active`.
   if (!appActive) {
     return (
-      <CardShell title={displayName} subtitle={packageId}>
-        <span className="flex items-center gap-3">
-          <span
-            className="text-destructive max-w-[18rem] text-right text-xs"
-            data-testid={`integration-inactive-${packageId}`}
-          >
-            {t("detail.integrationInactive")}
-          </span>
-          {/* The sentence asks for an activation; without this the reader had to
-              go find the integration page to perform it. A non-admin gets the
-              API's refusal as a toast, which still beats a dead sentence. */}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={activate.isPending}
-            onClick={() => activate.mutate({ params: { path: { packageId } } })}
-            data-testid={`integration-activate-${packageId}`}
-          >
-            {activate.isPending ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              t("editor.activateIntegration")
-            )}
-          </Button>
-        </span>
-      </CardShell>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={activate.isPending}
+        onClick={() => activate.mutate({ params: { path: { packageId } } })}
+        data-testid={`integration-activate-${packageId}`}
+      >
+        {activate.isPending ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          t("editor.activateIntegration")
+        )}
+      </Button>
     );
   }
 
   // Read-only preview (no per-agent context) — just the shell, no picker/CTA.
   // Matches the prior behaviour for library/marketplace previews.
   if (!agentPackageId) {
-    return <CardShell title={displayName} subtitle={packageId} />;
+    return <span className="text-muted-foreground text-sm">—</span>;
   }
 
   return (
@@ -151,7 +227,6 @@ function IntegrationConnectionCard({
       agentPackageId={agentPackageId}
       manifest={detail.manifest}
       authStatuses={detail.auths}
-      displayName={displayName}
       agentTools={agentTools}
       agentScopes={agentScopes}
     />
@@ -169,7 +244,6 @@ function ManagedIntegrationCard({
   agentPackageId,
   manifest,
   authStatuses,
-  displayName,
   agentTools,
   agentScopes,
 }: {
@@ -177,7 +251,6 @@ function ManagedIntegrationCard({
   agentPackageId: string;
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
-  displayName: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
 }) {
@@ -197,7 +270,7 @@ function ManagedIntegrationCard({
       : null;
 
   return (
-    <CardShell title={displayName} subtitle={packageId} extraSubtitle={reuseInfo}>
+    <div className="min-w-0">
       <IntegrationConnectionPicker
         integrationId={packageId}
         agentPackageId={agentPackageId}
@@ -206,7 +279,12 @@ function ManagedIntegrationCard({
         agentTools={agentTools}
         agentScopes={agentScopes}
       />
-    </CardShell>
+      {reuseInfo && (
+        <p className="text-muted-foreground mt-1 truncate text-xs" title={reuseInfo}>
+          {reuseInfo}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -224,39 +302,61 @@ function buildReuseInfo(
   return t("detail.integrationReuseShared", { account, count: agentCount });
 }
 
-function CardShell({
-  icon,
-  title,
-  subtitle,
-  extraSubtitle,
-  children,
-}: {
-  /** Optional inline icon before the subtitle (e.g. loading spinner). */
-  icon?: React.ReactNode;
-  title: string;
-  subtitle: string;
-  /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */
-  extraSubtitle?: string | null;
-  children?: React.ReactNode;
-}) {
+function IntegrationIdentityCell({ packageId }: { packageId: string }) {
+  const { data: detail, isPending } = useIntegrationDetail(packageId);
   return (
-    <div className="hover:bg-muted/30 flex items-center justify-between gap-3 px-2 py-3 transition-colors">
-      <div className="flex min-w-0 items-center gap-2">
-        <Puzzle className="text-muted-foreground size-4 shrink-0" />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{title}</div>
-          <div className="text-muted-foreground flex items-center gap-1.5 truncate text-xs">
-            {icon}
-            <span className="truncate font-mono">{subtitle}</span>
-          </div>
-          {extraSubtitle && (
-            <div className="text-muted-foreground/80 mt-0.5 truncate text-[0.65rem]">
-              {extraSubtitle}
-            </div>
-          )}
+    <div className="flex min-w-0 items-center gap-2">
+      <Puzzle className="text-muted-foreground size-4 shrink-0" />
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium">
+          {isPending ? packageId : (detail?.manifest.display_name ?? packageId)}
         </div>
+        <div className="text-muted-foreground truncate font-mono text-xs">{packageId}</div>
       </div>
-      {children}
     </div>
+  );
+}
+
+function IntegrationAccessCell({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["agents", "settings"]);
+  const { data: detail, isPending } = useIntegrationDetail(packageId);
+  if (isPending || !detail)
+    return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
+  const types = Array.from(
+    new Set(Object.values(detail.manifest.auths ?? {}).map((auth) => auth.type)),
+  );
+  if (types.length === 0) {
+    return (
+      <span className="text-muted-foreground text-xs">{t("detail.connectionsTable.none")}</span>
+    );
+  }
+  return (
+    <span className="text-muted-foreground text-xs">
+      {types.map((type) => t(`settings:integration.auth.type.${type}`)).join(", ")}
+    </span>
+  );
+}
+
+function IntegrationStatusCell({
+  packageId,
+  appActive,
+  agentPackageId,
+}: {
+  packageId: string;
+  appActive: boolean;
+  agentPackageId?: string;
+}) {
+  const { t } = useTranslation("agents");
+  const { data: resolution, isPending } = useIntegrationAgentResolution(packageId, agentPackageId);
+  if (!appActive) {
+    return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
+  }
+  if (!agentPackageId || isPending || !resolution) {
+    return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
+  }
+  return resolutionBlocksRun(resolution) ? (
+    <Badge variant="warning">{t("detail.connectionsTable.required")}</Badge>
+  ) : (
+    <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>
   );
 }

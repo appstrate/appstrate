@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { Link, useLocation, type To } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
+  Activity,
+  ArrowRight,
   Brain,
   CalendarClock,
-  CheckCircle2,
+  ChartNoAxesCombined,
   CircleX,
   Cpu,
   Database,
@@ -13,6 +16,7 @@ import {
   FileOutput,
   Globe,
   Plug,
+  PlayCircle,
   Puzzle,
   Server,
   SlidersHorizontal,
@@ -20,6 +24,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { Badge as StatusPill } from "@appstrate/ui/components/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -38,143 +43,189 @@ import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/markdown";
 import { AgentMapView } from "../../modules/agent-map/agent-map-view";
 import { AgentFilesView } from "./agent-files-view";
-import { useAgentDiagnostics, type AgentDiagnostic } from "../../hooks/use-agent-diagnostics";
+import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
+import { AgentDiagnosticsDialog, AgentDiagnosticsIssueBadge } from "./agent-diagnostics-dialog";
+import {
+  agentDiagnosticCorrectionTarget,
+  agentDiagnosticLocateTarget,
+} from "../../lib/agent-diagnostics";
+import { OverviewCardAction } from "../overview-card-action";
 
-function diagnosticCorrectionTarget(
-  diagnostic: AgentDiagnostic,
-  pathname: string,
-  currentSearch: string,
-) {
-  if (diagnostic.correction.destination === "schedule") {
-    const scheduleId = diagnostic.correction.params.scheduleId;
-    return scheduleId ? `/schedules/${scheduleId}` : { pathname, hash: "#configuration" };
-  }
-  const search = new URLSearchParams(currentSearch);
-  if (diagnostic.correction.destination === "bundle") {
-    search.set("agentBundle", diagnostic.correction.section ?? "general");
-    return { pathname, search: `?${search.toString()}`, hash: "#files" };
-  }
-  search.set("agentConfig", diagnostic.correction.section ?? "model");
-  return { pathname, search: `?${search.toString()}`, hash: "#configuration" };
-}
-
-function AgentHealthSection({ packageId, version }: { packageId: string; version?: string }) {
+function AgentHealthSection({
+  packageId,
+  version,
+  cardHeaders = false,
+}: {
+  packageId: string;
+  version?: string;
+  cardHeaders?: boolean;
+}) {
   const { t } = useTranslation("agents");
   const location = useLocation();
   const diagnostics = useAgentDiagnostics(packageId, version);
   const result = diagnostics.data;
-  const visible = result?.diagnostics.slice(0, 3) ?? [];
-  const tone = result?.status ?? "warning";
-  const Icon = tone === "healthy" ? CheckCircle2 : tone === "blocking" ? CircleX : TriangleAlert;
-  const title = diagnostics.isLoading
-    ? t("detail.diagnostics.assessing")
-    : diagnostics.isError || !result
-      ? t("detail.diagnostics.unknownTitle")
-      : result.status === "healthy"
-        ? t("detail.diagnostics.healthyTitle")
-        : result.status === "blocking"
-          ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
-          : t("detail.diagnostics.warningTitle", { count: result.warning_count });
-  const allIssuesSearch = new URLSearchParams(location.search);
-  allIssuesSearch.set("agentDiagnostics", "all");
+  const [issuesOpen, setIssuesOpen] = useState(false);
 
-  return (
-    <section aria-labelledby="agent-health-heading">
-      <h2 id="agent-health-heading" className="mb-2 text-sm font-semibold">
-        {t("detail.diagnostics.sectionTitle")}
-      </h2>
-      <div
+  if (diagnostics.isLoading) {
+    return (
+      <section
         className={cn(
-          "border-border bg-card rounded-lg border px-1 py-3",
+          "border-border rounded-lg border",
+          cardHeaders && "bg-muted/35",
+          cardHeaders ? "overflow-hidden" : "p-4",
+        )}
+        aria-label={t("detail.diagnostics.sectionTitle")}
+        aria-busy="true"
+      >
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-2",
+            cardHeaders && "bg-muted/35 px-4 py-3",
+          )}
+        >
+          <span className="bg-muted size-4 animate-pulse rounded" />
+          <span className="bg-muted h-4 w-28 animate-pulse rounded" />
+          <span className="bg-muted h-5 w-32 animate-pulse rounded-md" />
+        </div>
+      </section>
+    );
+  }
+
+  if (result?.status === "healthy") return null;
+
+  const visible = result?.diagnostics.slice(0, 3) ?? [];
+  const isUnknown = diagnostics.isError || !result;
+  const tone = isUnknown ? "unknown" : result.status;
+  const Icon = tone === "blocking" ? CircleX : tone === "warning" ? TriangleAlert : Activity;
+  const title = isUnknown
+    ? t("detail.diagnostics.unknownTitle")
+    : result.status === "blocking"
+      ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
+      : t("detail.diagnostics.warningTitle", { count: result.warning_count });
+  return (
+    <>
+      <section
+        aria-labelledby="agent-health-heading"
+        className={cn(
+          "border-border rounded-lg border",
+          cardHeaders ? "bg-muted/35 overflow-hidden" : "bg-card p-4",
           tone === "blocking" && "border-destructive/30",
-          tone === "warning" && result && "border-warning/30",
+          tone === "warning" && "border-warning/30",
         )}
       >
-        <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-2",
+            cardHeaders && "bg-muted/35 px-4 py-3",
+          )}
+        >
           <Icon
             className={cn(
-              "mt-0.5 size-4 shrink-0",
-              tone === "healthy"
-                ? "text-success"
-                : tone === "blocking"
-                  ? "text-destructive"
-                  : "text-warning",
+              "size-4 shrink-0",
+              tone === "blocking"
+                ? "text-destructive"
+                : tone === "warning"
+                  ? "text-warning"
+                  : "text-muted-foreground",
             )}
             aria-hidden
           />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{title}</p>
-            {result?.status === "healthy" && (
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {t("detail.diagnostics.healthyDescription")}
-              </p>
-            )}
+          <h2 id="agent-health-heading" className="text-sm font-semibold">
+            {t("detail.diagnostics.sectionTitle")}
+          </h2>
+          {result ? (
+            <button type="button" onClick={() => setIssuesOpen(true)}>
+              <AgentDiagnosticsIssueBadge result={result} />
+            </button>
+          ) : (
+            <StatusPill variant="pending">{title}</StatusPill>
+          )}
+        </div>
+        <div className={cn(cardHeaders && "bg-card overflow-hidden rounded-t-lg border-t")}>
+          <div className={cn(cardHeaders && "px-4")}>
             {result?.status === "blocking" && result.warning_count > 0 && (
-              <p className="text-muted-foreground mt-0.5 text-xs">
+              <p className="text-muted-foreground pt-4 text-xs">
                 {t("detail.diagnostics.warningAlongside", { count: result.warning_count })}
               </p>
             )}
-          </div>
-        </div>
 
-        {visible.length > 0 && (
-          <ul className="mt-3 divide-y pl-7">
-            {visible.map((diagnostic) => {
-              const locateSearch = new URLSearchParams(location.search);
-              locateSearch.set("agentIssue", diagnostic.code);
-              return (
-                <li
-                  key={`${diagnostic.code}:${diagnostic.field}`}
-                  className="flex items-start gap-4 py-3 first:pt-0 last:pb-0"
+            {visible.length > 0 && (
+              <ul
+                className={cn(
+                  "divide-y",
+                  !cardHeaders && "mt-3",
+                  cardHeaders &&
+                    result?.status === "blocking" &&
+                    result.warning_count > 0 &&
+                    "mt-3",
+                )}
+              >
+                {visible.map((diagnostic) => (
+                  <li
+                    key={`${diagnostic.code}:${diagnostic.field}`}
+                    className={cn(
+                      "grid gap-2 py-4 sm:grid-cols-[minmax(0,1fr)_auto]",
+                      cardHeaders ? "first:pt-4 last:pb-4" : "first:pt-0 last:pb-0",
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{diagnostic.title}</p>
+                      <p className="text-muted-foreground mt-0.5 text-xs">
+                        {diagnostic.explanation}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs sm:self-center">
+                      <Link
+                        to={agentDiagnosticCorrectionTarget(
+                          diagnostic,
+                          location.pathname,
+                          location.search,
+                        )}
+                        className="text-primary hover:underline"
+                      >
+                        {t("detail.diagnostics.fix")}
+                      </Link>
+                      <Link
+                        to={agentDiagnosticLocateTarget(
+                          diagnostic,
+                          location.pathname,
+                          location.search,
+                        )}
+                        className="text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        {t("detail.diagnostics.locate")}
+                      </Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {result && result.diagnostics.length > 3 && !cardHeaders && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setIssuesOpen(true)}
+                  className="text-primary text-xs font-medium hover:underline"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{diagnostic.title}</p>
-                    <p className="text-muted-foreground mt-0.5 text-xs">{diagnostic.explanation}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3 text-xs">
-                    <Link
-                      to={diagnosticCorrectionTarget(
-                        diagnostic,
-                        location.pathname,
-                        location.search,
-                      )}
-                      className="text-primary hover:underline"
-                    >
-                      {t("detail.diagnostics.fix")}
-                    </Link>
-                    <Link
-                      to={{
-                        pathname: location.pathname,
-                        search: `?${locateSearch.toString()}`,
-                        hash: "#map",
-                      }}
-                      className="text-muted-foreground hover:text-foreground hover:underline"
-                    >
-                      {t("detail.diagnostics.locate")}
-                    </Link>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        {result && result.diagnostics.length > 3 && (
-          <div className="mt-3 pl-7">
-            <Link
-              to={{
-                pathname: location.pathname,
-                search: `?${allIssuesSearch.toString()}`,
-                hash: "#map",
-              }}
-              className="text-primary text-xs font-medium hover:underline"
-            >
-              {t("detail.diagnostics.seeAll")}
-            </Link>
+                  {t("detail.diagnostics.seeAll")}
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-    </section>
+          {result && result.diagnostics.length > 3 && cardHeaders && (
+            <OverviewCardAction onClick={() => setIssuesOpen(true)}>
+              {t("detail.diagnostics.seeAll")}
+            </OverviewCardAction>
+          )}
+        </div>
+      </section>
+      <AgentDiagnosticsDialog
+        result={result}
+        open={issuesOpen}
+        onClose={() => setIssuesOpen(false)}
+      />
+    </>
   );
 }
 
@@ -271,6 +322,8 @@ export function AgentOverviewTab({
   currentContent,
   surface,
   onOpenFiles,
+  cardHeaders = false,
+  contained = false,
 }: {
   packageId: string;
   detail: AgentDetail;
@@ -280,6 +333,8 @@ export function AgentOverviewTab({
   currentContent?: string | null | undefined;
   surface: "summary" | "map" | "files";
   onOpenFiles: () => void;
+  cardHeaders?: boolean;
+  contained?: boolean;
 }) {
   const { t, i18n } = useTranslation("agents");
   const location = useLocation();
@@ -386,6 +441,13 @@ export function AgentOverviewTab({
       ? memoryDates.sort((a, b) => Date.parse(b) - Date.parse(a))[0]
       : undefined;
   const configurationWarning = t("detail.overview.configurationRequiredDescription");
+  const settingsHref = (section: "model" | "proxy" | "inputs" | "connections" | "schedules") => {
+    const search = new URLSearchParams(location.search);
+    if (section === "model") search.delete("agentSettings");
+    else search.set("agentSettings", section);
+    const query = search.toString();
+    return `${location.pathname}${query ? `?${query}` : ""}#settings`;
+  };
   const installedMap = {
     configuration: {
       schedules: {
@@ -399,14 +461,14 @@ export function AgentOverviewTab({
           ? formatDateField(nextSchedule.next_run_at, "datetime")
           : t("detail.overview.noSchedule"),
         icon: "schedule",
-        href: nextSchedule ? `/schedules/${nextSchedule.id}` : "#configuration",
+        href: nextSchedule ? `/schedules/${nextSchedule.id}` : settingsHref("schedules"),
       },
       model: {
         id: "model",
         title: t("detail.overview.model"),
         value: resolvedModel?.label ?? unknown,
         icon: "model",
-        href: "#configuration",
+        href: settingsHref("model"),
         warning: readiness.hasModel ? undefined : configurationWarning,
       },
       inputValues: {
@@ -417,7 +479,7 @@ export function AgentOverviewTab({
           total: inputCount,
         }),
         icon: "values",
-        href: "#configuration",
+        href: settingsHref("inputs"),
         warning: readiness.hasRequiredConfig ? undefined : configurationWarning,
       },
       proxy: {
@@ -425,7 +487,7 @@ export function AgentOverviewTab({
         title: t("detail.overview.proxy"),
         value: resolvedProxy?.label ?? unknown,
         icon: "proxy",
-        href: "#configuration",
+        href: settingsHref("proxy"),
       },
       connections: {
         id: "connections",
@@ -435,7 +497,7 @@ export function AgentOverviewTab({
             ? t("detail.overview.itemCount", { count: connectionCount })
             : unknown,
         icon: "connection",
-        href: "#configuration",
+        href: settingsHref("connections"),
         warning: connectionsKnown && !connections?.blocks_run ? undefined : configurationWarning,
       },
     },
@@ -562,84 +624,137 @@ export function AgentOverviewTab({
             style: "percent",
             maximumFractionDigits: 1,
           }).format(successRate);
-    const destination = (hash: string, key: string, value: string) => {
+    const destination = (hash: string, key?: string, value?: string) => {
       const search = new URLSearchParams(location.search);
-      search.set(key, value);
-      return { pathname: location.pathname, search: `?${search.toString()}`, hash };
+      if (hash === "#runs") search.delete("agentRunStatus");
+      if (hash === "#memory") search.delete("agentMemory");
+      if (key && value) search.set(key, value);
+      const query = search.toString();
+      return { pathname: location.pathname, search: query ? `?${query}` : "", hash };
     };
 
     return (
       <TooltipProvider>
-        <div className="space-y-8 px-4 pt-8 pb-4 md:px-6 md:pb-6" data-agent-operational-overview>
-          <AgentHealthSection packageId={packageId} version={version} />
+        <div
+          className={cn(
+            "space-y-8",
+            !contained && "pt-8 pb-4 md:pb-6",
+            !cardHeaders && !contained && "px-4 md:px-6",
+          )}
+          data-agent-operational-overview
+        >
+          <AgentHealthSection packageId={packageId} version={version} cardHeaders={cardHeaders} />
 
-          <div className="grid gap-8 xl:grid-cols-3">
-            <section className="flex min-w-0 flex-col" aria-labelledby="agent-executions-heading">
-              <h2 id="agent-executions-heading" className="mb-2 text-sm font-semibold">
-                {t("detail.overview.executions")}
-              </h2>
-              <div className="border-border bg-card grid h-full divide-y overflow-hidden rounded-lg border">
-                <div className="p-4">
-                  <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-                    {t("detail.overview.lastRun")}
-                  </p>
+          <div className="grid gap-6 xl:grid-cols-3">
+            <section
+              className={cn(
+                "flex min-w-0 flex-col",
+                cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+              )}
+              aria-labelledby="agent-executions-heading"
+            >
+              <OverviewSectionHeading
+                id="agent-executions-heading"
+                icon={PlayCircle}
+                title={t("detail.overview.executions")}
+                embedded={cardHeaders}
+              />
+              <div
+                className={cn(
+                  "border-border bg-card grid h-full divide-y overflow-hidden rounded-lg border",
+                  cardHeaders && "rounded-t-lg border-x-0 border-b-0",
+                )}
+              >
+                <div className="flex min-w-0 flex-col">
                   {detail.last_run ? (
-                    <div className="mt-3 flex items-center gap-3">
-                      <Badge status={detail.last_run.status} compact />
-                      <span className="text-muted-foreground text-xs">
-                        {formatDateField(detail.last_run.started_at, "datetime")}
-                      </span>
-                      <Link
-                        to={`/agents/${packageId}/runs/${detail.last_run.id}`}
-                        className="text-primary ml-auto text-xs hover:underline"
-                      >
-                        {t("detail.overview.open")}
-                      </Link>
-                    </div>
+                    <Link
+                      to={`/agents/${packageId}/runs/${detail.last_run.id}`}
+                      className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-muted-foreground text-xs font-medium">
+                            {t("detail.overview.lastRun")}
+                          </p>
+                          <Badge status={detail.last_run.status} compact />
+                        </div>
+                        <p className="text-foreground mt-3 text-sm">
+                          {formatDateField(detail.last_run.started_at, "datetime")}
+                        </p>
+                      </div>
+                      <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
+                    </Link>
                   ) : (
-                    <p className="text-muted-foreground mt-3 text-sm">
-                      {t("detail.overview.noRuns")}
-                    </p>
+                    <div className="p-4">
+                      <p className="text-muted-foreground text-xs font-medium">
+                        {t("detail.overview.lastRun")}
+                      </p>
+                      <p className="text-muted-foreground mt-3 text-sm">
+                        {t("detail.overview.noRuns")}
+                      </p>
+                    </div>
                   )}
                 </div>
-                <div className="p-4">
-                  <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-                    {t("detail.overview.nextExecution")}
-                  </p>
+                <div className="flex min-w-0 flex-col">
                   {nextSchedule?.next_run_at ? (
-                    <div className="mt-3 flex items-center gap-3 text-sm">
-                      <CalendarClock className="text-muted-foreground size-4" />
-                      <span className="truncate">
-                        {formatDateField(nextSchedule.next_run_at, "datetime")}
-                      </span>
-                      <Link
-                        to={{ hash: "#configuration" }}
-                        className="text-primary ml-auto text-xs hover:underline"
-                      >
-                        {t("detail.overview.open")}
-                      </Link>
-                    </div>
-                  ) : schedulesError ? (
-                    <p className="text-muted-foreground mt-3 text-sm">{unknown}</p>
+                    <Link
+                      to={settingsHref("schedules")}
+                      className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-muted-foreground text-xs font-medium">
+                          {t("detail.overview.nextExecution")}
+                        </p>
+                        <p className="text-foreground mt-3 truncate text-sm">
+                          {formatDateField(nextSchedule.next_run_at, "datetime")}
+                        </p>
+                      </div>
+                      <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
+                    </Link>
                   ) : (
-                    <p className="text-muted-foreground mt-3 text-sm">
-                      {t("detail.overview.noSchedule")}
-                    </p>
+                    <div className="p-4">
+                      <p className="text-muted-foreground text-xs font-medium">
+                        {t("detail.overview.nextExecution")}
+                      </p>
+                      {schedulesError ? (
+                        <p className="text-muted-foreground mt-3 text-sm">{unknown}</p>
+                      ) : (
+                        <p className="text-muted-foreground mt-3 text-sm">
+                          {t("detail.overview.noSchedule")}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
             </section>
 
-            <section className="flex min-w-0 flex-col" aria-labelledby="agent-activity-heading">
-              <div className="mb-2 flex items-center gap-2">
-                <h2 id="agent-activity-heading" className="text-sm font-semibold">
-                  {t("detail.overview.activity")}
-                </h2>
-                <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
-                  {t("detail.overview.lastThirtyDays")}
-                </span>
-              </div>
-              <dl className="border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border py-3 md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0">
+            <section
+              className={cn(
+                "flex min-w-0 flex-col",
+                cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+              )}
+              aria-labelledby="agent-activity-heading"
+            >
+              <OverviewSectionHeading
+                id="agent-activity-heading"
+                icon={ChartNoAxesCombined}
+                title={t("detail.overview.activity")}
+                embedded={cardHeaders}
+                trailing={
+                  <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
+                    {t("detail.overview.lastThirtyDays")}
+                  </span>
+                }
+                to={activity && activity.total > 0 ? destination("#runs") : undefined}
+                actionLabel={t("detail.overview.openRuns")}
+              />
+              <dl
+                className={cn(
+                  "border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0",
+                  cardHeaders && "rounded-t-lg border-x-0 border-b-0",
+                )}
+              >
                 <OperationalStat
                   className="xl:border-border xl:border-r xl:border-b"
                   label={t("detail.overview.totalRuns")}
@@ -650,6 +765,7 @@ export function AgentOverviewTab({
                         ? unknown
                         : String(activity.total)
                   }
+                  to={activity && activity.total > 0 ? destination("#runs") : undefined}
                 />
                 <OperationalStat
                   className="xl:border-border xl:border-b"
@@ -684,12 +800,21 @@ export function AgentOverviewTab({
                         ? unknown
                         : String(failedRunCount)
                   }
-                  to={destination("#runs", "agentRunStatus", "failed,timeout")}
+                  to={
+                    failedRunCount && failedRunCount > 0
+                      ? destination("#runs", "agentRunStatus", "failed,timeout")
+                      : undefined
+                  }
                 />
                 <OperationalStat
                   className="xl:border-border xl:border-b"
                   label={t("detail.overview.runningRuns")}
                   value={String(detail.running_runs)}
+                  to={
+                    detail.running_runs > 0
+                      ? destination("#runs", "agentRunStatus", "running")
+                      : undefined
+                  }
                 />
                 <OperationalStat
                   className="xl:col-span-2"
@@ -701,26 +826,59 @@ export function AgentOverviewTab({
                         ? unknown
                         : String(activeScheduleCount)
                   }
+                  to={
+                    activeScheduleCount && activeScheduleCount > 0
+                      ? settingsHref("schedules")
+                      : undefined
+                  }
                 />
               </dl>
             </section>
 
-            <section className="flex min-w-0 flex-col" aria-labelledby="agent-memory-heading">
-              <h2 id="agent-memory-heading" className="mb-2 text-sm font-semibold">
-                {t("detail.overview.memoryActivity")}
-              </h2>
-              <dl className="border-border bg-card grid h-full grid-cols-1 divide-y overflow-hidden rounded-lg border py-3 sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y">
+            <section
+              className={cn(
+                "flex min-w-0 flex-col",
+                cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+              )}
+              aria-labelledby="agent-memory-heading"
+            >
+              <OverviewSectionHeading
+                id="agent-memory-heading"
+                icon={Database}
+                title={t("detail.overview.memoryActivity")}
+                embedded={cardHeaders}
+                to={
+                  (pinned?.length ?? 0) + (memories?.length ?? 0) > 0
+                    ? destination("#memory")
+                    : undefined
+                }
+                actionLabel={t("detail.overview.openMemory")}
+              />
+              <dl
+                className={cn(
+                  "border-border bg-card grid h-full grid-cols-1 divide-y overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y",
+                  cardHeaders && "rounded-t-lg border-x-0 border-b-0",
+                )}
+              >
                 <OperationalStat
                   label={t("detail.overview.pinnedItems")}
                   value={pinnedLoading ? "…" : pinnedError ? unknown : String(pinned?.length ?? 0)}
-                  to={destination("#memory", "agentMemory", "pinned")}
+                  to={
+                    pinned && pinned.length > 0
+                      ? destination("#memory", "agentMemory", "pinned")
+                      : undefined
+                  }
                 />
                 <OperationalStat
                   label={t("detail.overview.archivedItems")}
                   value={
                     memoriesLoading ? "…" : memoriesError ? unknown : String(memories?.length ?? 0)
                   }
-                  to={destination("#memory", "agentMemory", "archive")}
+                  to={
+                    memories && memories.length > 0
+                      ? destination("#memory", "agentMemory", "archive")
+                      : undefined
+                  }
                 />
                 <OperationalStat
                   label={t("detail.overview.lastUpdated")}
@@ -759,7 +917,7 @@ export function AgentOverviewTab({
           >
             <div className="space-y-2">
               {configNodes.map((node) => (
-                <MapNode key={node.label} {...node} href="#configuration" />
+                <MapNode key={node.label} {...node} href={settingsHref("inputs")} />
               ))}
             </div>
           </Boundary>
@@ -838,24 +996,84 @@ function OperationalStat({
 }: {
   label: string;
   value: React.ReactNode;
-  to?: { pathname: string; search: string; hash: string };
+  to?: To;
   className?: string;
 }) {
-  return (
-    <div className={cn("px-4 py-1", className)}>
+  const content = (
+    <>
       <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
-      <dd className="mt-1 text-xl font-semibold tabular-nums">
-        {to ? (
-          <Link
-            className="hover:text-primary focus-visible:ring-ring rounded-sm transition-colors outline-none focus-visible:ring-2"
-            to={to}
-          >
-            {value}
-          </Link>
-        ) : (
-          value
+      <dd className="mt-1 text-xl font-semibold tabular-nums">{value}</dd>
+    </>
+  );
+
+  return (
+    <div className={cn("min-w-0", className)}>
+      {to ? (
+        <Link
+          className="group hover:bg-muted/20 focus-visible:ring-ring relative flex h-full min-h-20 flex-col justify-center px-4 py-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
+          to={to}
+        >
+          {content}
+          <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
+        </Link>
+      ) : (
+        <div className="flex h-full min-h-20 flex-col justify-center px-4 py-4">{content}</div>
+      )}
+    </div>
+  );
+}
+
+function OverviewSectionHeading({
+  id,
+  icon: Icon,
+  title,
+  trailing,
+  to,
+  actionLabel,
+  embedded = false,
+}: {
+  id: string;
+  icon: typeof Brain;
+  title: string;
+  trailing?: React.ReactNode;
+  to?: To;
+  actionLabel?: string;
+  embedded?: boolean;
+}) {
+  const content = (
+    <>
+      <Icon className="text-muted-foreground size-4 shrink-0" aria-hidden />
+      <h2 id={id} className="text-sm font-semibold">
+        {title}
+      </h2>
+      {trailing}
+      {to && (
+        <ArrowRight className="text-muted-foreground group-hover:text-primary group-focus-visible:text-primary ml-auto size-4 shrink-0 transition-all group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5" />
+      )}
+    </>
+  );
+
+  if (to) {
+    return (
+      <Link
+        to={to}
+        aria-label={actionLabel}
+        title={actionLabel}
+        className={cn(
+          "group focus-visible:ring-ring flex min-h-5 items-center gap-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
+          embedded ? "bg-muted/35 hover:bg-muted px-4 py-3" : "hover:bg-muted/40 mb-2 rounded-sm",
         )}
-      </dd>
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div
+      className={cn("flex min-h-5 items-center gap-2", embedded ? "bg-muted/35 px-4 py-3" : "mb-2")}
+    >
+      {content}
     </div>
   );
 }

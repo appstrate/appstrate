@@ -16,26 +16,19 @@ const available = (
   ...overrides,
 });
 describe("run detail tabs", () => {
-  it("exposes exactly Journal and Results", () => {
-    expect(RUN_DETAIL_TABS).toEqual(["journal", "results"]);
+  it("exposes Overview first, followed by Journal and Results", () => {
+    expect(RUN_DETAIL_TABS).toEqual(["overview", "journal", "results"]);
   });
 
-  it("opens active runs on Journal", () => {
-    expect(initialRunDetailTab(available({ isActive: true }))).toBe("journal");
+  it("opens every run lifecycle on Overview", () => {
+    expect(initialRunDetailTab(available({ isActive: true }))).toBe("overview");
+    expect(initialRunDetailTab(available({ hasResults: true }))).toBe("overview");
+    expect(initialRunDetailTab(available({ isFailed: true, hasResults: true }))).toBe("overview");
   });
 
-  it("opens completed runs with durable production on Results", () => {
-    expect(initialRunDetailTab(available({ hasResults: true }))).toBe("results");
-  });
-
-  it("opens failed runs and terminal runs without production on Journal", () => {
-    expect(initialRunDetailTab(available())).toBe("journal");
-    expect(initialRunDetailTab(available({ isFailed: true, hasResults: true }))).toBe("journal");
-  });
-
-  it("keeps Results unavailable without durable production", () => {
-    expect(effectiveRunDetailTab("results", available({ isActive: true }))).toBe("journal");
-    expect(effectiveRunDetailTab("results", available())).toBe("journal");
+  it("keeps Results addressable throughout the run lifecycle", () => {
+    expect(effectiveRunDetailTab("results", available({ isActive: true }))).toBe("results");
+    expect(effectiveRunDetailTab("results", available())).toBe("results");
     expect(effectiveRunDetailTab("results", available({ hasResults: true }))).toBe("results");
   });
 
@@ -44,5 +37,6 @@ describe("run detail tabs", () => {
     expect(effectiveRunDetailTab("results", available({ isFailed: true, hasResults: true }))).toBe(
       "results",
     );
+    expect(effectiveRunDetailTab("overview", available({ isActive: true }))).toBe("overview");
   });
 });

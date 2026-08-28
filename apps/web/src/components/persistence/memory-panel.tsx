@@ -2,23 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
-import {
-  BrainCircuit,
-  ChevronDown,
-  Copy,
-  FileText,
-  Library,
-  MoreHorizontal,
-  Pin,
-  Trash2,
-} from "lucide-react";
+import { BrainCircuit, Copy, FileText, MoreHorizontal, Pin, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,9 +12,6 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PersistenceActorType } from "@appstrate/shared-types";
 import { EmptyState, ErrorState, LoadingState } from "../page-states";
-import { ItemList } from "../item-list";
-import { MemoryRow } from "./memory-row";
-import { PinnedSlotCard } from "./pinned-slot-card";
 import { ActorBadge } from "./actor-badge";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Modal } from "../modal";
@@ -43,13 +25,13 @@ import {
   useRunPinned,
 } from "../../hooks/use-persistence";
 import { useDeleteMemory } from "../../hooks/use-mutations";
-import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
-import { RailButton } from "../settings/rail-link";
 
 export interface MemoryPanelProps {
   packageId: string;
   /** Run-scoped view: filter all rows by `runId`, hide scope filter, hide delete buttons. */
   runId?: string;
+  /** Optional entry filter used by overview deep links. */
+  initialTypes?: Array<"pinned" | "archive">;
 }
 
 /**
@@ -67,7 +49,7 @@ function SectionEmpty({ message }: { message: string }) {
   return <p className="text-muted-foreground/70 px-2 py-2 text-xs italic">{message}</p>;
 }
 
-export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
+export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps) {
   const { t } = useTranslation(["agents", "common"]);
   const isRunView = !!runId;
 
@@ -91,9 +73,6 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
   const isError = pinnedQ.isError || memoriesQ.isError;
 
-  const [pinnedOpen, setPinnedOpen] = useState(true);
-  const [archiveOpen, setArchiveOpen] = useState(true);
-
   // Nothing in EITHER tier, and only once both requests have answered. This
   // used to be the panel's single early return, taken on the counts alone: two
   // queries that had failed both counted zero, so a 500 on the endpoint drew
@@ -111,72 +90,20 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
     );
   }
 
-  if (!isRunView) {
-    return (
-      <AgentMemoryCollection
-        pinned={pinned ?? []}
-        memories={memories ?? []}
-        pinnedLoading={pinnedQ.isLoading}
-        memoriesLoading={memoriesQ.isLoading}
-        pinnedError={pinnedQ.isError}
-        memoriesError={memoriesQ.isError}
-        onDeletePinned={(id) => deletePinned.mutate(id)}
-        onDeleteMemory={(id) => deleteMemory.mutate(id)}
-        isDeleting={deletePinned.isPending || deleteMemory.isPending}
-      />
-    );
-  }
-
   return (
-    <div className="space-y-5">
-      <Section
-        open={pinnedOpen}
-        onOpenChange={setPinnedOpen}
-        icon={<Pin className="h-3.5 w-3.5" />}
-        title={t("detail.memorySectionPinned")}
-        count={pinnedQ.isSuccess ? pinnedCount : undefined}
-        accentClass="text-primary"
-      >
-        <ItemList
-          items={pinned ?? []}
-          itemKey={(slot) => String(slot.id)}
-          isLoading={pinnedQ.isLoading}
-          isError={pinnedQ.isError}
-          empty={<SectionEmpty message={t("detail.memorySectionPinnedEmpty")} />}
-          renderItem={(slot) => (
-            <PinnedSlotCard
-              slot={slot}
-              onDelete={isRunView ? undefined : (id) => deletePinned.mutate(id)}
-              isDeleting={deletePinned.isPending}
-            />
-          )}
-        />
-      </Section>
-
-      <Section
-        open={archiveOpen}
-        onOpenChange={setArchiveOpen}
-        icon={<Library className="h-3.5 w-3.5" />}
-        title={t("detail.memorySectionArchive")}
-        count={memoriesQ.isSuccess ? memoriesCount : undefined}
-        accentClass="text-muted-foreground"
-      >
-        <ItemList
-          items={memories ?? []}
-          itemKey={(mem) => String(mem.id)}
-          isLoading={memoriesQ.isLoading}
-          isError={memoriesQ.isError}
-          empty={<SectionEmpty message={t("detail.memorySectionArchiveEmpty")} />}
-          renderItem={(mem) => (
-            <MemoryRow
-              memory={mem}
-              onDelete={isRunView ? undefined : (id) => deleteMemory.mutate(id)}
-              isDeleting={deleteMemory.isPending}
-            />
-          )}
-        />
-      </Section>
-    </div>
+    <AgentMemoryCollection
+      pinned={pinned ?? []}
+      memories={memories ?? []}
+      pinnedLoading={pinnedQ.isLoading}
+      memoriesLoading={memoriesQ.isLoading}
+      pinnedError={pinnedQ.isError}
+      memoriesError={memoriesQ.isError}
+      onDeletePinned={isRunView ? undefined : (id) => deletePinned.mutate(id)}
+      onDeleteMemory={isRunView ? undefined : (id) => deleteMemory.mutate(id)}
+      isDeleting={deletePinned.isPending || deleteMemory.isPending}
+      embedded={isRunView}
+      initialTypes={initialTypes}
+    />
   );
 }
 
@@ -190,6 +117,8 @@ interface MemoryCollectionItem {
   runId: string | null;
   updatedAt: string | null;
 }
+
+const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
 
 function memoryText(content: unknown): string {
   return typeof content === "string"
@@ -207,6 +136,8 @@ function AgentMemoryCollection({
   onDeletePinned,
   onDeleteMemory,
   isDeleting,
+  embedded,
+  initialTypes = EMPTY_MEMORY_TYPES,
 }: {
   pinned: Array<{
     id: number;
@@ -229,25 +160,17 @@ function AgentMemoryCollection({
   memoriesLoading: boolean;
   pinnedError: boolean;
   memoriesError: boolean;
-  onDeletePinned: (id: number) => void;
-  onDeleteMemory: (id: number) => void;
+  onDeletePinned?: (id: number) => void;
+  onDeleteMemory?: (id: number) => void;
   isDeleting: boolean;
+  /** Run results already own the section heading and outer content padding. */
+  embedded: boolean;
+  initialTypes?: Array<"pinned" | "archive">;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const location = useLocation();
-  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [scopes, setScopes] = useState<string[]>([]);
-  const requestedTier = new URLSearchParams(location.search).get("agentMemory");
-  const tier: "pinned" | "archive" = requestedTier === "archive" ? "archive" : "pinned";
-  const setTier = (nextTier: "pinned" | "archive") => {
-    const search = new URLSearchParams(location.search);
-    search.set("agentMemory", nextTier);
-    void navigate(
-      { pathname: location.pathname, search: `?${search.toString()}`, hash: "#memory" },
-      { replace: true },
-    );
-  };
+  const [types, setTypes] = useState<string[]>(initialTypes);
   const [selected, setSelected] = useState<MemoryCollectionItem | null>(null);
   const { copy } = useCopyToClipboard(1_500);
 
@@ -281,112 +204,85 @@ function AgentMemoryCollection({
   const filteredItems = allItems.filter((item) => {
     const scope = item.actor_type === "shared" ? "shared" : "mine";
     const scopeMatches = scopes.length === 0 || scopes.includes(scope);
+    const typeMatches = types.length === 0 || types.includes(item.kind);
     const queryMatches =
       normalizedQuery === "" ||
       item.key?.toLocaleLowerCase().includes(normalizedQuery) ||
       memoryText(item.content).toLocaleLowerCase().includes(normalizedQuery);
-    return scopeMatches && queryMatches;
+    return scopeMatches && typeMatches && queryMatches;
   });
-  const pinnedItems = filteredItems.filter((item) => item.kind === "pinned");
-  const archiveItems = filteredItems.filter((item) => item.kind === "archive");
 
   const filters: FilterSpec[] = [
     {
-      id: "scope",
-      label: t("agents:detail.memoryScopeFilterLabel"),
-      values: scopes,
+      id: "type",
+      label: t("agents:detail.memoryTypeFilterLabel"),
+      values: types,
       options: [
-        { value: "shared", label: t("agents:detail.memoryScopeShared") },
-        { value: "mine", label: t("agents:detail.memoryScopeMine") },
+        { value: "pinned", label: t("agents:detail.memoryTabPinned") },
+        { value: "archive", label: t("agents:detail.memorySectionArchive") },
       ],
-      onChange: setScopes,
+      onChange: setTypes,
     },
+    ...(!embedded
+      ? [
+          {
+            id: "scope",
+            label: t("agents:detail.memoryScopeFilterLabel"),
+            values: scopes,
+            options: [
+              { value: "shared", label: t("agents:detail.memoryScopeShared") },
+              { value: "mine", label: t("agents:detail.memoryScopeMine") },
+            ],
+            onChange: setScopes,
+          },
+        ]
+      : []),
   ];
+  const tableLoading = pinnedLoading || memoriesLoading;
+  const tableError = pinnedError || memoriesError;
+  const activeTable = (
+    <MemoryTableSection
+      title={t("agents:detail.tabMemory")}
+      count={tableLoading || tableError ? undefined : filteredItems.length}
+      items={filteredItems}
+      isLoading={tableLoading}
+      isError={tableError}
+      empty={t("agents:detail.memoryEmptyAll")}
+      onOpen={setSelected}
+      onCopy={(item) => void copy(memoryText(item.content))}
+      onDelete={(item) => {
+        if (item.kind === "pinned") onDeletePinned?.(item.id);
+        else onDeleteMemory?.(item.id);
+      }}
+      canDelete={Boolean(onDeletePinned || onDeleteMemory)}
+      isDeleting={isDeleting}
+      hideHeading
+    />
+  );
 
-  const activeTitle =
-    tier === "pinned"
-      ? t("agents:detail.memorySectionPinned")
-      : t("agents:detail.memorySectionArchive");
-  const activeTable =
-    tier === "pinned" ? (
-      <MemoryTableSection
-        title={t("agents:detail.memorySectionPinned")}
-        count={pinnedLoading || pinnedError ? undefined : pinnedItems.length}
-        items={pinnedItems}
-        isLoading={pinnedLoading}
-        isError={pinnedError}
-        empty={t("agents:detail.memorySectionPinnedEmpty")}
-        onOpen={setSelected}
-        onCopy={(item) => void copy(memoryText(item.content))}
-        onDelete={(item) => onDeletePinned(item.id)}
-        isDeleting={isDeleting}
-        hideHeading
+  const collection = (
+    <section className={embedded ? "min-w-0" : "min-w-0 p-6"}>
+      <ListToolbar
+        placement="panel"
+        search={{
+          value: query,
+          onChange: setQuery,
+          placeholder: t("agents:detail.memorySearch"),
+        }}
+        filters={filters}
+        panelFiltersAdjacent
+        onReset={() => {
+          setTypes([]);
+          setScopes([]);
+        }}
       />
-    ) : (
-      <MemoryTableSection
-        title={t("agents:detail.memorySectionArchive")}
-        count={memoriesLoading || memoriesError ? undefined : archiveItems.length}
-        items={archiveItems}
-        isLoading={memoriesLoading}
-        isError={memoriesError}
-        empty={t("agents:detail.memorySectionArchiveEmpty")}
-        onOpen={setSelected}
-        onCopy={(item) => void copy(memoryText(item.content))}
-        onDelete={(item) => onDeleteMemory(item.id)}
-        isDeleting={isDeleting}
-        hideHeading
-      />
-    );
+      <div>{activeTable}</div>
+    </section>
+  );
 
   return (
     <>
-      <AgentDetailSplit
-        data-agent-memory-collection
-        railClassName="p-3"
-        rail={
-          <nav
-            className="flex flex-col gap-0.5 max-md:flex-row max-md:overflow-x-auto"
-            aria-label={t("agents:detail.tabMemory")}
-          >
-            <RailButton
-              icon={Pin}
-              label={t("agents:detail.memoryTabPinned")}
-              count={pinnedLoading || pinnedError ? undefined : pinned.length}
-              active={tier === "pinned"}
-              onClick={() => setTier("pinned")}
-            />
-            <RailButton
-              icon={Library}
-              label={t("agents:detail.memorySectionArchive")}
-              count={memoriesLoading || memoriesError ? undefined : memories.length}
-              active={tier === "archive"}
-              onClick={() => setTier("archive")}
-            />
-          </nav>
-        }
-      >
-        <section className="min-w-0 p-6">
-          <h2 className="text-lg font-semibold">{activeTitle}</h2>
-          <div className="border-border mt-2 border-b" />
-          <div className="pt-4">
-            <ListToolbar
-              placement="panel"
-              search={{
-                value: query,
-                onChange: setQuery,
-                placeholder: t("agents:detail.memorySearch"),
-              }}
-              filters={filters}
-              panelFiltersAdjacent
-              onReset={() => {
-                setScopes([]);
-              }}
-            />
-            <p className="text-muted-foreground text-xs">{t("agents:detail.memoryHelp")}</p>
-            <div className="pt-5">{activeTable}</div>
-          </div>
-        </section>
-      </AgentDetailSplit>
+      {collection}
       <Modal
         open={selected !== null}
         onClose={() => setSelected(null)}
@@ -433,6 +329,7 @@ function MemoryTableSection({
   onOpen,
   onCopy,
   onDelete,
+  canDelete = true,
   isDeleting,
   hideHeading = false,
 }: {
@@ -444,7 +341,8 @@ function MemoryTableSection({
   empty: string;
   onOpen: (item: MemoryCollectionItem) => void;
   onCopy: (item: MemoryCollectionItem) => void;
-  onDelete: (item: MemoryCollectionItem) => void;
+  onDelete?: (item: MemoryCollectionItem) => void;
+  canDelete?: boolean;
   isDeleting: boolean;
   hideHeading?: boolean;
 }) {
@@ -472,7 +370,7 @@ function MemoryTableSection({
         <div role="table" aria-label={title}>
           <div
             role="row"
-            className="text-muted-foreground grid grid-cols-[7rem_minmax(0,1fr)_8rem_10rem_2.5rem] gap-3 border-b px-3 py-2 text-[11px] font-semibold tracking-wide uppercase"
+            className="text-muted-foreground grid grid-cols-[7rem_minmax(0,1fr)_8rem_10rem_2.5rem] gap-3 border-y px-3 py-2 text-[11px] font-semibold tracking-wide uppercase"
           >
             <span role="columnheader">{t("agents:detail.memoryColumnType")}</span>
             <span role="columnheader">{t("agents:detail.memoryColumnContent")}</span>
@@ -489,7 +387,7 @@ function MemoryTableSection({
                 item={item}
                 onOpen={() => onOpen(item)}
                 onCopy={() => onCopy(item)}
-                onDelete={() => onDelete(item)}
+                onDelete={canDelete && onDelete ? () => onDelete(item) : undefined}
                 isDeleting={isDeleting}
               />
             ))}
@@ -510,7 +408,7 @@ function MemoryCollectionRow({
   item: MemoryCollectionItem;
   onOpen: () => void;
   onCopy: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   isDeleting: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
@@ -567,61 +465,19 @@ function MemoryCollectionRow({
               <Copy />
               {t("common:btn.copy")}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={isDeleting}
-              className="text-destructive focus:text-destructive"
-              onSelect={onDelete}
-            >
-              <Trash2 />
-              {t("common:btn.delete")}
-            </DropdownMenuItem>
+            {onDelete && (
+              <DropdownMenuItem
+                disabled={isDeleting}
+                className="text-destructive focus:text-destructive"
+                onSelect={onDelete}
+              >
+                <Trash2 />
+                {t("common:btn.delete")}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
     </div>
-  );
-}
-
-interface SectionProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  icon: React.ReactNode;
-  title: string;
-  /** Undefined until the request has answered — see the note on the pill. */
-  count?: number;
-  accentClass: string;
-  children: React.ReactNode;
-}
-
-/**
- * The heading a tier hangs under: a disclosure, a name, and its count.
- *
- * It no longer decides what to draw when the tier is empty. That was the
- * section's own italic sentence, which meant emptiness was answered in one
- * place, failure nowhere, and loading nowhere — the body owns all three now,
- * in the family's order.
- */
-function Section({ open, onOpenChange, icon, title, count, accentClass, children }: SectionProps) {
-  return (
-    <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className="hover:bg-muted/30 group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left">
-        <ChevronDown
-          className={`text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform ${
-            open ? "" : "-rotate-90"
-          }`}
-        />
-        <span className={`flex shrink-0 items-center ${accentClass}`}>{icon}</span>
-        <span className="text-foreground text-sm font-semibold tracking-tight">{title}</span>
-        {/* Only for an answer we have. `data?.length ?? 0` on a failed request
-            is a pill reading "0" over a body reading "this failed" — the same
-            lie the run list's footer had to be cured of, one level down. */}
-        {count !== undefined && (
-          <span className="bg-muted text-muted-foreground inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[11px] leading-none font-medium">
-            {count}
-          </span>
-        )}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="pt-2">{children}</CollapsibleContent>
-    </Collapsible>
   );
 }

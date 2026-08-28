@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
@@ -112,6 +113,22 @@ export function PackageActionsDropdown({
 
   const isAgent = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
+  const hasAgentBuildActions = isAgent && (isMutable || (isMember && !isOwned && Boolean(onFork)));
+  const hasAgentExecutionActions =
+    isAgent &&
+    ((isMember && Boolean(onRunWithOptions)) ||
+      (isAdmin && !hasFileInput && Boolean(onAddSchedule)));
+  const hasAgentExportActions =
+    isAgent && Boolean((downloadVersion && onDownload) || onDownloadBundle);
+  const hasAgentAdministrationActions =
+    isAgent &&
+    isAdmin &&
+    Boolean(
+      (hasRuns && onDeleteRuns) ||
+      (hasMemories && onDeleteMemories) ||
+      (canUninstall && onUninstall) ||
+      (!isBuiltIn && isOwned && onDeleteAgent),
+    );
 
   // The manifest is no longer reachable from here, and does not need to be:
   // every page that mounts this dropdown carries both tabs — À propos renders
@@ -130,7 +147,7 @@ export function PackageActionsDropdown({
         >
           {labelledTrigger ? (
             <>
-              {t("integrations.actions", { ns: "settings" })}
+              {t("pageActions.label", { ns: "common" })}
               <ChevronDown size={16} />
             </>
           ) : (
@@ -138,136 +155,182 @@ export function PackageActionsDropdown({
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {/* ── Run with options (advanced launcher — per-run overrides) ── */}
-        {isAgent && isMember && onRunWithOptions && (
+      <DropdownMenuContent align="end" className={isAgent ? "min-w-64" : undefined}>
+        {isAgent ? (
           <>
-            <DropdownMenuItem onSelect={onRunWithOptions}>
-              <SlidersHorizontal size={14} />
-              {t("run.options.menuItem")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {hasAgentBuildActions && (
+              <>
+                <DropdownMenuLabel>{t("detail.actions.agent")}</DropdownMenuLabel>
+                {isMutable && (
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      onEdit ? onEdit() : navigate(packageEditPath(type, packageId))
+                    }
+                  >
+                    <Pencil size={14} />
+                    {editLabel ?? t("btn.edit")}
+                  </DropdownMenuItem>
+                )}
+                {isMutable && onCreateVersion && (
+                  <DropdownMenuItem onSelect={onCreateVersion}>
+                    <GitBranchPlus size={14} />
+                    {t("version.createVersion")}
+                  </DropdownMenuItem>
+                )}
+                {isMember && !isOwned && onFork && (
+                  <DropdownMenuItem onSelect={onFork}>
+                    <GitFork size={14} />
+                    {t("fork.button")}
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+
+            {hasAgentExecutionActions && (
+              <>
+                {hasAgentBuildActions && <DropdownMenuSeparator />}
+                <DropdownMenuLabel>{t("detail.actions.execution")}</DropdownMenuLabel>
+                {isMember && onRunWithOptions && (
+                  <DropdownMenuItem onSelect={onRunWithOptions}>
+                    <SlidersHorizontal size={14} />
+                    {t("run.options.menuItem")}
+                  </DropdownMenuItem>
+                )}
+                {isAdmin && !hasFileInput && onAddSchedule && (
+                  <DropdownMenuItem onSelect={onAddSchedule}>
+                    <CalendarPlus size={14} />
+                    {t("schedule.titleNew")}
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+
+            {hasAgentExportActions && (
+              <>
+                {(hasAgentBuildActions || hasAgentExecutionActions) && <DropdownMenuSeparator />}
+                <DropdownMenuLabel>{t("detail.actions.export")}</DropdownMenuLabel>
+                {downloadVersion && onDownload && (
+                  <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
+                    <Download size={14} />
+                    {t("btn.download", { ns: "common" })}
+                  </DropdownMenuItem>
+                )}
+                {onDownloadBundle && (
+                  <DropdownMenuItem
+                    onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
+                    disabled={!hasPublishedVersion}
+                    title={!hasPublishedVersion ? t("bundle.requiresVersion") : undefined}
+                  >
+                    <Package size={14} />
+                    {t("bundle.download")}
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+
+            {hasAgentAdministrationActions && (
+              <>
+                {(hasAgentBuildActions || hasAgentExecutionActions || hasAgentExportActions) && (
+                  <DropdownMenuSeparator />
+                )}
+                <DropdownMenuLabel>{t("detail.actions.administration")}</DropdownMenuLabel>
+                {hasRuns && onDeleteRuns && (
+                  <DropdownMenuItem
+                    onSelect={onDeleteRuns}
+                    disabled={runningRuns > 0}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("detail.clearRuns")}
+                  </DropdownMenuItem>
+                )}
+                {hasMemories && onDeleteMemories && (
+                  <DropdownMenuItem
+                    onSelect={onDeleteMemories}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("detail.clearMemories")}
+                  </DropdownMenuItem>
+                )}
+                {canUninstall && onUninstall && (
+                  <DropdownMenuItem
+                    onSelect={onUninstall}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <PackageMinus size={14} />
+                    {t("packages.uninstall", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {!isBuiltIn && isOwned && onDeleteAgent && (
+                  <DropdownMenuItem
+                    onSelect={onDeleteAgent}
+                    disabled={runningRuns > 0}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("btn.delete")}
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
           </>
-        )}
-
-        {/* ── Download ── */}
-        {downloadVersion && onDownload && (
-          <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-            <Download size={14} />
-            {t("btn.download", { ns: "common" })}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Download bundle (agent only — multi-package, transitive).
-              Disabled when no version has been published: the export
-              endpoint resolves `(packageId, version)` from the registry,
-              so a draft-only package would 404. */}
-        {isAgent && onDownloadBundle && (
-          <DropdownMenuItem
-            onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
-            disabled={!hasPublishedVersion}
-            title={!hasPublishedVersion ? t("bundle.requiresVersion") : undefined}
-          >
-            <Package size={14} />
-            {t("bundle.download")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Create version ── */}
-        {isMutable && onCreateVersion && (
-          <DropdownMenuItem onSelect={onCreateVersion}>
-            <GitBranchPlus size={14} />
-            {t("version.createVersion")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Edit ── */}
-        {isMutable && (
-          <DropdownMenuItem
-            onSelect={() => (onEdit ? onEdit() : navigate(packageEditPath(type, packageId)))}
-          >
-            <Pencil size={14} />
-            {editLabel ?? t("btn.edit")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
-        {isMember && !isOwned && onFork && (
-          <DropdownMenuItem onSelect={onFork}>
-            <GitFork size={14} />
-            {t("fork.button")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Agent secondary actions ── */}
-        {isAgent && (
+        ) : (
           <>
-            <DropdownMenuSeparator />
-            {isAdmin && !hasFileInput && onAddSchedule && (
-              <DropdownMenuItem onSelect={onAddSchedule}>
-                <CalendarPlus size={14} />
-                {t("schedule.titleNew")}
+            {downloadVersion && onDownload && (
+              <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
+                <Download size={14} />
+                {t("btn.download", { ns: "common" })}
               </DropdownMenuItem>
             )}
-            {isAdmin && hasRuns && onDeleteRuns && (
+            {isMutable && onCreateVersion && (
+              <DropdownMenuItem onSelect={onCreateVersion}>
+                <GitBranchPlus size={14} />
+                {t("version.createVersion")}
+              </DropdownMenuItem>
+            )}
+            {isMutable && (
               <DropdownMenuItem
-                onSelect={onDeleteRuns}
-                disabled={runningRuns > 0}
-                className="text-destructive focus:text-destructive"
+                onSelect={() => (onEdit ? onEdit() : navigate(packageEditPath(type, packageId)))}
               >
-                <Trash2 size={14} />
-                {t("detail.clearRuns")}
+                <Pencil size={14} />
+                {editLabel ?? t("btn.edit")}
               </DropdownMenuItem>
             )}
-            {isAdmin && hasMemories && onDeleteMemories && (
-              <DropdownMenuItem
-                onSelect={onDeleteMemories}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("detail.clearMemories")}
+            {isMember && !isOwned && onFork && (
+              <DropdownMenuItem onSelect={onFork}>
+                <GitFork size={14} />
+                {t("fork.button")}
               </DropdownMenuItem>
             )}
-          </>
-        )}
-
-        {/* ── Deactivate / Uninstall / Delete ── */}
-        {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
-          <>
-            <DropdownMenuSeparator />
-            {canDeactivate && onDeactivate && (
-              <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
-                <PowerOff size={14} />
-                {t("integrations.btn.deactivate", { ns: "settings" })}
-              </DropdownMenuItem>
-            )}
-            {canUninstall && onUninstall && (
-              <DropdownMenuItem
-                onSelect={onUninstall}
-                className="text-destructive focus:text-destructive"
-              >
-                <PackageMinus size={14} />
-                {t("packages.uninstall", { ns: "settings" })}
-              </DropdownMenuItem>
-            )}
-            {!isBuiltIn && isOwned && isAgent && onDeleteAgent && (
-              <DropdownMenuItem
-                onSelect={onDeleteAgent}
-                disabled={runningRuns > 0}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("btn.delete")}
-              </DropdownMenuItem>
-            )}
-            {!isBuiltIn && isOwned && !isAgent && canDeletePackage && onDeletePackage && (
-              <DropdownMenuItem
-                onSelect={onDeletePackage}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("btn.delete")}
-              </DropdownMenuItem>
+            {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
+              <>
+                <DropdownMenuSeparator />
+                {canDeactivate && onDeactivate && (
+                  <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
+                    <PowerOff size={14} />
+                    {t("integrations.btn.deactivate", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {canUninstall && onUninstall && (
+                  <DropdownMenuItem
+                    onSelect={onUninstall}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <PackageMinus size={14} />
+                    {t("packages.uninstall", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {!isBuiltIn && isOwned && canDeletePackage && onDeletePackage && (
+                  <DropdownMenuItem
+                    onSelect={onDeletePackage}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("btn.delete")}
+                  </DropdownMenuItem>
+                )}
+              </>
             )}
           </>
         )}

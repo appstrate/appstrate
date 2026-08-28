@@ -39,7 +39,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
+import { Badge } from "@appstrate/ui/components/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -47,10 +49,19 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import { useAgentMap } from "./use-agent-map";
+import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
 import { ErrorState, LoadingState } from "../../components/page-states";
 import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
-import { MapIssuesDialog } from "./map-issues-dialog";
 import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
+import {
+  AgentDiagnosticsDialog,
+  AgentDiagnosticsIssueBadge,
+} from "../../components/agent-detail/agent-diagnostics-dialog";
+import {
+  AGENT_DIAGNOSTIC_QUERY_KEYS,
+  agentDiagnosticMapNodeId,
+  requestedAgentDiagnostic,
+} from "../../lib/agent-diagnostics";
 import {
   AgentNode,
   BoundaryNode,
@@ -95,6 +106,26 @@ function FitOnCanvasResize() {
     if (canvasSize === "0x0") return; // bootstrap frame, nothing measured yet
     void fitView(FIT_VIEW_OPTIONS);
   }, [fitView, canvasSize]);
+  return null;
+}
+
+/** Center the semantic target requested by a support/deep link. */
+function FocusDiagnosticTarget({ nodeId, requestKey }: { nodeId: string; requestKey: string }) {
+  const { fitView, getNode } = useReactFlow();
+  const measured = useStore((state) => {
+    const node = state.nodeLookup.get(nodeId);
+    return `${node?.measured?.width ?? 0}x${node?.measured?.height ?? 0}`;
+  });
+
+  useEffect(() => {
+    const node = getNode(nodeId);
+    if (!node || measured === "0x0") return;
+    const frame = requestAnimationFrame(() => {
+      void fitView({ nodes: [node], padding: 1.2, maxZoom: 1, duration: 300 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fitView, getNode, measured, nodeId, requestKey]);
+
   return null;
 }
 
@@ -406,16 +437,51 @@ export function AgentMapView({
   version?: string | undefined;
 }) {
   const { t } = useTranslation(["agents", "agent-map"]);
+  const location = useLocation();
+  const navigate = useNavigate();
   const { data, isLoading, error } = useAgentMap(packageId, version);
+  const diagnostics = useAgentDiagnostics(packageId, version);
+  const diagnosticResult = diagnostics.data;
+  const diagnosticSearch = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const requestedDiagnostic = useMemo(
+    () =>
+      diagnosticResult
+        ? requestedAgentDiagnostic(diagnosticSearch, diagnosticResult.diagnostics)
+        : null,
+    [diagnosticResult, diagnosticSearch],
+  );
+  const requestedNodeId = requestedDiagnostic
+    ? agentDiagnosticMapNodeId(requestedDiagnostic)
+    : null;
   const [editKind, setEditKind] = useState<MapEditKind | null>(null);
   const [panelKind, setPanelKind] = useState<MapPanelKind | null>(null);
-  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [localIssuesOpen, setLocalIssuesOpen] = useState(false);
+  const issuesOpen =
+    localIssuesOpen ||
+    (diagnosticSearch.get("agentDiagnostics") === "all" && Boolean(diagnosticResult));
   const [expanded, setExpanded] = useState(false);
   const [hoveredRelation, setHoveredRelation] = useState<string | null>(null);
   const [selectedRelation, setSelectedRelation] = useState<string | null>(null);
   const activeRelation = hoveredRelation ?? selectedRelation;
   const collapse = useCallback(() => setExpanded(false), []);
   useEscape(expanded, collapse);
+
+  const closeIssues = useCallback(() => {
+    setLocalIssuesOpen(false);
+    const search = new URLSearchParams(location.search);
+    let changed = false;
+    for (const key of AGENT_DIAGNOSTIC_QUERY_KEYS) {
+      if (search.has(key)) {
+        search.delete(key);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    void navigate(
+      { pathname: location.pathname, search: search.toString(), hash: location.hash },
+      { replace: true },
+    );
+  }, [location.hash, location.pathname, location.search, navigate]);
 
   // Stable identity: it rides in every node's `data`, which React Flow compares
   // to decide what to re-render.
@@ -433,14 +499,15 @@ export function AgentMapView({
 
   const projectedNodes = useMemo(() => {
     if (!data) return [] as Node[];
-    // Diagnostics ride into the node they belong to; row-level placement then
-    // happens inside the renderer by `item_id`.
-    const byNode = new Map<string, typeof data.diagnostics>();
-    for (const d of data.diagnostics) {
-      if (!d.node_id) continue;
-      const list = byNode.get(d.node_id) ?? [];
-      list.push(d);
-      byNode.set(d.node_id, list);
+    // `/diagnostics` owns the semantic target. This is only the visual adapter
+    // from that target to the current React Flow node id.
+    const byNode = new Map<string, NonNullable<typeof diagnosticResult>["diagnostics"]>();
+    for (const diagnostic of diagnosticResult?.diagnostics ?? []) {
+      const nodeId = agentDiagnosticMapNodeId(diagnostic);
+      if (!nodeId) continue;
+      const list = byNode.get(nodeId) ?? [];
+      list.push(diagnostic);
+      byNode.set(nodeId, list);
     }
     const cards = data.nodes.map<Node>((n) => ({
       id: n.id,
@@ -466,6 +533,7 @@ export function AgentMapView({
       // `.click()` still fires, which is how this hid). Fleet's own nodes carry
       // `nopan selectable` for the same reason. Dragging stays off.
       selectable: true,
+      selected: n.id === requestedNodeId,
       zIndex: 4,
     }));
     const boundaries = BOUNDARIES.map<Node>((boundary) => ({
@@ -485,7 +553,7 @@ export function AgentMapView({
       zIndex: 0,
     }));
     return [...boundaries, ...cards];
-  }, [data, editable, onEdit, onPanel, onRelationActive, t]);
+  }, [data, diagnosticResult, editable, onEdit, onPanel, onRelationActive, requestedNodeId, t]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   useEffect(() => {
@@ -498,11 +566,11 @@ export function AgentMapView({
           ...node,
           position: existing.position,
           ...(node.type === "boundary" ? { style: existing.style } : {}),
-          selected: existing.selected,
+          selected: requestedNodeId ? node.id === requestedNodeId : existing.selected,
         };
       });
     });
-  }, [projectedNodes, setNodes]);
+  }, [projectedNodes, requestedNodeId, setNodes]);
 
   const layoutKey = `${packageId}:${version ?? "draft"}:${projectedNodes
     .map((node) => node.id)
@@ -618,12 +686,11 @@ export function AgentMapView({
     return [...genericEdges, ...(configEdge ? [projectedEdge(configEdge)] : [])];
   }, [activeRelation, t]);
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading || diagnostics.isLoading) return <LoadingState />;
   if (error || !data) return <ErrorState message={t("agent-map:loadError")} />;
 
-  // Diagnostics with no node (an unrecognised readiness field) would otherwise
-  // vanish from the UI — surface them above the canvas instead of dropping them.
-  const orphanDiagnostics = data.diagnostics.filter((d) => !d.node_id);
+  // A target that has no semantic node remains visible rather than vanishing.
+  const orphanDiagnostics = diagnosticResult?.diagnostics.filter((d) => !d.target.node) ?? [];
 
   return (
     <div
@@ -631,33 +698,12 @@ export function AgentMapView({
         expanded ? "bg-background fixed inset-0 z-50 flex flex-col gap-3 p-4" : "space-y-3"
       }
     >
-      {/* Which definition is drawn and how much of it is broken. Fullscreen is
-          a canvas control and therefore lives beside the React Flow controls. */}
-      <div className="text-muted-foreground flex items-center gap-3 text-xs">
-        <span>
-          {data.agent.version_ref === "draft"
-            ? t("agent-map:draftDefinition")
-            : t("agent-map:pinnedDefinition", {
-                version: data.agent.version_ref,
-              })}
-        </span>
-        {data.diagnostics.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setIssuesOpen(true)}
-            className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
-          >
-            <AlertTriangle className="size-3.5" />
-            {t("agent-map:issueCount", { count: data.diagnostics.length })}
-          </button>
-        )}
-      </div>
       {orphanDiagnostics.length > 0 && (
         <div className="border-warning/40 bg-warning/10 flex flex-col gap-1 rounded-lg border p-3">
           {orphanDiagnostics.map((d) => (
             <div key={d.field} className="flex items-center gap-2 text-xs">
               <AlertTriangle className="text-warning size-3.5 shrink-0" />
-              <span>{d.message}</span>
+              <span>{d.explanation}</span>
             </div>
           ))}
         </div>
@@ -670,6 +716,32 @@ export function AgentMapView({
           expanded ? "min-h-0 flex-1" : "h-[60vh] min-h-[420px]"
         }`}
       >
+        <header className="border-border bg-background flex shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b px-4 py-2.5">
+          <div>
+            {diagnosticResult && diagnosticResult.status !== "healthy" && (
+              <button type="button" onClick={() => setLocalIssuesOpen(true)}>
+                <AgentDiagnosticsIssueBadge result={diagnosticResult} />
+              </button>
+            )}
+            {diagnostics.isError && (
+              <Badge variant="pending">{t("agents:detail.diagnostics.unknownTitle")}</Badge>
+            )}
+          </div>
+          <div className="text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
+            <span className="flex items-center gap-2">
+              <span className="bg-foreground h-0.5 w-7" />
+              {t("agent-map:legendFlow")}
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="bg-muted-foreground/70 h-px w-7" />
+              {t("agent-map:legendDependency")}
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="border-muted-foreground w-7 border-t border-dashed" />
+              {t("agent-map:legendResolution")}
+            </span>
+          </div>
+        </header>
         <div className="min-h-0 flex-1">
           <ReactFlow
             nodes={nodes}
@@ -720,31 +792,16 @@ export function AgentMapView({
             </Panel>
             <FitOnCanvasResize />
             <MeasuredSemanticLayout layoutKey={layoutKey} setNodes={setNodes} />
+            {requestedDiagnostic && requestedNodeId && (
+              <FocusDiagnosticTarget
+                nodeId={requestedNodeId}
+                requestKey={`${requestedDiagnostic.code}:${requestedDiagnostic.field}`}
+              />
+            )}
           </ReactFlow>
         </div>
-        <footer className="bg-background border-border shrink-0 overflow-x-auto border-t px-4 py-3">
-          <div className="text-muted-foreground flex min-w-max items-center gap-6 text-[11px]">
-            <span className="flex items-center gap-2">
-              <span className="bg-foreground h-0.5 w-7" />
-              {t("agent-map:legendFlow")}
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="bg-muted-foreground/70 h-px w-7" />
-              {t("agent-map:legendDependency")}
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="border-muted-foreground w-7 border-t border-dashed" />
-              {t("agent-map:legendResolution")}
-            </span>
-          </div>
-        </footer>
       </section>
-      <MapIssuesDialog
-        diagnostics={issuesOpen ? data.diagnostics : null}
-        onEdit={onEdit}
-        onPanel={onPanel}
-        onClose={() => setIssuesOpen(false)}
-      />
+      <AgentDiagnosticsDialog result={diagnosticResult} open={issuesOpen} onClose={closeIssues} />
       <MapEditDialog kind={editKind} packageId={packageId} onClose={() => setEditKind(null)} />
       <MapPanelDialog kind={panelKind} packageId={packageId} onClose={() => setPanelKind(null)} />
     </div>

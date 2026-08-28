@@ -66,22 +66,40 @@ export const SCREENS = [
     name: "agent-overview-blocking",
     settleMs: 1500,
   },
-  { path: "/agents/@tractr/compta-trimestrielle#map", name: "agent-map" },
-  { path: "/agents/@tractr/compta-trimestrielle#runs", name: "agent-runs" },
-  { path: "/agents/@tractr/compta-trimestrielle#configuration", name: "agent-configuration" },
-  { path: "/agents/@tractr/compta-trimestrielle#memory", name: "agent-memory" },
-  { path: "/agents/@tractr/compta-trimestrielle#files", name: "agent-files" },
   {
-    path: "/agents/@tractr/compta-trimestrielle/runs/run_01",
-    name: "run-journal-active",
+    path: "/agents/@tractr/compta-trimestrielle?agentSettings=map#settings",
+    name: "agent-map",
+  },
+  {
+    path: "/agents/@default/wiki-brain?agentSettings=map#settings",
+    name: "agent-map-warning",
+  },
+  {
+    path: "/agents/@tractr/analyse-recurrence-articles-tastet?agentSettings=map#settings",
+    name: "agent-map-blocking",
+  },
+  { path: "/agents/@tractr/compta-trimestrielle#runs", name: "agent-runs" },
+  { path: "/agents/@tractr/compta-trimestrielle#settings", name: "agent-configuration" },
+  { path: "/agents/@tractr/compta-trimestrielle#memory", name: "agent-memory" },
+  {
+    path: "/agents/@tractr/compta-trimestrielle?agentSettings=files#settings",
+    name: "agent-files",
   },
   {
     path: "/agents/@tractr/compta-trimestrielle/runs/run_01",
+    name: "run-overview-active",
+  },
+  {
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_01#results",
+    name: "run-results-active",
+  },
+  {
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_01#journal",
     name: "run-journal-search-open",
     steps: [{ type: "clickLabel", label: "Rechercher dans le journal…" }],
   },
   {
-    path: "/agents/@tractr/compta-trimestrielle/runs/run_01",
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_01#journal",
     name: "run-journal-filter-open",
     steps: [
       { type: "clickLabel", label: "Filtres du journal" },
@@ -89,7 +107,7 @@ export const SCREENS = [
     ],
   },
   {
-    path: "/agents/@tractr/compta-trimestrielle/runs/run_01",
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_01#journal",
     name: "run-journal-search-empty",
     steps: [
       { type: "clickLabel", label: "Rechercher dans le journal…" },
@@ -101,30 +119,42 @@ export const SCREENS = [
     ],
   },
   {
-    path: "/agents/@tractr/compta-trimestrielle/runs/run_01#journal",
-    name: "run-journal-turns-modal",
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_01",
+    name: "run-overview-turns-modal",
     settleMs: 1200,
     clickText: "Voir le détail par tour",
   },
   {
-    path: "/agents/@tractr/compta-trimestrielle/runs/run_02",
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_02#results",
     name: "run-results-success",
   },
   {
-    path: "/agents/@tractr/rq-entreprise-communications/runs/run_03",
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_02",
+    name: "run-overview-success",
+  },
+  {
+    path: "/agents/@default/wiki-brain/runs/run_06",
+    name: "run-overview-empty-input",
+  },
+  {
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_02#journal",
+    name: "run-journal-success",
+  },
+  {
+    path: "/agents/@tractr/rq-entreprise-communications/runs/run_03#journal",
     name: "run-journal-failed",
   },
   {
-    path: "/agents/@tractr/analyse-recurrence-articles-tastet/runs/run_05",
+    path: "/agents/@tractr/analyse-recurrence-articles-tastet/runs/run_05#results",
     name: "run-results-cancelled-partial",
   },
   { path: "/agents/@inline/r-8f2c41/runs/run_07#results", name: "run-results-inline" },
   {
-    path: "/agents/@default/wiki-brain/runs/run_06",
+    path: "/agents/@default/wiki-brain/runs/run_06#journal",
     name: "run-journal-success-empty",
   },
   {
-    path: "/agents/@tractr/compta-trimestrielle/runs/run_08",
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_08#journal",
     name: "run-journal-failed-empty",
   },
   // The settings surfaces, which are routed modals over whatever page you were
