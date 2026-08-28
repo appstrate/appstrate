@@ -140,7 +140,6 @@
   "overrides": {
     "zod": "4.4.3",
     "ai": "^7.0.48",
-    "@ai-sdk/mcp": "^2.0.22",
     "@ai-sdk/react": "^4.0.51",
     "@ai-sdk/provider-utils": "^5.0.18"
   },
