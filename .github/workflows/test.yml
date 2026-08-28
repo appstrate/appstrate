@@ -139,9 +139,26 @@ jobs:
       # CLI tests live in a separate workspace with its own bunfig.toml
       # (no Docker preload needed), so we run them from that directory to
       # pick up the right config and keep them fast.
+      #
+      # `--coverage` is not decoration. Until the integration job below was
+      # scoped to the integration suite, it ran `bun test` UNFILTERED — the
+      # whole repo, `apps/cli` included — so CLI coverage reached Codecov only
+      # as a side effect of that duplicated run. Scoping that job without
+      # emitting coverage here would have dropped `apps/cli` out of the project
+      # total silently, and the first PR to touch the CLI would have read it as
+      # a coverage regression it did not cause.
       - name: Run CLI unit tests
         working-directory: apps/cli
-        run: bun test
+        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
+
+      - name: Upload CLI coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: apps/cli/coverage/lcov.info
+          flags: cli
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   integration:
     name: Integration tests
@@ -153,28 +170,29 @@ jobs:
     # both jobs aligned on post-merge validation.
     if: contains(github.event.pull_request.labels.*.name, 'integration') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # 20, matching the two other heavy jobs. It was 10, and it was raised on
-    # PRE-change durations (425-464s) — a guess about what the new tests would
-    # cost, not a measurement of it.
+    # 20, matching the two other heavy jobs — and this time the number is not
+    # the thing doing the work. The `run` step below is.
     #
-    # MEASURED, on run 33080988225 of this branch:
+    # This job used to invoke `bun test` with NO path filter, i.e. the entire
+    # repository: 883 files, of which the `unit` job above had already run 547
+    # three minutes earlier, on the same tier, against the same Docker infra.
+    # Two thirds of it was a second execution of work that had already passed.
     #
-    #   Ran 11968 tests across 878 files. [961.51s]     ← the `bun test` step
-    #   Integration tests: 1015s                        ← the whole job
+    # That is what actually consumed the ceiling. Measured across four runs of
+    # this branch, unchanged suite: 821s, 915s, 1015s, then 1163s — a ~40%
+    # spread on runner variance alone. The last one finished its tests at
+    # 1162.86s with 12080 pass / 0 fail and was killed at 1213s with the
+    # coverage upload still to go. A green suite reported as a red gate,
+    # because the job had no room left for its own last step.
     #
-    # 1015s of a 1200s ceiling is 85%, leaving ~3 minutes. That is the right
-    # margin for a suite this size and it is why the number stays at 20 — but it
-    # is a margin, not a budget: this job is the ONLY pre-merge exercise of the
-    # integration suite, so a cancellation reads as a red gate for a suite that
-    # never ran, and there is no headroom left to absorb a second raise.
+    # Raising it again would have bought one more run. The comment that used to
+    # sit here said "when this approaches 20, split the suite — do not raise it
+    # again", so: the step now runs only `test/integration`, and the ceiling
+    # stays where it is.
     #
-    # The earlier claim that these runs had "under two minutes of headroom"
-    # against the 10-minute ceiling was arithmetic on the pre-change figure and
-    # is dropped; 464s against 600s was ~2.3 minutes, and neither number
-    # described the suite as it now stands.
-    #
-    # When this approaches 20, split the suite — do not raise it again. The
-    # number stops meaning anything once it is routinely re-raised.
+    # This job remains the ONLY pre-merge exercise of the integration suite, so
+    # a cancellation still reads as a red gate for a suite that never ran —
+    # which is exactly why the fix had to be the workload and not the budget.
     timeout-minutes: 20
 
     steps:
@@ -199,8 +217,19 @@ jobs:
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
-      - name: Run all tests with coverage
-        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
+      # Only the integration suite. The `unit` job already ran everything else
+      # at this same tier, so running it again here proved nothing and cost two
+      # thirds of the budget (see `timeout-minutes` above).
+      #
+      # The positional is a path SUBSTRING filter, not a glob, so it selects a
+      # deliberate SUPERSET: 306 files rather than the 276 under a literal
+      # `**/test/integration/**`, the extra 30 being files named
+      # `test/integration-*.test.ts`. Erring wide is the right side for a gate —
+      # those 30 run in both jobs, which wastes seconds, whereas a hand-listed
+      # set of roots would silently stop covering the day a module grows its
+      # first integration directory.
+      - name: Run integration tests with coverage
+        run: bun test test/integration --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
       - name: Upload integration coverage to Codecov
         if: always()
