@@ -60,6 +60,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`parsePackageZip` no longer accepts a bare `number` as its second argument**
+  (`./zip`) — the retired positional `maxSize`, replaced by
+  `ParsePackageZipOptions` in 6.0.0. TypeScript callers now get a compile error;
+  a plain-JS caller that passes a number gets a `TypeError` naming the object
+  form and the value it passed. Pass `{ maxSize: N }`.
+  The check is a runtime throw and not a deletion on purpose: with the branch
+  simply gone, a number falls through `options ?? {}`, `maxSize` reads
+  `undefined`, and the DEFAULT 10 MB ceiling silently replaces the limit the
+  caller asked for — a caller requesting 1 MB would get 10 MB with no error at
+  all. A retired form that can still arrive from outside fails loudly, never
+  works (`docs/NO_TRANSITIONAL_CODE.md` step 5).
+  A `TypeError` rather than a `PackageZipError`: nothing is wrong with the
+  archive, the call is. Consumers catching `PackageZipError` around this call
+  will NOT catch it, which is the intent — a caller-API defect must not be
+  rendered into the 400 an uploader reads.
+  Breaking for any consumer still on the positional form, so this is a **major**.
+
 - **A rejected unknown body key now names ITSELF in `errors[].field`**
   (`./api-errors`) — `zodIssuesToFieldErrors` previously rendered every
   `unrecognized_keys` issue through the generic path, and Zod 4 gives that issue

@@ -257,26 +257,42 @@ export interface ParsePackageZipOptions {
  * based on package type (prompt.md for agents, SKILL.md for skills, entrypoint for tools).
  * Includes zip bomb protection and wrapper folder stripping.
  * @param zipBuffer - The raw ZIP file as a Uint8Array
- * @param options - {@link ParsePackageZipOptions}, or a bare `number` read as
- *   `maxSize`. The bare-number form is the original signature and stays
- *   supported for published consumers of `@appstrate/core`; new call sites
- *   should use the object form.
+ * @param options - {@link ParsePackageZipOptions}
  * @returns Parsed package with manifest, content, files, type, and any dropped runtime-tool ids
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
+ * @throws TypeError when `options` is a number — see the guard in the body
  * @example
  * const zip = await readFile("my-agent.afps");
  * const { manifest, content, type } = parsePackageZip(new Uint8Array(zip));
  */
 export function parsePackageZip(
   zipBuffer: Uint8Array,
-  options?: number | ParsePackageZipOptions,
+  options?: ParsePackageZipOptions,
 ): ParsedPackageZip {
-  // `maxSize` is a TypeScript function option, not an AFPS manifest key — it
-  // is the original published positional parameter, kept for npm consumers.
-  const opts: ParsePackageZipOptions =
-    typeof options === "number"
-      ? { maxSize: options } // canonical-casing-exempt
-      : (options ?? {});
+  // The signature says `options` cannot be a number, so an in-tree call site
+  // that passes one fails to compile. This runtime check outlives that type on
+  // purpose: `@appstrate/core` is PUBLISHED, and an out-of-tree consumer in
+  // plain JS (or one that never runs `tsc`) can still pass the retired
+  // positional `maxSize` with no compiler in the way. Hence the cast — the
+  // check has to test a shape the type has already ruled out.
+  //
+  // Deleting the check instead would not restore the old behaviour, it would
+  // HIDE it: a number falls through `options ?? {}`, `opts.maxSize` reads
+  // `undefined`, and the default ceiling silently replaces the limit the caller
+  // asked for. `docs/NO_TRANSITIONAL_CODE.md` step 5 — a retired form that can
+  // still arrive from outside must fail loudly, never work.
+  //
+  // A `TypeError` and not a `PackageZipError`: nothing is wrong with the
+  // archive, the call is wrong. `PackageZipError` is what `routes/packages.ts`
+  // renders into the 400 an uploader reads, and that would blame them for a bug
+  // in the calling code.
+  if (typeof (options as unknown) === "number") {
+    throw new TypeError(
+      `parsePackageZip(zip, ${String(options)}): the bare-number \`maxSize\` argument is retired. ` +
+        `Pass a ParsePackageZipOptions object instead: parsePackageZip(zip, { maxSize: ${String(options)} }).`, // canonical-casing-exempt
+    );
+  }
+  const opts: ParsePackageZipOptions = options ?? {};
   const limit = opts.maxSize ?? PACKAGE_ZIP_MAX_COMPRESSED_BYTES;
   if (zipBuffer.length > limit) {
     throw new PackageZipError(
