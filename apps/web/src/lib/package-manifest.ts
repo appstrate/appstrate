@@ -16,7 +16,7 @@
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
-import { getMcpServerRuntime, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
+import { effectiveMcpServerType, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
 
 /** Any jsonb object. The manifest and every nested object share this shape. */
 type ManifestObject = Record<string, unknown>;
@@ -321,25 +321,27 @@ export interface McpServerManifestDetails {
  * Takes the WHOLE manifest, not just `server`, because the runtime is not a
  * property of `server`.
  *
- * The platform resolves it as `getMcpServerRuntime(manifest) ?? server.type`
- * (`services/integration-spawn-resolver.ts`), and `getMcpServerRuntime` reads
- * `_meta["dev.appstrate/mcp-server"].runtime` at the manifest ROOT. The two
- * disagree by design: MCPB's `server.type` enum has no `bun`, so a bun-native
- * server keeps `server.type: "node"` and declares `bun` in `_meta`. Reading
- * `server.type` alone labelled that server "node" — a fact about the manifest's
- * vocabulary presented as a fact about how the package runs.
+ * The platform resolves it with core's `effectiveMcpServerType`, which reads
+ * `_meta["dev.appstrate/mcp-server"].runtime` at the manifest ROOT and falls
+ * back to `server.type`. The two disagree by design: MCPB's `server.type` enum
+ * has no `bun`, so a bun-native server keeps `server.type: "node"` and declares
+ * `bun` in `_meta`. Reading `server.type` alone labelled that server "node" — a
+ * fact about the manifest's vocabulary presented as a fact about how the
+ * package runs.
  *
- * Core's reader is used rather than a second `_meta` walk here: a duplicate is
- * how the view ends up describing a runtime the runner does not pick.
+ * Core's reader is used rather than a local re-derivation: every spawn path
+ * calls the same function, so the view cannot describe a runtime the runner
+ * does not pick.
  */
 function readMcpServer(manifest: ManifestObject): McpServerView | undefined {
   const server = obj(manifest.server);
   if (!server) return undefined;
   const config = obj(server.mcp_config);
-  // `getMcpServerRuntime` narrows `_meta` itself and returns `undefined` for
+  // The override half narrows `_meta` itself and returns `undefined` for
   // anything it does not recognise, so an author-controlled value cannot get
-  // past it — the `server.type` fallback is the MCPB value, verbatim.
-  const runtime = getMcpServerRuntime(manifest as unknown as McpServerManifest) ?? str(server.type);
+  // past it — the `server.type` fallback is the MCPB value, verbatim, which is
+  // what a DRAFT being edited here needs: a typo must show as written.
+  const runtime = effectiveMcpServerType(manifest as unknown as McpServerManifest);
   const view: McpServerView = {
     ...(runtime ? { runtime } : {}),
     ...(str(server.entry_point) ? { entryPoint: str(server.entry_point) } : {}),

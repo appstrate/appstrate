@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`effectiveMcpServerType`** (`./mcp-server-meta`, re-exported from
+  `./mcp-server`) — the runtime an mcp-server actually spawns under: the
+  Appstrate `_meta["dev.appstrate/mcp-server"].runtime` override when present,
+  the MCPB `server.type` otherwise. `getMcpServerRuntime` is unchanged and still
+  exported; it reads the override alone, and every caller that needed a runtime
+  had to bolt the `?? server.type` fallback on by hand. Three did, and one of
+  them did it late: the connect-login spawn path forwarded the raw
+  `server.type`, so the same bun-native package ran under `bun` for an agent run
+  and under `node` for a connect login. The fallback now has one definition.
+  `server.type` is returned VERBATIM rather than narrowed to
+  `McpServerRuntime`, because the SPA reads unvalidated draft manifests where an
+  author's typo must still display as written; `undefined` means neither source
+  declared one, which for a spawn means "not runnable" and is the caller's to
+  fail closed on.
+  Additive — no existing export changes shape, so this is a minor.
+
 - **`formatErrorChain`** (`./errors`) — renders an error and every `cause`
   beneath it as one `": "`-joined string. It exists because `{ cause }` was
   threaded through this codebase with nothing on the other end to print it, and

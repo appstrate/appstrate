@@ -270,8 +270,8 @@ describe("readMcpServerDetails", () => {
     // The case core's own docstring records: MCPB's `server.type` enum has no
     // `bun`, so a bun-native server keeps `server.type: "node"` and declares
     // `bun` under `_meta`. The runner reads `_meta` first
-    // (`getMcpServerRuntime(manifest) ?? run.type`); reading `server.type` here
-    // labelled this server "node", which is not how it runs.
+    // (`effectiveMcpServerType`, the same core reader called here); reading
+    // `server.type` alone labelled this server "node", which is not how it runs.
     const details = readMcpServerDetails({
       ...MINIMAL,
       type: "mcp-server",

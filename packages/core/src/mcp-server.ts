@@ -45,6 +45,7 @@ export {
   MCP_SERVER_RUNTIMES,
   isMcpServerRuntime,
   getMcpServerRuntime,
+  effectiveMcpServerType,
 } from "./mcp-server-meta.ts";
 export type { McpServerRuntime } from "./mcp-server-meta.ts";
 
