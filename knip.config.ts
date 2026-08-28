@@ -55,6 +55,42 @@ import type { KnipConfig } from "knip";
  * before granting the exemption to anything else — `npm view <pkg> versions`
  * and `ls .github/workflows/publish-*`, not the manifest's `publishConfig`.
  *
+ * ## What the exemption is currently hiding (measured 2026-08-28)
+ *
+ * Recorded so the next audit reads an answer instead of re-deriving one. Turn
+ * `includeEntryExports: true` on for `packages/core` and `packages/afps-shared`
+ * below and knip reports **27** names with no in-tree reader — 25 in core, 2 in
+ * afps-shared. Reproduce it that way, then restore this file; the two flags are
+ * off on purpose, and none of the 27 is evidence of death on its own.
+ *
+ *   afps-shared  CREDENTIAL_REF, defaultHostResolver
+ *   core values  AGENT_OUTPUT_FILE_PURPOSE, MCP_SERVER_APPSTRATE_META_KEY,
+ *                anthropicReasoningBudgetTokens, modelCapabilitySupportSchema,
+ *                SLUG_PATTERN, decodePairingToken, ORG_ROLES,
+ *                RUN_AND_WAIT_MAX_MS, RUN_AND_WAIT_BACKOFF_MS,
+ *                RUN_AND_WAIT_TERMINAL_STATUSES, isRunAndWaitTerminalStatus,
+ *                projectRunAndWaitPayload, mcpServerSchema, RESERVE_FRACTION,
+ *                RESERVE_CEILING_FRACTION, integrationManifestSchema,
+ *                mcpServerManifestSchema, SCHEMA_VERSION_REGEX, manifestSchema
+ *   core types   FieldErrorCode, IntegrationsConfiguration,
+ *                IntegrityCheckResult, SidecarConfig, LlmProxyConfig,
+ *                BoundedUnzipLimits
+ *
+ * Both known out-of-tree consumers were checked at `origin/main` (their working
+ * trees are unreliable — connect-helper's sits on a stale branch). `cloud`
+ * imports none of the 27. `connect-helper` imports exactly one:
+ * `decodePairingToken`, in `src/cli.ts` and `test/pairing-token.test.ts` — so
+ * that name is proven live and the exemption earned its keep on it alone.
+ *
+ * The other 26 are unresolved, NOT dead. Third-party modules are the third
+ * consumer class and this repo cannot see them; removing a published name is a
+ * major either way (see `packages/core/test/export-surface.test.ts`). Two carry
+ * their own recorded disposition at the declaration and should not be re-raised
+ * here: `MCP_SERVER_APPSTRATE_META_KEY` (`src/mcp-server.ts`, the re-export line
+ * knip points at — a live façade, kept) and `AGENT_OUTPUT_FILE_PURPOSE`
+ * (`src/file-uri.ts`, read in-file, with the adoption gap named). Deciding the
+ * rest needs the consumers, which is exactly what this exemption says.
+ *
  * How that exemption is actually obtained matters, and is the one thing that
  * is easy to get wrong here. knip does **not** read `exports`, `bin`, `main`
  * or `module` out of a workspace's `package.json` — its only built-in entry

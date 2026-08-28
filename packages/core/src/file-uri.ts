@@ -57,6 +57,24 @@ export const PUBLISHED_FILE_LOG_EVENT = "file";
 /**
  * `files.purpose` of a file an agent published from a run. The other purposes
  * (`user_upload`, …) mark a file that came from somewhere else.
+ *
+ * Its one in-repo reader is {@link isFileProducedByRun}, below — a dead-export
+ * scan therefore reports the `export`, never the constant. The `export` is not
+ * decoration: the value sites that should adopt it are `apps/api`'s files
+ * service and the chat module's run reconciler, which still spell the literal.
+ *
+ * The SPA deliberately does NOT adopt it. Every `"agent_output"` in `apps/web`
+ * is a member of the two-value wire enum in TYPE position
+ * (`"user_upload" | "agent_output"` in `lib/files.ts` and `hooks/use-files.ts`),
+ * an i18n key suffix in the gallery filter domain
+ * (`components/file-list-panel.tsx`, where `files:filter.<value>` is looked up
+ * and `"all"` sits beside the two wire values), a generated `api/schema.d.ts`,
+ * or a test fixture asserting the wire value. In all four, swapping one member
+ * for a constant while its sibling stays a literal reads worse than the pair —
+ * there is no `USER_UPLOAD_FILE_PURPOSE`, and adding one would be new published
+ * surface duplicating `filePurposeValues` (`packages/db/src/schema/enums.ts`),
+ * which is where the vocabulary is actually declared once and from which the
+ * DB enum, the OpenAPI enum and the SPA's generated types all derive.
  */
 export const AGENT_OUTPUT_FILE_PURPOSE = "agent_output";
 
