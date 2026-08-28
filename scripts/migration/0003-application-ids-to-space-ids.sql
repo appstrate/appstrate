@@ -2,10 +2,21 @@
 -- `app_` space id as `spc_`, and rewrite every other stored VALUE that still
 -- spells the retired concept.
 --
--- NOT YET REHEARSED, NOT YET APPLIED. Row counts below are placeholders — the
--- README's step 4 (`pg_dump` production → throwaway `postgres:16-alpine` →
--- apply → verify) has not been run. Fill them in from the rehearsal, then
--- again from the production run, and only then update the `## Log` row.
+-- REHEARSED AND APPLIED — production, 2026-08-28, in the v1.0.0-beta.54 window,
+-- immediately after `0053` and before the new platform served a request.
+-- README step 4 was run first: `pg_dump` production → throwaway
+-- `postgres:16-alpine` → restore → `0005` → `0053`/`0054`/`0055` → this file →
+-- VERIFY blocks A–J → replay of both scripts (every `UPDATE 0`). The production
+-- run then emitted the IDENTICAL statement-by-statement counts and the
+-- identical A–J output, which is the only thing that separates "it worked" from
+-- "it matched zero rows".
+--
+-- Measured, both times: 33 `spaces.id`, 10717 rows across the eighteen carrying
+-- columns (10750 id rows in all), 32 `api_keys` scope arrays, 1 `user.realm` +
+-- 1 `session.realm`, 16 `storage_deletion_jobs.reason`, 1 `oauth_clients.level`;
+-- 17 foreign keys dropped and restored, all `c`. `convalidated` went `f` → `t`
+-- on `oauth_clients_level_check`. `audit_events` kept its 8 + 8 legacy-spelled
+-- history rows, deliberately, while its 3028 `space_id` pointers moved.
 --
 -- Why this is here and not in `packages/db/drizzle/`: it rewrites row CONTENTS,
 -- not schema shape. `docs/NO_TRANSITIONAL_CODE.md` §2, and `0046`'s header,
