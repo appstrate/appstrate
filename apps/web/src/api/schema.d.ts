@@ -2673,7 +2673,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including integrations, config, state, and skills.
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations).
          */
         get: operations["getAgentPackage"];
         /**
@@ -14480,7 +14480,7 @@ export interface operations {
     getAgentPackage: {
         parameters: {
             query?: {
-                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns config / input / integrations / skills from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
+                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
                 version?: string;
             };
             header?: {
