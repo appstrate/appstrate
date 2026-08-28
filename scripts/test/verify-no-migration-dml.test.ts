@@ -97,7 +97,7 @@ describe("findDml — what must fail", () => {
 
   it("flags a bare INSERT and a bare DELETE", () => {
     expect(flags(`INSERT INTO "orgs" ("id", "name") VALUES ('o1', 'acme');`)).toBe(true);
-    expect(flags(`DELETE FROM "application_packages" WHERE "org_id" IS NULL;`)).toBe(true);
+    expect(flags(`DELETE FROM "space_packages" WHERE "org_id" IS NULL;`)).toBe(true);
   });
 
   it("flags an INSERT inside a DO $$ block with no constraint", () => {
@@ -250,7 +250,10 @@ ALTER TABLE "package_schedules" ADD CONSTRAINT "one_actor" CHECK ((user_id IS NO
   it("does NOT let a DROP COLUMN on one table licence a rewrite of another", () => {
     // Same tightness for the fold clause: `0040` drops `package_schedules`
     // columns and also wraps `application_packages` rows, and the second write
-    // stays a finding.
+    // stays a finding. Both statements are `0040`'s own, verbatim, which is why
+    // this one fixture keeps the pre-#1227 table name: `space_packages` was
+    // called `application_packages` when that migration was written, and a
+    // quotation that renames its subject stops being evidence of anything.
     const sql = `UPDATE "application_packages" SET "input_settings" = jsonb_build_object('values', "input_settings");--> statement-breakpoint
 ALTER TABLE "package_schedules" DROP COLUMN IF EXISTS "config_override";`;
     expect(flags(sql)).toBe(true);
@@ -299,7 +302,7 @@ UPDATE "quotas" SET "seats" = 1;`;
   });
 
   it("does NOT treat `IS NOT NULL` in a WHERE clause as adding a constraint", () => {
-    const sql = `DELETE FROM "application_packages" WHERE "application_id" IS NOT NULL;`;
+    const sql = `DELETE FROM "space_packages" WHERE "space_id" IS NOT NULL;`;
     expect(flags(sql)).toBe(true);
   });
 

@@ -1,25 +1,83 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Production evidence for the two performance questions that cannot be answered
--- from the source tree. Read-only: no DDL, no writes, safe on a live primary
--- (every statement is a catalog read or a bounded sample).
+-- Production evidence for two performance questions that CANNOT be answered
+-- from the source tree — only from a live database with real rows and real
+-- planner statistics.
 --
 --   psql "$DATABASE_URL" -f scripts/perf-evidence.sql
 --
+-- STANDING OPERATOR TOOL, not one-off evidence-gathering. It is deliberately
+-- referenced by no `bun run` script, no workflow and no test — same posture,
+-- and same reason, as `scripts/check-index-drift.ts`: it needs a production
+-- connection string, so it is run by a human on a jump host, never by CI. Both
+-- sections are generic — no table, index or column list is hard-coded to a
+-- particular audit — so the script keeps answering its questions after the
+-- schema moves on. `DATABASE_URL` is the only input.
+--
+-- READ-ONLY. No DDL, no writes, safe on a live primary: every statement is a
+-- catalog read or a bounded sample. It takes no locks a reader does not.
+--
+-- WHEN TO RE-RUN
+--   Section 1 — before deciding whether to slim the run-list DTO (see below),
+--     and again after any change to which `runs` columns the list projects.
+--   Section 2 — after any release that ADDS indexes, and before any
+--     `DROP INDEX`. Its finding class recurs by construction: every new
+--     composite can turn an existing narrow index into a prefix duplicate.
+--   Both — before a release that claims a performance win on these paths.
+--
+-- ============================ THE TWO QUESTIONS ============================
+--
 -- Question 1 — is a slimmer run-list DTO worth breaking the response contract?
---   The list endpoints ship `input`, `result`, `checkpoint`, `context_snapshot`
---   and friends in full. Dropping them from list responses is a public contract
---   change, so it needs a number first: how many bytes per row are actually at
---   stake, at p50 and p95, versus the rest of the row.
+--   STATUS: OPEN. `enrichedRunColumns` (`apps/api/src/services/state/runs.ts`)
+--   still projects `input`, `result`, `checkpoint` and `context_snapshot`, and
+--   `runRowToWireDto` still serialises them on EVERY row of EVERY list page.
+--   Dropping them from list responses is a public contract change — `GET
+--   /api/runs` declares `#/components/schemas/Run` and `detect:breaking` will
+--   block it — so it needs a dated API version, and therefore a number first:
+--   how many bytes per row are actually at stake, at p50 and p95, versus the
+--   rest of the row. Sections 1a-1c are that number.
+--
+--   HOW TO READ IT. 1a ranks the JSONB columns by p95 weight against
+--   `__whole_row__`; 1b converts that to what one 20-row page carries and what
+--   share of it is droppable; 1c counts the tail. The decision rule the author
+--   of a slimming PR owes a reviewer: if `droppable_pct_at_p95` is small, the
+--   contract break buys nothing and the answer is no. If it is large, 1c says
+--   whether the win is broad or a handful of outliers — a fat tail argues for
+--   capping the fields, not removing them.
 --
 -- Question 2 — are the prefix indexes redundant?
---   An index whose column list is a strict prefix of another index on the same
---   table is functionally covered by it — but "covered" is not "useless": the
---   shorter index is smaller, cheaper to keep cached, and the planner may still
---   prefer it (locally, Postgres picked `idx_run_logs_run_id` over the wider
---   composite for a `run_id` lookup). Section 2 reports usage, size and the
---   stats window; dropping anything without an `EXPLAIN (ANALYZE, BUFFERS)` on
---   the real queries is guesswork.
+--   STATUS: the 2026-08 instance is CLOSED, the question is not. Migration
+--   `0039_unique_nebula` dropped 18 indexes (13 of them strict leading-prefix
+--   duplicates) and `0041_restore_squash_indexes` restored the two covers that
+--   turned out to be missing from production. Section 2a is the detector that
+--   finds the NEXT batch, not a record of that one.
+--
+--   HOW TO READ IT. 2a lists every non-unique, non-partial index whose columns
+--   are a strict left prefix of another index on the same table. "Covered" is
+--   not "useless": the shorter index is smaller, cheaper to keep cached, and
+--   the planner may still prefer it (locally, Postgres picked
+--   `idx_run_logs_run_id` over the wider composite for a `run_id` lookup).
+--   Treat a row as a CANDIDATE, never a verdict. Confirm with an
+--   `EXPLAIN (ANALYZE, BUFFERS)` on the real query against production before
+--   dropping anything — that is how `0039` justified its first entry, and it
+--   is the only thing that distinguishes a dead index from a chosen one.
+--   Read 2c strictly WITH section 0: an `idx_scan` of 0 over a stats window
+--   younger than the query it is meant to serve proves nothing at all.
+--
+--   TWO TRAPS THIS SECTION IS ALREADY WRITTEN AROUND. A UNIQUE or PARTIAL
+--   short index enforces or serves something the wide one does not, so it is
+--   excluded — a prefix argument never reaches it. And a covering index that
+--   the SCHEMA declares may simply not EXIST on production (`0000_init.sql` is
+--   a squash and production predates it): 2a reads `pg_index`, so it can only
+--   see what is really there, but the conclusion is worth stating anyway —
+--   before any `DROP INDEX`, verify the SURVIVING index against the live
+--   catalog. `scripts/check-index-drift.ts` is the tool for that half, and the
+--   two are meant to be run together.
+--
+--   OPS NOTE. `DROP INDEX CONCURRENTLY` cannot run inside a transaction and
+--   drizzle wraps the whole pending batch in one, so a drop migration must use
+--   a plain `DROP INDEX` behind a `SET LOCAL lock_timeout` fence. `0039` is
+--   the worked example.
 
 \pset pager off
 \timing off
