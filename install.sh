@@ -96,12 +96,12 @@ _appstrate_bootstrap() {
   esac
 
   # Default version pinned by `publish-installer.yml` at publish time —
-  # rewriting `v1.0.0-beta.53` so `curl get.appstrate.dev | bash`
+  # rewriting `v1.0.0-beta.54` so `curl get.appstrate.dev | bash`
   # downloads the binary matching the release that published this script.
   # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
   # release). When the placeholder is still present (local dev / unrendered
   # copy), fall back to `latest` so the script stays runnable out of tree.
-  _DEFAULT_VERSION="v1.0.0-beta.53"
+  _DEFAULT_VERSION="v1.0.0-beta.54"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
@@ -137,6 +137,22 @@ _appstrate_bootstrap() {
   warn() { printf '\033[0;33m⚠\033[0m  %s\n' "$*" >&2; }
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
+
+  # ─── Retired env vars ───────────────────────────────────────────────────────
+  #
+  # APPSTRATE_AUTO_INSTALL=1 selected unattended mode; `--yes` says the same
+  # thing. Ignoring it silently would flip an Ansible / cloud-init run that
+  # still sets it into the two-step path — binary dropped, nothing installed,
+  # exit 0. Fail here instead, before the first download. An explicitly
+  # blanked value carries no intent, so it is a no-op (same rule as
+  # `RETIRED_ENV_RENAMES` in `@appstrate/env`).
+  if [ -n "${APPSTRATE_AUTO_INSTALL:-}" ]; then
+    err "APPSTRATE_AUTO_INSTALL is retired and is no longer read."
+    err "  Pass --yes instead:"
+    err "    curl -fsSL https://get.appstrate.dev | bash -s -- --yes"
+    err "  CI=true|1|yes and a non-TTY stdout also select unattended mode."
+    exit 1
+  fi
 
   have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
   have_shasum() { command -v shasum >/dev/null 2>&1; }
@@ -563,14 +579,13 @@ _appstrate_bootstrap() {
     # roughly the same.
     if ! have_minisign; then
       # Decide between auto-install vs. prompt vs. fail-with-hint. We treat
-      # the same four signals that drive the launch decision below as
-      # "unattended": --yes arg, APPSTRATE_AUTO_INSTALL=1, CI=true|1|yes,
-      # and "no TTY on stdout". This keeps `curl … | bash -s -- --yes`
-      # truly one-step and prevents the prompt from firing in Dockerfile
-      # RUN, cron, or systemd contexts where there's nobody to answer.
+      # the same three signals that drive the launch decision below as
+      # "unattended": --yes arg, CI=true|1|yes, and "no TTY on stdout".
+      # This keeps `curl … | bash -s -- --yes` truly one-step and prevents
+      # the prompt from firing in Dockerfile RUN, cron, or systemd contexts
+      # where there's nobody to answer.
       _ms_wants_auto=0
       case " $* " in *" --yes "*) _ms_wants_auto=1 ;; esac
-      if [ "${APPSTRATE_AUTO_INSTALL:-0}" = "1" ]; then _ms_wants_auto=1; fi
       case "${CI:-}" in true | 1 | yes) _ms_wants_auto=1 ;; esac
       if [ ! -t 1 ]; then _ms_wants_auto=1; fi
 
@@ -736,14 +751,12 @@ _appstrate_bootstrap() {
   # process and no `</dev/tty` redirect chains a kqueue EINVAL into later
   # subprocesses (`bun run dev`, `docker compose up`).
   #
-  # Auto-install (legacy all-in-one behaviour) fires on four signals,
+  # Auto-install (all-in-one behaviour) fires on three signals,
   # ordered cheapest → broadest:
   #   1. user passed `--yes` (CI / scripted automation, explicit intent)
-  #   2. APPSTRATE_AUTO_INSTALL=1 (Ansible / cloud-init escape hatch —
-  #      preserves the previous default for existing IaC)
-  #   3. CI=true|1|yes (GHA, GitLab, CircleCI, Jenkins — any env that
+  #   2. CI=true|1|yes (GHA, GitLab, CircleCI, Jenkins — any env that
   #      sets the canonical CI flag is by definition non-interactive)
-  #   4. stdout is not a TTY (Dockerfile RUN, systemd unit, cron,
+  #   3. stdout is not a TTY (Dockerfile RUN, systemd unit, cron,
   #      `bash /tmp/inst.sh > out.log`). The user wouldn't see the
   #      next-step instruction anyway; running `--yes` is friendlier
   #      than dropping the binary and silently exiting.
@@ -754,12 +767,11 @@ _appstrate_bootstrap() {
   # VPS (#344 Layer 2b). The operator claims ownership at `<URL>/claim`
   # with the printed token.
   #
-  # Pre-existing escape hatch preserved:
+  # Escape hatch:
   #   - APPSTRATE_NO_LAUNCH=1 → drop binary, no install at all (scripted
   #     provisioning where install is owned by Ansible / cloud-init).
   _wants_auto=0
   case " $* " in *" --yes "*) _wants_auto=1 ;; esac
-  if [ "${APPSTRATE_AUTO_INSTALL:-0}" = "1" ]; then _wants_auto=1; fi
   case "${CI:-}" in true | 1 | yes) _wants_auto=1 ;; esac
   if [ ! -t 1 ]; then _wants_auto=1; fi
 
