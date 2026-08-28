@@ -98,7 +98,7 @@
     "./connect-handshake": "./src/connect-handshake.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.6.1",
+    "@afps-spec/schema": "^0.7.0",
     "@appstrate/afps-shared": "^0.7.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",

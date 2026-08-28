@@ -4761,35 +4761,6 @@ export interface components {
                     };
                 };
             };
-            config?: {
-                schema: {
-                    [key: string]: unknown;
-                } & {
-                    /** @constant */
-                    type: "object";
-                };
-                file_constraints?: {
-                    [key: string]: {
-                        accept?: string;
-                        max_size?: number;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                ui_hints?: {
-                    [key: string]: {
-                        placeholder?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                property_order?: string[];
-                _meta?: {
-                    [key: string]: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             timeout?: number;
         } & {
             [key: string]: unknown;
