@@ -2813,6 +2813,42 @@ and 12 px medium text. Draft, readiness, Run status, inline provenance and
 read-only history vary by colour and content only. A custom readiness control
 must not shrink into a second badge language merely because it opens a popover.
 
+**Agent and Run desktop rendering contract, 29 August.** The accepted desktop
+rendering is now a checked browser contract rather than a screenshot memory:
+
+```bash
+bun run lab:detail-contract
+```
+
+It reuses the Agent and Run entries in `e2e/lab/screens.mjs`, opens every screen
+as an independent document in Chrome Stable and covers 25 nominal states at
+1440, 1280 and 1024px. It waits for the local detail shell, loaded fonts and
+500ms of stable rendered geometry before reading the DOM. The guard fails on a
+missing fixture, a redirected or incomplete detail shell, viewport or main
+content overflow, a clipped interactive control, a broken local tab contract,
+or any baseline drift beyond the default one-pixel geometry tolerance. It
+serializes semantic landmarks, framed surfaces, controls, tables and their
+computed styles to `e2e/lab/baselines/agent-run-desktop.json`; repeated style
+tuples are content-addressed so the baseline stays reviewable rather than
+copying the same CSS values thousands of times.
+
+The same pass writes full-page PNGs to `lab-detail-shots/` for the necessary
+pixel review, but PNGs are deliberately not the blocking baseline. Chrome
+versions, host font rasterization and operating-system antialiasing make a
+cross-machine pixel diff noisy even when layout and computed styles are equal.
+The JSON contract is the deterministic gate, while the PNGs remain the second,
+human axis. Baselines are never regenerated implicitly: an accepted visual
+change requires `LAB_DETAIL_UPDATE=1 bun run lab:detail-contract`, inspection
+of both the JSON diff and the captures, then an intentional commit.
+
+Focused runs use `LAB_DETAIL_SCREENS` and `LAB_DETAIL_WIDTHS`; `LAB_URL`,
+`LAB_DETAIL_SCENARIO`, `LAB_DETAIL_OUT`, `LAB_DETAIL_BASELINE`,
+`LAB_DETAIL_TOLERANCE` and `LAB_DETAIL_TIMEOUT` cover isolated labs and review
+workflows. The harness comparison and invariant logic has a Bun test in
+`e2e/lab/detail-contract.test.ts`. The shared Journal screen steps were also
+corrected to the accepted UI: search is already open, and the warning filter
+lives under the Level submenu.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever

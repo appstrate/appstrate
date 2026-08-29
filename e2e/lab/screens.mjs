@@ -96,13 +96,13 @@ export const SCREENS = [
   {
     path: "/agents/@tractr/compta-trimestrielle/runs/run_01#journal",
     name: "run-journal-search-open",
-    steps: [{ type: "clickLabel", label: "Rechercher dans le journal…" }],
   },
   {
     path: "/agents/@tractr/compta-trimestrielle/runs/run_01#journal",
     name: "run-journal-filter-open",
     steps: [
-      { type: "clickLabel", label: "Filtres du journal" },
+      { type: "clickText", text: "Filtres" },
+      { type: "clickText", text: "Niveau" },
       { type: "clickText", text: "Avertissement" },
     ],
   },
@@ -110,7 +110,6 @@ export const SCREENS = [
     path: "/agents/@tractr/compta-trimestrielle/runs/run_01#journal",
     name: "run-journal-search-empty",
     steps: [
-      { type: "clickLabel", label: "Rechercher dans le journal…" },
       {
         type: "fillTextbox",
         label: "Rechercher dans le journal…",
