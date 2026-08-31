@@ -335,5 +335,34 @@
       "input": 0.6,
       "output": 3
     }
+  },
+  "qwen/qwen3.8-27b": {
+    "label": "Qwen/qwen3.8 27b",
+    "contextWindow": 131042,
+    "maxTokens": 16384,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.8,
+      "output": 4
+    }
   }
 }

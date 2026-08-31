@@ -3,11 +3,11 @@
   "version": "v1.98.0",
   "image": "ghcr.io/berriai/litellm",
   "digest": "sha256:20b5044b619055374061a6d5b7b08754cad75aeabbf82ddf4f69cc0cf80ddaf4",
-  "normalizedDigest": "sha256:785a24aa48d53491cfcab5ed26231243ff945b8e6786a466e63ac7f4fd42f24f",
+  "normalizedDigest": "sha256:739b65b15baf0fff7670ab6e74697f60e729370c94253dcbf999e1991e93e0e8",
   "catalog": {
     "repository": "BerriAI/litellm",
-    "commit": "947dbbf0298eecd3d226f765d4a4fb7ea3fd2551",
+    "commit": "10631eb834c7802aa61611e807474170b8a4d425",
     "path": "litellm/model_prices_and_context_window_backup.json",
-    "digest": "sha256:4659fb1673b8b48678f344afe794bd3f5a5f7bf057678163dc49b434ca3b4470"
+    "digest": "sha256:a980fa0e207d0976a3fa78c6a7c3165ec3c1cfd82b0dcfffc2a55795b9f6f451"
   }
 }

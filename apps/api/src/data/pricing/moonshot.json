@@ -180,6 +180,36 @@
       "cacheRead": 0.16
     }
   },
+  "kimi-k2.7-code": {
+    "label": "Kimi K2.7 Code",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.95,
+      "output": 4,
+      "cacheRead": 0.19
+    }
+  },
   "kimi-k3": {
     "label": "Kimi K3",
     "contextWindow": 1048576,

@@ -319,5 +319,66 @@
       "cacheRead": 0.26,
       "cacheWrite": 0
     }
+  },
+  "glm-5.3": {
+    "label": "Glm 5.3",
+    "contextWindow": 1000000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 1.4,
+      "output": 4.4,
+      "cacheRead": 0.26,
+      "cacheWrite": 0
+    }
+  },
+  "glm-5.3-flash": {
+    "label": "Glm 5.3 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.15,
+      "output": 0.5,
+      "cacheRead": 0.03,
+      "cacheWrite": 0
+    }
   }
 }

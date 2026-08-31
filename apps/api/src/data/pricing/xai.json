@@ -1,127 +1,4 @@
 {
-  "grok-2": {
-    "label": "Grok 2",
-    "contextWindow": 131072,
-    "maxTokens": null,
-    "capabilities": [
-      "text"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 2,
-      "output": 10
-    }
-  },
-  "grok-2-1212": {
-    "label": "Grok 2 1212",
-    "contextWindow": 131072,
-    "maxTokens": null,
-    "capabilities": [
-      "text"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 2,
-      "output": 10
-    }
-  },
-  "grok-2-latest": {
-    "label": "Grok 2 Latest",
-    "contextWindow": 131072,
-    "maxTokens": null,
-    "capabilities": [
-      "text"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 2,
-      "output": 10
-    }
-  },
-  "grok-2-vision": {
-    "label": "Grok 2 Vision",
-    "contextWindow": 32768,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 2,
-      "output": 10
-    }
-  },
-  "grok-2-vision-1212": {
-    "label": "Grok 2 Vision 1212",
-    "contextWindow": 32768,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 2,
-      "output": 10
-    }
-  },
-  "grok-2-vision-latest": {
-    "label": "Grok 2 Vision Latest",
-    "contextWindow": 32768,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 2,
-      "output": 10
-    }
-  },
   "grok-3": {
     "label": "Grok 3",
     "contextWindow": 131072,
@@ -138,9 +15,9 @@
       }
     },
     "cost": {
-      "input": 3,
-      "output": 15,
-      "cacheRead": 0.75
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-beta": {
@@ -159,9 +36,9 @@
       }
     },
     "cost": {
-      "input": 3,
-      "output": 15,
-      "cacheRead": 0.75
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-fast-beta": {
@@ -180,9 +57,9 @@
       }
     },
     "cost": {
-      "input": 5,
-      "output": 25,
-      "cacheRead": 1.25
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-fast-latest": {
@@ -201,9 +78,9 @@
       }
     },
     "cost": {
-      "input": 5,
-      "output": 25,
-      "cacheRead": 1.25
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-latest": {
@@ -222,9 +99,9 @@
       }
     },
     "cost": {
-      "input": 3,
-      "output": 15,
-      "cacheRead": 0.75
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-mini": {
@@ -253,9 +130,9 @@
       }
     },
     "cost": {
-      "input": 0.3,
-      "output": 0.5,
-      "cacheRead": 0.075
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-mini-beta": {
@@ -284,9 +161,9 @@
       }
     },
     "cost": {
-      "input": 0.3,
-      "output": 0.5,
-      "cacheRead": 0.075
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-mini-fast": {
@@ -315,9 +192,9 @@
       }
     },
     "cost": {
-      "input": 0.6,
-      "output": 4,
-      "cacheRead": 0.15
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-mini-fast-beta": {
@@ -346,9 +223,9 @@
       }
     },
     "cost": {
-      "input": 0.6,
-      "output": 4,
-      "cacheRead": 0.15
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-mini-fast-latest": {
@@ -377,9 +254,9 @@
       }
     },
     "cost": {
-      "input": 0.6,
-      "output": 4,
-      "cacheRead": 0.15
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-3-mini-latest": {
@@ -408,9 +285,9 @@
       }
     },
     "cost": {
-      "input": 0.3,
-      "output": 0.5,
-      "cacheRead": 0.075
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4": {
@@ -429,8 +306,9 @@
       }
     },
     "cost": {
-      "input": 3,
-      "output": 15
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-0709": {
@@ -449,8 +327,9 @@
       }
     },
     "cost": {
-      "input": 3,
-      "output": 15
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-1-fast": {
@@ -480,9 +359,9 @@
       }
     },
     "cost": {
-      "input": 0.2,
-      "output": 0.5,
-      "cacheRead": 0.05
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-1-fast-non-reasoning": {
@@ -502,9 +381,9 @@
       }
     },
     "cost": {
-      "input": 0.2,
-      "output": 0.5,
-      "cacheRead": 0.05
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-1-fast-non-reasoning-latest": {
@@ -524,9 +403,9 @@
       }
     },
     "cost": {
-      "input": 0.2,
-      "output": 0.5,
-      "cacheRead": 0.05
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-1-fast-reasoning": {
@@ -556,9 +435,9 @@
       }
     },
     "cost": {
-      "input": 0.2,
-      "output": 0.5,
-      "cacheRead": 0.05
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-1-fast-reasoning-latest": {
@@ -588,9 +467,9 @@
       }
     },
     "cost": {
-      "input": 0.2,
-      "output": 0.5,
-      "cacheRead": 0.05
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-fast-non-reasoning": {
@@ -609,9 +488,9 @@
       }
     },
     "cost": {
-      "input": 0.2,
-      "output": 0.5,
-      "cacheRead": 0.05
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-fast-reasoning": {
@@ -630,9 +509,9 @@
       }
     },
     "cost": {
-      "input": 0.2,
-      "output": 0.5,
-      "cacheRead": 0.05
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4-latest": {
@@ -651,8 +530,39 @@
       }
     },
     "cost": {
-      "input": 3,
-      "output": 15
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
+    }
+  },
+  "grok-4.20": {
+    "label": "Grok 4.20",
+    "contextWindow": 1000000,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
     }
   },
   "grok-4.20-0309-non-reasoning": {
@@ -763,29 +673,71 @@
       "cacheRead": 0.2
     }
   },
-  "grok-4.20-multi-agent-0309": {
-    "label": "Grok 4.20 Multi Agent 0309",
+  "grok-4.20-non-reasoning": {
+    "label": "Grok 4.20 Non Reasoning",
     "contextWindow": 1000000,
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "supported",
-        "temperatureCompatible": "supported",
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
+    }
+  },
+  "grok-4.20-non-reasoning-latest": {
+    "label": "Grok 4.20 Non Reasoning Latest",
+    "contextWindow": 1000000,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1.25,
+      "output": 2.5,
+      "cacheRead": 0.2
+    }
+  },
+  "grok-4.20-reasoning": {
+    "label": "Grok 4.20 Reasoning",
+    "contextWindow": 1000000,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "supported",
-          "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "supported",
-          "max": "supported"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -795,29 +747,27 @@
       "cacheRead": 0.2
     }
   },
-  "grok-4.20-multi-agent-beta-0309": {
-    "label": "Grok 4.20 Multi Agent Beta 0309",
+  "grok-4.20-reasoning-latest": {
+    "label": "Grok 4.20 Reasoning Latest",
     "contextWindow": 1000000,
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "supported",
-        "temperatureCompatible": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "supported",
-          "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "supported",
-          "max": "supported"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -987,27 +937,6 @@
       "cacheRead": 0.5
     }
   },
-  "grok-beta": {
-    "label": "Grok Beta",
-    "contextWindow": 131072,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 5,
-      "output": 15
-    }
-  },
   "grok-build-0.1": {
     "label": "Grok Build 0.1",
     "contextWindow": 256000,
@@ -1134,27 +1063,6 @@
       "input": 1,
       "output": 2,
       "cacheRead": 0.2
-    }
-  },
-  "grok-vision-beta": {
-    "label": "Grok Vision Beta",
-    "contextWindow": 8192,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "unknown",
-        "adaptive": null,
-        "levels": {}
-      }
-    },
-    "cost": {
-      "input": 5,
-      "output": 15
     }
   }
 }

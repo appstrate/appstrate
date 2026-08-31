@@ -1076,9 +1076,9 @@
       }
     },
     "cost": {
-      "input": 0.14,
-      "output": 0.28,
-      "cacheRead": 0.028
+      "input": 0.22,
+      "output": 0.66,
+      "cacheRead": 0.007
     }
   },
   "accounts/fireworks/models/deepseek-v4-pro": {
@@ -1110,6 +1110,37 @@
       "input": 1.74,
       "output": 3.48,
       "cacheRead": 0.145
+    }
+  },
+  "accounts/fireworks/models/deepseek-v4-pro-0813": {
+    "label": "Accounts/fireworks/models/deepseek V4 Pro 0813",
+    "contextWindow": 1048576,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 1.32,
+      "output": 3.96,
+      "cacheRead": 0.044
     }
   },
   "accounts/fireworks/models/devstral-small-2505": {
@@ -1723,6 +1754,35 @@
       "input": 1.4,
       "output": 4.4,
       "cacheRead": 0.14
+    }
+  },
+  "accounts/fireworks/models/glm-5p3": {
+    "label": "Accounts/fireworks/models/glm 5p3",
+    "contextWindow": 1048576,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 1.4,
+      "output": 4.4,
+      "cacheRead": 0.26
     }
   },
   "accounts/fireworks/models/gpt-oss-120b": {
