@@ -20,13 +20,14 @@ dimension, and consolidates into one report written to
 
 ## What it checks
 
-`docs/NO_TRANSITIONAL_CODE.md` is authoritative. Three prohibitions:
+`docs/NO_TRANSITIONAL_CODE.md` is authoritative. Four prohibitions:
 
 1. **No backward-compatibility branches** — a validator/parser/resolver accepts
    exactly one form. No legacy aliases, `X ?? legacyX` fallbacks, dual-read
    paths, "accept both shapes" parsing, regex alternations admitting a retired
-   spelling. A retired name must fail LOUDLY (the `RETIRED_ENV_RENAMES` shape),
-   never fall back.
+   spelling. A retired name must never quietly work — it either fails loudly, or
+   (better, where a tool sits in the path) is rewritten by that tool so the
+   platform never learns it.
 2. **Data repair belongs in `scripts/migration/`, never in a drizzle migration**
    — `packages/db/drizzle/*.sql` describes schema and is replayed forever. DML
    that rewrites row contents is an operational task. Two overlaps are
@@ -39,6 +40,14 @@ dimension, and consolidates into one report written to
 3. **No dead transition scaffolding** — decided feature flags, shims, adapters
    wrapping a shape nothing emits, `@deprecated` exports with no caller,
    re-export barrels that exist only to keep an old import path resolving.
+4. **No retirement guard outlives its transition** — the guard §1 creates is
+   itself transitional code: it exists only because of a transition and is
+   invisible on a fresh install. It is DELETED, not dated. An expiry annotation
+   was considered and rejected — it keeps the code, the prose and the tests, and
+   pays the full reader cost to defer the decision. Two limits §4 states and
+   this summary cannot: deleting a guard may make an old form SILENT (relocate
+   the work to the tool in the path, do not keep the guard), and a guard that is
+   load-bearing for data that works TODAY was never transitional at all.
 
 ## Severity
 
@@ -55,16 +64,36 @@ dimension, and consolidates into one report written to
 that still accepts it, and what replaces it. A finding that cannot name its
 replacement is 🟡 at best. (Same discipline as `/audit-overengineering`.)
 
+**Verify a sub-agent's blast-radius claim before acting on it.** A sub-agent
+reads a slice of the tree and reasons confidently from it; the slice can be the
+wrong one. The first run of this audit reported `run_logs.event='document'` as
+live data loss — "every DB upgraded from ≤beta.51 silently drops attachments" —
+and it was **wrong**: both readers take the file list from the `files` TABLE
+(`producedRunFiles` over `/api/files`; the chat card unions that read over its
+log chips), and the log event is only a live-frame invalidation nudge, which a
+historical row cannot be. A migration nearly got written for a bug that does not
+exist. So: before consolidating any finding that claims data loss, a security
+hole, or a broken user-visible path, **trace the consumer yourself** — find who
+actually reads the value and what else supplies it. Report the correction in the
+consolidated report; do not quietly drop it, and do not repeat it.
+
+The reverse discipline applies too: a sub-agent that calls something clean has
+only proven it is clean on the surface it swept. Three agents independently
+classified `RETIRED_ENV_RENAMES` as exemplary — correctly, on §1's terms — and
+none of them was asked whether the guard should exist at all. That question
+became §4 and deleted it. A dimension nobody assigned is a dimension nobody
+swept.
+
 ## Behavior
 
 1. Read `docs/NO_TRANSITIONAL_CODE.md` for the current authoritative rules
 2. Record starting state: `git status --short`, `git log --oneline -3`
-3. Dispatch **6 opus sub-agents IN PARALLEL** (one message, 6 tool_uses)
-4. Wait for all 6
+3. Dispatch **7 opus sub-agents IN PARALLEL** (one message, 7 tool_uses)
+4. Wait for all 7
 5. Consolidate into `claudedocs/audit-legacy-<date>.md` + an in-chat summary
 6. Ask the user which findings to act on — never fix unprompted
 
-## The six agents
+## The seven agents
 
 **Agent A — Validators & parsers.** Sweep `packages/core/src`, `packages/env`,
 `packages/afps-runtime`, `apps/api/src/lib`, `apps/api/src/services` for any
@@ -85,6 +114,13 @@ routinely added `NOT VALID` a release earlier), and a fold whose source column
 that file `DROP`s. A fold whose source column survives is NOT exempt. Read
 `docs/NO_TRANSITIONAL_CODE.md` §2 for the exact carve-out and the column-level
 limit it does not reach, and note that only an `UPDATE` is ever licenced — an `INSERT`, a `DELETE` or a `TRUNCATE` never is.
+`ALTER TABLE … ALTER COLUMN … TYPE … USING <expr>` is the sixth write verb and
+the easiest to miss: it evaluates against every existing row and stores the
+result, so a repair written there rewrites contents exactly as an `UPDATE` would
+while passing through no DML keyword. A pure conversion (a bare column, a cast,
+an `AT TIME ZONE`) is not a write; anything else is. The gate scans it now —
+verify the gate still matches §2 rather than assuming, and remember `USING` is
+also a common keyword (`CREATE INDEX … USING btree`, `ON UPDATE no action`).
 Also flag migrations
 whose header argues its own necessity from a read-time alias that no longer
 exists — that pairing is what produced `0046`. Note: existing files are
@@ -114,9 +150,30 @@ version or capability that every module now has.
 **Agent F — Cross-repo & tests.** `cloud/`, `connect-helper/`, `github-action/`,
 plus `test/` fixtures across the workspace.
 
+**Agent G — Retirement machinery (the inverse sweep).** A–F look for
+accept-paths: code that TOLERATES a retired form. G looks for the opposite —
+**rejection machinery**, code whose only purpose is to detect and refuse one.
+This dimension exists because nobody had ever costed that family as a family,
+and the first sweep found 16 guards carrying ~257 lines of code behind ~517
+lines of prose and ~750 of test, with exactly one recording any condition for
+its own removal. Grep `RETIRED`, `retired`, `renamed to`, `no longer read`,
+`was renamed`, `grandfathered`, plus any constant mapping an old name to a new
+one. For each: what does it refuse, lines of code vs lines of prose, what does
+it cost a FRESH install (usually zero at runtime — the cost is reader cost), and
+**is its transition over?** Under §4 a finished transition means the guard is
+deleted, not dated. Two verdicts G must reach explicitly, because they are where
+the dimension earns its keep: (a) would deleting it make the old form SILENT,
+and is there a TOOL in the path that should do the rewrite instead (the
+`mergeEnv` shape); (b) is it load-bearing for data that works TODAY — a
+published content-addressed artifact, a stored token — in which case it was
+never transitional and §4 does not reach it. `scripts/migration/*` is NOT in
+scope: the doc says those stay.
+
 > **Read `git show origin/main:<path>` in sibling repos, never the working tree.**
 > A sibling checkout sits on whatever branch someone left it on, which can
-> predate main by weeks. The first run of this audit reported `cloud` pinned to
+> predate main by weeks. Confirm each repo is actually cloned before sweeping it:
+> `github-action/` was NOT present locally on the last run, and the correct
+> report is "absent, not swept", never an invented finding. The first run of this audit reported `cloud` pinned to
 > `@appstrate/core >=8.0.0` — true of its working tree, which was parked on a
 > feature branch, and false of `origin/main`, which had been bumped to `>=9.0.0`
 > hours earlier. Run `git -C <repo> fetch -q origin` first, then read from
@@ -153,7 +210,7 @@ Each agent must:
 ## Consolidation
 
 Write `claudedocs/audit-legacy-<YYYY-MM-DD>.md` containing: total violations by
-dimension, the full 🔴 list sorted by blast radius, the 🟡 list with the missing
+dimension (all seven), any sub-agent finding you verified and CORRECTED, the full 🔴 list sorted by blast radius, the 🟡 list with the missing
 evidence named, the coverage claim (what was swept), and a short "next
 retirement" checklist derived from the findings. Then summarise in chat and ask
 which to act on.

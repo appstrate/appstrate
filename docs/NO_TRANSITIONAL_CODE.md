@@ -10,7 +10,7 @@ This is a _minimality_ rule, not a purity one. Every compatibility branch is a
 second code path that no test exercises on purpose, that no reader can date, and
 that quietly changes what the primary path means.
 
-## The three prohibitions
+## The four prohibitions
 
 ### 1. No backward-compatibility branches
 
@@ -31,9 +31,12 @@ expires.
 
 The same applies to: legacy field aliases, `X ?? legacyX` fallbacks, dual-read
 paths, "accept both shapes" JSON parsing, and env-var aliases. When a name
-changes, the old name must **fail loudly** — see `RETIRED_ENV_RENAMES`
-(`packages/env/src/index.ts`), which refuses to boot rather than silently
-falling back to a default. That is the correct shape for a retirement.
+changes, the old name must never quietly work. Refusing it — a hard failure that
+names the replacement — is one correct answer, and §4 governs how long that
+refusal lives. Having the tool in the path rewrite it, so the platform never
+learns the old name at all, is the better one where a tool exists: see
+`mergeEnv` in `apps/cli/src/lib/install/upgrade.ts`, which renames a retired key
+in the operator's `.env` and reports what it renamed.
 
 ### 2. Data repair lives in `scripts/migration/`, never in a drizzle migration
 
@@ -254,6 +257,51 @@ emits, `@deprecated` exports with no remaining caller, and re-export barrels
 that exist only so an old import path keeps resolving: delete them with the
 transition, in the same PR that completes it.
 
+### 4. No retirement guard outlives its transition
+
+Step 5 below creates a guard: code whose only purpose is to detect and refuse a
+form nothing writes any more. `RETIRED_ENV_RENAMES` (`packages/env`) was the
+model of it — read raw `process.env`, abort boot, name the replacement. It is
+gone now, and its removal is what this section was written from.
+
+**A guard is transitional code too.** It exists only because of a transition, it
+is invisible on a fresh install, and it is subject to §3 like every other piece
+of scaffolding. So it goes when the transition is over, and "over" is not a date
+somebody writes down.
+
+This was measured before it was decided. A sweep of the whole family found
+**16 guards: ~257 lines of code, defended by ~517 lines of prose and ~750 lines
+of test** — prose outweighing code 2:1, tests 3:1 — and exactly **one of the
+sixteen** recorded any condition under which it could be removed. That is §1's
+own defect in mirror image: §1 rejects an alias because "nothing records when
+that reason expires", and fifteen guards recorded nothing either. An alias
+silently widens what is legal while a guard only accretes, which makes the guard
+the cheaper failure, not a different one.
+
+**The remedy is deletion, not an expiry annotation.** Dating every guard was
+considered and rejected: it keeps the code, keeps the prose, keeps the tests,
+and adds a gate to enforce a calendar — paying the full reader cost to defer the
+decision. The codebase describes how the system works now. A fresh instance
+carries no legacy-detection mechanism, so neither does the codebase.
+
+Two consequences worth stating, because they are where this gets uncomfortable:
+
+- **Deleting a guard can make an old form silent.** Drop `RETIRED_ENV_RENAMES`
+  and Zod strips the unknown key, reverting the setting to its default with no
+  output — issue #513 exactly. That is a real cost, and it does not license
+  keeping the guard. It relocates the work: the rename moved to
+  `appstrate install --upgrade` (`mergeEnv`), which rewrites the operator's
+  `.env` and reports what it renamed. **An operational one-off belongs with the
+  operator tooling, exactly as row repair belongs in `scripts/migration/`** —
+  the tool does the moving, the platform stays clean. Prefer that relocation to
+  a guard whenever a tool is in the path.
+- **A guard that is load-bearing for CURRENT data is not a guard.** If deleting
+  it breaks something that works today, it was never transitional and §4 does
+  not reach it. The AFPS retired-key handling is the live example: its "drop"
+  mode is what keeps a published, content-addressed artifact installable, so
+  removing it would brick existing packages with no repair path. Name that case
+  and leave it; do not delete on the strength of a legacy-sounding identifier.
+
 ## Why this is written down
 
 Both halves of this rule were broken by the same rename (#1177,
@@ -292,7 +340,11 @@ why.
 4. Run it, verify, and delete nothing else — the script stays as the record of
    what was done, outside the replay path.
 5. If the old form can still arrive from outside (an env var, a stored token, a
-   third-party payload), make it **fail loudly**. Never make it work.
+   third-party payload), make it **fail loudly**. Never make it work — unless a
+   tool already stands in that path, in which case have the TOOL rewrite the old
+   form and leave the platform with no knowledge of it (§4).
+6. Delete the guard with the transition. It is scaffolding like any other (§4),
+   and it does not get a date.
 
 ## Audit
 
