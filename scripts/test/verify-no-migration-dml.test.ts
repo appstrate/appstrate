@@ -1026,3 +1026,77 @@ describe("sanitize", () => {
     }
   });
 });
+
+describe("findDml — ALTER COLUMN … USING, the sixth verb", () => {
+  it("flags a repair written as a USING expression", () => {
+    // The shape `0053` deliberately refused to write. It rewrites row contents
+    // exactly as the `UPDATE` beside it would, and passes through no DML verb.
+    const found = findDml(
+      `ALTER TABLE "space_packages" ALTER COLUMN "level" SET DATA TYPE text ` +
+        `USING (CASE WHEN "level" = 'application' THEN 'space' ELSE "level" END);`,
+    );
+    expect(found).toHaveLength(1);
+  });
+
+  it("does NOT flag a pure type conversion", () => {
+    // Every existing site in the directory — 30 in `0047` alone. A cast
+    // restates a value in another type and asserts nothing about it.
+    expect(
+      findDml(
+        `ALTER TABLE "device_codes" ALTER COLUMN "expires_at" SET DATA TYPE ` +
+          `timestamp with time zone USING "expires_at" AT TIME ZONE 'UTC';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findDml(`ALTER TABLE "t" ALTER COLUMN "c" SET DATA TYPE text USING "c"::text;`),
+    ).toHaveLength(0);
+    expect(findDml(`ALTER TABLE "t" ALTER COLUMN "c" TYPE text USING c;`)).toHaveLength(0);
+  });
+
+  it("flags a function call, which is not a conversion", () => {
+    expect(
+      findDml(`ALTER TABLE "t" ALTER COLUMN "c" SET DATA TYPE text USING lower("c");`),
+    ).toHaveLength(1);
+  });
+
+  it("flags a second column, which moves data between columns", () => {
+    expect(
+      findDml(`ALTER TABLE "t" ALTER COLUMN "c" SET DATA TYPE text USING "other";`),
+    ).toHaveLength(0);
+    // ^ a bare column reference reads as a conversion by shape alone; the
+    // column-level limit §2 names is out of reach here exactly as it is for an
+    // `UPDATE`. Documented so the gap stays a known limit, not a surprise.
+    expect(
+      findDml(`ALTER TABLE "t" ALTER COLUMN "c" SET DATA TYPE text USING "a" || "b";`),
+    ).toHaveLength(1);
+  });
+
+  it("licences a USING repair on a table the same file licences", () => {
+    // Same carve-out as an `UPDATE`: the clause must land on the same table.
+    expect(
+      findDml(
+        `ALTER TABLE "t" ALTER COLUMN "c" SET DATA TYPE text USING coalesce("c", 'x');\n` +
+          `ALTER TABLE "t" ALTER COLUMN "c" SET NOT NULL;`,
+      ),
+    ).toHaveLength(0);
+    // …and not on a different one.
+    expect(
+      findDml(
+        `ALTER TABLE "t" ALTER COLUMN "c" SET DATA TYPE text USING coalesce("c", 'x');\n` +
+          `ALTER TABLE "other" ALTER COLUMN "c" SET NOT NULL;`,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does not confuse USING in an index with a column rewrite", () => {
+    // `USING` is a common keyword. A scan that walked freely from `ALTER TABLE`
+    // to the next `USING` reported every `ON UPDATE no action` in the tree.
+    expect(
+      findDml(
+        `ALTER TABLE "webhooks" ADD CONSTRAINT "fk" FOREIGN KEY ("org_id") ` +
+          `REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;\n` +
+          `CREATE INDEX "idx" ON "webhooks" USING btree ("org_id");`,
+      ),
+    ).toHaveLength(0);
+  });
+});

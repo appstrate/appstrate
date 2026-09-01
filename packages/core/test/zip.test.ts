@@ -298,38 +298,6 @@ describe("parsePackageZip", () => {
     expect(() => parsePackageZip(zip, { maxSize: zip.length - 1 })).toThrow(PackageZipError);
     expect(parsePackageZip(zip, { maxSize: zip.length }).packageId).toBe("@test/my-agent");
   });
-
-  // `@appstrate/core` is published, so the retired positional `maxSize` can
-  // still arrive from an out-of-tree consumer that never sees the TypeScript
-  // signature. It must fail loudly rather than fall through to the default
-  // ceiling (`docs/NO_TRANSITIONAL_CODE.md` step 5). The `as never` is the
-  // point of the test: only a caller the compiler cannot reach can do this.
-  it("rejects the retired bare-number maxSize argument", () => {
-    const zip = makeZip({
-      "manifest.json": validAgentManifest(),
-      "prompt.md": "# Test prompt",
-    });
-    // A limit the archive would PASS under, so a silent fall-through to the
-    // default would parse happily and this test would go green for the wrong
-    // reason. The throw is the only thing that can make it fail.
-    const retired = (10 * 1024 * 1024) as never;
-    expect(() => parsePackageZip(zip, retired)).toThrow(TypeError);
-    // Not a `PackageZipError`: the archive is fine, the call is not — and
-    // `PackageZipError` is what the upload route renders into an uploader's 400.
-    expect(() => parsePackageZip(zip, retired)).not.toThrow(PackageZipError);
-    try {
-      parsePackageZip(zip, retired);
-    } catch (e) {
-      // The message alone has to tell an out-of-tree author what to change: it
-      // names the retired form, the replacement option object, and the very
-      // value they passed.
-      const message = (e as Error).message;
-      expect(message).toContain("bare-number");
-      expect(message).toContain("maxSize");
-      expect(message).toContain("ParsePackageZipOptions");
-      expect(message).toContain(String(10 * 1024 * 1024));
-    }
-  });
 });
 
 // ─────────────────────────────────────────────

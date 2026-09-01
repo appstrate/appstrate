@@ -134,12 +134,15 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
 
     rows.push({
       index: d["index"],
-      // The emitter computes `contextTokens`; recompute only as a fallback so a
-      // row written by an older/partial emitter still plots the right bar.
-      contextTokens: readNumber(
-        d["contextTokens"],
-        inputTokens + cacheReadTokens + cacheWriteTokens,
-      ),
+      // The emitter sets `contextTokens` unconditionally (`buildTurnProgress`
+      // in `@appstrate/afps-runtime`), unlike `latencyMs`/`contextWindow`
+      // above, which are conditional spreads. So an absent value means a
+      // malformed payload, not an older emitter — the field and its only
+      // producer landed in the same commit and no release ever wrote a turn
+      // row without it. Read it like the other token counts and let a
+      // malformed row fall to 0; do NOT recompute a plausible-looking total
+      // from the parts, which plots a bar that was never measured.
+      contextTokens: readNumber(d["contextTokens"], 0),
       inputTokens,
       outputTokens,
       cacheReadTokens,

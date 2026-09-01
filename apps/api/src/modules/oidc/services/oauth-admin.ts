@@ -89,54 +89,8 @@ export class OAuthAdminValidationError extends Error {
 }
 
 /**
- * Retired scope prefixes, each mapped to the prefix that replaced it. This is
- * DATA, not a string compare: a resource rename that rewrites persisted scope
- * strings adds one entry and is diagnosed by the same path as every other.
- *
- * DIAGNOSTIC ONLY — a retired prefix is not an alias: it is still rejected and
- * comparisons stay exact. The one job here is to let an error message say
- * "this was renamed" instead of "unknown scope". `documents` → `files` is
- * issue #1177 (`0046_legacy_permission_scope_strings`); `applications` →
- * `spaces` is `scripts/migration/0003-application-ids-to-space-ids.sql`.
- * Scope strings are the only field this service manages that a data migration
- * has ever rewritten, so `scopes` is the only field that can go stale in an
- * operator's env without the operator having changed anything.
- */
-const RETIRED_SCOPE_PREFIXES: Record<string, string> = {
-  documents: "files",
-  applications: "spaces",
-};
-
-/**
- * The retired scope spellings in `scopes`, each paired with what replaced it.
- * Empty when the list uses only current vocabulary — the normal case.
- *
- * Exported so the env-sync (`instance-client-sync.ts`) can tell a `scopes`
- * drift caused by a stale `OIDC_INSTANCE_CLIENTS` entry apart from a genuine
- * one, and print the remedy that actually works.
- */
-export function retiredScopeRenames(
-  scopes: readonly string[],
-): { retired: string; replacement: string }[] {
-  const out: { retired: string; replacement: string }[] = [];
-  for (const scope of scopes) {
-    const sep = scope.indexOf(":");
-    if (sep <= 0) continue;
-    const prefix = RETIRED_SCOPE_PREFIXES[scope.slice(0, sep)];
-    if (!prefix) continue;
-    out.push({ retired: scope, replacement: `${prefix}${scope.slice(sep)}` });
-  }
-  return out;
-}
-
-/**
  * Reject any requested scope outside the OIDC vocabulary (identity scopes +
  * `OIDC_ALLOWED_SCOPES` + module `endUserGrantable` contributions).
- *
- * A retired spelling is rejected like any other unknown scope, but with its own
- * message: it is not a typo, it is a name that used to work, and the operator
- * needs to be told what replaced it rather than being told the scope does not
- * exist.
  *
  * `undefined` / empty in — nothing to validate, the caller's own default
  * applies.
@@ -147,18 +101,6 @@ function assertValidScopes(scopes: readonly string[] | undefined): void {
   const allowed = getAppstrateScopeSet();
   const invalid = scopes.filter((s) => !allowed.has(s));
   if (invalid.length === 0) return;
-
-  const retired = retiredScopeRenames(invalid);
-  if (retired.length > 0) {
-    const renames = retired.map((r) => `${r.retired} -> ${r.replacement}`).join(", ");
-    throw new OAuthAdminValidationError(
-      "scopes",
-      `OIDC: retired scope spellings rejected at service boundary: ${renames}. ` +
-        `These resources were renamed and the stored values were rewritten by a ` +
-        `data migration; the old spellings no longer grant anything. ` +
-        `Replace them with the current names.`,
-    );
-  }
 
   throw new OAuthAdminValidationError(
     "scopes",

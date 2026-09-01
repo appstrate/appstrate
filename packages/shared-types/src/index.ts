@@ -265,10 +265,15 @@ export interface ResourceEntry {
   /**
    * Niveau 2 — agent's tool allowlist for an integration dependency.
    * Drives sidecar `tools/list` filtering and OAuth scope inference.
-   * `undefined` keeps legacy "all tools allowed" semantics. The AFPS §4.4
-   * wildcard literal `"*"` opts the agent into every upstream tool (only
-   * valid when the integration declares `allow_undeclared_tools: true`,
-   * §7.8). Ignored for non-integration resource types.
+   *
+   * Four cases, resolved by `resolveEffectiveToolSelection`
+   * (`apps/api/src/services/integration-spawn-resolver.ts`): omitted inherits
+   * the integration's declared `default_tools` (AFPS §4.4) — it does NOT mean
+   * "all tools" and does NOT collapse to `[]`; `[]` selects none; `[..]`
+   * selects exactly those; and the §4.4 wildcard literal `"*"` opts into every
+   * upstream tool (only valid when the integration declares
+   * `allow_undeclared_tools: true`, §7.8). Ignored for non-integration
+   * resource types.
    */
   tools?: string[] | "*";
   /**

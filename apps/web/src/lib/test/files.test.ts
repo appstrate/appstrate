@@ -283,11 +283,19 @@ describe("producedRunFiles", () => {
 });
 
 /**
- * The run page refreshes its file list off the run's live log stream, and it
- * replays the same run's persisted history. The tag it matches on was renamed
- * by #1177, so every row written by a release through `v1.0.0-beta.51` carries
- * the old one — immutably. A reader that only knows the new tag leaves an older
- * run's file list silently stale.
+ * The run page uses this tag to decide when a LIVE log frame should invalidate
+ * its file caches. It is not where the file list comes from: that is
+ * `producedRunFiles` over `GET /api/files`, i.e. the `files` table. The chat
+ * card unions the same authoritative read over its log-derived chips
+ * (`chat-run-progress-card.tsx`), so neither reader can lose a file by
+ * declining a tag.
+ *
+ * That is what makes the strict match affordable. Releases through
+ * `v1.0.0-beta.51` wrote `event='document'` and `scripts/migration/0001`
+ * deliberately left those rows alone ("run_logs keeps its `document://doc_…`
+ * prose — immutable emitted text"), so the retired tag IS still on disk. It is
+ * declined rather than aliased, and it costs nothing: the row it names is a
+ * replay nudge whose file the `files` table already carries.
  */
 describe("isPublishedFileLogEvent", () => {
   it("accepts the current tag", () => {
@@ -295,8 +303,9 @@ describe("isPublishedFileLogEvent", () => {
   });
 
   it("rejects the retired pre-#1177 `document` tag", () => {
-    // Accepted until the rename finished. A row carrying it renders without
-    // its attachment — an absence, not an error — and no such row exists.
+    // Accepted until the rename finished. Such rows DO exist on any database
+    // upgraded from <= beta.51 (see the block comment above); declining them
+    // costs a replay nudge, never a file.
     expect(isPublishedFileLogEvent("document")).toBe(false);
   });
 

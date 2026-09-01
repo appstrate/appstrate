@@ -18,13 +18,20 @@ Please include as much detail as possible:
 
 ## Supported Versions
 
-| Version        | Support Level         |
-| -------------- | --------------------- |
-| Latest release | Full support          |
-| Previous major | Security patches only |
-| Older versions | Not supported         |
+| Version                                    | Support Level         |
+| ------------------------------------------ | --------------------- |
+| Latest release                             | Full support          |
+| Previous major                             | Security patches only |
+| Pre-1.0: the last 12 releases, or 6 months | Security patches only |
+| Older versions                             | Not supported         |
 
 We recommend always running the latest release. Security patches for the previous major version are provided on a best-effort basis and only for critical or high severity issues.
+
+**The pre-1.0 row is not a footnote — it is the whole window.** With one major
+version published and ~190 tags behind it, "previous major" names nothing, so
+until a `2.0.0` exists the supported window is the last 12 releases or 6 months,
+whichever reaches further back. An upgrade from outside that window is not
+supported: re-install rather than upgrade in place.
 
 ## Response Timeline
 

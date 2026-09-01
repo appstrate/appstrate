@@ -262,13 +262,14 @@ async function main(): Promise<void> {
         continue;
       }
 
-      // `peerDependencies` is inspected too: an out-of-tree module repo
-      // declares core as a peer (the host platform supplies it), and that
-      // range is exactly the compatibility claim the module makes to
-      // operators. Reading only deps/devDeps let a peer-only consumer drift
-      // unchecked. No CONSUMERS entry is peer-only today — the one that was
-      // (`module-claude-code`) moved in-tree — but the read stays so the next
-      // out-of-tree module is covered the day it is listed.
+      // `peerDependencies` is inspected too, and it is LOAD-BEARING, not
+      // speculative: `cloud` declares `@appstrate/core` under
+      // `peerDependencies` ONLY (the host platform supplies it, and the range
+      // is exactly the compatibility claim the module makes to operators). It
+      // appears in neither `dependencies` nor `devDependencies`, so this
+      // spread is the only thing that verifies half the consumer list — drop
+      // it and the gate reports `cloud` as "does not depend on
+      // @appstrate/core" and passes.
       const deps = {
         ...(pkg.dependencies as Record<string, string> | undefined),
         ...(pkg.devDependencies as Record<string, string> | undefined),

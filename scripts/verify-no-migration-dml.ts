@@ -349,6 +349,99 @@ function dmlTarget(sanitized: string, index: number): string | null {
   return head?.[1] === undefined ? null : normalizeTable(head[1]);
 }
 
+/**
+ * `ALTER TABLE t ALTER COLUMN c … TYPE <type> USING <expr>` — the sixth verb.
+ *
+ * `<expr>` is evaluated against every row that already EXISTS and what it
+ * returns is stored, so a repair written there rewrites row contents exactly as
+ * the `UPDATE` beside it would — while passing through none of `DML`. It was
+ * invisible to this gate and unnamed in §2 until it was measured: 30 sites in
+ * `0047` alone, and it is the exact shape `0053` refused to write, i.e. the one
+ * the next author reaches for.
+ *
+ * Two shapes, and the difference is the whole point:
+ *   - a CONVERSION restates a value in another type and asserts nothing about
+ *     it: a bare column reference, a cast of one, an `AT TIME ZONE` on one.
+ *     Not a write. This is every existing site in the directory.
+ *   - anything else is a REPAIR — a `CASE`, a function call, a literal, a
+ *     second column — and is a write, subject to the same same-table carve-out
+ *     as an `UPDATE`.
+ */
+const ALTER_TABLE_HEAD = new RegExp(String.raw`\bALTER\s+TABLE\s+(?:ONLY\s+)?(${QUALIFIED})`, "gi");
+
+/**
+ * The `ALTER COLUMN … USING` inside ONE `ALTER TABLE` statement.
+ *
+ * Bounded to the statement on purpose. A pattern that scanned freely from
+ * `ALTER TABLE` to the next `USING` glues unrelated statements together — the
+ * first cut of this did exactly that and reported every `ADD CONSTRAINT … ON
+ * UPDATE no action` in the directory, matching forward to a `CREATE INDEX …
+ * USING btree` many lines later. `USING` is a common keyword; only this one
+ * position writes rows.
+ */
+const ALTER_COLUMN_USING = /\bALTER\s+COLUMN\s+[\s\S]*?\bUSING\b/gi;
+
+/** A type name: `text`, `varchar(10)`, `text[]`, `timestamp with time zone`. */
+const TYPE = String.raw`[A-Za-z_][A-Za-z0-9_ ]*(?:\([^)]*\))?(?:\s*\[\s*\])*`;
+
+/**
+ * Is this `USING` expression a pure type conversion? Conservative by design:
+ * anything it does not recognise reads as a repair and is reported, because a
+ * false positive here costs an author one comment and a false negative is the
+ * hole this whole scan exists to close.
+ */
+function isConversion(expr: string): boolean {
+  let e = expr.trim();
+  while (e.startsWith("(") && e.endsWith(")")) e = e.slice(1, -1).trim();
+  const shape = new RegExp(
+    String.raw`^(?:${IDENT})(?:\s*::\s*${TYPE})?` +
+      // The zone literal is OPTIONAL because `sanitize` blanks a literal
+      // INCLUDING its quotes — `'UTC'` reaches here as whitespace, so a
+      // pattern requiring quotes matches none of the 30 real casts in `0047`.
+      String.raw`(?:\s+AT\s+TIME\s+ZONE\s*(?:'[^']*')?)?` +
+      String.raw`(?:\s*::\s*${TYPE})?$`,
+    "i",
+  );
+  return shape.test(e);
+}
+
+/** The `USING` expression starting at `from`, to the end of its ALTER action. */
+function usingExpression(sanitized: string, from: number, limit: number): string {
+  let depth = 0;
+  for (let i = from; i < limit; i++) {
+    const ch = sanitized[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    // `;` as well as `,`: `statementEnd` points PAST the terminator, so
+    // without it the expression carries a trailing `;` and every pure cast in
+    // the directory reads as a repair.
+    else if (depth === 0 && (ch === "," || ch === ";")) return sanitized.slice(from, i);
+  }
+  return sanitized.slice(from, limit);
+}
+
+/**
+ * Every `USING` clause that rewrites rather than converts, paired with the
+ * table its `ALTER TABLE` names.
+ */
+function usingWrites(sanitized: string): { index: number; start: number; table: string }[] {
+  const out: { index: number; start: number; table: string }[] = [];
+  for (const head of sanitized.matchAll(ALTER_TABLE_HEAD)) {
+    const start = head.index;
+    if (!startsStatement(sanitized, start)) continue;
+    const raw = head[1];
+    if (raw === undefined) continue;
+    const end = statementEnd(sanitized, start);
+    const body = sanitized.slice(start, end);
+    for (const action of body.matchAll(ALTER_COLUMN_USING)) {
+      const usingAt = start + action.index + action[0].length;
+      if (isConversion(usingExpression(sanitized, usingAt, end))) continue;
+      out.push({ index: usingAt, start, table: normalizeTable(raw) });
+    }
+  }
+  return out;
+}
+
 /** A half-open `[start, end)` slice of a sanitized migration. */
 type Span = readonly [number, number];
 
@@ -726,6 +819,15 @@ export function findDml(sql: string): Finding[] {
     }
     if (MERGE_VERB.test(verb)) mergeEnd = statementEnd(sanitized, index);
     report(index, index);
+  }
+
+  // Pass 1b — `ALTER COLUMN … USING <repair>`, which passes through no DML
+  // verb at all. Same carve-out as an `UPDATE`: licenced when the table its
+  // `ALTER TABLE` names is licenced by a clause in this file.
+  for (const { index, start, table } of usingWrites(sanitized)) {
+    if (within(definitions, index)) continue;
+    if (licenced.has(table)) continue;
+    report(index, start);
   }
 
   // Pass 2 — what the file builds and then executes.

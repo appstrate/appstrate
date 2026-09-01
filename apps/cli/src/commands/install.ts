@@ -75,6 +75,7 @@ import {
   detectInstallMode,
   inferInstalledTier,
   mergeEnv,
+  retiredEnvKeysIn,
   backupFiles,
   cleanupBackups,
   runWithRollback,
@@ -1840,6 +1841,13 @@ async function installDockerTier(
     dir,
     backedUp,
     async () => {
+      // A retired env name in the old `.env` is RENAMED by `mergeEnv`, not
+      // carried forward — the platform refuses to boot on one. Reported after
+      // the write below: the operator's file is about to stop matching what
+      // they last edited, and silence there is how a rename gets rediscovered
+      // as a boot failure instead of a line of install output.
+      const renamedEnvKeys = mode === "upgrade" ? retiredEnvKeysIn(existing.existingEnv) : [];
+
       // Compose + .env.
       await withSpinner(
         mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
@@ -1873,6 +1881,15 @@ async function installDockerTier(
           ? `Rewrote ${dir}/docker-compose.yml (secrets preserved)`
           : `Wrote ${dir}/docker-compose.yml + .env`,
       );
+
+      if (renamedEnvKeys.length > 0) {
+        note(
+          renamedEnvKeys
+            .map(({ retired, replacement }) => `${retired} → ${replacement}`)
+            .join("\n"),
+          "Renamed in .env (the old names are no longer read)",
+        );
+      }
 
       // Bring stack up. The project name is pinned via `--project-name`
       // rather than baked into the compose template, so two installs

@@ -23,7 +23,7 @@ export * from "./interfaces/index.ts";
 export * from "./types/index.ts";
 export * from "./events/index.ts";
 export * from "./sinks/index.ts";
-export * from "./template/index.ts";
+export * from "./template/mustache.ts";
 
 // Multi-package Bundle contract (spec §4) — the single runtime
 // representation.

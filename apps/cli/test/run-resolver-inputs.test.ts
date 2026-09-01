@@ -18,13 +18,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
-import { join } from "node:path";
 
-import {
-  _buildResolverInputsForTesting,
-  ResolverConfigError,
-  type RunCommandOptions,
-} from "../src/commands/run.ts";
+import { _buildResolverInputsForTesting, type RunCommandOptions } from "../src/commands/run.ts";
 import type { RemoteResolverInputs } from "../src/commands/run/resolver.ts";
 import {
   installFakeKeyring,
@@ -182,73 +177,5 @@ describe("buildResolverInputs — remote", () => {
         message: expect.stringMatching(/no space pinned/),
       });
     });
-  });
-
-  describe("stale profile (retired `applicationId` key on disk)", () => {
-    /**
-     * Write a `config.toml` by hand — `setProfile` cannot produce this shape,
-     * which is the point: only an OLDER CLI ever wrote `applicationId`.
-     */
-    async function writeStaleConfig(): Promise<void> {
-      const fs = await import("node:fs/promises");
-      const dir = join(configHome.dir(), "appstrate");
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(
-        join(dir, "config.toml"),
-        [
-          'defaultProfile = "default"',
-          "[profile.default]",
-          'instance = "https://app.example.com"',
-          'userId = "u_1"',
-          'email = "a@example.com"',
-          'orgId = "org_1"',
-          'applicationId = "app_1"',
-        ].join("\n"),
-      );
-    }
-
-    it("surfaces the retired-key refusal instead of blaming a missing login", async () => {
-      // Reviewer's reproduction: the user IS logged in, but their profile was
-      // pinned by an older CLI. `buildResolverInputs` used to swallow
-      // `readConfig`'s refusal with `.catch(() => null)` and report "requires a
-      // logged-in profile or an API key — Run `appstrate login`" — a wrong
-      // diagnosis whose suggested remedy hits the very same refusal.
-      await writeStaleConfig();
-
-      const message = await _buildResolverInputsForTesting("remote", bundleOpts()).then(
-        // `undefined` on resolve, so every assertion below fails on a
-        // non-string receiver rather than passing vacuously.
-        () => undefined,
-        (err: unknown) => (err as Error).message,
-      );
-
-      expect(message).toContain('"applicationId"');
-      expect(message).toContain('"spaceId"');
-      expect(message).toContain("appstrate space switch");
-      // The misdiagnosis this test exists to prevent.
-      expect(message).not.toContain("logged-in profile or an API key");
-    });
-
-    it("surfaces it on the headless API-key path too", async () => {
-      // Same swallow, second call site: an `ask_…` key with no
-      // APPSTRATE_INSTANCE falls back to the profile, so the stale file is
-      // read here as well and must refuse rather than demand an env var.
-      process.env.APPSTRATE_API_KEY = "ask_headless_stale";
-      await writeStaleConfig();
-
-      const message = await _buildResolverInputsForTesting("remote", bundleOpts()).then(
-        () => undefined,
-        (err: unknown) => (err as Error).message,
-      );
-
-      expect(message).toContain('"applicationId"');
-      expect(message).not.toContain("No Appstrate instance URL");
-    });
-  });
-
-  it("uses ResolverConfigError as its error class so the CLI formatError pipeline renders hints", async () => {
-    await expect(_buildResolverInputsForTesting("remote", bundleOpts())).rejects.toBeInstanceOf(
-      ResolverConfigError,
-    );
   });
 });

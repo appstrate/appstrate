@@ -34,7 +34,7 @@ export function OrgSettingsCliSessionsPage() {
     { params: { path: { orgId: orgId ?? "" } } },
     {
       enabled: !!orgId,
-      // Unwrap the list envelope (legacy apiList behavior).
+      // Unwrap the list envelope — the universal 2xx list shape here.
       select: (envelope) => envelope.data,
     },
   );

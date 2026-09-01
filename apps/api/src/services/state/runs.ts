@@ -78,8 +78,12 @@ export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
  * observability/billing. Every consumer downstream (finalize, the internal
  * run-context endpoint, `getRunEffectiveAgent`'s `agent_deleted` report) needs a
  * printable, stable id — so fall back to the INSERT-time snapshot, stamped on
- * the row precisely for this case, and only then to a neutral sentinel for
- * pre-snapshot legacy rows.
+ * the row precisely for this case, and only then to a neutral sentinel.
+ *
+ * The sentinel is LIVE, not a legacy path: `agent_scope`/`agent_name` are
+ * nullable and both writers still persist NULL when they have nothing to
+ * snapshot (`params.agentScope ?? null`, `agentDenorm?.scope ?? null` below).
+ * A run launched with no resolvable agent identity reaches it today.
  */
 export function runAgentIdentity(row: {
   packageId: string | null;

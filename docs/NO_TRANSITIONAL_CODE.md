@@ -202,6 +202,22 @@ code` takes a **string constant**, and `$$ … $$` is only one way to write one:
 twin and rewrites the same rows on every replay. The gate reads a `DO` body as
 code either way, in the same pass, so the same-table carve-out reaches both.
 
+**A `USING` expression is a write.**
+`ALTER TABLE t ALTER COLUMN c SET DATA TYPE <type> USING <expr>` evaluates
+`<expr>` against every row that already exists and stores what it returns. A
+type cast is the honest use, and this directory is full of them — `0047` alone
+has thirty, all `AT TIME ZONE 'UTC'`. But nothing stops the expression being a
+repair: `USING (CASE WHEN c = 'old' THEN 'new' ELSE c END)` rewrites row
+contents exactly as the `UPDATE` beside it would, and it is the shape `0053`
+deliberately refused to write, so it is the shape the next author reaches for.
+It is therefore a sixth verb in the vocabulary, with the table read from the
+`ALTER TABLE` it opens and the same carve-out available: a repair whose
+`USING` lands on the table a `SET NOT NULL`, a `CHECK`, a `VALIDATE` or a
+`DROP COLUMN` in the same file also lands on is licenced, and nothing else is.
+A cast with no repair in it — `USING c::text`, `USING c AT TIME ZONE 'UTC'` — is
+not a write: the gate reads a bare column reference, a cast of one, and an
+`AT TIME ZONE` on one as conversion, and anything else as a repair.
+
 Two writing forms are outside that vocabulary on purpose. `SELECT … INTO` is
 PL/pgSQL variable assignment inside the `DO` blocks this directory is full of,
 and creates a new relation rather than rewriting rows; `COPY … FROM` needs a

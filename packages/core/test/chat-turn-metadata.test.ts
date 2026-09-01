@@ -89,6 +89,45 @@ describe("chat turn metadata", () => {
     expect(message.metadata.source).toBe("test");
   });
 
+  it("answers from `maxStepsReached` alone — the retired second arm is gone", () => {
+    // `turnLimitReached` used to read `maxStepsReached || toolStepBudgetReached`
+    // for rows written before the chat unified on one engine. The divergent
+    // pair below is the ONLY shape that arm could ever speak for (a turn
+    // carrying `toolStepBudgetReached` alone never clears the shape gate), and
+    // `scripts/migration/0006-chat-turn-step-cap-fold.sql` moved those rows.
+    // One form written, the same one read.
+    const divergent = {
+      role: "assistant",
+      parts: [],
+      metadata: mergeTurnMetadata(undefined, {
+        finishReason: "stop",
+        stepCount: 16,
+        maxSteps: 16,
+        toolStepBudget: 15,
+        toolStepBudgetReached: true,
+        maxStepsReached: false,
+      }),
+    };
+    expect(turnLimitReached(divergent)).toBe(false);
+
+    // And the gate itself is what makes "carries the retired field alone"
+    // unreachable: no `maxStepsReached`, no decode at all.
+    expect(
+      turnMetadataFromMessage({
+        metadata: {
+          appstrate: {
+            turn: {
+              finishReason: "stop",
+              stepCount: 16,
+              maxSteps: 16,
+              toolStepBudgetReached: true,
+            },
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
   it("reads assistant-ui message metadata from the top-level message", () => {
     const message = {
       role: "assistant",

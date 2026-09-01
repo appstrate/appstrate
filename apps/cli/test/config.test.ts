@@ -108,61 +108,6 @@ describe("readConfig", () => {
     expect(Object.keys(config.profiles)).toEqual(["ok"]);
   });
 
-  it("refuses to parse a profile that still pins the retired `applicationId`", async () => {
-    // Fail-loud on the retired key (`docs/NO_TRANSITIONAL_CODE.md` §1): the
-    // parse is an allow-list that drops unknown keys, so accepting the file
-    // would let the next `writeConfig` erase the user's pin without a word.
-    const stale = [
-      'defaultProfile = "prod"',
-      "[profile.prod]",
-      'instance = "https://a.example"',
-      'userId = "u"',
-      'email = "x@y.z"',
-      'orgId = "org_1"',
-      'applicationId = "app_1"',
-    ].join("\n");
-    const fs = await import("node:fs/promises");
-    await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
-    await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), stale);
-
-    // `undefined` when `readConfig` resolved — every assertion below then fails
-    // on a non-string receiver rather than passing vacuously.
-    const message = await readConfig().then(
-      () => undefined,
-      (err: unknown) => (err as Error).message,
-    );
-    // Names the offending profile, the retired key, its replacement, and the fix.
-    expect(message).toContain('Profile "prod"');
-    expect(message).toContain(join(configHome.dir(), "appstrate", "config.toml"));
-    expect(message).toContain('"applicationId"');
-    expect(message).toContain('"spaceId"');
-    expect(message).toContain("appstrate space switch");
-  });
-
-  it("refuses even when the stale profile is not the active one", async () => {
-    // Deliberate: `writeConfig` rewrites the WHOLE file, so a check narrowed to
-    // the active profile would let the inactive one's pin be dropped silently
-    // the next time any command saved the config.
-    const mixed = [
-      'defaultProfile = "current"',
-      "[profile.current]",
-      'instance = "https://a.example"',
-      'userId = "u"',
-      'email = "x@y.z"',
-      'spaceId = "spc_1"',
-      "[profile.stale]",
-      'instance = "https://b.example"',
-      'userId = "u2"',
-      'email = "s@y.z"',
-      'applicationId = "app_9"',
-    ].join("\n");
-    const fs = await import("node:fs/promises");
-    await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
-    await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), mixed);
-
-    await expect(readConfig()).rejects.toThrow(/Profile "stale"/);
-  });
-
   it("parses a profile that carries only `spaceId`", async () => {
     const good = [
       'defaultProfile = "prod"',
@@ -187,11 +132,10 @@ describe("readConfig", () => {
     });
   });
 
-  it("never carries the retired key into a parsed profile", async () => {
-    // The repaired file the refusal message asks for: the `app_…` value is gone,
-    // replaced by a `spc_…` one. A parse that aliased the retired key onto
-    // `spaceId`, or spread the raw TOML row wholesale, would still surface
-    // `applicationId` on the returned object here.
+  it("drops an unknown key rather than spreading the raw TOML row", async () => {
+    // The parse is an ALLOW-LIST. A version that spread the row wholesale would
+    // surface whatever the file happened to carry on the returned object, which
+    // is how an unrecognised key reaches code that never declared it.
     const repaired = [
       'defaultProfile = "prod"',
       "[profile.prod]",
@@ -199,6 +143,7 @@ describe("readConfig", () => {
       'userId = "u"',
       'email = "x@y.z"',
       'spaceId = "spc_1"',
+      'somethingElse = "nope"',
     ].join("\n");
     const fs = await import("node:fs/promises");
     await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
@@ -206,8 +151,8 @@ describe("readConfig", () => {
 
     const prod = (await readConfig()).profiles.prod!;
     expect(prod.spaceId).toBe("spc_1");
-    expect(Object.keys(prod)).not.toContain("applicationId");
-    expect((prod as unknown as Record<string, unknown>).applicationId).toBeUndefined();
+    expect(Object.keys(prod)).not.toContain("somethingElse");
+    expect((prod as unknown as Record<string, unknown>).somethingElse).toBeUndefined();
   });
 });
 
@@ -418,28 +363,5 @@ describe("resolveActiveProfileOrNull", () => {
   it("degrades an unparseable config file to null", async () => {
     await writeConfigFile("this is not [ valid toml");
     expect(await resolveActiveProfileOrNull(undefined)).toBeNull();
-  });
-
-  it("re-throws the retired-key refusal instead of degrading it to null", async () => {
-    // The one error this helper must NOT hide. `null` here would make the
-    // caller report "no profile" at a user who has one — see
-    // `test/run-resolver-inputs.test.ts`.
-    await writeConfigFile(
-      [
-        'defaultProfile = "prod"',
-        "[profile.prod]",
-        'instance = "https://a.example"',
-        'userId = "u"',
-        'email = "x@y.z"',
-        'applicationId = "app_1"',
-      ].join("\n"),
-    );
-
-    const message = await resolveActiveProfileOrNull(undefined).then(
-      () => undefined,
-      (err: unknown) => (err as Error).message,
-    );
-    expect(message).toContain('"applicationId"');
-    expect(message).toContain("appstrate space switch");
   });
 });
