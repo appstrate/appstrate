@@ -53,19 +53,21 @@ export function MarkdownText() {
       // cadence the provider and the transport batch it.
       //
       // `maxCharIntervalMs` is the ceiling on the gap BETWEEN characters, so
-      // it is the reveal's top speed: 3 ms is ~5 characters per frame at
-      // 60 fps, ~330 characters/s — just under a fast model's output, so a
-      // small backlog persists and every frame paints. `drainMs` is how long
-      // the animator gives itself to clear the backlog once it exceeds that
-      // pace; 150 ms bounds how far the display can trail a burst, and how
-      // long the tail takes to land after the stream ends. The first
-      // character still paints on the frame after its byte arrived: with a
-      // backlog of a few characters the formula reveals them at top speed.
+      // it is the reveal's top speed: 10 ms is ~1.6 characters per frame at
+      // 60 fps, ~100 characters/s (~25 tokens/s) — below the output rate of
+      // any model worth streaming, so a backlog persists and every frame
+      // paints. `drainMs` is the second term of the same formula and takes
+      // over whenever the backlog exceeds that pace: it is how long the
+      // animator gives itself to clear what it holds, so in steady state the
+      // reveal tracks the arrival rate exactly and trails it by `drainMs`.
+      // 150 ms also bounds how long the tail takes to land after the stream
+      // ends. The first character still paints on the frame after its byte
+      // arrived — the top speed only applies once there is a backlog.
       //
       // `minCommitMs` stays at its default (0): the animator only paints on a
       // commit, so a commit floor below the frame rate turns the reveal into
       // steps.
-      smooth={{ drainMs: 150, maxCharIntervalMs: 3 }}
+      smooth={{ drainMs: 150, maxCharIntervalMs: 10 }}
       className="prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs"
       components={MARKDOWN_COMPONENTS}
     />
