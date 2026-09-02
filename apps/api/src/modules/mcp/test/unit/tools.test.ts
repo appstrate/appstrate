@@ -15,6 +15,7 @@ import {
   getCatalog,
   resetCatalog,
   buildOperationIndex,
+  getOperationIndexCacheStats,
   type CatalogOperation,
 } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
@@ -506,6 +507,52 @@ describe("buildOperationIndex", () => {
     const a = buildOperationIndex();
     const b = buildOperationIndex();
     expect(b).toBe(a);
+  });
+
+  // The permission-scoped index is what the MCP router builds on EVERY
+  // `tools/call` POST (the chat module drives each tool call through it), so
+  // it is memoised per permission set. Strings compare by value under
+  // `Object.is`, so identity cannot prove a memo hit — the build counter can.
+  describe("permission-scoped memo", () => {
+    it("serves a repeated permission set from the memo, order-independently", () => {
+      const first = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
+
+      const second = buildOperationIndex(new Set(["agents:read", "mcp:read"]));
+      expect(second).toBe(first);
+      // Negative control: an unmemoised build would report `builds: 2` here.
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
+    });
+
+    it("keeps distinct permission sets apart — they yield different indexes", () => {
+      const narrow = buildOperationIndex(new Set(["mcp:read"]));
+      const wide = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
+      expect(narrow).not.toContain("## Agents");
+      expect(wide).toContain("## Agents");
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 2, builds: 2 });
+    });
+
+    it("is dropped with the catalog — resetCatalog forces a rebuild", () => {
+      const before = buildOperationIndex(new Set(["mcp:read"]));
+      resetCatalog();
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 0, builds: 0 });
+
+      const after = buildOperationIndex(new Set(["mcp:read"]));
+      expect(after).toEqual(before);
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
+    });
+
+    it("is bounded — past 64 sets the oldest is evicted and rebuilt on demand", () => {
+      for (let i = 0; i < 65; i++) buildOperationIndex(new Set(["mcp:read", `x:${i}`]));
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 64, builds: 65 });
+
+      // The first (oldest) set was evicted, so asking for it again is a miss…
+      buildOperationIndex(new Set(["mcp:read", "x:0"]));
+      expect(getOperationIndexCacheStats().builds).toBe(66);
+      // …while the most recent one is still a hit.
+      buildOperationIndex(new Set(["mcp:read", "x:64"]));
+      expect(getOperationIndexCacheStats().builds).toBe(66);
+    });
   });
 });
 
