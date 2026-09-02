@@ -60,7 +60,9 @@ describe("cache invalidation bus (NOTIFY)", () => {
     cache.set("a", 1);
     cache.set("b", 2);
     await notifyFrom({ cache: "test-cache-bus", key: null, origin: "replica-b" });
-    expect(await until(() => cache.stats().size === 0)).toBe(true);
+    expect(await until(() => cache.peek("a") === undefined && cache.peek("b") === undefined)).toBe(
+      true,
+    );
   });
 
   it("publishes its own invalidations on the channel, and ignores their echo", async () => {

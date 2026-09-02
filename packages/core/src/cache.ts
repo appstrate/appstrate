@@ -51,8 +51,11 @@ export interface CacheBus {
   publish(message: CacheInvalidation): void;
 }
 
+/** Any value but `undefined` — `undefined` is the cache's own "absent" (see {@link Cache}). */
+type Storable = NonNullable<unknown> | null;
+
 export interface CacheOptions {
-  /** Process-unique name — the routing key on the bus and the label in stats. */
+  /** Process-unique name — the routing key on the bus. */
   name: string;
   /** Entry lifetime from the moment it is stored. */
   ttlMs: number;
@@ -60,27 +63,32 @@ export interface CacheOptions {
   max?: number;
 }
 
-export interface CacheGetOptions<V> {
+export interface CacheGetOptions<V extends Storable> {
   /**
-   * Whether a freshly loaded value is worth keeping. Default: always. A cache
-   * whose loader can answer "not found" (`null`/`undefined`) usually wants
-   * that answer retried on the next call rather than remembered for a TTL.
+   * Whether a freshly loaded value is worth keeping. Default: always. A loader
+   * that answers `undefined` is never stored regardless (see {@link Cache.get});
+   * this is for a cache whose loader uses another "not found" value, such as
+   * `null`, and wants that answer retried on the next call rather than
+   * remembered for a TTL.
    */
   store?: (value: V) => boolean;
 }
 
-export interface CacheStats {
-  name: string;
-  size: number;
-  hits: number;
-  misses: number;
-  /** Loader invocations — strictly ≤ misses when loads coalesce. */
-  loads: number;
-}
-
-export interface Cache<V> {
+/**
+ * `V` is constrained to non-`undefined` values (`null` is allowed): `undefined`
+ * is the cache's own "absent" — a loader that answers it is answered but never
+ * stored, so the next call loads again. A cache that must remember "not found"
+ * uses `null`.
+ */
+export interface Cache<V extends Storable> {
   /** The cached value, or the loader's result — one loader call per key in flight. */
   get(key: string, loader: () => Promise<V>, options?: CacheGetOptions<V>): Promise<V>;
+  /** Same, for a loader that may answer `undefined`: answered, never stored. */
+  get(
+    key: string,
+    loader: () => Promise<V | undefined>,
+    options?: CacheGetOptions<V>,
+  ): Promise<V | undefined>;
   /** The cached value if present and fresh, without loading. */
   peek(key: string): V | undefined;
   /** Store a value the caller already has. */
@@ -89,7 +97,6 @@ export interface Cache<V> {
   invalidate(key: string): void;
   /** Drop every entry here and on every replica. */
   clear(): void;
-  stats(): CacheStats;
 }
 
 interface Entry<V> {
@@ -102,7 +109,13 @@ const DEFAULT_MAX = 1_000;
 /** Which process this is, for the bus to tell a broadcast from its own echo. */
 const ORIGIN = crypto.randomUUID();
 
-const registry = new Map<string, InternalCache<unknown>>();
+/** What a delivered invalidation needs from a registered cache. */
+interface Droppable {
+  drop(key: string): void;
+  dropAll(): void;
+}
+
+const registry = new Map<string, Droppable>();
 let bus: CacheBus | null = null;
 let clock: () => number = Date.now;
 
@@ -144,18 +157,10 @@ export function clearAllCachesLocally(): void {
   for (const cache of registry.values()) cache.dropAll();
 }
 
-/** Registered cache names, for diagnostics and the registry test. */
-export function listCaches(): CacheStats[] {
-  return [...registry.values()].map((cache) => cache.stats());
-}
-
-class InternalCache<V> implements Cache<V> {
+class InternalCache<V extends Storable> implements Cache<V>, Droppable {
   private readonly entries = new Map<string, Entry<V>>();
   /** Loads in flight, each tagged so a completed load can tell whether it still owns its slot. */
-  private readonly inflight = new Map<string, { promise: Promise<V>; token: symbol }>();
-  private hits = 0;
-  private misses = 0;
-  private loads = 0;
+  private readonly inflight = new Map<string, { promise: Promise<V | undefined>; token: symbol }>();
   private readonly max: number;
 
   constructor(
@@ -176,17 +181,22 @@ class InternalCache<V> implements Cache<V> {
     return entry.value;
   }
 
-  async get(key: string, loader: () => Promise<V>, options?: CacheGetOptions<V>): Promise<V> {
+  get(key: string, loader: () => Promise<V>, options?: CacheGetOptions<V>): Promise<V>;
+  get(
+    key: string,
+    loader: () => Promise<V | undefined>,
+    options?: CacheGetOptions<V>,
+  ): Promise<V | undefined>;
+  async get(
+    key: string,
+    loader: () => Promise<V | undefined>,
+    options?: CacheGetOptions<V>,
+  ): Promise<V | undefined> {
     const cached = this.peek(key);
-    if (cached !== undefined) {
-      this.hits += 1;
-      return cached;
-    }
-    this.misses += 1;
+    if (cached !== undefined) return cached;
     const pending = this.inflight.get(key);
     if (pending) return pending.promise;
 
-    this.loads += 1;
     const token = Symbol("load");
     const promise = (async () => {
       const value = await loader();
@@ -194,7 +204,9 @@ class InternalCache<V> implements Cache<V> {
       // landed mid-flight dropped it, and what this load fetched is exactly the
       // value that write made stale. The caller still gets its answer.
       const owned = this.inflight.get(key)?.token === token;
-      if (owned && (options?.store ? options.store(value) : true)) this.set(key, value);
+      if (owned && value !== undefined && (options?.store ? options.store(value) : true)) {
+        this.set(key, value);
+      }
       return value;
     })();
     this.inflight.set(key, { promise, token });
@@ -237,23 +249,13 @@ class InternalCache<V> implements Cache<V> {
     this.entries.clear();
     this.inflight.clear();
   }
-
-  stats(): CacheStats {
-    return {
-      name: this.name,
-      size: this.entries.size,
-      hits: this.hits,
-      misses: this.misses,
-      loads: this.loads,
-    };
-  }
 }
 
 /**
  * Create and register a cache. One call per cache, at module load, next to
  * the reads it fronts. Throws on a name already registered in this process.
  */
-export function createCache<V>(options: CacheOptions): Cache<V> {
+export function createCache<V extends Storable>(options: CacheOptions): Cache<V> {
   if (registry.has(options.name)) {
     throw new Error(`cache "${options.name}" is already registered`);
   }
@@ -261,6 +263,6 @@ export function createCache<V>(options: CacheOptions): Cache<V> {
     throw new Error(`cache "${options.name}": ttlMs must be positive`);
   }
   const cache = new InternalCache<V>(options.name, options.ttlMs, options.max ?? DEFAULT_MAX);
-  registry.set(options.name, cache as InternalCache<unknown>);
+  registry.set(options.name, cache);
   return cache;
 }

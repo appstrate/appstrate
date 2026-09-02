@@ -7,7 +7,6 @@ import {
   receiveCacheInvalidation,
   setCacheClock,
   clearAllCachesLocally,
-  listCaches,
   type CacheInvalidation,
 } from "../src/cache.ts";
 
@@ -66,7 +65,6 @@ describe("createCache — read-through", () => {
     expect(await results).toEqual([42, 42, 42]);
     // Negative control: without coalescing this is 3.
     expect(loads).toBe(1);
-    expect(cache.stats()).toMatchObject({ hits: 0, misses: 3, loads: 1 });
   });
 
   it("does not coalesce across keys", async () => {
@@ -93,6 +91,18 @@ describe("createCache — read-through", () => {
     expect(loads).toBe(2);
   });
 
+  it("answers a loader's `undefined` without storing it", async () => {
+    const cache = createCache<string>({ name: uniqueName("undef"), ttlMs: 60_000 });
+    let loads = 0;
+    const loader = async () => (++loads === 1 ? undefined : "found");
+    expect(await cache.get("k", loader)).toBeUndefined();
+    expect(cache.peek("k")).toBeUndefined();
+    // Negative control: a cache that stored the miss would answer `undefined`
+    // here with `loads` still 1.
+    expect(await cache.get("k", loader)).toBe("found");
+    expect(loads).toBe(2);
+  });
+
   it("propagates a loader failure and caches nothing", async () => {
     const cache = createCache<string>({ name: uniqueName("fail"), ttlMs: 60_000 });
     await expect(cache.get("k", async () => Promise.reject(new Error("boom")))).rejects.toThrow(
@@ -111,7 +121,6 @@ describe("createCache — read-through", () => {
     expect(cache.peek("a")).toBeUndefined();
     expect(cache.peek("b")).toBe(2);
     expect(cache.peek("c")).toBe(3);
-    expect(cache.stats().size).toBe(2);
   });
 
   it("refuses a duplicate name and a non-positive TTL", () => {
@@ -200,6 +209,5 @@ describe("createCache — invalidation bus", () => {
     expect(a.peek("x")).toBeUndefined();
     expect(b.peek("y")).toBeUndefined();
     expect(published).toEqual([]);
-    expect(listCaches().map((s) => s.name)).toEqual(expect.arrayContaining([a.stats().name]));
   });
 });

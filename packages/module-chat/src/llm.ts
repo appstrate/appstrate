@@ -112,12 +112,12 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
  */
 export const SPACE_CACHE_TTL_MS = 5 * 60_000;
 
-// Only RESOLVED ids are cached — never a miss (the `store` predicate below). A
-// miss (transient failure OR an empty 200) is left uncached so the next turn
-// retries: an empty `/api/spaces` is anomalous (every org normally has a
-// default space), so caching it would strip space-scoped MCP tools org-wide.
-// Concurrent turns of one org share a single lookup.
-const spaceCache = createCache<string | undefined>({
+// Only RESOLVED ids are cached — a miss answers `undefined`, which the cache
+// never stores, so the next turn retries. A miss (transient failure OR an
+// empty 200) is anomalous (every org normally has a default space), and
+// caching it would strip space-scoped MCP tools org-wide. Concurrent turns of
+// one org share a single lookup.
+const spaceCache = createCache<string>({
   name: "chat-default-space",
   ttlMs: SPACE_CACHE_TTL_MS,
 });
@@ -131,9 +131,7 @@ export function resolveDefaultSpaceId(
   // `fetch` default would silently bypass it — symmetry with listModels.
   fetchImpl: typeof fetch,
 ): Promise<string | undefined> {
-  return spaceCache.get(orgId, () => fetchDefaultSpaceId(origin, headers, orgId, fetchImpl), {
-    store: (id) => id !== undefined,
-  });
+  return spaceCache.get(orgId, () => fetchDefaultSpaceId(origin, headers, orgId, fetchImpl));
 }
 
 async function fetchDefaultSpaceId(
