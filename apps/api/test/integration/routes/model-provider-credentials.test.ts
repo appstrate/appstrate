@@ -10,7 +10,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
-import { registerCatalog } from "../../../src/services/pricing-catalog.ts";
+import { registerCatalog, lookupCatalogModel } from "../../../src/services/pricing-catalog.ts";
 import xaiFeatured from "../../../src/data/featured-models.json" with { type: "json" };
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 
@@ -88,12 +88,22 @@ describe("Model Provider Keys API", () => {
       expect(anthropic).toBeDefined();
       const haiku = anthropic!.models.find((m) => m.id === "claude-haiku-4-5-20251001");
       expect(haiku).toBeDefined();
-      expect(haiku!.cost).toEqual({
-        input: expect.closeTo(1, 4),
-        output: expect.closeTo(5, 4),
-        cacheRead: expect.closeTo(0.1, 4),
-        cacheWrite: expect.closeTo(1.25, 4),
-      });
+      // Assert the route SERVES WHAT THE CATALOG HOLDS, not a transcription of
+      // what it held the day this was written. `apps/api/src/data/pricing/*` is
+      // refreshed weekly by a bot (`chore(pricing): refresh LiteLLM pricing
+      // catalog`), so a literal price turns every vendor repricing into a red
+      // `main` — which is exactly what the xai assertion below did on
+      // 2026-09-02 when xAI moved grok from $3/$15 to $1.25/$2.50.
+      //
+      // Not vacuous: the serializer can still drop the field, read the wrong
+      // provider or model, or reshape the object, and each of those fails here.
+      // What it can no longer do is fail because a vendor changed a price. The
+      // `toBeDefined` guard is the other half — without it a catalog that
+      // stopped pricing this model would compare undefined to undefined and go
+      // green while the route served nothing.
+      const haikuCatalogCost = lookupCatalogModel("anthropic", "claude-haiku-4-5-20251001")?.cost;
+      expect(haikuCatalogCost).toBeDefined();
+      expect(haiku!.cost).toEqual(haikuCatalogCost);
     });
 
     it("marks featured catalog models with featured: true (xai)", async () => {
@@ -119,12 +129,26 @@ describe("Model Provider Keys API", () => {
       for (const id of generated) {
         expect(xai!.models.find((m) => m.id === id)?.featured).toBe(true);
       }
-      // Catalog-derived cost still flows for non-featured models.
+      // Catalog-derived cost still flows for non-featured models. Compared
+      // against the catalog rather than a literal, for the reason spelled out
+      // on the anthropic test above.
       const grok4 = xai!.models.find((m) => m.id === "grok-4");
-      expect(grok4?.cost).toEqual({ input: 3, output: 15 });
-      // A non-featured xai model surfaces too.
-      const grok2 = xai!.models.find((m) => m.id === "grok-2");
-      expect(grok2?.featured).toBe(false);
+      const grok4CatalogCost = lookupCatalogModel("xai", "grok-4")?.cost;
+      expect(grok4CatalogCost).toBeDefined();
+      expect(grok4?.cost).toEqual(grok4CatalogCost);
+      // A non-featured xai model surfaces too, flagged `featured: false`.
+      //
+      // Picked from the response rather than named: `grok-2` used to be the
+      // literal here and the 2026-09-02 catalog refresh DELETED it upstream, so
+      // the assertion started reading `undefined?.featured` and failed on a
+      // model that no longer exists. The property is "everything outside the
+      // generated list is flagged false", which needs no particular model to
+      // survive a vendor's catalog.
+      const nonFeatured = xai!.models.filter((m) => !generated.includes(m.id));
+      expect(nonFeatured.length).toBeGreaterThan(0);
+      for (const m of nonFeatured) {
+        expect(m.featured).toBe(false);
+      }
     });
 
     it("projects only requested fields and drops the heavy models catalog", async () => {
