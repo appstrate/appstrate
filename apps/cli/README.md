@@ -449,6 +449,47 @@ There is no automatic rename: remove or rename the directory yourself and re-run
 
 Ownership is recorded per target **together with the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten.
 
+#### Codex, and running without a Claude Code plugin
+
+The recorded marketplace command syncs both targets (`--target claude-plugin --target codex`), so if you use Claude Code, every session already refreshes `~/.agents/skills/` and Codex picks the skills up on its next start — Codex rescans that directory per session and has no hook of its own.
+
+Two cases need you to run the sync yourself: you do not use Claude Code at all, or your organization blocks command-sourced plugins (`disableCommandPluginSources`). Then schedule `appstrate skills sync --target codex` (add or swap in `--target claude-user` to feed `~/.claude/skills/`, which Claude Code picks up live).
+
+A cron entry every 15 minutes — cron's `PATH` is minimal, so give the absolute path:
+
+```cron
+*/15 * * * * /usr/local/bin/appstrate skills sync --target codex >/dev/null 2>&1
+```
+
+On macOS, prefer `launchd`. Write `~/Library/LaunchAgents/dev.appstrate.skills-sync.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>dev.appstrate.skills-sync</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/local/bin/appstrate</string>
+      <string>skills</string>
+      <string>sync</string>
+      <string>--target</string>
+      <string>codex</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+  </dict>
+</plist>
+```
+
+Load it with `launchctl load ~/Library/LaunchAgents/dev.appstrate.skills-sync.plist` (`command -v appstrate` gives the path to put in both snippets).
+
+**The scheduler must reach your OS keyring.** The sync reads the profile's token from the keyring, and a keyring is bound to a session, not to a user id: a `launchd` **user agent** runs inside your logged-in session and can unlock the login keychain, while a system cron job (or anything under `sudo`) may not — the sync then fails with the "not logged in" remedy even though you are. That is why `launchd` is the recommended path on macOS. Remember that `HOME` differs per context too: a scheduler resolving a different `~/.agents/skills` than your shell does gets a state file that claims nothing, and every directory there is refused rather than overwritten.
+
+Per-skill toggles survive all of this. We never write `~/.codex/config.toml`, and directory names are stable across syncs, so a `[[skills.config]]` block disabling one of the synced skills keeps applying to the same skill after the next sync.
+
 ---
 
 ### `appstrate openapi`

@@ -8,8 +8,21 @@ available locally as `/appstrate:<skill>`, kept up to date without manual
 steps. The same sync feeds OpenAI Codex as a passenger.
 
 > **Status (2026-09-02).** Design + feasibility verified against the code and
-> the current Claude Code / Codex / Agent Skills docs. **Phase 1 is implemented
-> (`appstrate skills sync`, CLI only); phases 2-4 are pending.**
+> the current Claude Code / Codex / Agent Skills docs.
+>
+> - **Phase 1 — implemented and validated end to end** (`appstrate skills sync`,
+>   CLI only). Observations in §4.
+> - **Phase 2 — marketplace prepared and validated up to the consent step.**
+>   `appstrate/claude-plugins` exists locally
+>   (`/Users/pierrecabriere/Dev/appstrate/claude-plugins`), passes
+>   `claude plugin validate`, and installs; the acceptance prompt requires the
+>   user's own terminal, so everything downstream of it is pending human
+>   confirmation (§4, Phase 2 table). The repo is **not pushed yet**.
+> - **Phase 3 — documented** (`apps/cli/README.md` → `appstrate skills`,
+>   "Codex, and running without a Claude Code plugin").
+> - **Phase 4 — pending**: tag `cli@<version>` after merge, then push the
+>   `appstrate/claude-plugins` repo.
+>
 > Every fact below cites its source; every decision states the alternative
 > it rejected.
 
@@ -208,14 +221,23 @@ run, so one unpublished skill must not cost the user a correct plugin.
 README.md
 ```
 
+The file as prepared (verbatim; `claude plugin validate` passes on it):
+
 ```json
 {
   "name": "appstrate",
-  "owner": { "name": "Appstrate" },
+  "owner": { "name": "Appstrate", "url": "https://appstrate.dev" },
+  "metadata": {
+    "description": "Official Appstrate plugins for Claude Code",
+    "pluginRoot": "./plugins"
+  },
   "plugins": [
     {
       "name": "appstrate",
-      "description": "Your Appstrate organization's skills, synced every session",
+      "description": "Your Appstrate organization's skills, synced every session (published versions only; requires the appstrate CLI, logged in with a pinned org and space)",
+      "homepage": "https://github.com/appstrate/appstrate/tree/main/apps/cli#appstrate-skills",
+      "category": "productivity",
+      "keywords": ["appstrate", "skills", "sync"],
       "source": {
         "source": "command",
         "command": "appstrate skills sync --target claude-plugin --target codex --print-path",
@@ -226,6 +248,10 @@ README.md
   ]
 }
 ```
+
+The repo's `README.md` carries the install steps, the Claude Code minimum
+(2.1.229), the `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` note and the
+`disableCommandPluginSources` fallback.
 
 User flow: `appstrate login` → `claude plugin marketplace add appstrate/claude-plugins`
 → `claude plugin install appstrate@appstrate` (shows and records the command).
@@ -253,48 +279,84 @@ Tests (`apps/cli/test/skills-*.test.ts`, bun:test, deps injection, no `mock.modu
   `appstrate skills sync --target claude-user` then `/skills` in Claude Code
   lists them.
 
+**Done.** Implemented and validated end to end (observations in the Phase 2
+table below — the CLI rows were exercised in that same session).
+
 ### Phase 2 — Marketplace + plugin validation
 
-- Create `appstrate/claude-plugins` with the JSON above; `claude plugin validate .`.
-- Validate on macOS + Linux: install → consent screen shows the command;
-  session start → background run; publish a skill version → within a new
-  session, notification "plugin reloaded" or `/reload-plugins` prompt;
-  `/appstrate:<slug>` works. Record the observed behaviour in this file.
-- Confirm the keychain path: background run from `sh -c` in `$HOME`, no TTY,
-  after a CLI self-update (new binary) — macOS may show a Keychain ACL dialog
-  the first time. If it does, document it in the README (one-time) and make
-  sure the CLI fails within the timeout instead of hanging on the dialog.
-- Windows: `mode: "copy"` works; check `%APPDATA%` paths and that `sh` here is
-  `cmd.exe` (command string is shell-neutral: no quotes, no `&&`).
+`appstrate/claude-plugins` is prepared at
+`/Users/pierrecabriere/Dev/appstrate/claude-plugins` (manifest quoted in §3.5)
+and **not pushed yet**. Validated on macOS, Claude Code 2.1.258, against a
+Tier-0 instance with published skills, using a local copy of the marketplace
+directory.
+
+| What                                                                                    | Result                                                                                                                    |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `claude plugin validate` on the marketplace manifest                                    | **Verified** — passes                                                                                                     |
+| `claude plugin marketplace add <dir>` + `claude plugin install appstrate@<marketplace>` | **Verified** — the consent screen shows the exact command string                                                          |
+| Automating the consent step from an agent session                                       | **Impossible**: `-y` / `--yes` is ignored inside a Claude Code session. Acceptance must happen in the user's own terminal |
+| Background re-run once per session; reload / `/reload-plugins` prompt after a publish   | **Pending human confirmation** — gated behind the acceptance above, not observed                                          |
+| `--print-path`                                                                          | **Verified** — exactly one stdout line, exit 0                                                                            |
+| Determinism                                                                             | **Verified** — byte-identical output on re-run, and a fresh build matches a forced rebuild                                |
+| Version bump on one skill                                                               | **Verified** — only that skill re-downloaded                                                                              |
+| Server-side delete                                                                      | **Verified** — removed from every target                                                                                  |
+| Unmanaged directory in `~/.agents/skills`                                               | **Verified** — refused with the documented message, left intact; `--print-path` still exits 0                             |
+| `--dry-run --print-path`                                                                | **Verified** — refused                                                                                                    |
+| Foreign directory inside `<plugin>/skills/`                                             | **Verified** — triggers a rebuild                                                                                         |
+| Plugin directory deleted                                                                | **Verified** — recreated                                                                                                  |
+| Lock: busy / stale                                                                      | **Verified** — a busy lock waits then proceeds; a lock with an mtime of 2026-01-01 is reaped                              |
+| Ledger of a target not touched by the run                                               | **Verified** — carried over across a plugin-only run                                                                      |
+| Wall time                                                                               | **Verified** — ≈0.3 s for 3 skills                                                                                        |
+| `~/.claude/skills/` live pickup                                                         | **Verified** — Claude Code listed the skills mid-session, no restart                                                      |
+| macOS Keychain ACL dialog from a background process after a CLI self-update             | **Untestable here**: the keyring needs the real `HOME`, so no isolated probe is possible. Still open                      |
+| Windows (`%APPDATA%` paths, `sh` = `cmd.exe`)                                           | **Untested** — no Windows machine in this setup. The command string stays shell-neutral (no quotes, no `&&`)              |
+| `HOME`-mismatch ownership path                                                          | **Unit-tested only** — not exercised against a real second `HOME`                                                         |
 
 ### Phase 3 — Codex + fallback docs
 
-- `codex` target is already produced by the marketplace command. Document
-  the Codex-only path: `appstrate skills sync --target codex` on a `launchd`
-  / cron entry, or after `appstrate login`.
+**Done.** What exists now:
+
+- The `codex` target is produced by the same marketplace command
+  (`--target claude-plugin --target codex`), so a Claude Code session refreshes
+  `~/.agents/skills/` too. Codex itself has no session hook; it rescans
+  `$HOME/.agents/skills` per session (`learn.chatgpt.com/docs/build-skills`).
+- The Codex-only / no-plugin path (`--target codex`, `--target claude-user`)
+  is documented with a `crontab` line and a `launchd` plist in
+  `apps/cli/README.md` → `appstrate skills` → "Codex, and running without a
+  Claude Code plugin", including the keyring-reachability caveat (prefer
+  `launchd` on macOS).
 - `[[skills.config]]` interplay: we never write `~/.codex/config.toml`; a
   user disabling one of our skills there keeps their choice across syncs
-  because paths are stable.
+  because directory names are stable. Documented in the same section.
 
 ### Phase 4 — Release
 
-- CLI: bump, tag `cli@<version>`, push (the npm channel is the only way the
-  marketplace command reaches users; the curl channel follows the platform
-  release). Mention the Claude Code minimum (v2.1.229) in the release notes.
+**Pending.**
+
+- CLI: bump, tag `cli@<version>`, push after merge (the npm channel is the only
+  way the marketplace command reaches users; the curl channel follows the
+  platform release). Mention the Claude Code minimum (v2.1.229) in the release
+  notes.
+- Then push the `appstrate/claude-plugins` repo — publishing the marketplace
+  before the CLI version it invokes is on npm would hand users a plugin whose
+  command does not exist.
 
 ## 5. Risks and what to test first
 
-| Risk                                                                            | Mitigation / test                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Background run silently skipped (`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`)    | Documented; `claude plugin update appstrate@appstrate` is the manual path                                                                                                                           |
-| Org policy blocks command sources                                               | `--target claude-user` + cron, documented                                                                                                                                                           |
-| Prompt-cache invalidation turns the auto-reload into a `/reload-plugins` prompt | Expected per docs; still zero manual sync                                                                                                                                                           |
-| Keychain dialog from a non-interactive background process on macOS              | Phase 2 test; CLI must not block past the timeout                                                                                                                                                   |
-| Half-written plugin dir hashed as a "version"                                   | Atomic swap (§3.4 step 6)                                                                                                                                                                           |
-| Deleting user content in `~/.agents/skills` or `~/.claude/skills`               | State-file ownership; never delete unmanaged dirs; `--dry-run`                                                                                                                                      |
-| Skill names that are Claude built-ins (`help`, `review`…)                       | Namespaced `/appstrate:help` still works; bare name yields to the built-in — documented, no rename                                                                                                  |
-| Rate limit 50/window on package routes with large orgs                          | Concurrency 8; downloads only on change; bulk route if measured (§6)                                                                                                                                |
-| Path traversal / zip bombs in a published skill                                 | `unzipArtifact` + `stripWrapperPrefix` under `PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES` + explicit entry guard; the runner-pi materializer's lack of a guard is out of scope here but worth its own issue |
+| Risk                                                                            | Status / mitigation                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Background run silently skipped (`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`)    | Documented; `claude plugin update appstrate@appstrate` is the manual path                                                                                                                                                                       |
+| Org policy blocks command sources                                               | Closed by docs: `--target codex` / `--target claude-user` on a `launchd` or cron entry, with a plist and a crontab line in `apps/cli/README.md`                                                                                                 |
+| Install consent cannot be scripted                                              | Confirmed in Phase 2: `-y` / `--yes` is ignored inside a Claude Code session. The install is a one-time step the user runs in their own terminal — documented in the marketplace README, and it is why the post-consent behaviour is unobserved |
+| Prompt-cache invalidation turns the auto-reload into a `/reload-plugins` prompt | Expected per docs; still zero manual sync. Not observed yet (gated behind consent)                                                                                                                                                              |
+| Keychain dialog from a non-interactive background process on macOS              | **Still open.** Not testable in the Phase 2 setup — the keyring needs the real `HOME`, so no isolated probe exists. CLI must not block past the 120 s timeout                                                                                   |
+| Half-written plugin dir hashed as a "version"                                   | Atomic swap (§3.4 step 6). Verified indirectly: a foreign dir inside `<plugin>/skills/` triggers a rebuild, a deleted plugin dir is recreated                                                                                                   |
+| Deleting user content in `~/.agents/skills` or `~/.claude/skills`               | Verified: an unmanaged dir is refused with the documented message and left intact, and `--print-path` still exits 0. State-file ownership; never delete unmanaged dirs; `--dry-run`                                                             |
+| Ownership ledger read under a different `HOME` (cron, `launchd`, `sudo -E`)     | Implemented: the ledger records the root it was written under and claims nothing when it does not match. **Unit-tested only** — never exercised against a real second `HOME`                                                                    |
+| Two sessions syncing at once                                                    | Closed: `mkdir` lock verified — a busy lock waits then proceeds, a stale one (mtime 2026-01-01) is reaped                                                                                                                                       |
+| Skill names that are Claude built-ins (`help`, `review`…)                       | Namespaced `/appstrate:help` still works; bare name yields to the built-in — documented, no rename                                                                                                                                              |
+| Rate limit 50/window on package routes with large orgs                          | Concurrency 8; downloads only on change; bulk route if measured (§6)                                                                                                                                                                            |
+| Path traversal / zip bombs in a published skill                                 | `unzipArtifact` + `stripWrapperPrefix` under `PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES` + explicit entry guard; the runner-pi materializer's lack of a guard is out of scope here but worth its own issue                                             |
 
 ## 6. Follow-ups (not in this plan)
 
