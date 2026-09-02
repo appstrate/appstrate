@@ -63,7 +63,18 @@ export function MarkdownText() {
       // a long one — which is the point: the reveal rate follows the stream
       // rather than a fixed budget. Reading this as a frame cap and raising
       // `drainMs` to slow the reveal does the opposite of what it looks like.
-      smooth={{ drainMs: 60, maxCharIntervalMs: 1 }}
+      //
+      // `minCommitMs` bounds the COMMIT cadence, not the reveal. The animator
+      // still advances `currentText` every rAF by the rule above, but only
+      // calls `setText` (a React commit + a full `react-markdown` reparse of
+      // the whole answer) when `now - lastCommitTime >= minCommitMs` — or when
+      // the reveal catches up with the stream, which always commits so the
+      // final text is never held back. At the default `0` every rAF with
+      // pending characters commits (60 reparses/s while the text is behind);
+      // at 32 ms that is ~30/s, with the characters revealed in between
+      // simply landing in the next commit. Visible rate unchanged, half the
+      // remark work.
+      smooth={{ drainMs: 60, maxCharIntervalMs: 1, minCommitMs: 32 }}
       className="prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs"
       components={MARKDOWN_COMPONENTS}
     />
