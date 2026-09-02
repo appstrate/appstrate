@@ -18,6 +18,7 @@
  */
 
 import {
+  memo,
   type ReactNode,
   useCallback,
   useEffect,
@@ -73,6 +74,7 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
+import { shouldReconcileHistory } from "./history-reconcile.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -83,6 +85,17 @@ const subscribeVisibility = (cb: () => void) => {
   return () => document.removeEventListener("visibilitychange", cb);
 };
 const getVisible = () => document.visibilityState === "visible";
+
+/** React Query key for the chat model catalog (module-local, not the typed client). */
+// Prefixed like the shell's typed-client key for `GET /api/models` on purpose:
+// every `invalidateQueries({ queryKey: ["get", "/api/models"] })` the shell
+// issues on a catalog change (model added, credential paired, auto-seed) then
+// reaches this entry too. The third segment keeps it a separate cache entry.
+const MODELS_QUERY_KEY = ["get", "/api/models", { consumer: "chat" }] as const;
+/** A catalog change (credential added/revoked) is rare; re-entering `/chat` is not. */
+const MODELS_STALE_MS = 60_000;
+/** Stable empty list so the composer slot memo below does not miss on `undefined`. */
+const EMPTY_MODELS: OrgModelOption[] = [];
 
 export interface ChatPageProps {
   getHeaders?: GetHeaders;
@@ -156,7 +169,20 @@ export function ChatPage({
 
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const [models, setModels] = useState<OrgModelOption[]>([]);
+  // The model catalog is a React Query, not a per-mount fetch: leaving and
+  // re-entering `/chat` within `staleTime` reuses the cached list instead of
+  // re-hitting `/api/models` at exactly the moment the composer is trying to
+  // become usable. No org scope in the key — the shell wipes the whole cache
+  // on org switch (`queryClient.removeQueries`), the same contract the
+  // session list relies on. A failed GET rejects (see `fetchModels`), so an
+  // outage is an error state React Query retries — never an empty catalog
+  // served as fresh for `staleTime`.
+  const modelsQuery = useQuery({
+    queryKey: MODELS_QUERY_KEY,
+    queryFn: () => fetchModels(getHeaders),
+    staleTime: MODELS_STALE_MS,
+  });
+  const models = modelsQuery.data ?? EMPTY_MODELS;
   // Model selection lives in an external store (localStorage-backed), not React
   // state: the transport's header builder reads it per request through a stable
   // function (see ConversationInner), so a switch applies to the very next send
@@ -168,20 +194,22 @@ export function ChatPage({
     getGenerationSettings,
   );
 
+  // Runs on every catalog change (first load, refetch after `staleTime`), not
+  // just on mount — a cached list served on re-entry still has to reconcile
+  // the stored selection. External-store sync in an effect (no setState).
   useEffect(() => {
-    void fetchModels(getHeaders).then((list) => {
-      setModels(list);
-      setModelGenerationCapabilities(list);
-      // Reconcile a stale/absent stored selection to the org default. A model
-      // whose credential went dead is listed (the picker marks it, unpickable)
-      // but must not be kept as the stored selection nor adopted as the
-      // fallback — the server would reject it on the next send.
-      const live = list.filter(isModelLive);
-      const cur = getSelectedModel();
-      if (cur && live.some((m) => m.id === cur)) return;
-      setSelectedModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);
-    });
-  }, [getHeaders]);
+    if (!modelsQuery.data) return;
+    const list = modelsQuery.data;
+    setModelGenerationCapabilities(list);
+    // Reconcile a stale/absent stored selection to the org default. A model
+    // whose credential went dead is listed (the picker marks it, unpickable)
+    // but must not be kept as the stored selection nor adopted as the
+    // fallback — the server would reject it on the next send.
+    const live = list.filter(isModelLive);
+    const cur = getSelectedModel();
+    if (cur && live.some((m) => m.id === cur)) return;
+    setSelectedModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);
+  }, [modelsQuery.data]);
 
   // Unread replies for conversations the user left mid-generation. `unread` is
   // server-computed (read-state lives in `chat_sessions`, shared across
@@ -237,6 +265,35 @@ export function ChatPage({
     () => createChatAttachmentAdapter({ upload: uploadFile, t }),
     [uploadFile, t],
   );
+
+  // Built once per catalog/selection change, NOT per `ChatPage` render: this
+  // page re-renders on every session-list refetch (SSE frame, safety-net poll,
+  // the local-first row patch on send), and an inline element here would hand
+  // `Conversation` a new prop each time and defeat its `memo` below. The
+  // setters are stable module functions, so the deps are exactly the values
+  // the picker displays.
+  const composerSlot = useMemo(
+    () => (
+      <div className="flex items-center gap-2">
+        <ModelSelect
+          models={models}
+          selectedId={selectedModel}
+          onSelect={setSelectedModel}
+          generation={generation}
+          onGenerationChange={setGenerationSettings}
+        />
+      </div>
+    ),
+    [models, selectedModel, generation],
+  );
+
+  // The server's view of the ACTIVE conversation, reduced to two primitives so
+  // the memoised `Conversation` re-renders only when they change (a few times
+  // per turn), not on every list refetch. Feeds the history self-heal in
+  // `ConversationInner` (see `history-reconcile.ts`).
+  const activeRow = sessions.data?.find((s) => s.id === activeId);
+  const serverGenerating = activeRow?.generating;
+  const serverUpdatedAt = activeRow?.updatedAt;
 
   return (
     <ChatHeadersProvider value={getHeaders ?? null}>
@@ -295,17 +352,9 @@ export function ChatPage({
                   isPersisted={isPersisted}
                   onConversationChange={onConversationChange}
                   attachments={attachments}
-                  composerSlot={
-                    <div className="flex items-center gap-2">
-                      <ModelSelect
-                        models={models}
-                        selectedId={selectedModel}
-                        onSelect={setSelectedModel}
-                        generation={generation}
-                        onGenerationChange={setGenerationSettings}
-                      />
-                    </div>
-                  }
+                  composerSlot={composerSlot}
+                  serverGenerating={serverGenerating}
+                  serverUpdatedAt={serverUpdatedAt}
                 />
               </main>
             </div>
@@ -324,6 +373,10 @@ interface ConversationProps {
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
+  /** Server session row `generating`, from the shared list; `undefined` = no row. */
+  serverGenerating: boolean | undefined;
+  /** Server session row `updatedAt`, from the shared list; `undefined` = no row. */
+  serverUpdatedAt: string | undefined;
 }
 
 /**
@@ -332,8 +385,21 @@ interface ConversationProps {
  * read once at mount, not reactive). A not-yet-persisted conversation is
  * known-empty, so we skip the GET entirely (`enabled: false`) and seed `[]`
  * immediately — no speculative 404, no composer flash.
+ *
+ * `memo`: `ChatPage` re-renders on every session-list refetch, and this subtree
+ * hosts the streaming runtime. Every prop is either a primitive (`id`,
+ * `isPersisted`, `serverGenerating`, `serverUpdatedAt`), a stable host function
+ * (`getHeaders`, `onConversationChange` — the host must memoise it, as
+ * documented on `ChatPageProps`), or a `useMemo` product of `ChatPage`
+ * (`attachments`, `composerSlot`), so a list refetch that leaves the active row
+ * untouched is a no-op here.
  */
-function Conversation({ id, getHeaders, isPersisted, ...rest }: ConversationProps) {
+const Conversation = memo(function Conversation({
+  id,
+  getHeaders,
+  isPersisted,
+  ...rest
+}: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
   // lazy URL adoption, so this component does NOT remount when `isPersisted`
   // flips false→true on the first send. If we read the live prop, that flip
@@ -366,7 +432,7 @@ function Conversation({ id, getHeaders, isPersisted, ...rest }: ConversationProp
       {...rest}
     />
   );
-}
+});
 
 function ConversationInner({
   id,
@@ -376,6 +442,8 @@ function ConversationInner({
   onConversationChange,
   attachments,
   composerSlot,
+  serverGenerating,
+  serverUpdatedAt,
 }: ConversationProps & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
 
@@ -429,7 +497,74 @@ function ConversationInner({
     // connections with the model list and the session list at exactly the
     // moment the composer is trying to become usable.
     resume: isPersisted,
+    // One React commit per animation frame (16 ms) instead of one per stream
+    // chunk. The SDK applies this to the `messages` subscription only
+    // (`useChat` passes it to `~registerMessagesCallback`); `status` is a
+    // separate, unthrottled subscription, so "submitted → streaming → ready"
+    // still lands the instant it happens. A frame is the floor that stays
+    // invisible: the markdown smoothing (`markdown-text.tsx`) reveals text at
+    // a paced rate from a backlog, so frame-sized deliveries feed that
+    // backlog continuously, where a 50 ms batch reads as a pulse. Each chunk
+    // still structured-clones the in-flight message
+    // (`ReactChatState.replaceMessage`) — this only bounds how often the
+    // thread re-renders and re-parses on top of that.
+    throttle: 16,
   });
+
+  // History ↔ resume self-heal: the history GET and the resume GET are both
+  // one-shot, so a turn that finalizes between them leaves this thread ending
+  // on the user message with nothing to ever fetch the reply. When the shared
+  // session list reports the row idle at a `updatedAt` we have not reconciled
+  // (`shouldReconcileHistory` holds the full rule), refetch history and — only
+  // if it is LONGER than what the runtime holds — swap it in with
+  // `setMessages`. No remount: `useChat` keeps its `Chat` instance while `id`
+  // is unchanged, and `setMessages` writes straight to its state. The ref
+  // records the `updatedAt` each attempt ran at so a turn that ended without a
+  // reply (server-side failure) costs one GET per server change, not a loop.
+  const lastReconciledUpdatedAt = useRef<string | null>(null);
+  const { status: chatStatus, messages: chatMessages, setMessages } = chat;
+  useEffect(() => {
+    if (
+      !shouldReconcileHistory({
+        status: chatStatus,
+        serverGenerating,
+        serverUpdatedAt,
+        localMessages: chatMessages,
+        lastReconciledUpdatedAt: lastReconciledUpdatedAt.current,
+      })
+    ) {
+      return;
+    }
+    // `serverUpdatedAt` is defined here (the rule returns false otherwise).
+    lastReconciledUpdatedAt.current = serverUpdatedAt ?? null;
+    let cancelled = false;
+    void queryClient
+      .fetchQuery({
+        queryKey: ["chat", "session", id],
+        queryFn: () => loadHistory(getHeaders, id),
+        // The mounted history query pins `staleTime: Infinity`; force the GET.
+        staleTime: 0,
+      })
+      .then((fetched) => {
+        if (cancelled || fetched.length <= chatMessages.length) return;
+        setMessages(fetched);
+      })
+      .catch(() => {
+        // Best-effort: the next server change re-arms the rule.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    chatStatus,
+    chatMessages,
+    serverGenerating,
+    serverUpdatedAt,
+    setMessages,
+    queryClient,
+    getHeaders,
+    id,
+  ]);
 
   // LOCAL-FIRST sidebar state for this conversation. The turn's lifecycle is
   // known right here (`chat.status`) — waiting for the server round-trip

@@ -203,60 +203,73 @@ export async function getInstalledPackage(scope: SpaceScope, packageId: string) 
 // ---------------------------------------------------------------------------
 
 /**
+ * WHERE for "visible in this space, of this `type`": system packages (always
+ * visible) + packages explicitly installed in `space_packages`, org-or-system
+ * owned, never an ephemeral shadow. Expects `spacePackages` LEFT JOINed on
+ * (package, this space). Shared by `listAccessiblePackages` and the bounded
+ * hint query so the two can never disagree on what is accessible.
+ */
+function accessiblePackagesFilter(scope: SpaceScope, type: PackageType) {
+  return and(
+    eq(packages.type, type),
+    orgOrSystemFilter(scope.orgId),
+    notEphemeralFilter(),
+    // system packages always visible, local packages only if installed
+    or(eq(packages.source, "system"), isNotNull(spacePackages.packageId)),
+  );
+}
+
+/**
+ * ORDER BY for accessible-package listings: system first, then by id. The
+ * tie-break is load-bearing rather than cosmetic: Postgres does not order rows
+ * within an equal sort key, so two identical calls could hand back different
+ * permutations. The chat renders this list (capped, via
+ * `listInstalledPackageHints`) into its system prompt, which pi-ai emits as ONE
+ * cache block with ONE breakpoint — a reshuffle rewrites the prompt and
+ * invalidates the cached prefix, and the conversation history behind it. It
+ * also makes the CAP itself stable: without a total order, which 15 of N
+ * packages survive the limit is undefined.
+ */
+function accessiblePackagesOrder() {
+  return [sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`, packages.id];
+}
+
+/**
  * List all packages accessible to a space, filtered by type.
  * Accessible = system packages (always visible) + explicitly installed in space_packages.
  * Single query via LEFT JOIN — no N+1.
  */
 export async function listAccessiblePackages(scope: SpaceScope, type: PackageType) {
-  return (
-    db
-      .select({
-        id: packages.id,
-        type: packages.type,
-        draftManifest: packages.draftManifest,
-        draftContent: packages.draftContent,
-        source: packages.source,
-        // space_packages columns (null for system packages). The agent's
-        // stored input values are NOT projected here — `getInstalledPackageSettings`
-        // is the reader for those, and it travels with the locks.
-        spaceModelId: spacePackages.modelId,
-        spaceProxyId: spacePackages.proxyId,
-        spaceVersionId: spacePackages.versionId,
-        spaceEnabled: spacePackages.enabled,
-        // `latest` dist-tag version id — non-null iff the package has a published
-        // version. Lets callers tell published agents from draft-only ones without
-        // an N+1 (a draft-only agent must be run with `version=draft`).
-        latestVersionId: packageDistTags.versionId,
-      })
-      .from(packages)
-      .leftJoin(
-        spacePackages,
-        and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
-      )
-      .leftJoin(
-        packageDistTags,
-        and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
-      )
-      .where(
-        and(
-          eq(packages.type, type),
-          orgOrSystemFilter(scope.orgId),
-          notEphemeralFilter(),
-          // system packages always visible, local packages only if installed
-          or(eq(packages.source, "system"), isNotNull(spacePackages.packageId)),
-        ),
-      )
-      // System first, then by id. The tie-break is load-bearing rather than
-      // cosmetic: Postgres does not order rows within an equal sort key, so two
-      // identical calls could hand back different permutations. The chat renders
-      // this list (capped, via `listInstalledPackageHints`) into its system
-      // prompt, which pi-ai emits as ONE cache block with ONE breakpoint — a
-      // reshuffle rewrites the prompt and invalidates the cached prefix, and the
-      // conversation history behind it. It also makes the CAP itself stable:
-      // without a total order, which 15 of N packages survive the limit is
-      // undefined.
-      .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`, packages.id)
-  );
+  return db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+      source: packages.source,
+      // space_packages columns (null for system packages). The agent's
+      // stored input values are NOT projected here — `getInstalledPackageSettings`
+      // is the reader for those, and it travels with the locks.
+      spaceModelId: spacePackages.modelId,
+      spaceProxyId: spacePackages.proxyId,
+      spaceVersionId: spacePackages.versionId,
+      spaceEnabled: spacePackages.enabled,
+      // `latest` dist-tag version id — non-null iff the package has a published
+      // version. Lets callers tell published agents from draft-only ones without
+      // an N+1 (a draft-only agent must be run with `version=draft`).
+      latestVersionId: packageDistTags.versionId,
+    })
+    .from(packages)
+    .leftJoin(
+      spacePackages,
+      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
+    )
+    .leftJoin(
+      packageDistTags,
+      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
+    )
+    .where(accessiblePackagesFilter(scope, type))
+    .orderBy(...accessiblePackagesOrder());
 }
 
 // ---------------------------------------------------------------------------
@@ -287,10 +300,18 @@ const DEFAULT_PACKAGE_HINT_LIMIT = 15;
 /**
  * List the packages of one `type` an actor in this space could use, as a
  * bounded hint for the get_me / chat-prompt caller context. "Installed" =
- * visible in the space (`listAccessiblePackages`) AND not disabled per-space. System
- * packages are always enabled. The list is capped (`limit`) so a large catalog
- * doesn't bloat the system prompt — the long tail stays reachable via
+ * visible in the space (`accessiblePackagesFilter`) AND not disabled per-space.
+ * System packages are always enabled. The list is capped (`limit`) so a large
+ * catalog doesn't bloat the system prompt — the long tail stays reachable via
  * `search_operations`.
+ *
+ * Bounded IN SQL. This runs twice per chat turn (agents, then skills) on the
+ * TTFT path: the enabled filter and the LIMIT sit in the query, so only the
+ * returned rows' manifests (`draft_manifest` JSONB) cross the wire, and
+ * `total` rides along as a window count over the filtered set (evaluated
+ * before the LIMIT, so it is the size of the whole catalog, not of the page).
+ * The ordering is `accessiblePackagesOrder` — the same total order as
+ * `listAccessiblePackages`, which is what makes the cap deterministic.
  *
  * The base hint (id/name/description/source) is uniform across package types;
  * `project` layers on the type-specific extras from the manifest. Access gating
@@ -304,14 +325,39 @@ async function listInstalledPackageHints<T extends PackageHint>(
   opts?: { limit?: number },
 ): Promise<{ items: T[]; truncated: boolean; total: number }> {
   const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
-  const rows = await listAccessiblePackages(scope, type);
+  const rows = await db
+    .select({
+      id: packages.id,
+      source: packages.source,
+      draftManifest: packages.draftManifest,
+      // `latest` dist-tag version id — non-null iff the package has a
+      // published version (see `listAccessiblePackages`).
+      latestVersionId: packageDistTags.versionId,
+      total: sql<number>`count(*) over ()`.mapWith(Number),
+    })
+    .from(packages)
+    .leftJoin(
+      spacePackages,
+      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
+    )
+    .leftJoin(
+      packageDistTags,
+      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
+    )
+    .where(
+      and(
+        accessiblePackagesFilter(scope, type),
+        // `enabled` is null for system packages (no space_packages row) — null
+        // counts as enabled; only an explicit `false` disables a local install.
+        sql`${spacePackages.enabled} IS DISTINCT FROM false`,
+      ),
+    )
+    .orderBy(...accessiblePackagesOrder())
+    .limit(limit);
 
-  // `enabled` is null for system packages (no space_packages row) — treat
-  // null as enabled; only an explicit `false` disables a local install.
-  const enabled = rows.filter((r) => r.spaceEnabled !== false);
-  const total = enabled.length;
+  const total = rows[0]?.total ?? 0;
 
-  const items = enabled.slice(0, limit).map((row) => {
+  const items = rows.map((row) => {
     const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
     const base: PackageHint = {
       package_id: typeof manifest.name === "string" ? manifest.name : row.id,

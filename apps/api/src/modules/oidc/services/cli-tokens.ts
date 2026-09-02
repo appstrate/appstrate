@@ -66,6 +66,7 @@
  * device flow.
  */
 
+import { createCache } from "@appstrate/core/cache";
 import { randomBytes, createHash } from "node:crypto";
 import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
@@ -795,7 +796,7 @@ export async function revokeAllFamiliesForUser(userId: string): Promise<{ revoke
   // Drop device-name cache entries for the revoked families — same race
   // window as `revokeFamily` (see comment there). Bulk path bypasses the
   // single-family helper, so invalidate inline.
-  for (const { familyId } of heads) _runnerDeviceNameCache.delete(familyId);
+  for (const { familyId } of heads) runnerDeviceNameCache.invalidate(familyId);
   return { revokedCount: heads.length };
 }
 
@@ -878,35 +879,25 @@ export async function checkFamilyAndTouch(params: {
  * via the dashboard.
  */
 const RUNNER_DEVICE_NAME_CACHE_TTL_MS = 60 * 1000;
-/** Coarse upper bound on the cache. The 60 s TTL means dead keys naturally
- *  expire on read, but `Map.delete` is never called on a TTL miss — so a
- *  stream of distinct family ids would grow the Map unbounded between
- *  reads of the same key. At ~10 k entries (~1 MB at typical key+name
- *  sizes) we wholesale-clear and let the cache rebuild from cold. Cheaper
- *  than maintaining LRU bookkeeping for a path whose miss is one indexed
- *  query. */
+/** Entry cap — past it the oldest entry is evicted (~1 MB at typical key+name sizes). */
 const RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES = 10_000;
-const _runnerDeviceNameCache = new Map<string, { name: string | null; expiresAt: number }>();
+/** `familyId` → head device name (`null` = none). Bounded + TTL'd, invalidations broadcast. */
+const runnerDeviceNameCache = createCache<string | null>({
+  name: "oidc-cli-device-name",
+  ttlMs: RUNNER_DEVICE_NAME_CACHE_TTL_MS,
+  max: RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES,
+});
 
 export async function lookupCliDeviceName(familyId: string): Promise<string | null> {
-  const now = Date.now();
-  const cached = _runnerDeviceNameCache.get(familyId);
-  if (cached && cached.expiresAt > now) return cached.name;
   try {
-    const [row] = await db
-      .select({ deviceName: cliRefreshToken.deviceName })
-      .from(cliRefreshToken)
-      .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
-      .limit(1);
-    const name = row?.deviceName ?? null;
-    if (_runnerDeviceNameCache.size >= RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES) {
-      _runnerDeviceNameCache.clear();
-    }
-    _runnerDeviceNameCache.set(familyId, {
-      name,
-      expiresAt: now + RUNNER_DEVICE_NAME_CACHE_TTL_MS,
+    return await runnerDeviceNameCache.get(familyId, async () => {
+      const [row] = await db
+        .select({ deviceName: cliRefreshToken.deviceName })
+        .from(cliRefreshToken)
+        .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
+        .limit(1);
+      return row?.deviceName ?? null;
     });
-    return name;
   } catch (err) {
     logger.warn("oidc: cli device-name lookup failed (runner attribution)", {
       module: "oidc",
@@ -1075,7 +1066,7 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
   // doesn't stamp the dead session's label on `runs.runner_name`. The
   // strategy already rejects bearers from a revoked family, but a request
   // admitted just before the revocation can still reach run creation.
-  _runnerDeviceNameCache.delete(familyId);
+  runnerDeviceNameCache.invalidate(familyId);
 }
 
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];

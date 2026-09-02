@@ -15,11 +15,7 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials, loadCredentialRow } from "./model-providers/credentials.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import {
-  getResolvedModel,
-  setResolvedModel,
-  invalidateResolvedModel,
-} from "./resolved-model-cache.ts";
+import { invalidateResolvedModel, resolveModelCached } from "./resolved-model-cache.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
   mergeSystemAndDb,
@@ -834,10 +830,13 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
   // Short-TTL cache (see resolved-model-cache.ts). Only the successful (non-null)
   // DB result is cached; system models are already in-memory. Invalidated
-  // eagerly by model + credential mutators, so the TTL is a backstop.
-  const cached = getResolvedModel(orgId, modelDbId);
-  if (cached) return cached;
+  // eagerly by model + credential mutators, so the TTL is a backstop. Concurrent
+  // resolves of one preset (the llm-proxy resolves it on every inference call
+  // of a turn) share ONE load instead of each reading + decrypting.
+  return resolveModelCached(orgId, modelDbId, () => loadModelFromDb(orgId, modelDbId));
+}
 
+async function loadModelFromDb(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
   // Check DB. `orgModels.id` is a `uuid` column — a `modelDbId` that isn't a
   // valid UUID (e.g. a human-readable model name like `gpt-5.5`) makes Postgres
   // raise `invalid input syntax for type uuid` rather than returning no rows.
@@ -875,9 +874,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  const resolved = buildDbResolvedModel(row, creds);
-  setResolvedModel(orgId, modelDbId, resolved);
-  return resolved;
+  return buildDbResolvedModel(row, creds);
 }
 
 /**

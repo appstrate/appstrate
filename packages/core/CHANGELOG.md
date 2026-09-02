@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`./cache`** — one read-through cache primitive for the platform and its
+  modules. `createCache<V>({ name, ttlMs, max })` (`CacheOptions`) returns a
+  `Cache<V>`: `get(key, loader, { store? })` (`CacheGetOptions` — read-through
+  with request coalescing, so concurrent loads of one key share a single
+  loader call, and an optional `store` predicate that answers a value without
+  keeping it), `peek`, `set`, `invalidate`, `clear`. `V` is constrained to
+  non-`undefined` values: a loader that answers `undefined` is answered but
+  never stored, so a miss is retried on the next call.
+  Caches register by `name`; a duplicate name throws. `invalidate`/`clear`
+  drop the local entry and publish a `CacheInvalidation` (`{ cache, key,
+origin }`) on the transport given to `configureCacheBus` (`CacheBus`);
+  `receiveCacheInvalidation` applies a frame from another process and ignores
+  this process's own echo by `origin`. An invalidation landing while a load is
+  in flight discards what that load would have stored. Test seams:
+  `setCacheClock` (one clock for every TTL), `clearAllCachesLocally` (drops
+  every registered cache without publishing).
+  No shared store: the bus carries names and keys, never values. Replaces the
+  hand-rolled TTL maps in the platform; additive, minor.
+
 - **`effectiveMcpServerType`** (`./mcp-server-meta`, re-exported from
   `./mcp-server`) — the runtime an mcp-server actually spawns under: the
   Appstrate `_meta["dev.appstrate/mcp-server"].runtime` override when present,

@@ -65,6 +65,69 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 }
 
 /**
+ * In-flight audit inserts. A caller that must not wait for the insert on its
+ * response path (the MCP router — every chat tool call goes through it) hands
+ * the promise to `trackAudit` instead of awaiting it; graceful shutdown then
+ * `drainAudits` so a process recycle still flushes the trail. Same shape as
+ * `packages/module-chat/src/inflight.ts` for chat turns.
+ */
+const inFlightAudits = new Set<Promise<unknown>>();
+
+/**
+ * Register an audit insert as in flight until it settles. Returns the same
+ * promise so a caller can still await it when it wants to. Settlement (either
+ * way) removes the entry — `recordAudit` never rejects, but a stubbed sink
+ * might, and a rejected `finally` chain would surface as an unhandled
+ * rejection, so both branches are handled explicitly.
+ */
+export function trackAudit<T>(promise: Promise<T>): Promise<T> {
+  inFlightAudits.add(promise);
+  const untrack = () => {
+    inFlightAudits.delete(promise);
+  };
+  promise.then(untrack, untrack);
+  return promise;
+}
+
+/** Number of audit inserts registered and not yet settled. */
+export function pendingAuditCount(): number {
+  return inFlightAudits.size;
+}
+
+/**
+ * Await every tracked audit insert, capped at `timeoutMs`. Loops until the
+ * registry is empty — an HTTP request still finishing during shutdown may
+ * register an insert after the first snapshot — or the cap fires. `pending`
+ * is the number of inserts awaited; `drained` is false when the cap fired
+ * first (the remaining inserts stay registered and the caller — the shutdown
+ * handler — decides what to log).
+ */
+export async function drainAudits(
+  timeoutMs: number,
+): Promise<{ pending: number; drained: boolean }> {
+  let awaited = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    while (inFlightAudits.size > 0) {
+      const pending = [...inFlightAudits];
+      awaited += pending.length;
+      const outcome = await Promise.race([
+        Promise.allSettled(pending).then(() => "settled" as const),
+        timeout,
+      ]);
+      if (outcome === "timeout") return { pending: awaited, drained: false };
+    }
+    return { pending: awaited, drained: true };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Convenience wrapper: derive `actorType`, `actorId`, `ip`, `userAgent`,
  * `requestId`, and `spaceId` from the Hono context. Routes still
  * pass the audit-specific fields (`action`, `resourceType`, …).

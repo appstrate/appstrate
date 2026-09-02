@@ -25,6 +25,7 @@ import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
+import { orgApiVersionCache } from "./org-settings-cache.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -95,6 +96,11 @@ export async function createOrganization(
 
     return created;
   });
+
+  // The initial `orgSettings` write above is a settings writer like any other:
+  // a pin read for this id that raced the insert (and cached "no pin" for a
+  // row that did not exist yet) must not outlive the commit.
+  orgApiVersionCache.invalidate(org.id);
 
   return toOrgResult(org);
 }
@@ -171,6 +177,11 @@ import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/perm
 export const orgSettingsPatchSchema = orgSettingsBaseSchema.partial().strict();
 import type { OrgSettings } from "@appstrate/shared-types";
 
+/**
+ * Uncached, deliberately: the oidc `dashboard_sso_enabled` gate reads through
+ * here and a security gate must not depend on a TTL. The one hot-path field
+ * (the `api_version` pin) has its own cached reader below.
+ */
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db
     .select({ orgSettings: organizations.orgSettings })
@@ -179,6 +190,23 @@ export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
     .limit(1);
 
   return (row?.orgSettings as OrgSettings) ?? {};
+}
+
+/**
+ * The org's `api_version` pin (null when unpinned), read through the 10 s
+ * cache in `org-settings-cache.ts`. This is what the api-version middleware
+ * calls for strategy-authenticated requests (chat `chatloop_` hops, API keys)
+ * that did not pass through `requireOrgContext` — otherwise each hop is one
+ * organizations-table query. Every settings writer in this file invalidates
+ * the entry after its write commits; the staleness bound and its rationale
+ * live on the cache module. Built on the uncached `getOrgSettings` so the two
+ * can never read the row differently.
+ */
+export async function getCachedOrgApiVersion(orgId: string): Promise<string | null> {
+  return orgApiVersionCache.get(
+    orgId,
+    async () => (await getOrgSettings(orgId)).api_version ?? null,
+  );
 }
 
 /**
@@ -217,6 +245,11 @@ export async function updateOrgSettings(
     })
     .where(eq(organizations.id, orgId))
     .returning({ orgSettings: organizations.orgSettings });
+
+  // The statement above is auto-committed (no enclosing transaction), so the
+  // row is durable by the time the pin entry is dropped — the next cached
+  // read cannot re-cache the pre-update value.
+  orgApiVersionCache.invalidate(orgId);
 
   return (row?.orgSettings as OrgSettings) ?? {};
 }
@@ -534,6 +567,10 @@ export async function deleteOrganization(orgId: string): Promise<void> {
       throw new Error("Failed to delete organization: not found");
     }
   });
+
+  // Hygiene, not a confinement boundary: a cached pin for a deleted org is
+  // inert (membership is gone, org-context 403s), but it need not linger.
+  orgApiVersionCache.invalidate(orgId);
 }
 
 export async function isSlugAvailable(slug: string): Promise<boolean> {

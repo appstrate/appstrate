@@ -46,7 +46,7 @@ import { logger } from "../../lib/logger.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
-import { recordAuditFromContext } from "../../services/audit.ts";
+import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../lib/audiences.ts";
@@ -212,7 +212,17 @@ async function resolveMcpSpaceScope(c: Context<AppEnv>, orgId: string): Promise<
   return { orgId, spaceId: active.id };
 }
 
-export function createMcpRouter(): Hono<AppEnv> {
+/**
+ * Injection seam for the audit sink. Production uses `recordAuditFromContext`;
+ * the integration suite substitutes a sink whose insert it controls, to prove
+ * the MCP response does not wait on it.
+ */
+export interface McpRouterDeps {
+  recordAudit?: typeof recordAuditFromContext;
+}
+
+export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
+  const recordAudit = deps.recordAudit ?? recordAuditFromContext;
   const app = new Hono<AppEnv>();
 
   // Register the per-org protected-resource FAMILY (RFC 8707 audience binding).
@@ -347,10 +357,15 @@ export function createMcpRouter(): Hono<AppEnv> {
     // separately so the trail shows the call arrived via MCP). Reads
     // (search/describe) are metadata browsing and are not audited.
     //
-    // Audit inserts are collected and awaited before the response returns, so
-    // the trail is not lost if the process is recycled between requests (the
-    // insert is itself best-effort and never throws — recordAudit swallows).
-    const pendingAudits: Promise<unknown>[] = [];
+    // Audit inserts are NOT awaited on the response path — every chat tool
+    // call goes through here, and its two Hono passes would each pay the
+    // insert's round-trip. The trail still survives a process recycle: the promise is handed
+    // to `trackAudit`, and graceful shutdown (`lib/shutdown.ts`) drains the
+    // registry before the DB connection closes. What is lost is only what a
+    // hard kill would have lost anyway. The insert is itself best-effort and
+    // never rejects (recordAudit swallows), and `recordAuditFromContext` reads
+    // the context synchronously before its first await, so nothing here
+    // depends on the request outliving the response.
     const observe: McpObserver = (event) => {
       logger.info("mcp.tool_call", {
         requestId: c.get("requestId"),
@@ -367,8 +382,8 @@ export function createMcpRouter(): Hono<AppEnv> {
         event.tool === "invoke_operation" &&
         (event.outcome === "invoked" || event.outcome === "denied")
       ) {
-        pendingAudits.push(
-          recordAuditFromContext(c, {
+        trackAudit(
+          recordAudit(c, {
             action: event.outcome === "denied" ? "mcp.operation.denied" : "mcp.operation.invoked",
             resourceType: "mcp_operation",
             resourceId: event.operationId ?? null,
@@ -437,11 +452,9 @@ export function createMcpRouter(): Hono<AppEnv> {
 
     try {
       await server.connect(transport);
-      const response = await transport.handleRequest(forwarded);
-      // Flush audit inserts before responding so the trail survives a process
-      // recycle. allSettled — a failed insert is already swallowed upstream.
-      if (pendingAudits.length > 0) await Promise.allSettled(pendingAudits);
-      return response;
+      // Any audit insert the tool layer triggered is already tracked (see
+      // `observe` above) and flushed at shutdown, not here.
+      return await transport.handleRequest(forwarded);
     } finally {
       await transport.close();
       await server.close();

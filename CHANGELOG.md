@@ -42,6 +42,22 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **Chat turns shed their fixed per-hop costs** (#1243). The preamble reads
+  (models, default space, caller context, session) run in parallel; the
+  resumable recording is coalesced (50 ms / 16 KiB) instead of one store
+  append per SSE chunk and is released ten seconds after persistence settles;
+  the final assistant message is extracted in a single pass; session
+  bookkeeping is one UPDATE per persisted message; the MCP operation index is
+  memoised per permission set; the package hints query is bounded in SQL. The
+  chat UI throttles message re-renders and polls the session list every 10 s
+  while a turn is generating (60 s idle), and the resume route clears a
+  marker whose producer died. MCP `invoke_operation` audit inserts are no
+  longer awaited on the response path: they are tracked in-process and
+  drained (5 s cap) by graceful shutdown before the DB closes. Every
+  process-local TTL cache in the platform is now an instance of
+  `@appstrate/core/cache`, whose `invalidate`/`clear` broadcast to every
+  replica over the Postgres NOTIFY channel `cache_invalidate`.
+
 - **BREAKING: the `application` entity is now `space`, everywhere, with no
   compatibility layer** (#1227). The org-scoped container that delimits agents,
   skills and integrations is renamed across 619 files — wire, database, headers,

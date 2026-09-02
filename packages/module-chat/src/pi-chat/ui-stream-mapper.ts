@@ -95,11 +95,30 @@ function mapStopReason(stop: string | undefined): PiFinishReason {
   }
 }
 
+interface PiChatUiStreamMapperOptions {
+  /**
+   * Fired once per turn, on the first ASSISTANT `message_start`. pi-ai pushes
+   * its `start` event only after the provider's response headers have arrived
+   * (`pi-ai/dist/api/openai-completions.js`, `withResponse()` then `start`), and
+   * pi-agent-core turns that into the assistant `message_start` — so this is
+   * the turn's time-to-first-response, the point where waiting on the model
+   * begins to pay out. The user echo's `message_start` fires at `prompt()` and
+   * is not it.
+   */
+  onFirstModelEvent?: () => void;
+}
+
 /**
  * Stateful translator. One instance per chat turn; {@link map} is called for
  * each Pi session event in arrival order and returns the UI chunks to write.
  */
 export class PiChatUiStreamMapper {
+  private readonly onFirstModelEvent: (() => void) | undefined;
+
+  constructor(options: PiChatUiStreamMapperOptions = {}) {
+    this.onFirstModelEvent = options.onFirstModelEvent;
+  }
+
   /**
    * Id namespace for content blocks. Bumped on EVERY `message_start` — Pi emits
    * one per user, assistant AND tool-result message — which is what keeps
@@ -143,7 +162,10 @@ export class PiChatUiStreamMapper {
     switch (e.type) {
       case "message_start":
         this.blockSeq += 1;
-        if (assistantView(e.message)) this.modelCalls += 1;
+        if (assistantView(e.message)) {
+          this.modelCalls += 1;
+          if (this.modelCalls === 1) this.onFirstModelEvent?.();
+        }
         this.open.clear();
         return [{ type: "start-step" }];
       case "message_update":
@@ -276,7 +298,11 @@ export class PiChatUiStreamMapper {
       ];
     }
     return [
-      { type: "tool-output-available", toolCallId: ev.toolCallId, output: ev.result ?? null },
+      {
+        type: "tool-output-available",
+        toolCallId: ev.toolCallId,
+        output: persistedToolOutput(ev.result),
+      },
     ];
   }
 
@@ -398,6 +424,28 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
     return block as PiToolCallBlock;
   }
   return undefined;
+}
+
+/**
+ * The tool output that crosses the wire and gets persisted: the Pi result
+ * WITHOUT `details`.
+ *
+ * A Pi `AgentToolResult` carries its payload twice — `content[0].text` is the
+ * JSON string the MODEL reads, `details` the same object for Pi's own in-memory
+ * UI channel. Nothing in this module's UI reads `details` (`src/ui/tool-result.ts`
+ * parses `content`; `src/ui/auth-offer.ts` reads the typed `connectOffer`), and
+ * every tool output is persisted, served by the history GET and re-uploaded by
+ * the client on every later turn — so the wire/persisted shape is the model
+ * channel plus the typed offer: `content`, `connectOffer`, `isError` and
+ * whatever else the result carries, minus `details`. The in-memory Pi result
+ * itself is untouched (`mcp-tools.ts` builds it with `details`).
+ */
+function persistedToolOutput(result: unknown): unknown {
+  if (result == null) return null;
+  if (typeof result !== "object" || Array.isArray(result)) return result;
+  if (!("details" in result)) return result;
+  const { details: _details, ...rest } = result as Record<string, unknown>;
+  return rest;
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */

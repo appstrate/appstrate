@@ -35,9 +35,10 @@ import { notFound, parseBody } from "@appstrate/core/api-errors";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
-import { getResumableContext } from "./resumable.ts";
+import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
+import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 /** Page size for the session list — one row past this is fetched to derive `hasMore`. */
@@ -243,8 +244,31 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       const session = await findOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
       if (!session?.activeStreamId) return c.body(null, 204);
       const stream = await getResumableContext().resume(session.activeStreamId);
-      // Stale id (producer gone, e.g. after a crash) → nothing to resume.
-      if (!stream) return c.body(null, 204);
+      if (!stream) {
+        // No recording under the marker's id. Two things look like this: a
+        // live turn whose recording is not there (acquisition still a few
+        // statements away, acquisition failed, key evicted), and a marker
+        // whose producer is gone (crash, restart, an in-memory store on a
+        // previous process). The marker's age tells them apart —
+        // `setActiveStream` stamps `updated_at` with the marker, and no live
+        // turn outlives `STALE_MARKER_MIN_AGE_MS` (the turn deadline plus a
+        // teardown allowance). A young marker is left alone: 204.
+        const markerAgeMs = Date.now() - session.updatedAt.getTime();
+        if (markerAgeMs < STALE_MARKER_MIN_AGE_MS) return c.body(null, 204);
+        // Stale: nothing will ever clear it from here on — `clearActiveStream`
+        // runs from the producer's own teardown, which is the thing that never
+        // happened. Left set, the sidebar polls a spinner forever and
+        // `persistNotice` refuses the session forever. Clear it now — guarded
+        // by the stream id, so a newer turn that already re-marked the session
+        // is untouched — and say so once: the next GET finds no marker and
+        // never reaches this branch.
+        await clearActiveStream(session.id, session.activeStreamId);
+        logger.info("chat resume: cleared stale active stream marker", {
+          chatSessionId: session.id,
+          streamId: session.activeStreamId,
+        });
+        return c.body(null, 204);
+      }
       return new Response(stream, { headers: UI_MESSAGE_STREAM_HEADERS });
     },
   );

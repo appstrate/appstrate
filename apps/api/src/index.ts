@@ -61,7 +61,7 @@ import {
 import { ApiError, notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
-import { getOrgSettings } from "./services/organizations.ts";
+import { getCachedOrgApiVersion } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
@@ -224,10 +224,18 @@ app.use("*", async (c, next) => {
 // settings in the same query as the membership check — read them from
 // context instead of hitting the organizations table again on every
 // request. Non-session auth (API key, module strategies) resolves orgId
-// inline without that middleware, so fall back to the direct lookup there.
+// inline without that middleware, so fall back to `getCachedOrgApiVersion`
+// there: ONLY the pin is cached (10 s, `services/org-settings-cache.ts`), so
+// the chat module's in-process `chatloop_` hops (two per tool call) cost one
+// organizations query per org per window rather than one per hop, while the
+// rest of `org_settings` — including the oidc SSO gate — still reads fresh.
+// The `Appstrate-Version` header override never touches the cache: the
+// middleware resolves it before this callback runs, so an explicit request
+// for a version is always honoured immediately.
 const apiVersionMiddleware = apiVersion(async (orgId, c) => {
-  const settings = c.get("orgSettings") ?? (await getOrgSettings(orgId));
-  return settings.api_version ?? null;
+  const settings = c.get("orgSettings");
+  if (settings) return settings.api_version ?? null;
+  return getCachedOrgApiVersion(orgId);
 });
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();

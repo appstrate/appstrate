@@ -23,7 +23,7 @@
  * store resolves to "no active stream".
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
@@ -36,6 +36,7 @@ import {
 } from "assistant-stream/resumable";
 import { createIoredisResumableStreamStore } from "assistant-stream/resumable/ioredis";
 import { logger } from "./logger.ts";
+import { CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
 
 let context: ResumableStreamContext | null = null;
 let client: Redis | null = null;
@@ -56,6 +57,36 @@ let redisUrl: string | null = null;
  * than that is dead and its bytes are garbage.
  */
 const STREAM_TTL_MS = 30 * 60_000;
+
+/**
+ * How often a RESUMED reader polls Redis for the live tail.
+ *
+ * The Redis store has no push channel: `read()` is an `XRANGE` loop that sleeps
+ * `pollIntervalMs` between empty polls (`assistant-stream`
+ * `stores/redis-impl.js`, default 100 ms). Only resume readers — a second tab,
+ * a reload mid-turn — go through it; the connected client reads its own tee
+ * branch and never polls (see `finalize-stream.ts`). The trade-off is therefore
+ * confined to that path: a resumed tab sees the tail up to 250 ms late (the
+ * record branch flushes on a 50 ms window, so that is a fraction of a batch),
+ * and each resumed reader costs Redis 4 polls/s — what matters when a long
+ * turn is watched from several tabs.
+ */
+const RESUME_POLL_INTERVAL_MS = 250;
+
+/**
+ * Grace between "the turn is over" and the recording's deletion.
+ *
+ * `releaseRecording` is scheduled from the persist drain's `finally`, which
+ * runs the instant the persist branch of the tee sees end-of-stream — but the
+ * producer feeding the store reads its OWN branch, a batch window and a few
+ * Redis round trips behind, and still has its last chunks plus the `finalize`
+ * marker to append. Deleting under it fails those appends (`Stream not found`)
+ * and a resume reader that connected BEFORE `clearActiveStream` wiped the
+ * session marker — legitimately, the turn was live when it looked — is still
+ * reading the tail. Ten seconds is orders of magnitude above both, and still
+ * ~180× shorter than the 30-minute TTL backstop the bytes used to sit under.
+ */
+const RECORDING_RELEASE_GRACE_MS = 10_000;
 
 /**
  * Retries ioredis attempts per command before rejecting.
@@ -132,7 +163,7 @@ function buildStore(): ResumableStreamStore {
   if (redisUrl) {
     client = createClient(redisUrl);
     logger.info("chat resumable store: redis");
-    return createIoredisResumableStreamStore(client);
+    return createIoredisResumableStreamStore(client, { pollIntervalMs: RESUME_POLL_INTERVAL_MS });
   }
   logger.info("chat resumable store: in-memory (single replica)");
   return createInMemoryResumableStreamStore();
@@ -178,14 +209,80 @@ export async function closeResumableStore(): Promise<void> {
 }
 
 /**
+ * Delete a turn's recording from the store once the turn is over, after a
+ * grace (see {@link RECORDING_RELEASE_GRACE_MS} for why it is not zero).
+ *
+ * Fire-and-forget by design: the caller is the persist drain's teardown, which
+ * has nothing to wait for. The timer is `unref`'d so a process draining on
+ * shutdown does not stay up for pending deletions — the TTL is the backstop for
+ * anything this misses, exactly as it was for everything before this existed.
+ * A failed delete is logged and otherwise dropped for the same reason.
+ */
+export function releaseRecording(
+  streamId: string,
+  opts: { graceMs?: number; context?: ResumableStreamContext } = {},
+): void {
+  const graceMs = opts.graceMs ?? RECORDING_RELEASE_GRACE_MS;
+  const context = opts.context ?? getResumableContext();
+  const timer = setTimeout(() => {
+    context.delete(streamId).catch((err: unknown) => {
+      logger.warn("chat resumable recording release failed", { streamId, err: String(err) });
+    });
+  }, graceMs);
+  timer.unref?.();
+}
+
+/**
+ * Null every `chat_sessions.active_stream_id` and return how many were set.
+ *
+ * Boot-time sweep for the in-memory store tier ONLY: with no Redis, a recording
+ * cannot outlive the process that made it, so after a restart every marker
+ * still set points at a producer that no longer exists — stale by construction.
+ * Left in place, each one keeps its conversation "generating" forever: the
+ * sidebar polls a spinner that never clears and `persistNotice` refuses to post
+ * into the session. On the Redis tier this must NOT run: another replica may
+ * own a live turn whose marker this one would wipe. There the resume-miss
+ * sweep in `routes.ts` clears a stale marker the first time a client asks for
+ * it.
+ */
+export async function sweepStaleActiveStreams(): Promise<number> {
+  const rows = await db
+    .update(chatSessions)
+    .set({ activeStreamId: null })
+    .where(isNotNull(chatSessions.activeStreamId))
+    .returning({ id: chatSessions.id });
+  return rows.length;
+}
+
+/**
+ * A marker younger than this is never treated as stale by the resume route.
+ *
+ * A live turn can look exactly like a crashed one — marker set, no recording —
+ * for its WHOLE duration, not just the few statements between `claimTurn` and
+ * `context.run()`: a store acquisition that fails (`finalize-stream.ts`
+ * continues without a recording) or a Redis key evicted mid-turn leaves the
+ * marker with nothing under it while the turn keeps streaming. A resume GET
+ * (a second tab, a reload) must not wipe a live turn's marker — that strands
+ * its resume on 204 and reopens the `persistNotice` window the claim ordering
+ * closes. What bounds a live turn is `CHAT_TURN_DEADLINE_MS`: past it the
+ * turn is aborted and its own teardown clears the marker. `setActiveStream`
+ * stamps `updated_at` in the same statement as the marker, so a marker older
+ * than the deadline plus a teardown allowance with no recording is stale by
+ * construction.
+ */
+export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
+
+/**
  * Mark a session's in-flight stream so a reloaded client can reconnect to it.
  * Signals the change (`generating` flipped true) so connected clients update
- * the spinner without polling.
+ * the spinner without polling. `updated_at` is stamped in the same statement:
+ * it is what lets the resume route tell a freshly claimed turn from a marker
+ * whose producer died (see {@link STALE_MARKER_MIN_AGE_MS}).
  */
 export async function setActiveStream(sessionId: string, streamId: string): Promise<void> {
   const [row] = await db
     .update(chatSessions)
-    .set({ activeStreamId: streamId })
+    .set({ activeStreamId: streamId, updatedAt: new Date() })
     .where(eq(chatSessions.id, sessionId))
     .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
   if (row) notifySessionUpdate(sessionId, row.orgId, row.userId);

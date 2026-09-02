@@ -30,6 +30,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
+import { initCacheBus } from "./cache-bus.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { initSystemIntegrations } from "../services/integration-client-registry.ts";
@@ -242,6 +243,14 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
       }),
     initRealtime().catch((err) => {
       logger.warn("Could not initialize realtime LISTEN", {
+        error: getErrorMessage(err),
+      });
+    }),
+    // Cross-replica cache invalidation rides the same LISTEN client. Without
+    // it every `@appstrate/core/cache` invalidation stays process-local and
+    // other replicas fall back to their TTL — degraded, not broken.
+    initCacheBus().catch((err) => {
+      logger.warn("Could not initialize the cache invalidation bus", {
         error: getErrorMessage(err),
       });
     }),

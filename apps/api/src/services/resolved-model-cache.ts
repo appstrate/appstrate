@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Short-TTL cache of resolved DB models, shared by `loadModel` (writer/reader)
- * and the credential mutators (invalidation). A single chat turn / agent run
- * fans out into many `loadModel(orgId, presetId)` calls — the llm-proxy resolves
+ * Short-TTL cache of resolved DB models, shared by `loadModel` (reader) and
+ * the credential mutators (invalidation). A single chat turn / agent run fans
+ * out into many `loadModel(orgId, presetId)` calls — the llm-proxy resolves
  * the preset on EVERY inference request (up to MAX_STEPS per turn) — each
- * otherwise re-queries `org_models` + the credential row and re-decrypts. The
- * cache collapses that to one resolve per window.
+ * otherwise re-querying `org_models` + the credential row and re-decrypting.
+ * The cache collapses that to one resolve per window, and because it is a
+ * `@appstrate/core/cache`, concurrent resolves of one preset coalesce into a
+ * single load instead of racing each other to the same row.
  *
  * Lives in its own module (not `org-models.ts`) so `credentials.ts` can bust it
  * on a credential mutation WITHOUT an import cycle (`org-models` already imports
@@ -15,41 +17,42 @@
  *
  * Security: the cached value carries the decrypted credential, so a disable /
  * rotation / reconnection-flag change MUST invalidate it. Every credential
- * mutator calls `clearResolvedModelCache()`, which is immediate WITHIN a
- * process. This Map is process-local — there is no cross-instance pub/sub
- * invalidation, so on a multi-instance deployment another instance's cached
- * copy stays live until its own entry expires; cross-instance staleness is
- * therefore bounded by the 30 s TTL backstop. The TTL is also the backstop for
- * anything not explicitly wired to an invalidation call.
+ * mutator calls `clearResolvedModelCache()`. The clear is immediate WITHIN the
+ * process and broadcast on the platform cache bus (`lib/cache-bus.ts`), so
+ * another replica drops its copy within a round trip; a lost broadcast falls
+ * back to the 30 s TTL. The value never leaves the process: the bus carries
+ * cache names and keys, never entries.
  */
 
+import { createCache } from "@appstrate/core/cache";
 import type { ResolvedModel } from "./org-models.ts";
 
 const TTL_MS = 30_000;
-const MAX = 500;
 
-const cache = new Map<string, { value: ResolvedModel; exp: number }>();
+const cache = createCache<ResolvedModel | null>({
+  name: "resolved-model",
+  ttlMs: TTL_MS,
+  max: 500,
+});
 
 const keyOf = (orgId: string, modelDbId: string): string => `${orgId}:${modelDbId}`;
 
-export function getResolvedModel(orgId: string, modelDbId: string): ResolvedModel | null {
-  const hit = cache.get(keyOf(orgId, modelDbId));
-  if (hit && hit.exp > Date.now()) return hit.value;
-  return null;
-}
-
-export function setResolvedModel(orgId: string, modelDbId: string, value: ResolvedModel): void {
-  const key = keyOf(orgId, modelDbId);
-  if (cache.size >= MAX && !cache.has(key)) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
-  }
-  cache.set(key, { value, exp: Date.now() + TTL_MS });
+/**
+ * Resolve through the cache. `null` (unknown / disabled model, missing
+ * credential) is answered but never stored — the next call retries, so a
+ * model enabled a moment later is seen without waiting out a TTL.
+ */
+export function resolveModelCached(
+  orgId: string,
+  modelDbId: string,
+  loader: () => Promise<ResolvedModel | null>,
+): Promise<ResolvedModel | null> {
+  return cache.get(keyOf(orgId, modelDbId), loader, { store: (value) => value !== null });
 }
 
 /** Drop one model's entry — call when that specific model row changes. */
 export function invalidateResolvedModel(orgId: string, modelDbId: string): void {
-  cache.delete(keyOf(orgId, modelDbId));
+  cache.invalidate(keyOf(orgId, modelDbId));
 }
 
 /**

@@ -8,12 +8,19 @@
  * without a per-engine persistence callback or a core-contract change.
  */
 
-import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
+import { consumeStream, createUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { logger } from "./logger.ts";
 
-/** Decode an AI SDK UI-message SSE byte stream into its chunk objects. */
-function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
+/**
+ * Decode an AI SDK UI-message SSE byte stream into its chunk objects.
+ *
+ * Exported for the equivalence tests, which feed identical input to the AI
+ * SDK's `readUIMessageStream` and to {@link extractAssistantMessage}.
+ */
+export function sseToChunks(
+  byteStream: ReadableStream<Uint8Array>,
+): ReadableStream<UIMessageChunk> {
   const decoder = new TextDecoder();
   let buffer = "";
   // Fail loud, but only once per stream: a malformed frame is dropped (never
@@ -57,8 +64,26 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
  * writers: `engine.ts` writes it before iterating the Pi session; `closePiTurn`
  * writes it only when that never happened (a setup failure); and
  * `PiChatUiStreamMapper.map` emits the per-turn `start-step`/`finish-step`
- * boundaries but never a `start`. So `readUIMessageStream` re-emits an evolving
- * snapshot of a single message and the LAST one is the whole turn.
+ * boundaries but never a `start`. So the whole stream assembles ONE message,
+ * and only its final state matters.
+ *
+ * Single pass, no per-chunk snapshot: `createUIMessageStream`'s `onFinish`
+ * (`handleUIMessageStreamFinish`) runs the AI SDK's message processor with a
+ * no-op `write` and hands over `state.message` itself, uncloned, once, when
+ * the merged stream ends — the `flush()` of its terminal transform. (The
+ * SDK's `readUIMessageStream` would instead `structuredClone` the whole
+ * in-progress message on EVERY chunk, O(chunks × message size) on the event
+ * loop every other user's stream shares, for a snapshot only read once.) Verified
+ * against the vendored source: an `error` chunk only reaches `onError` and does
+ * not stop the stream, so `onFinish` still fires; `isAborted` only reports an
+ * `abort` chunk (the AI SDK's client-abort marker, which this engine never
+ * emits) and does not change what is returned.
+ *
+ * "Produced none" is "no `start` was seen": the processor seeds an empty
+ * assistant message before the first chunk, so `onFinish` always has one to
+ * hand over, and the `start` chunk is the one every writer above emits exactly
+ * once per turn. A stream that ends without it (nothing at all, or a lone
+ * `error` chunk) yields `undefined`.
  *
  * Reading the stream to the end is what drives generation to completion on this
  * teed branch — the disconnect-survival guarantee (see `finalize-stream.ts`).
@@ -66,9 +91,45 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
 export async function extractAssistantMessage(
   byteStream: ReadableStream<Uint8Array>,
 ): Promise<UIMessage | undefined> {
-  let last: UIMessage | undefined;
-  for await (const message of readUIMessageStream({ stream: sseToChunks(byteStream) })) {
-    last = message;
-  }
-  return last?.role === "assistant" ? last : undefined;
+  let sawStart = false;
+  const chunks = sseToChunks(byteStream).pipeThrough(
+    new TransformStream<UIMessageChunk, UIMessageChunk>({
+      transform(chunk, controller) {
+        if (chunk.type === "start") sawStart = true;
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+
+  // Same contract as the frame decoder above: a processing failure (the
+  // processor throws on a semantically broken sequence, e.g. a delta for a part
+  // that was never started; the decoder throws past its frame-size bound) is
+  // logged once and never thrown — a throw would fail the persist drain and
+  // lose the turn. `createUIMessageStream` turns a rejection of the merged
+  // stream into an `error` chunk through `onError`, and `consumeStream` reports
+  // a failure of the processor pipe through its own `onError`; both land here.
+  let loggedProcessError = false;
+  const reportProcessError = (err: unknown): void => {
+    if (loggedProcessError) return;
+    loggedProcessError = true;
+    logger.error("chat ui stream processing failed", { err: String(err) });
+  };
+
+  let assembled: UIMessage | undefined;
+  const stream = createUIMessageStream<UIMessage>({
+    execute: ({ writer }) => {
+      writer.merge(chunks);
+    },
+    onError: (err) => {
+      reportProcessError(err);
+      return "chat ui stream processing failed";
+    },
+    onFinish: ({ responseMessage }) => {
+      assembled = responseMessage;
+    },
+  });
+  await consumeStream({ stream, onError: reportProcessError });
+
+  if (!sawStart || !assembled) return undefined;
+  return assembled.role === "assistant" ? assembled : undefined;
 }

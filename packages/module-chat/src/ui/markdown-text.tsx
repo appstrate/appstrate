@@ -41,29 +41,33 @@ export function MarkdownText() {
   return (
     <MarkdownTextPrimitive
       remarkPlugins={REMARK_PLUGINS}
-      // `smooth` defaults to true, and its first `requestAnimationFrame` tick
-      // reveals ZERO characters — it only schedules the next one. So the first
-      // character of an answer paints a frame after the byte arrived, and the
-      // display then trails the stream by up to `drainMs` (250 ms by default)
-      // while re-rendering at 60 fps regardless of the token rate. On a path
-      // whose whole point is time-to-first-token, that is latency we add
-      // ourselves, after the network already delivered.
+      // The typewriter reveal (`useSmooth`) is what makes a token feed read as
+      // continuous, and it only works while it has a BACKLOG: its animator runs
+      // one `requestAnimationFrame` loop that reveals
+      // `deltaTime / min(maxCharIntervalMs, drainMs / remaining)` characters per
+      // frame, and the moment it catches up with the stream it stops — the next
+      // delivery restarts it, and that first frame reveals nothing. So a reveal
+      // rate above the arrival rate paints exactly when the network delivers
+      // (one frame late, with an idle frame after each catch-up) and the
+      // smoothing is effectively off: the text advances in lots at whatever
+      // cadence the provider and the transport batch it.
       //
-      // Kept as smoothing rather than switched off outright: a raw chunk feed
-      // reads as jittery. Retuned so the animation tracks the stream instead of
-      // buffering it: at most one character per MILLISECOND, and a quarter of
-      // the former backlog window.
+      // `maxCharIntervalMs` is the ceiling on the gap BETWEEN characters, so
+      // it is the reveal's top speed: 10 ms is ~1.6 characters per frame at
+      // 60 fps, ~100 characters/s (~25 tokens/s) — below the output rate of
+      // any model worth streaming, so a backlog persists and every frame
+      // paints. `drainMs` is the second term of the same formula and takes
+      // over whenever the backlog exceeds that pace: it is how long the
+      // animator gives itself to clear what it holds, so in steady state the
+      // reveal tracks the arrival rate exactly and trails it by `drainMs`.
+      // 150 ms also bounds how long the tail takes to land after the stream
+      // ends. The first character still paints on the frame after its byte
+      // arrived — the top speed only applies once there is a backlog.
       //
-      // `maxCharIntervalMs` is the ceiling on the gap BETWEEN characters, not a
-      // per-frame cap — the per-frame cap is `maxCharsPerFrame`, deliberately
-      // left at its default. `useSmooth`'s animator computes
-      // `baseTimePerChar = min(maxCharIntervalMs, drainMs / remaining)` and then
-      // reveals `deltaTime / baseTimePerChar` characters per frame, so this
-      // yields ~16 at 60 fps with a short backlog and proportionally more with
-      // a long one — which is the point: the reveal rate follows the stream
-      // rather than a fixed budget. Reading this as a frame cap and raising
-      // `drainMs` to slow the reveal does the opposite of what it looks like.
-      smooth={{ drainMs: 60, maxCharIntervalMs: 1 }}
+      // `minCommitMs` stays at its default (0): the animator only paints on a
+      // commit, so a commit floor below the frame rate turns the reveal into
+      // steps.
+      smooth={{ drainMs: 150, maxCharIntervalMs: 10 }}
       className="prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs"
       components={MARKDOWN_COMPONENTS}
     />
