@@ -215,6 +215,39 @@
       "cacheWrite": 0
     }
   },
+  "deepseek-v4-flash-vision-exp": {
+    "label": "Deepseek V4 Flash Vision Exp",
+    "contextWindow": 1000000,
+    "maxTokens": 393216,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.44,
+      "output": 1.32,
+      "cacheRead": 0.014,
+      "cacheWrite": 0
+    }
+  },
   "deepseek-v4-pro": {
     "label": "Deepseek V4 Pro",
     "contextWindow": 1000000,
