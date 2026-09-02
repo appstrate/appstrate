@@ -53,7 +53,7 @@ import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
-import { mapWithConcurrency } from "./map-with-concurrency.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept

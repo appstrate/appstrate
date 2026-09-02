@@ -70,6 +70,7 @@
     "./ssrf": "./src/ssrf.ts",
     "./sse": "./src/sse.ts",
     "./cache": "./src/cache.ts",
+    "./map-with-concurrency": "./src/map-with-concurrency.ts",
     "./html": "./src/html.ts",
     "./schemas": "./src/schemas.ts",
     "./schema-validation": "./src/schema-validation.ts",

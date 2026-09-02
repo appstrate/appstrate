@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { mapWithConcurrency } from "../../src/lib/map-with-concurrency.ts";
+import { mapWithConcurrency } from "../src/map-with-concurrency.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 

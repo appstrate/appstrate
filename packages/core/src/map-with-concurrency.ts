@@ -13,6 +13,12 @@
  *
  * Callers that discard the result array simply ignore the return value; the
  * array costs one allocation of `items.length` slots.
+ *
+ * It lives in core rather than in `apps/api` because it stopped being an API
+ * concern: `appstrate skills sync` needs the same bounded fan-out against the
+ * rate-limited package routes, and a second copy in the CLI would be the third
+ * implementation of this loop in the repo — the first two already diverged on
+ * abort-on-rejection, which is the only behaviour worth getting right here.
  */
 
 /**

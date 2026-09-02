@@ -60,7 +60,7 @@ import {
 import { isUploadUri, isFileUri, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getActor } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
-import { mapWithConcurrency } from "../lib/map-with-concurrency.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
 import { extensionForMime } from "@appstrate/core/naming";
@@ -452,7 +452,7 @@ export function assertDocsWithinCap(files: { size: number }[], maxBytes: number)
  *
  * Module-private: its one consumer is the `mapWithConcurrency` fan-out below
  * that streams resolved uploads into the run workspace. The pool itself lives
- * in `lib/map-with-concurrency.ts` — on a rejection here the caller rolls back
+ * in `@appstrate/core/map-with-concurrency` — on a rejection here the caller rolls back
  * the run workspace by doc name, so stragglers that finished are cleaned
  * regardless.
  */
