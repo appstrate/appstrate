@@ -497,14 +497,19 @@ function ConversationInner({
     // connections with the model list and the session list at exactly the
     // moment the composer is trying to become usable.
     resume: isPersisted,
-    // One React commit per ≤50 ms instead of one per stream chunk. The SDK
-    // applies this to the `messages` subscription only (`useChat` passes it to
-    // `~registerMessagesCallback`); `status` is a separate, unthrottled
-    // subscription, so "submitted → streaming → ready" still lands the instant
-    // it happens. Each chunk still structured-clones the in-flight message
+    // One React commit per animation frame (16 ms) instead of one per stream
+    // chunk. The SDK applies this to the `messages` subscription only
+    // (`useChat` passes it to `~registerMessagesCallback`); `status` is a
+    // separate, unthrottled subscription, so "submitted → streaming → ready"
+    // still lands the instant it happens. A frame is the floor that stays
+    // invisible: the markdown smoothing (`markdown-text.tsx`) drains each
+    // delivery over a 60 ms window, so consecutive frame-sized deliveries
+    // overlap into one continuous reveal, where a 50 ms batch reads as a
+    // pulse — each batch restarts the reveal at a different rate. Each chunk
+    // still structured-clones the in-flight message
     // (`ReactChatState.replaceMessage`) — this only bounds how often the
     // thread re-renders and re-parses on top of that.
-    throttle: 50,
+    throttle: 16,
   });
 
   // History ↔ resume self-heal: the history GET and the resume GET are both
