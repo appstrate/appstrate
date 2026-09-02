@@ -15,6 +15,7 @@ import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts
 import { shutdownOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
 import { shutdownPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { shutdownLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
+import { drainAudits } from "../services/audit.ts";
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { stopRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -24,6 +25,8 @@ import { stopStorageDeletionWorker } from "../services/storage-deletion.ts";
 import { shutdownTelemetry } from "@appstrate/core/telemetry";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
+/** Cap on flushing tracked audit inserts (`services/audit.ts`) at shutdown. */
+const AUDIT_DRAIN_TIMEOUT_MS = 5_000;
 
 /**
  * Hard ceiling on the WHOLE shutdown sequence, not just the in-flight drain.
@@ -109,6 +112,23 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutting down LLM usage retry worker...");
     await shutdownLlmUsageRetryWorker();
+
+    // Audit inserts are taken off the response path (the MCP router hands
+    // them to `trackAudit` instead of awaiting them), so the trail's
+    // survival across a recycle is guaranteed HERE: after in-flight runs and
+    // workers (nothing new is being audited), before the modules and the DB
+    // connection go away. Bounded — a wedged insert must not hold the
+    // deadline hostage.
+    logger.info("Draining pending audit inserts...");
+    const audits = await drainAudits(AUDIT_DRAIN_TIMEOUT_MS);
+    if (audits.drained) {
+      logger.info("Audit inserts drained", { count: audits.pending });
+    } else {
+      logger.warn("Audit drain timed out — some audit rows may be lost", {
+        pending: audits.pending,
+        timeoutMs: AUDIT_DRAIN_TIMEOUT_MS,
+      });
+    }
 
     logger.info("Shutting down modules...");
     await shutdownModules();

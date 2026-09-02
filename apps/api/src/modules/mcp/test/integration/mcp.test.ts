@@ -22,7 +22,10 @@ import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
 import { seedApiKey } from "../../../../../test/helpers/seed.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
 import { getCatalog, resetCatalog } from "../../catalog.ts";
+import { createMcpRouter } from "../../router.ts";
+import mcpModule from "../../index.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app (production sets this in
@@ -438,7 +441,9 @@ describe("mcp audit + rate limiting", () => {
       method: "tools/call",
       params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
     });
-    // Audit inserts are flushed before the response returns, so the row exists.
+    // The insert is tracked, not awaited, on the response path — drain the
+    // registry (what shutdown does) before asserting on the row.
+    expect((await drainAudits(5_000)).drained).toBe(true);
     const rows = await db
       .select()
       .from(auditEvents)
@@ -463,12 +468,66 @@ describe("mcp audit + rate limiting", () => {
       method: "tools/call",
       params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
     });
+    expect((await drainAudits(5_000)).drained).toBe(true);
     const rows = await db
       .select()
       .from(auditEvents)
       .where(eq(auditEvents.action, "mcp.operation.denied"));
     expect(rows.length).toBe(1);
     expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("denied");
+  });
+
+  it("returns the MCP response before the audit insert settles — the insert is tracked, not awaited", async () => {
+    // The same module, with a router whose audit sink is an insert that does
+    // not settle until this test says so.
+    let settleInsert!: () => void;
+    const insert = new Promise<void>((resolve) => {
+      settleInsert = resolve;
+    });
+    const stubbedApp = getTestApp({
+      modules: [
+        { ...mcpModule, createRouter: () => createMcpRouter({ recordAudit: () => insert }) },
+      ],
+    });
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const op = [...getCatalog().operations.values()].find(
+      (o) => o.method === "GET" && o.pathParams.length === 0,
+    )!;
+    const pendingBefore = pendingAuditCount();
+
+    try {
+      const request = Promise.resolve(
+        stubbedApp.request(mcpPath(headers), {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+          }),
+        }),
+      );
+      // Negative control: under the previous `await Promise.allSettled(pendingAudits)`
+      // the response could not resolve while the insert was pending, and this
+      // race would yield "timeout".
+      const outcome = await Promise.race([
+        request.then((res) => res.status),
+        Bun.sleep(500).then(() => "timeout" as const),
+      ]);
+      expect(outcome).toBe(200);
+
+      // The insert is registered and still pending — a bounded drain reports
+      // it as not drained rather than losing it.
+      expect(pendingAuditCount()).toBe(pendingBefore + 1);
+      expect((await drainAudits(20)).drained).toBe(false);
+    } finally {
+      settleInsert();
+    }
+
+    // Once the insert settles, the drain shutdown relies on completes.
+    expect((await drainAudits(1_000)).drained).toBe(true);
+    expect(pendingAuditCount()).toBe(pendingBefore);
   });
 
   it("does NOT audit read-only search/describe calls", async () => {
