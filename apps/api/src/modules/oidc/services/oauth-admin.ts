@@ -89,6 +89,23 @@ export class OAuthAdminValidationError extends Error {
 }
 
 /**
+ * The scopes in `scopes` that are outside the OIDC vocabulary — i.e. exactly
+ * what {@link assertValidScopes} would refuse. Empty for a valid list, and for
+ * `undefined`/empty input (nothing to validate, the caller's default applies).
+ *
+ * Exported for `instance-client-sync.ts`, which must know whether a declaration
+ * would SURVIVE a re-create before it tells an operator to delete a row and
+ * restart. Answering that with a predicate rather than a catch keeps the
+ * vocabulary in one place.
+ */
+export function invalidScopesIn(scopes: readonly string[] | undefined): string[] {
+  if (!scopes || scopes.length === 0) return [];
+  // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
+  const allowed = getAppstrateScopeSet();
+  return scopes.filter((s) => !allowed.has(s));
+}
+
+/**
  * Reject any requested scope outside the OIDC vocabulary (identity scopes +
  * `OIDC_ALLOWED_SCOPES` + module `endUserGrantable` contributions).
  *
@@ -96,10 +113,7 @@ export class OAuthAdminValidationError extends Error {
  * applies.
  */
 function assertValidScopes(scopes: readonly string[] | undefined): void {
-  if (!scopes || scopes.length === 0) return;
-  // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
-  const allowed = getAppstrateScopeSet();
-  const invalid = scopes.filter((s) => !allowed.has(s));
+  const invalid = invalidScopesIn(scopes);
   if (invalid.length === 0) return;
 
   throw new OAuthAdminValidationError(
@@ -992,13 +1006,13 @@ export async function compareDeclaredClientWithStored(
       declared: declared.postLogoutRedirectUris,
     });
   }
-  // Exact comparison, deliberately: a retired spelling in the declaration is a
-  // real divergence from the stored (migrated) row and must be reported, not
-  // absorbed by an alias. What it must NOT do is fall through to the generic
-  // "delete the row and restart" remedy — that is destructive and does not even
-  // work, since the re-create then trips `assertValidScopes` on the same env
-  // value. `syncInstanceClientsFromEnv` recognises the case via
-  // `retiredScopeRenames` and prints the remedy that does work.
+  // Exact comparison, deliberately: a divergence from the stored row is
+  // reported, never absorbed by an alias. What a `scopes` divergence must NOT
+  // do is fall through to the generic "delete the row and restart" remedy when
+  // the declared list would not survive the re-create — that is destructive AND
+  // useless, since the re-create trips `assertValidScopes` on the same env
+  // value. `syncInstanceClientsFromEnv` checks that with `invalidScopesIn`
+  // before offering the remedy.
   if (!setEquals(row.scopes ?? [], declared.scopes)) {
     mismatches.push({
       field: "scopes",

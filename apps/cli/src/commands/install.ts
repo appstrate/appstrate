@@ -1841,11 +1841,12 @@ async function installDockerTier(
     dir,
     backedUp,
     async () => {
-      // A retired env name in the old `.env` is RENAMED by `mergeEnv`, not
-      // carried forward — the platform refuses to boot on one. Reported after
-      // the write below: the operator's file is about to stop matching what
-      // they last edited, and silence there is how a rename gets rediscovered
-      // as a boot failure instead of a line of install output.
+      // A retired env name in the old `.env` is rewritten by `mergeEnv`, not
+      // carried forward — the platform has no code that recognises it, so
+      // carrying it would silently revert the setting to its default (#513).
+      // Reported after the write below: the operator's file is about to stop
+      // matching what they last edited, and silence there is how a rename gets
+      // rediscovered as a mystery default weeks later.
       const renamedEnvKeys = mode === "upgrade" ? retiredEnvKeysIn(existing.existingEnv) : [];
 
       // Compose + .env.
@@ -1883,11 +1884,20 @@ async function installDockerTier(
       );
 
       if (renamedEnvKeys.length > 0) {
+        // One line per key, saying what actually happened to it. A key whose
+        // replacement was ALSO set explicitly is discarded, not moved — the
+        // operator is losing a value and a blanket "renamed" would hide that.
         note(
           renamedEnvKeys
-            .map(({ retired, replacement }) => `${retired} → ${replacement}`)
+            .map(({ retired, replacement, outcome }) =>
+              outcome === "renamed"
+                ? `${retired} → ${replacement}`
+                : outcome === "dropped-superseded"
+                  ? `${retired} DROPPED — ${replacement} is already set explicitly; its value wins`
+                  : `${retired} dropped (was empty)`,
+            )
             .join("\n"),
-          "Renamed in .env (the old names are no longer read)",
+          "Retired names in .env (the old names are no longer read)",
         );
       }
 

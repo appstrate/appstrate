@@ -262,16 +262,45 @@ describe("syncInstanceClientsFromEnv — drift", () => {
       expect(caught).toBeInstanceOf(InstanceClientSyncError);
       const message = (caught as Error).message;
       expect(message).toContain("OIDC_INSTANCE_CLIENTS");
+      // No rename vocabulary survives: the platform does not know these were
+      // renamed, only that they are not scopes.
       expect(message).not.toContain("renamed");
       expect(message).not.toContain("-> files:read");
       expect(message).not.toContain("-> spaces:read");
+      // But the DESTRUCTIVE remedy must still be withheld — not because the
+      // spelling is retired, because the declaration would not survive its own
+      // re-create. Deleting the row would lose every satellite session AND
+      // still not boot.
+      expect(message).not.toContain("DELETE FROM oauth_clients");
+      expect(message).toContain("outside the OIDC vocabulary");
+      expect(message).toContain("Do NOT delete the oauth_clients row");
     });
   }
 
-  // Control: an ordinary scope drift takes the same path and offers the generic
-  // remedy. With the retired branch gone the two cases are one case, which is
-  // the point — this is what the retired spellings now get too.
-  it("offers the delete remedy for a scope drift", async () => {
+  it("withholds the delete remedy for ANY unusable scope, not just a renamed one", async () => {
+    // The property is "would this declaration survive a re-create?", so a plain
+    // typo gets the same protection. Without this the guard reads as if it were
+    // still about retired spellings.
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "flies:raed"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    const message = (caught as Error).message;
+    expect(message).toContain("flies:raed");
+    expect(message).not.toContain("DELETE FROM oauth_clients");
+  });
+
+  // Control: a drift whose declaration WOULD survive a re-create still gets the
+  // generic remedy. This is the discriminator — without it, the assertions
+  // above would pass just as well against a build that had stopped offering the
+  // delete remedy at all.
+  it("offers the delete remedy for a scope drift the declaration survives", async () => {
     setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
     await syncInstanceClientsFromEnv();
 

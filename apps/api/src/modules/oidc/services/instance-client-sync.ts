@@ -47,6 +47,7 @@ import {
   compareDeclaredClientWithStored,
   listInstanceClientIds,
   updateInstanceClientPolicyFromEnv,
+  invalidScopesIn,
   OAuthAdminValidationError,
   type CreateInstanceClientFromEnvInput,
 } from "./oauth-admin.ts";
@@ -221,6 +222,32 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
           `    ${m.field}: stored=${JSON.stringify(m.stored)} declared=${JSON.stringify(m.declared)}`,
       )
       .join("\n");
+
+    // The generic remedy below is "delete the oauth_clients row and restart".
+    // That is destructive — the row backs every satellite session — and for a
+    // declaration whose scopes are not in the OIDC vocabulary it is also
+    // USELESS: the re-create trips `assertValidScopes` on the same env value,
+    // so the platform still does not boot and the row is gone. Never offer it
+    // for a declaration that cannot survive its own re-create.
+    //
+    // Deliberately keyed on "would this validate?", not on any particular bad
+    // spelling. A rename whose data migration rewrote the stored row is one way
+    // to land here and used to have its own branch; a typo, a scope dropped
+    // from `OIDC_ALLOWED_SCOPES`, or a module that stopped contributing one all
+    // land here identically, and all of them deserve the same answer.
+    const unusableScopes = invalidScopesIn(entry.scopes);
+    if (unusableScopes.length > 0) {
+      throw new InstanceClientSyncError(
+        `OIDC_INSTANCE_CLIENTS: client '${entry.clientId}' declares scopes outside the OIDC ` +
+          `vocabulary (${unusableScopes.join(", ")}), and drifts from the stored row ` +
+          `(fields: ${fields}).\n` +
+          `  Fix the ENV, not the database: correct OIDC_INSTANCE_CLIENTS and restart.\n` +
+          `  Do NOT delete the oauth_clients row — the re-create would be rejected by the same\n` +
+          `  scope validation, the platform still would not boot, and you would lose the client\n` +
+          `  backing every satellite session.\n` +
+          `  Mismatches:\n${detailed}`,
+      );
+    }
 
     throw new InstanceClientSyncError(
       `OIDC_INSTANCE_CLIENTS: drift detected on client '${entry.clientId}' (fields: ${fields}).\n` +

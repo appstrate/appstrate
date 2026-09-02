@@ -24,6 +24,7 @@ import {
   inferInstalledTier,
   parseEnvFile,
   mergeEnv,
+  retiredEnvKeysIn,
   backupFiles,
   restoreBackups,
   cleanupBackups,
@@ -159,6 +160,132 @@ describe("parseEnvFile", () => {
   it("returns an empty dict for empty or whitespace-only input", () => {
     expect(parseEnvFile("")).toEqual({});
     expect(parseEnvFile("\n\n  \n")).toEqual({});
+  });
+});
+
+describe("mergeEnv — retired env names", () => {
+  // The platform carries NO recognition of a retired name
+  // (`docs/NO_TRANSITIONAL_CODE.md`): Zod strips the unknown key and the
+  // setting silently reverts to its default, which is issue #513 and, for
+  // `FILE_RETENTION_DAYS`, means stored files quietly stop expiring. The
+  // installer is the only half that can fix it, so these pin that it does.
+
+  it("renames a retired key, preserving the operator's value", () => {
+    const merged = mergeEnv({ EXECUTION_ADAPTER: "docker" }, { RUN_ADAPTER: "process" });
+    // Existing still wins — the rename must not become a silent reset to the
+    // freshly-generated default.
+    expect(merged.RUN_ADAPTER).toBe("docker");
+    expect(merged).not.toHaveProperty("EXECUTION_ADAPTER");
+  });
+
+  it("renames every entry in the table, not just the one that motivated it", () => {
+    const merged = mergeEnv(
+      {
+        APPSTRATE_MODULES: "oidc",
+        DOCUMENT_MAX_FILE_BYTES: "1",
+        DOCUMENT_RETENTION_DAYS: "2",
+        EXECUTION_TOKEN_SECRET: "s",
+        OAUTH_ALLOWED_INTERNAL_IDP_HOSTS: "h",
+        RUN_MAX_DOCUMENTS: "3",
+        WORKSPACE_MAX_DOCS_BYTES: "4",
+      },
+      {},
+    );
+    expect(merged).toEqual({
+      MODULES: "oidc",
+      FILE_MAX_BYTES: "1",
+      FILE_RETENTION_DAYS: "2",
+      RUN_TOKEN_SECRET: "s",
+      EGRESS_ALLOW_INTERNAL_HOSTS: "h",
+      RUN_MAX_FILES: "3",
+      WORKSPACE_MAX_FILES_BYTES: "4",
+    });
+  });
+
+  it("drops the retired key when the current name is set explicitly too", () => {
+    // The operator already stated the current answer; two spellings of one
+    // setting is what the retirement removed. The retired VALUE is discarded —
+    // which is why the notice must not call this a rename.
+    const merged = mergeEnv(
+      { EXECUTION_ADAPTER: "docker", RUN_ADAPTER: "firecracker" },
+      { RUN_ADAPTER: "process" },
+    );
+    expect(merged.RUN_ADAPTER).toBe("firecracker");
+    expect(merged).not.toHaveProperty("EXECUTION_ADAPTER");
+  });
+
+  it("drops a blank retired key without inventing an empty current one", () => {
+    // Compose's `${VAR:-}` produces exactly this. A blank carries no setting,
+    // so writing `RUN_ADAPTER=` would turn a no-op into an explicit empty.
+    const merged = mergeEnv({ EXECUTION_ADAPTER: "" }, { RUN_ADAPTER: "process" });
+    expect(merged.RUN_ADAPTER).toBe("process");
+    expect(merged).not.toHaveProperty("EXECUTION_ADAPTER");
+  });
+
+  it("leaves an `.env` with no retired name untouched", () => {
+    const existing = { RUN_ADAPTER: "docker", SMTP_HOST: "mail.example.com" };
+    expect(mergeEnv(existing, { RUN_ADAPTER: "process" })).toEqual(existing);
+  });
+
+  it("still lets OVERRIDE_KEYS win over a renamed value", () => {
+    // The rename runs inside `mergeEnv`, so it must not shadow the one class of
+    // key that tracks the CLI rather than the operator.
+    const merged = mergeEnv(
+      { EXECUTION_ADAPTER: "docker", APPSTRATE_VERSION: "old" },
+      { APPSTRATE_VERSION: "new" },
+    );
+    expect(merged.APPSTRATE_VERSION).toBe("new");
+    expect(merged.RUN_ADAPTER).toBe("docker");
+  });
+});
+
+describe("retiredEnvKeysIn — what the operator is told", () => {
+  it("reports a rename as a rename", () => {
+    expect(retiredEnvKeysIn({ EXECUTION_ADAPTER: "docker" })).toEqual([
+      { retired: "EXECUTION_ADAPTER", replacement: "RUN_ADAPTER", outcome: "renamed" },
+    ]);
+  });
+
+  it("reports a discarded value as DROPPED, never as renamed", () => {
+    // The defect this pins: an earlier cut reported every retired key as
+    // "renamed", including the ones it threw away — telling an operator their
+    // value moved when it is gone.
+    expect(retiredEnvKeysIn({ EXECUTION_ADAPTER: "docker", RUN_ADAPTER: "process" })).toEqual([
+      {
+        retired: "EXECUTION_ADAPTER",
+        replacement: "RUN_ADAPTER",
+        outcome: "dropped-superseded",
+      },
+    ]);
+  });
+
+  it("distinguishes a blank drop, where nothing is lost", () => {
+    expect(retiredEnvKeysIn({ EXECUTION_ADAPTER: "" })).toEqual([
+      { retired: "EXECUTION_ADAPTER", replacement: "RUN_ADAPTER", outcome: "dropped-empty" },
+    ]);
+  });
+
+  it("is empty for an `.env` that carries no retired name — the normal case", () => {
+    expect(retiredEnvKeysIn({ RUN_ADAPTER: "docker", MODULES: "oidc" })).toEqual([]);
+  });
+
+  it("agrees with mergeEnv on every branch", () => {
+    // The two functions mirror each other by hand; this is what stops them
+    // drifting. Every key reported `renamed` must actually appear under its
+    // replacement, and every `dropped-*` must not have moved a value.
+    const existing: Record<string, string> = {
+      EXECUTION_ADAPTER: "docker",
+      APPSTRATE_MODULES: "oidc",
+      MODULES: "webhooks",
+      DOCUMENT_RETENTION_DAYS: "",
+    };
+    const merged = mergeEnv(existing, {});
+    for (const { retired, replacement, outcome } of retiredEnvKeysIn(existing)) {
+      expect(merged).not.toHaveProperty(retired);
+      if (outcome === "renamed") expect(merged[replacement]).toBe(existing[retired]);
+      if (outcome === "dropped-superseded") expect(merged[replacement]).toBe(existing[replacement]);
+      if (outcome === "dropped-empty") expect(merged).not.toHaveProperty(replacement);
+    }
   });
 });
 

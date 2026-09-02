@@ -335,8 +335,12 @@ const RETIRED_ENV_RENAMES: Readonly<Record<string, string>> = {
  * A retired name whose replacement is ALSO set explicitly is dropped, not
  * merged: the operator already stated the current answer, and two spellings of
  * one setting is exactly what the retirement removed. An empty value is dropped
- * with the name — it carries no setting to preserve, which is the same
- * `"" → no-op` reading the boot guard applies.
+ * with the name — it carries no setting to preserve, the same `"" → unset`
+ * reading `sanitizeEnv` (`@appstrate/core/env`) applies to every field.
+ *
+ * Both of those are DROPS, not renames, which is why {@link retiredEnvKeysIn}
+ * reports an outcome per key rather than a flat list: telling an operator a
+ * value moved when it was discarded is worse than saying nothing.
  */
 function renameRetiredEnvKeys(env: EnvVars): EnvVars {
   const out: EnvVars = {};
@@ -352,14 +356,37 @@ function renameRetiredEnvKeys(env: EnvVars): EnvVars {
   return out;
 }
 
+/** What {@link mergeEnv} did with a retired key it found. */
+export interface RetiredEnvKeyOutcome {
+  retired: string;
+  replacement: string;
+  /**
+   * `renamed` — the value moved to `replacement`.
+   * `dropped-superseded` — `replacement` was set explicitly too, so the retired
+   *   value was DISCARDED. The operator loses it, and must be told that.
+   * `dropped-empty` — the retired key carried no value; nothing was lost.
+   */
+  outcome: "renamed" | "dropped-superseded" | "dropped-empty";
+}
+
 /**
- * Which retired names a parsed `.env` still carries, paired with what replaces
- * each. Empty on every `.env` written since the rename — the normal case.
+ * Which retired names a parsed `.env` carries and what {@link mergeEnv} does
+ * with each. Empty on every `.env` written since the rename — the normal case.
+ *
+ * Mirrors `renameRetiredEnvKeys`'s branches exactly, and must keep doing so: an
+ * earlier cut reported every retired key as "renamed", including the ones it
+ * had thrown away, which tells an operator their value moved when it is gone.
  */
-export function retiredEnvKeysIn(env: EnvVars): { retired: string; replacement: string }[] {
-  return Object.keys(env)
-    .filter((key) => key in RETIRED_ENV_RENAMES)
-    .map((retired) => ({ retired, replacement: RETIRED_ENV_RENAMES[retired] as string }));
+export function retiredEnvKeysIn(env: EnvVars): RetiredEnvKeyOutcome[] {
+  const out: RetiredEnvKeyOutcome[] = [];
+  for (const retired of Object.keys(env)) {
+    const replacement = RETIRED_ENV_RENAMES[retired];
+    if (replacement === undefined) continue;
+    const outcome =
+      env[retired] === "" ? "dropped-empty" : replacement in env ? "dropped-superseded" : "renamed";
+    out.push({ retired, replacement, outcome });
+  }
+  return out;
 }
 
 /**
