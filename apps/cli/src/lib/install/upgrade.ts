@@ -277,116 +277,13 @@ const OVERRIDE_KEYS: readonly string[] = ["APPSTRATE_VERSION"];
  * pre-#905 installs get CONNECT_SESSION_SECRET backfilled). Keys
  * in `existing` but not in `fresh` are also preserved (user additions
  * like SMTP_HOST stay intact).
- *
- * EXCEPT a retired name. "Existing wins" used to carry a retired spelling
- * (`EXECUTION_ADAPTER`, `APPSTRATE_MODULES`, …) straight into the freshly
- * written `.env`, where the platform no longer recognises it: Zod strips the
- * unknown key and the setting silently reverts to its default. That is issue
- * #513's exact failure mode, and for `FILE_RETENTION_DAYS` it means stored
- * files quietly stop expiring.
- *
- * The installer is the right half to fix it — it is the half that knows a
- * rewrite is happening — and the ONLY half: the platform carries no
- * recognition of a retired name, by design (`docs/NO_TRANSITIONAL_CODE.md`).
- * The value is preserved under the current name, never dropped, and an
- * explicit current name always wins over the retired one it replaces.
  */
 export function mergeEnv(existing: EnvVars, fresh: EnvVars): EnvVars {
-  const merged: EnvVars = { ...fresh, ...renameRetiredEnvKeys(existing) };
+  const merged: EnvVars = { ...fresh, ...existing };
   for (const key of OVERRIDE_KEYS) {
     if (key in fresh) merged[key] = fresh[key] as string;
   }
   return merged;
-}
-
-/**
- * Env names this CLI renames when it rewrites an existing `.env`, mapped to
- * what replaced each.
- *
- * It lives HERE, in the installer, and deliberately not in `@appstrate/env`.
- * The platform describes how it works now: it has never heard of these names
- * and carries no code to recognise them (`docs/NO_TRANSITIONAL_CODE.md`). A
- * rename is a one-off operational task on somebody's `.env` file, which is
- * exactly the split `scripts/migration/` draws for a one-off task on somebody's
- * rows — the operator tool does the moving, the platform stays clean.
- *
- * A name leaves this table when no supported upgrade can still carry it (see
- * SECURITY.md for the window). Nothing here is an alias: the platform does not
- * read the left column, this file rewrites it before the platform ever sees the
- * file.
- */
-const RETIRED_ENV_RENAMES: Readonly<Record<string, string>> = {
-  APPSTRATE_MODULES: "MODULES",
-  DOCUMENT_MAX_FILE_BYTES: "FILE_MAX_BYTES",
-  DOCUMENT_RETENTION_DAYS: "FILE_RETENTION_DAYS",
-  EXECUTION_ADAPTER: "RUN_ADAPTER",
-  EXECUTION_TOKEN_SECRET: "RUN_TOKEN_SECRET",
-  OAUTH_ALLOWED_INTERNAL_IDP_HOSTS: "EGRESS_ALLOW_INTERNAL_HOSTS",
-  RUN_MAX_DOCUMENTS: "RUN_MAX_FILES",
-  WORKSPACE_MAX_DOCS_BYTES: "WORKSPACE_MAX_FILES_BYTES",
-};
-
-/**
- * Rewrite every retired env name in a parsed `.env` to its replacement,
- * carrying the value across. Module-local: {@link mergeEnv} is the only
- * caller, and {@link retiredEnvKeysIn} is what `appstrate install` uses to
- * report the renames.
- *
- * A retired name whose replacement is ALSO set explicitly is dropped, not
- * merged: the operator already stated the current answer, and two spellings of
- * one setting is exactly what the retirement removed. An empty value is dropped
- * with the name — it carries no setting to preserve, the same `"" → unset`
- * reading `sanitizeEnv` (`@appstrate/core/env`) applies to every field.
- *
- * Both of those are DROPS, not renames, which is why {@link retiredEnvKeysIn}
- * reports an outcome per key rather than a flat list: telling an operator a
- * value moved when it was discarded is worse than saying nothing.
- */
-function renameRetiredEnvKeys(env: EnvVars): EnvVars {
-  const out: EnvVars = {};
-  for (const [key, value] of Object.entries(env)) {
-    const replacement = RETIRED_ENV_RENAMES[key];
-    if (replacement === undefined) {
-      out[key] = value;
-      continue;
-    }
-    if (value === "" || replacement in env) continue;
-    out[replacement] = value;
-  }
-  return out;
-}
-
-/** What {@link mergeEnv} did with a retired key it found. */
-export interface RetiredEnvKeyOutcome {
-  retired: string;
-  replacement: string;
-  /**
-   * `renamed` — the value moved to `replacement`.
-   * `dropped-superseded` — `replacement` was set explicitly too, so the retired
-   *   value was DISCARDED. The operator loses it, and must be told that.
-   * `dropped-empty` — the retired key carried no value; nothing was lost.
-   */
-  outcome: "renamed" | "dropped-superseded" | "dropped-empty";
-}
-
-/**
- * Which retired names a parsed `.env` carries and what {@link mergeEnv} does
- * with each. Empty on every `.env` written since the rename — the normal case.
- *
- * Mirrors `renameRetiredEnvKeys`'s branches exactly, and must keep doing so: an
- * earlier cut reported every retired key as "renamed", including the ones it
- * had thrown away, which tells an operator their value moved when it is gone.
- */
-export function retiredEnvKeysIn(env: EnvVars): RetiredEnvKeyOutcome[] {
-  const out: RetiredEnvKeyOutcome[] = [];
-  for (const retired of Object.keys(env)) {
-    const replacement = RETIRED_ENV_RENAMES[retired];
-    if (replacement === undefined) continue;
-    const outcome =
-      env[retired] === "" ? "dropped-empty" : replacement in env ? "dropped-superseded" : "renamed";
-    out.push({ retired, replacement, outcome });
-  }
-  return out;
 }
 
 /**

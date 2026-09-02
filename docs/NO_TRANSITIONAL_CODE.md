@@ -32,11 +32,10 @@ expires.
 The same applies to: legacy field aliases, `X ?? legacyX` fallbacks, dual-read
 paths, "accept both shapes" JSON parsing, and env-var aliases. When a name
 changes, the old name must never quietly work. Refusing it — a hard failure that
-names the replacement — is one correct answer, and §4 governs how long that
-refusal lives. Having the tool in the path rewrite it, so the platform never
-learns the old name at all, is the better one where a tool exists: see
-`mergeEnv` in `apps/cli/src/lib/install/upgrade.ts`, which renames a retired key
-in the operator's `.env` and reports what it renamed.
+names the replacement — is the answer while the transition is live, and §4
+governs how long that refusal lives. Afterwards nothing in the codebase knows
+the old name at all; moving the data is the operator's task, announced in the
+release notes, exactly as a `scripts/migration/` script is for rows.
 
 ### 2. Data repair lives in `scripts/migration/`, never in a drizzle migration
 
@@ -286,15 +285,21 @@ carries no legacy-detection mechanism, so neither does the codebase.
 
 Two consequences worth stating, because they are where this gets uncomfortable:
 
-- **Deleting a guard can make an old form silent.** Drop `RETIRED_ENV_RENAMES`
-  and Zod strips the unknown key, reverting the setting to its default with no
-  output — issue #513 exactly. That is a real cost, and it does not license
-  keeping the guard. It relocates the work: the rename moved to
-  `appstrate install --upgrade` (`mergeEnv`), which rewrites the operator's
-  `.env` and reports what it renamed. **An operational one-off belongs with the
-  operator tooling, exactly as row repair belongs in `scripts/migration/`** —
-  the tool does the moving, the platform stays clean. Prefer that relocation to
-  a guard whenever a tool is in the path.
+- **Deleting a guard can make an old form silent, and that cost is accepted.**
+  Drop `RETIRED_ENV_RENAMES` and Zod strips the unknown key, reverting the
+  setting to its default with no output — issue #513 exactly. It does not
+  license keeping the guard, and it does not license MOVING it either. That
+  second point cost this rule a wrong turn worth recording: the table was first
+  relocated into the installer's `mergeEnv`, justified as "an operational
+  one-off belongs with the operator tooling, like `scripts/migration/`". The
+  analogy is false. What disqualifies a drizzle migration under §2 is that it
+  is _replayed forever_; a `scripts/migration/` script is run ONCE and is then
+  outside that path. `mergeEnv` runs on every upgrade, forever — so the move
+  went from one permanent path to another and changed nothing but the address.
+  A retired env name is the operator's to fix, announced in the release notes.
+  What may legitimately stand in its place is a check that names no old
+  spelling at all — warning on any key the running version does not read covers
+  retired names, typos and every future removal, and never expires.
 - **A guard that is load-bearing for CURRENT data is not a guard.** If deleting
   it breaks something that works today, it was never transitional and §4 does
   not reach it. The AFPS retired-key handling is the live example: its "drop"

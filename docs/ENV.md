@@ -134,4 +134,4 @@ Opt-in, comma-separated hostnames the operator explicitly trusts on private/inte
 
 Redirect chains are checked per hop: a trusted host redirecting to a second internal host requires that host to be listed too, and a cross-host redirect still strips credentials and the request body. Unset ⇒ every internal host stays blocked (the secure default).
 
-The platform knows this variable by one name and no other. An `.env` from before the rename is renamed for you by `appstrate install --upgrade` (`mergeEnv`, `apps/cli/src/lib/install/upgrade.ts`), which prints what it renamed; the platform itself carries no recognition of the old spelling.
+The platform knows this variable by one name and no other, and nothing anywhere recognises the pre-rename spelling. An `.env` still carrying it is not read and not reported: the key is stripped as unknown and this setting falls back to its default (every internal host stays blocked). Renaming it is an operator task — see the release notes for the version that made the change.

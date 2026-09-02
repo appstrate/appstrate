@@ -162,9 +162,11 @@ one. For each: what does it refuse, lines of code vs lines of prose, what does
 it cost a FRESH install (usually zero at runtime — the cost is reader cost), and
 **is its transition over?** Under §4 a finished transition means the guard is
 deleted, not dated. Two verdicts G must reach explicitly, because they are where
-the dimension earns its keep: (a) would deleting it make the old form SILENT,
-and is there a TOOL in the path that should do the rewrite instead (the
-`mergeEnv` shape); (b) is it load-bearing for data that works TODAY — a
+the dimension earns its keep: (a) would deleting it make the old form SILENT —
+and note that RELOCATING the table into a tool is NOT an answer, since a tool's
+always-run path is as permanent as the platform's; §4 records that exact wrong
+turn, taken and reversed in this repo; (b) is it load-bearing for data that
+works TODAY — a
 published content-addressed artifact, a stored token — in which case it was
 never transitional and §4 does not reach it. `scripts/migration/*` is NOT in
 scope: the doc says those stay.
