@@ -648,11 +648,23 @@ describe("mcp-server package routes", () => {
       expect(body.errors?.map((e) => e.field)).toContain("manifest.type");
     });
 
-    it("still publishes a drifted STORED draft (no type gate on the publish path)", async () => {
-      // FORWARD guard, not a regression: publishing was ungated before the fix
-      // too. It pins the deliberate asymmetry — closing the author door must
-      // never close this one, or a legacy drifted draft becomes permanently
-      // un-publishable (#983).
+    it("REFUSES to publish a drifted STORED draft rather than minting it unchecked", async () => {
+      // This inverts #983, deliberately. Publishing used to skip the
+      // `parsePackageZip` re-parse whenever the stored manifest's `type` had
+      // drifted — so the one row shape that cannot be trusted was the one shape
+      // that reached `package_versions` with NOTHING validating the bytes, and
+      // the artifact it minted is immutable and content-addressed. The
+      // exemption was worth more to an attacker than to the drifted draft it
+      // protected.
+      //
+      // The cost, stated rather than hidden: a drifted draft that was never
+      // published is now stuck — the author door 400s on `manifest.type` (the
+      // test above) and this door refuses too. `package-fork.ts` is "the one
+      // path allowed to normalize" a drifted type, and it works from a
+      // PUBLISHED version, so it does not reach a never-published draft. If
+      // such rows are found in production, repair them in `scripts/migration/`,
+      // which is what `package-fork.ts` records was done for the `provider`
+      // rows #481 left behind — do NOT re-open the exemption.
       const drifted = skillManifestFor(PUT_ID);
       await seedPackage({
         id: PUT_ID,
@@ -673,7 +685,9 @@ describe("mcp-server package routes", () => {
         body: JSON.stringify({}),
       });
 
-      expect(res.status).toBe(201);
+      // 400, not 201: the re-parse now runs for every `mcp-server` publish,
+      // keyed on `packages.type` alone.
+      expect(res.status).toBe(400);
     });
   });
 });

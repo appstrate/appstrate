@@ -47,7 +47,7 @@ import {
   compareDeclaredClientWithStored,
   listInstanceClientIds,
   updateInstanceClientPolicyFromEnv,
-  retiredScopeRenames,
+  invalidScopesIn,
   OAuthAdminValidationError,
   type CreateInstanceClientFromEnvInput,
 } from "./oauth-admin.ts";
@@ -223,25 +223,28 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
       )
       .join("\n");
 
-    // A `scopes` drift where the DECLARATION still names a retired spelling is
-    // not operator drift at all: a data migration rewrote the stored row out
-    // from under an env value nobody edited. The generic remedy below is actively
-    // harmful here — the DELETE drops the row every satellite session hangs off,
-    // and the re-create immediately fails `assertValidScopes` on the same env
-    // value, so the platform still does not boot and the row is gone. Say what
-    // actually fixes it instead.
-    const staleScopes = drift.mismatches.some((m) => m.field === "scopes")
-      ? retiredScopeRenames(entry.scopes)
-      : [];
-    if (staleScopes.length > 0) {
-      const renames = staleScopes.map((r) => `${r.retired} -> ${r.replacement}`).join(", ");
+    // The generic remedy below is "delete the oauth_clients row and restart".
+    // That is destructive — the row backs every satellite session — and for a
+    // declaration whose scopes are not in the OIDC vocabulary it is also
+    // USELESS: the re-create trips `assertValidScopes` on the same env value,
+    // so the platform still does not boot and the row is gone. Never offer it
+    // for a declaration that cannot survive its own re-create.
+    //
+    // Deliberately keyed on "would this validate?", not on any particular bad
+    // spelling. A rename whose data migration rewrote the stored row is one way
+    // to land here and used to have its own branch; a typo, a scope dropped
+    // from `OIDC_ALLOWED_SCOPES`, or a module that stopped contributing one all
+    // land here identically, and all of them deserve the same answer.
+    const unusableScopes = invalidScopesIn(entry.scopes);
+    if (unusableScopes.length > 0) {
       throw new InstanceClientSyncError(
-        `OIDC_INSTANCE_CLIENTS: client '${entry.clientId}' declares retired scope spellings (${renames}).\n` +
-          `  These resources were renamed and a data migration rewrote the stored values,\n` +
-          `  so the declaration and the row can no longer agree. Fix the ENV, not the database: update\n` +
-          `  OIDC_INSTANCE_CLIENTS to the current spellings (${staleScopes.map((r) => r.replacement).join(", ")})\n` +
-          `  and restart. Do NOT delete the oauth_clients row — the re-create would be rejected by the\n` +
-          `  same scope validation and you would lose the client backing every satellite session.\n` +
+        `OIDC_INSTANCE_CLIENTS: client '${entry.clientId}' declares scopes outside the OIDC ` +
+          `vocabulary (${unusableScopes.join(", ")}), and drifts from the stored row ` +
+          `(fields: ${fields}).\n` +
+          `  Fix the ENV, not the database: correct OIDC_INSTANCE_CLIENTS and restart.\n` +
+          `  Do NOT delete the oauth_clients row — the re-create would be rejected by the same\n` +
+          `  scope validation, the platform still would not boot, and you would lose the client\n` +
+          `  backing every satellite session.\n` +
           `  Mismatches:\n${detailed}`,
       );
     }

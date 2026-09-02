@@ -200,26 +200,11 @@ const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Arguments that USED to exist, mapped to what replaced them.
- *
- * A model trained on an older tool description keeps emitting these, and the
- * generic "unknown argument" message below would send it hunting through the
- * schema. Naming the replacement turns the retirement into one actionable
- * correction. This is a message-quality table, not an alias table: nothing
- * here is accepted, canonicalized or relayed.
- */
-const RUN_AND_WAIT_RETIRED_ARGUMENTS: Readonly<Record<string, string>> = {
-  context_documents: "context_files",
-};
-
-/**
  * Refuse any argument the tool does not declare.
  *
- * Generic on purpose. The previous shape named exactly ONE retired spelling
- * (`context_documents`) and let `context_file`, `contextFiles`, `files` and
- * every other near-miss through to the same silent drop it was written to
- * prevent. One membership test covers all of them, and the retired-name table
- * above keeps the good message for the case that actually recurs.
+ * Generic on purpose: one membership test covers every near-miss
+ * (`context_file`, `contextFiles`, `files`, …) rather than a hand-listed set
+ * that lets the rest through to the silent drop this exists to prevent.
  */
 function unknownArgumentsError(args: Record<string, unknown>): string | undefined {
   const unknown = Object.keys(args).filter(
@@ -227,14 +212,6 @@ function unknownArgumentsError(args: Record<string, unknown>): string | undefine
   );
   if (unknown.length === 0) return undefined;
 
-  const renamed = unknown.filter((k) => k in RUN_AND_WAIT_RETIRED_ARGUMENTS);
-  if (renamed.length > 0) {
-    const first = renamed[0] as string;
-    return (
-      `\`${first}\` is not an argument of this tool — it was renamed to ` +
-      `\`${RUN_AND_WAIT_RETIRED_ARGUMENTS[first]}\`. Resend under the new name.`
-    );
-  }
   return (
     `Unknown argument${unknown.length > 1 ? "s" : ""} ${unknown.map((k) => `\`${k}\``).join(", ")}. ` +
     `This tool accepts only: ${[...RUN_AND_WAIT_ARGUMENT_NAMES].map((k) => `\`${k}\``).join(", ")}. ` +
@@ -279,9 +256,8 @@ function inputArgument(args: Record<string, unknown>): {
  * The tool's file argument (fan-in by reference), checked for a shape the
  * launch body can carry.
  *
- * The retired `context_documents` spelling is refused upstream by
- * {@link unknownArgumentsError}, along with every other undeclared name — it is
- * not read, canonicalized or relayed here.
+ * Any undeclared name is refused upstream by {@link unknownArgumentsError} —
+ * nothing is read, canonicalized or relayed here.
  *
  * What is left is the wrong-typed value. The MCP transport does not validate
  * tool arguments, so a single URI passed bare, or a JSON-encoded array, used to
@@ -662,9 +638,8 @@ export async function launchRunAndWait(
     if (inputArg.input) launchBody.input = inputArg.input;
     // Fan-in by reference: entries forwarded verbatim; the route resolves each
     // URI through the file ACL and declares the reserved input field itself.
-    // One spelling reaches the wire because only one is accepted: the retired
-    // `context_documents` is REFUSED upstream by `unknownArgumentsError`, not
-    // canonicalized here.
+    // One spelling reaches the wire because `unknownArgumentsError` accepts
+    // only one — nothing is canonicalized here.
     if (contextFiles) launchBody.context_files = contextFiles;
   } else {
     return {

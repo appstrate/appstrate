@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `SPACE_ID_RE` / `assertSpaceId` — the shape guard that makes a half-finished
- * `app_` → `spc_` data migration fail loudly instead of working in silence.
+ * `SPACE_ID_RE` / `assertSpaceId` — the shape guard that makes an id whose
+ * prefix is wrong fail loudly instead of working in silence.
  *
- * The guard has two branches and they are NOT interchangeable, which is what
- * these tests pin:
- *   - a retired `app_` id must name the retired prefix and tell the operator
- *     the id migration has not run on this deployment;
- *   - anything else malformed must say so, and must NOT claim the deployment
- *     holds pre-rename data.
+ * One shape is minted and the same one is read. There is a single rejection
+ * branch: the `app_` prefix used to get its own message naming the rename, and
+ * that branch was retirement machinery, deleted with the transition
+ * (`docs/NO_TRANSITIONAL_CODE.md` §4).
  *
  * The malformed cases below are the guard's whole reason for being strict:
  * widening `SPACE_ID_RE` to `/^spc_.+/` — the widening its own docblock forbids
@@ -40,7 +38,7 @@ describe("SPACE_ID_RE", () => {
   });
 
   const rejected: Array<[string, string]> = [
-    ["retired prefix", "app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10"],
+    ["a wrong prefix", "app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10"],
     ["truncated id", "spc_1"],
     ["dashless slice of a UUID", "spc_2f1c6d849a524f2bb1a70c9d3e5f7a10"],
     ["uppercase hex", "spc_2F1C6D84-9A52-4F2B-B1A7-0C9D3E5F7A10"],
@@ -64,27 +62,27 @@ describe("assertSpaceId", () => {
     expect(() => assertSpaceId(prefixedId("spc"))).not.toThrow();
   });
 
-  describe("retired `app_` prefix", () => {
+  describe("a retired `app_` id is malformed, nothing more", () => {
+    // The `app_` prefix used to get its own 400 naming the rename. That guard
+    // was retirement machinery and went with the transition
+    // (`docs/NO_TRANSITIONAL_CODE.md` §4) — the platform carries no knowledge
+    // of the old prefix. It is now refused as exactly what it is.
     const retired = "app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10";
 
-    it("throws a 400 naming the retired prefix and the migration", () => {
+    it("is refused, with the generic malformed wording", () => {
       const err = captureThrow(retired);
       expect(err.status).toBe(400);
       expect(err.code).toBe("invalid_request");
       expect(err.message).toContain(retired);
-      expect(err.message).toContain("app_");
-      expect(err.message).toContain("retired");
-      expect(err.message).toContain("migration");
-      // The operator-facing half: this is un-migrated DATA, not a bad client.
-      expect(err.message).toContain("pre-rename data");
+      expect(err.message).toContain("Malformed");
     });
 
-    it("does NOT reuse the generic malformed wording", () => {
-      expect(captureThrow(retired).message).not.toContain("Malformed");
-    });
-
-    it("still names the retired prefix when the rest of the id is garbage", () => {
-      expect(captureThrow("app_nope").message).toContain("retired");
+    it("names no rename, no migration and no retired prefix", () => {
+      // The whole point of the deletion: no code here recognises `app_`.
+      const message = captureThrow(retired).message;
+      expect(message).not.toContain("retired");
+      expect(message).not.toContain("migration");
+      expect(message).not.toContain("pre-rename");
     });
 
     it("reports the field the id arrived on", () => {

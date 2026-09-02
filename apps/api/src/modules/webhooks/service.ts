@@ -15,7 +15,7 @@ import type {
   WebhookInfo,
   WebhookCreateResponse,
   WebhookDelivery as WebhookDeliveryInfo,
-} from "./types.ts";
+} from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**

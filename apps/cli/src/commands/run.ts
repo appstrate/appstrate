@@ -1181,7 +1181,6 @@ async function resolveBundleSource(
 
 // Re-exported for `apps/cli/test/run-resolver.test.ts`, which asserts against
 // the error class the resolver builders throw.
-export { ResolverConfigError };
 
 /**
  * Test-only access to the resolver-input builder. Exercised by

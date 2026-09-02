@@ -610,10 +610,11 @@ export function validateManifest(
     if (options?.retiredRuntimeTools !== "drop") {
       // Author direction (default): an id that resolves to NOTHING must surface
       // as a field error the editor can render, so the raw manifest is handed
-      // to Zod and the `runtime_tools` enum rejects it. A merely RENAMED id
-      // resolved cleanly above (`dropped` is empty), so the canonicalized
-      // manifest is what gets parsed and persisted — an author saving a
-      // manifest that still spells the tool the old way writes the new spelling.
+      // to Zod and the `runtime_tools` enum rejects it. When nothing was
+      // dropped, the canonicalized manifest is what gets parsed and persisted
+      // — `canonicalizeRuntimeToolIds` collapses duplicates, which is the only
+      // thing it does now: it holds no alias table, so no id is rewritten to
+      // another spelling here.
       if (dropped.length > 0) return parseWithSchema(agentManifestSchema, raw);
       return parseWithSchema(agentManifestSchema, manifest);
     }

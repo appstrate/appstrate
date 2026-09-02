@@ -10,7 +10,7 @@ This is a _minimality_ rule, not a purity one. Every compatibility branch is a
 second code path that no test exercises on purpose, that no reader can date, and
 that quietly changes what the primary path means.
 
-## The three prohibitions
+## The four prohibitions
 
 ### 1. No backward-compatibility branches
 
@@ -31,9 +31,11 @@ expires.
 
 The same applies to: legacy field aliases, `X ?? legacyX` fallbacks, dual-read
 paths, "accept both shapes" JSON parsing, and env-var aliases. When a name
-changes, the old name must **fail loudly** — see `RETIRED_ENV_RENAMES`
-(`packages/env/src/index.ts`), which refuses to boot rather than silently
-falling back to a default. That is the correct shape for a retirement.
+changes, the old name must never quietly work. Refusing it — a hard failure that
+names the replacement — is the answer while the transition is live, and §4
+governs how long that refusal lives. Afterwards nothing in the codebase knows
+the old name at all; moving the data is the operator's task, announced in the
+release notes, exactly as a `scripts/migration/` script is for rows.
 
 ### 2. Data repair lives in `scripts/migration/`, never in a drizzle migration
 
@@ -202,6 +204,22 @@ code` takes a **string constant**, and `$$ … $$` is only one way to write one:
 twin and rewrites the same rows on every replay. The gate reads a `DO` body as
 code either way, in the same pass, so the same-table carve-out reaches both.
 
+**A `USING` expression is a write.**
+`ALTER TABLE t ALTER COLUMN c SET DATA TYPE <type> USING <expr>` evaluates
+`<expr>` against every row that already exists and stores what it returns. A
+type cast is the honest use, and this directory is full of them — `0047` alone
+has thirty, all `AT TIME ZONE 'UTC'`. But nothing stops the expression being a
+repair: `USING (CASE WHEN c = 'old' THEN 'new' ELSE c END)` rewrites row
+contents exactly as the `UPDATE` beside it would, and it is the shape `0053`
+deliberately refused to write, so it is the shape the next author reaches for.
+It is therefore a sixth verb in the vocabulary, with the table read from the
+`ALTER TABLE` it opens and the same carve-out available: a repair whose
+`USING` lands on the table a `SET NOT NULL`, a `CHECK`, a `VALIDATE` or a
+`DROP COLUMN` in the same file also lands on is licenced, and nothing else is.
+A cast with no repair in it — `USING c::text`, `USING c AT TIME ZONE 'UTC'` — is
+not a write: the gate reads a bare column reference, a cast of one, and an
+`AT TIME ZONE` on one as conversion, and anything else as a repair.
+
 Two writing forms are outside that vocabulary on purpose. `SELECT … INTO` is
 PL/pgSQL variable assignment inside the `DO` blocks this directory is full of,
 and creates a new relation rather than rewriting rows; `COPY … FROM` needs a
@@ -237,6 +255,57 @@ Feature flags whose branch is decided, shims, adapters wrapping a shape nothing
 emits, `@deprecated` exports with no remaining caller, and re-export barrels
 that exist only so an old import path keeps resolving: delete them with the
 transition, in the same PR that completes it.
+
+### 4. No retirement guard outlives its transition
+
+Step 5 below creates a guard: code whose only purpose is to detect and refuse a
+form nothing writes any more. `RETIRED_ENV_RENAMES` (`packages/env`) was the
+model of it — read raw `process.env`, abort boot, name the replacement. It is
+gone now, and its removal is what this section was written from.
+
+**A guard is transitional code too.** It exists only because of a transition, it
+is invisible on a fresh install, and it is subject to §3 like every other piece
+of scaffolding. So it goes when the transition is over, and "over" is not a date
+somebody writes down.
+
+This was measured before it was decided. A sweep of the whole family found
+**16 guards: ~257 lines of code, defended by ~517 lines of prose and ~750 lines
+of test** — prose outweighing code 2:1, tests 3:1 — and exactly **one of the
+sixteen** recorded any condition under which it could be removed. That is §1's
+own defect in mirror image: §1 rejects an alias because "nothing records when
+that reason expires", and fifteen guards recorded nothing either. An alias
+silently widens what is legal while a guard only accretes, which makes the guard
+the cheaper failure, not a different one.
+
+**The remedy is deletion, not an expiry annotation.** Dating every guard was
+considered and rejected: it keeps the code, keeps the prose, keeps the tests,
+and adds a gate to enforce a calendar — paying the full reader cost to defer the
+decision. The codebase describes how the system works now. A fresh instance
+carries no legacy-detection mechanism, so neither does the codebase.
+
+Two consequences worth stating, because they are where this gets uncomfortable:
+
+- **Deleting a guard can make an old form silent, and that cost is accepted.**
+  Drop `RETIRED_ENV_RENAMES` and Zod strips the unknown key, reverting the
+  setting to its default with no output — issue #513 exactly. It does not
+  license keeping the guard, and it does not license MOVING it either. That
+  second point cost this rule a wrong turn worth recording: the table was first
+  relocated into the installer's `mergeEnv`, justified as "an operational
+  one-off belongs with the operator tooling, like `scripts/migration/`". The
+  analogy is false. What disqualifies a drizzle migration under §2 is that it
+  is _replayed forever_; a `scripts/migration/` script is run ONCE and is then
+  outside that path. `mergeEnv` runs on every upgrade, forever — so the move
+  went from one permanent path to another and changed nothing but the address.
+  A retired env name is the operator's to fix, announced in the release notes.
+  What may legitimately stand in its place is a check that names no old
+  spelling at all — warning on any key the running version does not read covers
+  retired names, typos and every future removal, and never expires.
+- **A guard that is load-bearing for CURRENT data is not a guard.** If deleting
+  it breaks something that works today, it was never transitional and §4 does
+  not reach it. The AFPS retired-key handling is the live example: its "drop"
+  mode is what keeps a published, content-addressed artifact installable, so
+  removing it would brick existing packages with no repair path. Name that case
+  and leave it; do not delete on the strength of a legacy-sounding identifier.
 
 ## Why this is written down
 
@@ -276,7 +345,11 @@ why.
 4. Run it, verify, and delete nothing else — the script stays as the record of
    what was done, outside the replay path.
 5. If the old form can still arrive from outside (an env var, a stored token, a
-   third-party payload), make it **fail loudly**. Never make it work.
+   third-party payload), make it **fail loudly**. Never make it work — unless a
+   tool already stands in that path, in which case have the TOOL rewrite the old
+   form and leave the platform with no knowledge of it (§4).
+6. Delete the guard with the transition. It is scaffolding like any other (§4),
+   and it does not get a date.
 
 ## Audit
 

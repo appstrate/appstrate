@@ -128,54 +128,10 @@ Primary source of truth: the `@appstrate/env` Zod schema (`packages/env/src/inde
 | `APP_VERSION`                           | No          | —                                                           | Deployed build identity, stamped into the image at build time (Dockerfile `ARG` → `ENV`, fed by the release workflow). Read-only: surfaced on `/health` and in the SPA footer. Absent in dev/source runs → the UI shows `dev`. Do **not** set this by hand in `.env`. Also the platform's half of the runtime-image version contract: when this and both image tags are release versions they must all be equal, or boot fails. Anything that is not a release version — `dev`, absent, or a build stamp like `health-container-e2e` — takes the platform out of that comparison, as does an image pinned to an alias tag family (see the `PI_IMAGE` row)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `GIT_SHA`                               | No          | —                                                           | Short git SHA of the build commit — companion to `APP_VERSION`, same build-time provenance, same "don't set by hand" rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
-## File limits — renamed from `DOCUMENT_*` (breaking)
-
-Issue #1177 renamed the `document` concept to `file` from the schema up: the
-tables are `files` / `file_links`, the URI scheme is `appfile://`, the routes are
-`/api/files/*`. Four environment variables kept their pre-rename spelling for a
-while; they no longer do. **There is no alias, and boot now refuses while an old
-name is still set**, naming the replacement. That refusal exists because the
-failure it replaces was silent: Zod strips unknown keys, so an `.env` carrying an
-old name used to parse cleanly with the limit back at its default — and for
-`DOCUMENT_RETENTION_DAYS` the default is "no expiry at all", so an operator who
-set it for data minimisation lost it on upgrade without a line of output. Grep
-your `.env`, compose file, secret store and CI for the left column:
-
-| Was                        | Now                         | Governs                               |
-| -------------------------- | --------------------------- | ------------------------------------- |
-| `DOCUMENT_MAX_FILE_BYTES`  | `FILE_MAX_BYTES`            | per-file write cap                    |
-| `DOCUMENT_RETENTION_DAYS`  | `FILE_RETENTION_DAYS`       | default `expires_at` at file creation |
-| `RUN_MAX_DOCUMENTS`        | `RUN_MAX_FILES`             | per-run input + output file COUNT cap |
-| `WORKSPACE_MAX_DOCS_BYTES` | `WORKSPACE_MAX_FILES_BYTES` | total input bytes a run may carry in  |
-
-Values and semantics are unchanged — only the names moved.
-`ORG_STORAGE_QUOTA_BYTES` (per-org durable-storage byte quota) never carried the
-old vocabulary and did not move.
-
-## Pre-1.0 renames — also refused (breaking)
-
-Three more names moved during the `v1.0.0-alpha.*` series and are refused by the
-same guard. They were shipped: `release.yml` fires on every `v*` tag, so each
-alpha published GHCR images and CLI binaries, and an `.env` written against one
-of those builds still carries the left column. Grep for it the same way:
-
-| Was                      | Now                | Governs                                    | Last shipped as   |
-| ------------------------ | ------------------ | ------------------------------------------ | ----------------- |
-| `APPSTRATE_MODULES`      | `MODULES`          | comma-separated list of modules to load    | `v1.0.0-alpha.35` |
-| `EXECUTION_ADAPTER`      | `RUN_ADAPTER`      | how a run is executed (`process`/`docker`) | `v1.0.0-alpha.18` |
-| `EXECUTION_TOKEN_SECRET` | `RUN_TOKEN_SECRET` | HMAC secret for run bearer tokens          | `v1.0.0-alpha.18` |
-
-`MODULES` and `RUN_ADAPTER` both carry a default, which is the whole hazard: the
-old spelling used to be stripped as an unknown key and the platform booted with
-a module list or a run adapter the operator never chose — the same silent drift
-as issue #513. `RUN_TOKEN_SECRET` is required, so the old spelling already
-aborted boot; it now aborts naming the rename instead of reporting a missing
-variable the operator never typed.
-
 ## `EGRESS_ALLOW_INTERNAL_HOSTS` — full semantics
 
 Opt-in, comma-separated hostnames the operator explicitly trusts on private/internal addresses. Exempts **only** the SSRF host blocklist — never the redirect discipline — across every platform egress site that consults it: OAuth token exchange/refresh/discovery, LLM upstream `baseUrl`, org proxies, org model tests, credential-proxy targets, and remote MCP servers (spawn validation allows plain `http://` for these hosts). The value is forwarded to the sidecar under the same name at launch, so the sidecar's own gates honour the same allowlist.
 
 Redirect chains are checked per hop: a trusted host redirecting to a second internal host requires that host to be listed too, and a cross-host redirect still strips credentials and the request body. Unset ⇒ every internal host stays blocked (the secure default).
 
-The pre-rename name `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` (the var outgrew its OAuth-only origin) is **no longer accepted**: boot refuses while it is still set, naming this variable. It was an alias at the env-parse boundary only — the sidecar launch path never read it — so a deployment on the old spelling exempted hosts platform-side and none of them sidecar-side. Rename it in your `.env`.
+The platform knows this variable by one name and no other, and nothing anywhere recognises the pre-rename spelling. An `.env` still carrying it is not read and not reported: the key is stripped as unknown and this setting falls back to its default (every internal host stays blocked). Renaming it is an operator task — see the release notes for the version that made the change.

@@ -5,13 +5,12 @@
  *
  * The unit tests in `test/unit/lib/ids.test.ts` pin `assertSpaceId` itself.
  * These pin that a request actually reaches it, and reaches it BEFORE the
- * `spaces` lookup — the whole point of the guard is that a retired `app_` id
- * must not be answered with a 404 ("no such space", which reads like a client
- * mistake) but with a 400 that names the un-run migration.
+ * `spaces` lookup — a wrong-shaped id must be answered with a 400, not a 404
+ * ("no such space", which reads like a client mistake about a well-formed id).
  *
- * `spc_`-prefixed-but-malformed ids are covered here too, not just `app_`
- * ones: they are the cases that discriminate the strict regex from the
- * `/^spc_.+/` widening its docblock forbids.
+ * `spc_`-prefixed-but-malformed ids are covered here too: they are the cases
+ * that discriminate the strict regex from the `/^spc_.+/` widening its
+ * docblock forbids.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -23,7 +22,7 @@ import { prefixedId } from "../../../src/lib/ids.ts";
 const app = getTestApp();
 
 /** A retired-prefix id whose UUID half is perfectly well-formed. */
-const RETIRED_ID = "app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10";
+const WRONG_PREFIX_ID = "app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10";
 
 /**
  * `spc_`-prefixed ids the strict regex rejects and `/^spc_.+/` would accept.
@@ -49,21 +48,21 @@ describe("space-context middleware — X-Space-Id shape", () => {
     expect(res.status).toBe(200);
   });
 
-  it("400s a retired `app_` id with the migration diagnostic — not a 404", async () => {
+  it("400s a wrong-prefix id on shape — not a 404 from the spaces lookup", async () => {
     const res = await app.request("/api/agents", {
-      headers: authHeaders(ctx, { "X-Space-Id": RETIRED_ID }),
+      headers: authHeaders(ctx, { "X-Space-Id": WRONG_PREFIX_ID }),
     });
 
-    // 404 would be the answer for a well-formed id that does not exist. A
-    // retired id is not a missing row, it is un-migrated data.
+    // 404 would be the answer for a well-formed id that does not exist. This
+    // one never reaches the lookup: the shape guard answers first.
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string; detail: string; param?: string };
     expect(body.code).toBe("invalid_request");
     expect(body.param).toBe("space_id");
-    expect(body.detail).toContain("retired");
-    expect(body.detail).toContain("app_");
-    expect(body.detail).toContain("pre-rename data");
-    expect(body.detail).toContain("migration");
+    expect(body.detail).toContain("Malformed");
+    // No rename, no migration: the platform does not recognise `app_` at all.
+    expect(body.detail).not.toContain("retired");
+    expect(body.detail).not.toContain("migration");
   });
 
   for (const id of MALFORMED_SPC_IDS) {

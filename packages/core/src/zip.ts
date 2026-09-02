@@ -260,7 +260,6 @@ export interface ParsePackageZipOptions {
  * @param options - {@link ParsePackageZipOptions}
  * @returns Parsed package with manifest, content, files, type, and any dropped runtime-tool ids
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
- * @throws TypeError when `options` is a number — see the guard in the body
  * @example
  * const zip = await readFile("my-agent.afps");
  * const { manifest, content, type } = parsePackageZip(new Uint8Array(zip));
@@ -269,35 +268,6 @@ export function parsePackageZip(
   zipBuffer: Uint8Array,
   options?: ParsePackageZipOptions,
 ): ParsedPackageZip {
-  // The signature says `options` cannot be a number, so an in-tree call site
-  // that passes one fails to compile. This runtime check outlives that type on
-  // purpose: `@appstrate/core` is PUBLISHED, and a published consumer can still
-  // pass the retired positional `maxSize` with no compiler in the way. Be exact
-  // about who that is — this package ships RAW TypeScript (`"./zip":
-  // "./src/zip.ts"`, `files: ["src", …]`, `engines.bun`, no build step), so a
-  // plain-JS Node consumer of this subpath cannot exist at all. The reachable
-  // caller is narrower: a Bun consumer that never runs `tsc` — its own `check`
-  // is lint-only, or the call is in a `.js`/`.mjs` file, or it types the
-  // argument `any`. Bun executes the `.ts` and erases the type either way.
-  // Hence the cast — the check has to test a shape the type has already ruled
-  // out.
-  //
-  // Deleting the check instead would not restore the old behaviour, it would
-  // HIDE it: a number falls through `options ?? {}`, `opts.maxSize` reads
-  // `undefined`, and the default ceiling silently replaces the limit the caller
-  // asked for. `docs/NO_TRANSITIONAL_CODE.md` step 5 — a retired form that can
-  // still arrive from outside must fail loudly, never work.
-  //
-  // A `TypeError` and not a `PackageZipError`: nothing is wrong with the
-  // archive, the call is wrong. `PackageZipError` is what `routes/packages.ts`
-  // renders into the 400 an uploader reads, and that would blame them for a bug
-  // in the calling code.
-  if (typeof (options as unknown) === "number") {
-    throw new TypeError(
-      `parsePackageZip(zip, ${String(options)}): the bare-number \`maxSize\` argument is retired. ` +
-        `Pass a ParsePackageZipOptions object instead: parsePackageZip(zip, { maxSize: ${String(options)} }).`, // canonical-casing-exempt
-    );
-  }
   const opts: ParsePackageZipOptions = options ?? {};
   const limit = opts.maxSize ?? PACKAGE_ZIP_MAX_COMPRESSED_BYTES;
   if (zipBuffer.length > limit) {

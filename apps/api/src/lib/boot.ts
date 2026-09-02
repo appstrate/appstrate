@@ -472,9 +472,14 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
  * recording when the repair could stop shipping. That is what
  * `docs/NO_TRANSITIONAL_CODE.md` §3 and §5 forbid. The DDL moved to
  * `scripts/migration/0004-oauth-resources-watermark-drift.sql`, run once by an
- * operator; what stays here detects and refuses, the shape
- * `RETIRED_ENV_RENAMES` (`packages/env/src/index.ts`) already uses for a form
- * that must never silently work.
+ * operator; what stays here detects and refuses.
+ *
+ * NOT retirement machinery, despite replacing a self-heal: it does not refuse a
+ * RETIRED FORM, it detects a watermark corruption that — in this function's own
+ * words below — "fires for a drift that first appears from here on". The
+ * transition it came from is over; the failure mode it guards is not, so
+ * `docs/NO_TRANSITIONAL_CODE.md` §4 does not reach it. A transitional-code
+ * audit deleted it once on the strength of the resemblance; that was wrong.
  *
  * Refusing rather than warning, deliberately: the drift is not scoped to 0006.
  * It skipped every migration below the corrupted watermark, so a process that

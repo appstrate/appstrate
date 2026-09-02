@@ -89,76 +89,32 @@ export class OAuthAdminValidationError extends Error {
 }
 
 /**
- * Retired scope prefixes, each mapped to the prefix that replaced it. This is
- * DATA, not a string compare: a resource rename that rewrites persisted scope
- * strings adds one entry and is diagnosed by the same path as every other.
+ * The scopes in `scopes` that are outside the OIDC vocabulary — i.e. exactly
+ * what {@link assertValidScopes} would refuse. Empty for a valid list, and for
+ * `undefined`/empty input (nothing to validate, the caller's default applies).
  *
- * DIAGNOSTIC ONLY — a retired prefix is not an alias: it is still rejected and
- * comparisons stay exact. The one job here is to let an error message say
- * "this was renamed" instead of "unknown scope". `documents` → `files` is
- * issue #1177 (`0046_legacy_permission_scope_strings`); `applications` →
- * `spaces` is `scripts/migration/0003-application-ids-to-space-ids.sql`.
- * Scope strings are the only field this service manages that a data migration
- * has ever rewritten, so `scopes` is the only field that can go stale in an
- * operator's env without the operator having changed anything.
+ * Exported for `instance-client-sync.ts`, which must know whether a declaration
+ * would SURVIVE a re-create before it tells an operator to delete a row and
+ * restart. Answering that with a predicate rather than a catch keeps the
+ * vocabulary in one place.
  */
-const RETIRED_SCOPE_PREFIXES: Record<string, string> = {
-  documents: "files",
-  applications: "spaces",
-};
-
-/**
- * The retired scope spellings in `scopes`, each paired with what replaced it.
- * Empty when the list uses only current vocabulary — the normal case.
- *
- * Exported so the env-sync (`instance-client-sync.ts`) can tell a `scopes`
- * drift caused by a stale `OIDC_INSTANCE_CLIENTS` entry apart from a genuine
- * one, and print the remedy that actually works.
- */
-export function retiredScopeRenames(
-  scopes: readonly string[],
-): { retired: string; replacement: string }[] {
-  const out: { retired: string; replacement: string }[] = [];
-  for (const scope of scopes) {
-    const sep = scope.indexOf(":");
-    if (sep <= 0) continue;
-    const prefix = RETIRED_SCOPE_PREFIXES[scope.slice(0, sep)];
-    if (!prefix) continue;
-    out.push({ retired: scope, replacement: `${prefix}${scope.slice(sep)}` });
-  }
-  return out;
+export function invalidScopesIn(scopes: readonly string[] | undefined): string[] {
+  if (!scopes || scopes.length === 0) return [];
+  // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
+  const allowed = getAppstrateScopeSet();
+  return scopes.filter((s) => !allowed.has(s));
 }
 
 /**
  * Reject any requested scope outside the OIDC vocabulary (identity scopes +
  * `OIDC_ALLOWED_SCOPES` + module `endUserGrantable` contributions).
  *
- * A retired spelling is rejected like any other unknown scope, but with its own
- * message: it is not a typo, it is a name that used to work, and the operator
- * needs to be told what replaced it rather than being told the scope does not
- * exist.
- *
  * `undefined` / empty in — nothing to validate, the caller's own default
  * applies.
  */
 function assertValidScopes(scopes: readonly string[] | undefined): void {
-  if (!scopes || scopes.length === 0) return;
-  // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
-  const allowed = getAppstrateScopeSet();
-  const invalid = scopes.filter((s) => !allowed.has(s));
+  const invalid = invalidScopesIn(scopes);
   if (invalid.length === 0) return;
-
-  const retired = retiredScopeRenames(invalid);
-  if (retired.length > 0) {
-    const renames = retired.map((r) => `${r.retired} -> ${r.replacement}`).join(", ");
-    throw new OAuthAdminValidationError(
-      "scopes",
-      `OIDC: retired scope spellings rejected at service boundary: ${renames}. ` +
-        `These resources were renamed and the stored values were rewritten by a ` +
-        `data migration; the old spellings no longer grant anything. ` +
-        `Replace them with the current names.`,
-    );
-  }
 
   throw new OAuthAdminValidationError(
     "scopes",
@@ -1050,13 +1006,13 @@ export async function compareDeclaredClientWithStored(
       declared: declared.postLogoutRedirectUris,
     });
   }
-  // Exact comparison, deliberately: a retired spelling in the declaration is a
-  // real divergence from the stored (migrated) row and must be reported, not
-  // absorbed by an alias. What it must NOT do is fall through to the generic
-  // "delete the row and restart" remedy — that is destructive and does not even
-  // work, since the re-create then trips `assertValidScopes` on the same env
-  // value. `syncInstanceClientsFromEnv` recognises the case via
-  // `retiredScopeRenames` and prints the remedy that does work.
+  // Exact comparison, deliberately: a divergence from the stored row is
+  // reported, never absorbed by an alias. What a `scopes` divergence must NOT
+  // do is fall through to the generic "delete the row and restart" remedy when
+  // the declared list would not survive the re-create — that is destructive AND
+  // useless, since the re-create trips `assertValidScopes` on the same env
+  // value. `syncInstanceClientsFromEnv` checks that with `invalidScopesIn`
+  // before offering the remedy.
   if (!setEquals(row.scopes ?? [], declared.scopes)) {
     mismatches.push({
       field: "scopes",

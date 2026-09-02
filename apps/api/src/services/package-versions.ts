@@ -683,9 +683,19 @@ export async function createVersionFromDraft(params: {
   // A schema-valid mcp-server draft can still point at a companion file that
   // is absent from the stored payload. Reparse the exact bytes about to become
   // immutable so publish enforces the same executable-archive invariant as
-  // create/import/install. Legacy rows whose stored manifest drifted to another
-  // package type retain their established publish compatibility path.
-  if (pkg.type === "mcp-server" && finalManifest.type === "mcp-server") {
+  // create/import/install.
+  //
+  // Keyed on `pkg.type` ALONE. This used to also require
+  // `finalManifest.type === "mcp-server"`, exempting a row whose stored
+  // manifest had drifted to another type — which meant the one row shape that
+  // cannot be trusted was the one that skipped the check, minting an immutable
+  // version + ZIP nothing ever validated. Every write direction is closed:
+  // create throws (`package-items/manifest.ts`), the author routes 400
+  // (`validateManifestForRoute`), fork normalizes (`package-fork.ts`), and
+  // #987 closed the last one. A surviving drifted row now fails publish loudly
+  // with `invalid_bundle` instead of publishing unchecked
+  // (`docs/NO_TRANSITIONAL_CODE.md` §1).
+  if (pkg.type === "mcp-server") {
     try {
       parsePackageZip(new Uint8Array(zipBuffer), { retiredRuntimeTools: "drop" });
     } catch (err) {

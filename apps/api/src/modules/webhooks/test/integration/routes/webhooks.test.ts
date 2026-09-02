@@ -108,7 +108,7 @@ describe("Webhooks API", () => {
       });
     }
 
-    it("rejects a retired `app_` spaceId with the migration diagnostic", async () => {
+    it("rejects a wrong-prefix spaceId through the same guard as `X-Space-Id`", async () => {
       const res = await app.request("/api/webhooks", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -123,10 +123,11 @@ describe("Webhooks API", () => {
       const body = (await res.json()) as any;
       expect(body.code).toBe("invalid_request");
       expect(body.param).toBe("spaceId");
-      // Same diagnostic the `X-Space-Id` path gives — one implementation.
-      expect(body.detail).toContain("retired");
-      expect(body.detail).toContain("pre-rename data");
-      expect(body.detail).toContain("migration");
+      // Same diagnostic the `X-Space-Id` path gives — one implementation, and
+      // it names no rename: `app_` is simply not a space id shape.
+      expect(body.detail).toContain("Malformed space id");
+      expect(body.detail).not.toContain("retired");
+      expect(body.detail).not.toContain("migration");
     });
 
     it("returns secret only at creation", async () => {
@@ -158,16 +159,16 @@ describe("Webhooks API", () => {
       expect(body.param).toBe("spaceId");
     });
 
-    it("400s a retired `app_` `?spaceId=` with the migration diagnostic", async () => {
+    it("400s a wrong-prefix `?spaceId=` on shape", async () => {
       const res = await app.request(
         "/api/webhooks?spaceId=app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10",
         { headers: authHeaders(ctx) },
       );
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
-      expect(body.detail).toContain("retired");
-      expect(body.detail).toContain("pre-rename data");
-      expect(body.detail).toContain("migration");
+      expect(body.detail).toContain("Malformed space id");
+      expect(body.detail).not.toContain("retired");
+      expect(body.detail).not.toContain("migration");
     });
 
     it("lists space-level webhooks when spaceId is passed", async () => {

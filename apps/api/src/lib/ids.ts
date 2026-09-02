@@ -11,16 +11,12 @@ export function prefixedId(prefix: string): string {
  * Strict space id shape: `spc_` + a canonical lowercase dashed UUID — exactly
  * what `prefixedId("spc")` mints (`crypto.randomUUID()`), and nothing else.
  *
- * Why a regex at all: the id prefix was `app_` until the space rename, and
- * without a shape check an `app_` id that a data migration failed to rewrite
- * does NOT 404 — the header, the API key's bound id and the `spaces` row all
- * still agree with each other, so a half-finished migration keeps working and
- * says nothing. The regex turns that silence into a loud failure. Mirrors
+ * Why a regex at all: without a shape check, an id whose prefix is wrong does
+ * NOT 404 — the header, the API key's bound id and the `spaces` row can all
+ * still agree with each other, so a malformed id keeps working and says
+ * nothing. The regex turns that silence into a loud failure. Mirrors
  * `FILE_ID_RE` (`packages/core/src/file-uri.ts`), which exists for the same
  * reason on the equivalent `file_` id.
- *
- * One shape is written and the same one is read: `app_` is REJECTED, never
- * accepted-and-warned (`docs/NO_TRANSITIONAL_CODE.md` §1).
  *
  * There is one mint shape and this regex is it: fixtures go through
  * `prefixedId("spc")` like everything else, rather than hand-rolling a lookalike.
@@ -32,20 +28,9 @@ export const SPACE_ID_RE = /^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
 /**
  * Throw unless `id` is a canonical space id. `param` names the field the id
  * arrived on so the 400 points at it (`X-Space-Id`, `space_id`, …).
- *
- * The `app_` case gets its own message on purpose: an operator reading the log
- * must be able to tell "a client sent garbage" apart from "the `app_` → `spc_`
- * data migration has not run on this deployment".
  */
 export function assertSpaceId(id: string, param = "space_id"): void {
   if (SPACE_ID_RE.test(id)) return;
-  if (id.startsWith("app_")) {
-    throw invalidRequest(
-      `Space id '${id}' uses the retired \`app_\` prefix. Space ids are \`spc_\` + a UUID; ` +
-        `this deployment still holds pre-rename data — run the \`app_\` → \`spc_\` id migration.`,
-      param,
-    );
-  }
   throw invalidRequest(
     `Malformed space id '${id}'. Expected \`spc_\` followed by a canonical UUID.`,
     param,

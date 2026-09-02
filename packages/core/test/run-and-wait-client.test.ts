@@ -594,7 +594,7 @@ describe("launchRunAndWait launch body", () => {
   // sees it, and the run launches with nothing mounted while every layer
   // reports success. These two assert the refusal, which is the only place
   // that signal can exist.
-  it("kind:inline refuses the retired context_documents spelling by name", async () => {
+  it("kind:inline refuses an undeclared file-argument spelling", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -602,7 +602,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_documents: ["appfile://file_abc12345"],
+        contextDocuments: ["appfile://file_abc12345"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -610,7 +610,7 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(false);
     expect(
       String((result as { step: { payload: { error?: string } } }).step.payload.error),
-    ).toMatch(/`context_documents` is not an argument of this tool/);
+    ).toMatch(/Unknown argument `contextDocuments`/);
     // Nothing launched — the model is told to resend, not handed a fileless run.
     expect(captured()).toBeUndefined();
   });
@@ -627,7 +627,7 @@ describe("launchRunAndWait launch body", () => {
         manifest: { name: "tmp" },
         prompt: "compile",
         context_files: ["appfile://file_abc12345"],
-        context_documents: ["appfile://file_def67890"],
+        contextDocuments: ["appfile://file_def67890"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -666,7 +666,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_documents: "appfile://file_abc12345",
+        contextDocuments: "appfile://file_abc12345",
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -674,7 +674,7 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(false);
     expect(
       String((result as { step: { payload: { error?: string } } }).step.payload.error),
-    ).toMatch(/`context_documents` is not an argument of this tool/);
+    ).toMatch(/Unknown argument `contextDocuments`/);
   });
 
   it("kind:agent rejects the retired spelling too (never silently drops it)", async () => {
@@ -685,7 +685,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        context_documents: ["appfile://file_abc12345"],
+        contextDocuments: ["appfile://file_abc12345"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
