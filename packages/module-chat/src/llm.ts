@@ -106,13 +106,18 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
  * Space-scoped operations (agents, runs, …) need a space context. A
  * session carries none by default, so resolve the org's default space
  * and forward it as `X-Space-Id` on the MCP request. Cached per org —
- * the default space rarely changes.
+ * the default space rarely changes, but it CAN (an admin re-points it), so
+ * an entry expires after {@link SPACE_CACHE_TTL_MS} and the next turn
+ * re-reads. Without the expiry a process kept routing every turn's MCP
+ * calls at the old space until restart.
  */
+export const SPACE_CACHE_TTL_MS = 5 * 60_000;
+
 // Only RESOLVED ids are cached — never a miss. A miss (transient failure OR an
 // empty 200) is left uncached so the next turn retries: an empty
 // `/api/spaces` is anomalous (every org normally has a default space), so
 // caching it would strip space-scoped MCP tools org-wide.
-const spaceCache = new Map<string, string>();
+const spaceCache = new Map<string, { id: string; expiresAt: number }>();
 
 export async function resolveDefaultSpaceId(
   origin: string,
@@ -122,9 +127,12 @@ export async function resolveDefaultSpaceId(
   // so the default-space lookup rides the loopback-auth seam. A plain
   // `fetch` default would silently bypass it — symmetry with listModels.
   fetchImpl: typeof fetch,
+  // The clock the TTL is judged against — injectable so the expiry can be
+  // exercised without waiting it out.
+  now: () => number = Date.now,
 ): Promise<string | undefined> {
   const cached = spaceCache.get(orgId);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined && cached.expiresAt > now()) return cached.id;
   try {
     const res = await fetchImpl(`${origin}/api/spaces`, { headers });
     if (!res.ok) {
@@ -151,7 +159,7 @@ export async function resolveDefaultSpaceId(
     }
     const id = (body.data.find((s) => s.isDefault) ?? body.data[0])?.id;
     if (id) {
-      spaceCache.set(orgId, id);
+      spaceCache.set(orgId, { id, expiresAt: now() + SPACE_CACHE_TTL_MS });
       return id;
     }
     return undefined; // empty 200 — anomalous, don't cache

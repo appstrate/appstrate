@@ -161,15 +161,26 @@ async function upsertMessage(
 /**
  * Persist the user turn BEFORE inference starts. Returns the user message id so
  * the assistant turn can derive its own id from it.
+ *
+ * The message this one follows is read ONLY when the message carries no id. It
+ * is hash material for `deterministicMessageId`, which `upsertMessage` reaches
+ * on that branch alone; the chat route always sends the client-minted id, so
+ * the common turn is one INSERT and one UPDATE with no read in front of them.
+ * The derived-id path is unchanged: same material, same id.
+ *
+ * `client` is the writer's DB slice — `db` in production. A caller that needs
+ * to observe the statements this issues (a test counting round trips) passes
+ * its own; it is the same seam `persistNotice` uses to run inside a
+ * transaction.
  */
-export async function persistUserMessage(sessionId: string, message: UIMessage): Promise<string> {
-  const { messageId, seq } = await upsertMessage(
-    db,
-    sessionId,
-    message,
-    await lastMessageId(db, sessionId),
-  );
-  const owner = await touchSession(db, sessionId, "user", seq);
+export async function persistUserMessage(
+  sessionId: string,
+  message: UIMessage,
+  client: ChatDbClient = db,
+): Promise<string> {
+  const precedingMessageId = message.id ? null : await lastMessageId(client, sessionId);
+  const { messageId, seq } = await upsertMessage(client, sessionId, message, precedingMessageId);
+  const owner = await touchSession(client, sessionId, "user", seq, titleCandidate(message));
   if (owner) notifySessionUpdate(sessionId, owner.orgId, owner.userId);
   return messageId;
 }
@@ -216,8 +227,8 @@ export async function persistAssistantMessage(
  * the first write set it — while `lastReadSeq` is not in the assistant branch
  * at all, so `unread` cannot flip. What the upsert WOULD do is rewrite the row
  * (a fresh heap tuple carrying identical content) and re-run `touchSession` on
- * it: a title scan for as long as `title` is null, an UPDATE of `chat_sessions`
- * bumping `updatedAt` — which re-sorts the conversation list, ordered
+ * it: an UPDATE of `chat_sessions` bumping `updatedAt` (plus a title scan for
+ * as long as `title` is null) — which re-sorts the conversation list, ordered
  * `desc(updatedAt)` in routes.ts — and an SSE `notifySessionUpdate` telling
  * every connected client of that owner to refetch. A replayed reconciliation
  * would jump the session to the top of its owner's sidebar with nothing new in
@@ -307,13 +318,29 @@ interface NoticeOutcome {
 }
 
 /**
- * Bump `updatedAt`, derive a title from the first user message if still unset,
- * and advance the read-state watermark matching the persisted turn: an
- * assistant turn advances `lastAssistantSeq` (the session becomes unread until
- * its owner looks at it), a user turn advances `lastReadSeq` (sending a message
- * implies having seen the thread — keeps headless/API senders from accruing
- * phantom unread). Watermarks are message pointers, monotonic via GREATEST —
- * a replayed/late write can never regress them.
+ * Bump `updatedAt`, set the title if still unset, and advance the read-state
+ * watermark matching the persisted turn: an assistant turn advances
+ * `lastAssistantSeq` (the session becomes unread until its owner looks at it),
+ * a user turn advances `lastReadSeq` (sending a message implies having seen the
+ * thread — keeps headless/API senders from accruing phantom unread). Watermarks
+ * are message pointers, monotonic via GREATEST — a replayed/late write can
+ * never regress them.
+ *
+ * ONE statement on the common path. It used to be three — SELECT the session,
+ * maybe scan for a title, UPDATE — on every persisted message. The title is
+ * now written as `COALESCE(title, <candidate>)`, where the candidate is the
+ * text of the message being persisted (a user turn; see `titleCandidate`), so
+ * a first user message titles the session in the same UPDATE that records it,
+ * and a later one can never overwrite a title that is already there — the
+ * user's own rename included. `RETURNING` hands back the owner the caller
+ * signals with, and the title as it stands after the write.
+ *
+ * The scan (`deriveTitle`) survives as a fallback for the one case the
+ * candidate cannot cover: the row is still untitled after the write AND this
+ * message brought no candidate — an assistant turn or a server notice on a
+ * session whose user turns carried no text. Then, and only then, the earlier
+ * user messages are read and a second, guarded UPDATE sets whatever they
+ * yield.
  *
  * Returns the session's owner (null when the row is gone) INSTEAD of signalling
  * the change itself. `notifySessionUpdate` always publishes on the pooled `db`,
@@ -329,25 +356,54 @@ async function touchSession(
   sessionId: string,
   kind: "user" | "assistant",
   seq: number,
+  candidate: string | null = null,
 ): Promise<SessionOwner | null> {
   const [session] = await client
-    .select({ title: chatSessions.title, orgId: chatSessions.orgId, userId: chatSessions.userId })
-    .from(chatSessions)
-    .where(eq(chatSessions.id, sessionId))
-    .limit(1);
-  if (!session) return null;
-  const title = session.title ?? (await deriveTitle(client, sessionId));
-  await client
     .update(chatSessions)
     .set({
       updatedAt: new Date(),
       ...(kind === "assistant"
         ? { lastAssistantSeq: sql`GREATEST(coalesce(${chatSessions.lastAssistantSeq}, 0), ${seq})` }
         : { lastReadSeq: sql`GREATEST(coalesce(${chatSessions.lastReadSeq}, 0), ${seq})` }),
-      ...(title !== session.title ? { title } : {}),
+      // The cast pins the parameter's type when the candidate is null.
+      title: sql`COALESCE(${chatSessions.title}, ${candidate}::text)`,
     })
-    .where(eq(chatSessions.id, sessionId));
+    .where(eq(chatSessions.id, sessionId))
+    .returning({
+      title: chatSessions.title,
+      orgId: chatSessions.orgId,
+      userId: chatSessions.userId,
+    });
+  if (!session) return null;
+  if (session.title === null && candidate === null) {
+    const derived = await deriveTitle(client, sessionId);
+    if (derived !== null) {
+      // Guarded like the COALESCE above: a title set in between stays.
+      await client
+        .update(chatSessions)
+        .set({ title: derived })
+        .where(and(eq(chatSessions.id, sessionId), isNull(chatSessions.title)));
+    }
+  }
   return { orgId: session.orgId, userId: session.userId };
+}
+
+/**
+ * The title a message being persisted proposes for its session: a user turn's
+ * text, or nothing — an assistant turn never titles a conversation. Computed
+ * in memory from the message already in hand, so the common first turn needs
+ * no scan of `chat_messages`. Same rule as `deriveTitle`, which reads the
+ * stored form of the same messages.
+ */
+function titleCandidate(message: UIMessage): string | null {
+  if (message.role !== "user") return null;
+  return titleFromText(uiMessageText(message.parts));
+}
+
+/** A message's text as a title: trimmed to 60 chars (57 + ellipsis); null when empty. */
+function titleFromText(text: string): string | null {
+  if (!text) return null;
+  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
 }
 
 /**
@@ -355,14 +411,17 @@ async function touchSession(
  *
  * The loop below skips a user message with no text (one carrying only an
  * attachment, say), so this cannot be 1. It used to be unbounded — the query
- * read every message of the session, with no role filter — and it re-ran on
- * every turn for as long as `title` stayed null, i.e. on the FIRST turn of every
- * conversation, the one whose latency the user judges. Ten is far past the point
+ * read every message of the session, with no role filter — and it ran on
+ * every turn for as long as `title` stayed null. Ten is far past the point
  * where a conversation that has not yielded a title is going to.
  */
 const TITLE_SCAN_LIMIT = 10;
 
-/** First user message's text, trimmed to 60 chars (57 + ellipsis). */
+/**
+ * First user message's text as a title (see `titleFromText`), read back from
+ * storage. The fallback path of `touchSession` — the common path titles from
+ * the message in hand without a read.
+ */
 async function deriveTitle(client: ChatDbClient, sessionId: string): Promise<string | null> {
   const rows = await client
     .select({ content: chatMessages.content })
@@ -381,8 +440,8 @@ async function deriveTitle(client: ChatDbClient, sessionId: string): Promise<str
   for (const row of rows) {
     const content = row.content as { role?: string; parts?: unknown[] };
     if (content?.role !== "user" || !Array.isArray(content.parts)) continue;
-    const text = uiMessageText(content.parts);
-    if (text) return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+    const title = titleFromText(uiMessageText(content.parts));
+    if (title !== null) return title;
   }
   return null;
 }
