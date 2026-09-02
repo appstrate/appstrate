@@ -32,7 +32,11 @@ import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
 import { drainTurns } from "./inflight.ts";
-import { closeResumableStore, configureResumableStore } from "./resumable.ts";
+import {
+  closeResumableStore,
+  configureResumableStore,
+  sweepStaleActiveStreams,
+} from "./resumable.ts";
 import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
 import { warnIfDefaultChatConcurrency } from "./pi-chat/concurrency.ts";
@@ -70,6 +74,22 @@ const chatModule: AppstrateModule = {
     // Resume tiering comes from the platform's own Redis decision, not from a
     // second read of the environment inside the module.
     configureResumableStore(ctx.redisUrl);
+    // No Redis → in-memory store, single replica: no recording survived the
+    // restart, so every `active_stream_id` still set is stale by construction
+    // (see `sweepStaleActiveStreams`). With Redis this is deliberately NOT
+    // done — another replica may own a live turn — and the resume route clears
+    // a stale marker on its first miss instead. Best-effort: a failure here
+    // is logged, not fatal, since that same resume-miss sweep covers it.
+    if (!ctx.redisUrl) {
+      try {
+        const swept = await sweepStaleActiveStreams();
+        if (swept > 0) {
+          logger.info("chat: cleared stale active stream markers at boot", { count: swept });
+        }
+      } catch (err) {
+        logger.warn("chat: stale active stream sweep failed at boot", { err: String(err) });
+      }
+    }
     // Chat now runs entirely in-process, so its concurrency cap is a capacity
     // decision an operator must make deliberately. Say so at boot.
     warnIfDefaultChatConcurrency();
