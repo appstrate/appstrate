@@ -229,6 +229,8 @@ export async function handleChatStream(
   // always satisfiable. Ephemeral turns record un-attributed usage (null).
   const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
+  const turnStart = Date.now();
+
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
   // creates conversations lazily, so the sidebar shows a new conversation
@@ -240,9 +242,14 @@ export async function handleChatStream(
   // marker are still written later, just before generation — keeping the
   // "generating" flag off until we're committed to a turn, so a preamble error
   // can't strand the session as perpetually generating.
-  if (sessionId && lastMessage?.id) {
-    await ensureSession(sessionId, orgId, user.id);
-  }
+  //
+  // Started here, NOT awaited here: it depends on nothing but ids, so it runs
+  // concurrently with the phase-A reads below and is joined in the same
+  // `Promise.all` — a foreign-tenant 404 still surfaces before anything is
+  // materialized into the session, and attaching the join in the same tick is
+  // what keeps a rejection from ever going unhandled.
+  const sessionReady: Promise<void> =
+    sessionId && lastMessage?.id ? ensureSession(sessionId, orgId, user.id) : Promise.resolve();
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
@@ -258,8 +265,6 @@ export async function handleChatStream(
   // than a header captured once.
   const platformFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     deps.dispatch(new Request(input, init))) as typeof fetch;
-
-  const turnStart = Date.now();
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -287,16 +292,65 @@ export async function handleChatStream(
   // ── Preamble phase A (parallel) ──────────────────────────────────────────
   // The model list and the default space id are independent reads, so
   // fire them together rather than back-to-back. `listModels` resolves the row
-  // the turn binds to; the space id scopes the MCP + integration reads that follow. Pin from the header when the caller
-  // already supplied one (no lookup needed).
+  // the turn binds to; the space id scopes the MCP + integration reads that
+  // follow. Pin from the header when the caller already supplied one (no lookup
+  // needed).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
   const pinnedSpaceId = c.req.header("x-space-id");
   const phaseAStart = Date.now();
+  const spaceIdPromise: Promise<string | undefined> = pinnedSpaceId
+    ? Promise.resolve(pinnedSpaceId)
+    : resolveDefaultSpaceId(origin, headers, orgId, platformFetch);
+
+  // ── Preamble phase B (overlapped with A) ─────────────────────────────────
+  // Only the caller-context block. It depends on the space id and the caller's
+  // headers — never on the chosen model or the admission gate — so it is chained
+  // on the space id and starts the moment that resolves (immediately when
+  // pinned), overlapping the model list, the attachment materialization, the
+  // credential resolution and the gate rather than waiting behind them. It is a
+  // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
+  // nothing, which is acceptable — what a rejected turn must not do is persist
+  // a user message, open an MCP session or record usage, none of which happen
+  // before the gate.
+  //
+  // There is NO platform-MCP probe here: the Pi engine opens its OWN MCP
+  // connection from `platformMcp.url`, and the MCP server's instructions reach
+  // the model through that handshake. Probing here would be a second handshake
+  // we'd immediately close — 2 round-trips wasted on the TTFT path. We pass
+  // `platformMcp` optimistically; if the `mcp` module is absent the engine just
+  // gets no tools.
+  //
+  // The promise settles to a RESULT and never rejects: every early return
+  // between here and the point the block is consumed (invalid generation
+  // settings, a gate rejection) would otherwise leave a rejection with no
+  // handler. The error is rethrown where the block is consumed.
+  let phaseBMs = 0;
+  const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
+    spaceIdPromise
+      .then((resolvedSpaceId) => {
+        const phaseBStart = Date.now();
+        return buildCallerContextBlock(c, {
+          origin,
+          headers,
+          spaceId: resolvedSpaceId,
+          user,
+          deps,
+          // UI language forwarded by the client; validated/defaulted in the builder.
+          locale: c.req.header("X-Chat-Locale"),
+        }).finally(() => {
+          // Wall time of the block itself, from the space id being known.
+          phaseBMs = Date.now() - phaseBStart;
+        });
+      })
+      .then(
+        (block) => ({ ok: true as const, block }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
   const [models, spaceId] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    pinnedSpaceId
-      ? Promise.resolve(pinnedSpaceId)
-      : resolveDefaultSpaceId(origin, headers, orgId, platformFetch),
+    spaceIdPromise,
+    sessionReady,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -360,8 +414,10 @@ export async function handleChatStream(
   // subscription status must be able to refuse it. `subscription` reports the
   // credential mode, and the platform derives the credential source from it.
   //
-  // Gated BEFORE the phase-B preamble so a rejected turn opens no MCP session
-  // and persists no user message.
+  // Gated BEFORE the caller-context block is consumed, the model binding is
+  // resolved and capacity is reserved, so a rejected turn opens no MCP session
+  // and persists no user message. (The block's read may already be in flight —
+  // see phase B above — but nothing is written until the gate has answered.)
   const rejection = await deps.checkUsageAllowed({
     orgId,
     presetId: chosen.id,
@@ -370,24 +426,10 @@ export async function handleChatStream(
   });
   if (rejection) return usageRejectionResponse(rejection);
 
-  // ── Preamble phase B ─────────────────────────────────────────────────────
-  // Only the caller-context block. There is NO platform-MCP probe here: the Pi
-  // engine opens its OWN MCP connection from `platformMcp.url`, and the MCP
-  // server's instructions reach the model through that handshake. Probing here
-  // would be a second handshake we'd immediately close — 2 round-trips wasted on
-  // the TTFT path. We pass `platformMcp` optimistically; if the `mcp` module is
-  // absent the engine just gets no tools.
-  const phaseBStart = Date.now();
-  const contextBlock = await buildCallerContextBlock(c, {
-    origin,
-    headers,
-    spaceId,
-    user,
-    deps,
-    // UI language forwarded by the client; validated/defaulted in the builder.
-    locale: c.req.header("X-Chat-Locale"),
-  });
-  const phaseBMs = Date.now() - phaseBStart;
+  // Join phase B. This is the one place its failure is allowed to surface.
+  const contextResult = await contextBlockPromise;
+  if (!contextResult.ok) throw contextResult.error;
+  const contextBlock = contextResult.block;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -401,14 +443,8 @@ export async function handleChatStream(
   let system = SYSTEM_PROMPT;
   if (contextBlock) system += `\n\n${contextBlock}`;
 
-  logger.info("chat preamble", {
-    // Which credential the turn spends. One engine drives them both.
-    credentialMode: isSubscription ? "oauth2" : "api-key",
-    providerId: chosen.providerId,
-    phaseAMs,
-    phaseBMs,
-    preambleMs: Date.now() - turnStart,
-  });
+  // Which credential the turn spends. One engine drives them both.
+  const credentialMode = isSubscription ? "oauth2" : "api-key";
 
   // Resolve the model binding and reserve capacity before the user message or
   // the active-stream marker is written, so a dead credential, an unsupported
@@ -443,12 +479,15 @@ export async function handleChatStream(
   // `active_stream_id` so a reloaded client's resume GET can find the live turn.
   const streamId = crypto.randomUUID();
 
-  // The session row was already ensured up front (before the preamble). Claim
+  // The session row was already ensured up front (joined with phase A). Claim
   // the conversation and persist the user turn now, just before generation.
   let userMessageId: string | undefined;
+  let claimTurnMs = 0;
   if (sessionId && lastMessage?.id) {
+    const claimStart = Date.now();
     try {
       userMessageId = await claimTurn(sessionId, streamId, lastMessage);
+      claimTurnMs = Date.now() - claimStart;
     } catch (err) {
       // The concurrency slot is already reserved but generation has not started,
       // so neither `finalize` (teardown via onSettled) nor `failCleanup` (defined
@@ -459,6 +498,20 @@ export async function handleChatStream(
       throw err;
     }
   }
+
+  // Everything before generation, for an ADMITTED turn: the two overlapped
+  // phases (their wall times, not a sum — `phaseBMs` runs under `phaseAMs`),
+  // the claim/persist round trips, and the whole span since the request was
+  // parsed. A rejected turn (gate, dead credential, unsupported family,
+  // saturated capacity) returns above and is not measured here.
+  logger.info("chat preamble", {
+    credentialMode,
+    providerId: chosen.providerId,
+    phaseAMs,
+    phaseBMs,
+    claimTurnMs,
+    preambleMs: Date.now() - turnStart,
+  });
 
   // Generation abort is DECOUPLED from the request connection: a client
   // disconnect must NOT cancel generation (that was the data-loss bug). Only an
@@ -526,7 +579,7 @@ export async function handleChatStream(
   };
   if (spaceId) mcpHeaders["x-space-id"] = spaceId;
   try {
-    return await finalize(
+    const response = await finalize(
       runEngine({
         slot,
         modelBinding,
@@ -557,6 +610,16 @@ export async function handleChatStream(
         },
       }),
     );
+    // Time to the Response object: from the parsed request to the resumable
+    // stream being wired up and handed back. `preambleMs` above stops before
+    // the engine is invoked; this includes the engine's synchronous setup and
+    // `finalizeChatStream`.
+    logger.info("chat turn response", {
+      credentialMode,
+      providerId: chosen.providerId,
+      toResponseMs: Date.now() - turnStart,
+    });
+    return response;
   } catch (err) {
     await failCleanup();
     throw err;

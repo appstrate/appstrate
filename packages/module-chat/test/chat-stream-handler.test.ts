@@ -222,13 +222,15 @@ describe("handleChatStream", () => {
       resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
       /** Scripted `/api/me/context` body, to vary the payload between turns. */
       context?: () => Response;
+      /** Replace the whole scripted dispatch (to observe request timing). */
+      dispatch?: (req: Request) => Promise<Response>;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
     const deps = {
       ...buildChatPlatformDeps(buildModuleInitContext()),
-      dispatch: scriptedDispatch(overrides?.apiShape, overrides?.context),
+      dispatch: overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.context),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
     };
     const app = buildApp(deps, engine);
@@ -438,6 +440,56 @@ describe("handleChatStream", () => {
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.orgId, ctx.orgId)))
       .limit(1);
     expect(session?.activeStreamId).toBeNull();
+  }, 20_000);
+
+  /**
+   * The preamble overlap.
+   *
+   * The caller-context read (`/api/me/context`) depends on the space id and the
+   * caller's headers only — never on the chosen model or the admission gate —
+   * so the handler starts it the moment the space id is known, under the model
+   * list. Pinned here: the context request is dispatched BEFORE the model list
+   * has answered. With the reads back in series (context after models → pick →
+   * resolve → gate) it can only start after `models:end`, and this fails.
+   */
+  it("dispatches the caller-context read before the model list has answered", async () => {
+    const events: string[] = [];
+    const base = scriptedDispatch();
+    const dispatch = async (req: Request): Promise<Response> => {
+      const path = new URL(req.url).pathname;
+      if (path === "/api/models") {
+        events.push("models:start");
+        // Long enough that a serial context read is unambiguously later.
+        await new Promise((r) => setTimeout(r, 50));
+        events.push("models:end");
+      } else if (path === "/api/me/context") {
+        events.push("context:start");
+      }
+      return base(req);
+    };
+
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      dispatch,
+      // Scripted so the ordering is observable in isolation — the platform's
+      // own resolution needs the boot-time system-model registry, which is
+      // beside the point here.
+      resolveChatModel: async () => ({ subscription: false }),
+    });
+    expect(res.status).toBe(200);
+    await res.text();
+
+    const contextStart = events.indexOf("context:start");
+    const modelsEnd = events.indexOf("models:end");
+    expect(contextStart).toBeGreaterThanOrEqual(0);
+    expect(modelsEnd).toBeGreaterThanOrEqual(0);
+    expect(contextStart).toBeLessThan(modelsEnd);
+    // The overlapped block still reached the prompt — it was joined, not lost.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.system).toContain(CONTEXT_ORG_MARKER);
+
+    await waitForAssistantPersist(sessionId);
   }, 20_000);
 
   /**
