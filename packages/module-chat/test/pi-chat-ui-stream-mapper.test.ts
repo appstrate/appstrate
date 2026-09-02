@@ -123,6 +123,70 @@ describe("PiChatUiStreamMapper", () => {
     });
   });
 
+  it("strips `details` from the tool output — the wire carries the model channel + typed offer", () => {
+    // A Pi result carries the payload twice: `content[0].text` (what the model
+    // reads) and `details` (Pi's in-memory UI channel, which nothing here
+    // reads). Forwarding both persisted and re-uploaded every tool output at
+    // twice its size. Everything BUT `details` must survive untouched.
+    const content = [{ type: "text", text: JSON.stringify({ id: "run_1", status: "success" }) }];
+    const connectOffer = { connect_url: "https://app/api/integrations/connect/start?token=t" };
+    const { chunks } = run([
+      {
+        type: "tool_execution_end",
+        toolCallId: "call_3",
+        toolName: "invoke_operation",
+        result: { content, details: { id: "run_1", status: "success" }, connectOffer },
+        isError: false,
+      },
+    ]);
+
+    expect(chunks).toEqual([
+      { type: "tool-output-available", toolCallId: "call_3", output: { content, connectOffer } },
+    ]);
+    // Negative control, stated explicitly: the key is absent, not `undefined`.
+    const output = (chunks[0] as { output: Record<string, unknown> }).output;
+    expect(Object.keys(output)).toEqual(["content", "connectOffer"]);
+    expect("details" in output).toBe(false);
+  });
+
+  it("passes a non-object tool output through unchanged", () => {
+    const { chunks } = run([
+      {
+        type: "tool_execution_end",
+        toolCallId: "c",
+        toolName: "t",
+        result: "plain",
+        isError: false,
+      },
+      {
+        type: "tool_execution_end",
+        toolCallId: "d",
+        toolName: "t",
+        result: undefined,
+        isError: false,
+      },
+    ]);
+    expect(chunks).toEqual([
+      { type: "tool-output-available", toolCallId: "c", output: "plain" },
+      { type: "tool-output-available", toolCallId: "d", output: null },
+    ]);
+  });
+
+  it("fires onFirstModelEvent once, on the first ASSISTANT message_start only", () => {
+    // The user echo's `message_start` fires at `prompt()`; the assistant's is
+    // pi-ai's `start`, pushed once the provider answered. Only the latter is a
+    // model event, and only the first one is the turn's time-to-first-response.
+    let fired = 0;
+    const mapper = new PiChatUiStreamMapper({ onFirstModelEvent: () => (fired += 1) });
+    mapper.map({ type: "message_start", message: { role: "user" } });
+    expect(fired).toBe(0);
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    expect(fired).toBe(1);
+    mapper.map({ type: "message_start", message: { role: "toolResult" } });
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    expect(fired).toBe(1);
+  });
+
   it("emits tool-output-error for a failed tool execution", () => {
     const { chunks } = run([
       {

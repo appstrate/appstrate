@@ -23,12 +23,14 @@
  * pi-ai's own request shape — that is the SDK's contract, not ours.
  */
 
-import { describe, it, expect, afterAll, afterEach } from "bun:test";
+import { describe, it, expect, afterAll, afterEach, mock } from "bun:test";
 import type { UIMessage } from "ai";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
 import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
-import { runPiChat } from "../src/pi-chat/engine.ts";
+import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
+import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
+import { logger } from "../src/logger.ts";
 import type { OrgModel } from "../src/llm.ts";
 
 const ANSWER = "Bonjour le monde";
@@ -502,6 +504,119 @@ describe("runPiChat against a stub provider", () => {
       slot!.release();
     }
   }, 5_000);
+
+  it("releases the slot when the MCP close never settles", async () => {
+    // `await mcpTools?.close()` in the turn's `finally` was the last unbounded
+    // await between the producer and its return: a close that never settles
+    // holds `execute` open, `createUIMessageStream` never closes, and
+    // `releaseOnClose` never frees the slot — the same leak the session-abort
+    // bound closed, re-entered one line later. On the unbounded engine this
+    // test does not fail, it HANGS: `res.text()` never resolves.
+    //
+    // A real close always settles, so the real builder is wrapped and only its
+    // `close` replaced. The real client is closed by hand at the end so it
+    // does not outlive the test.
+    const binding = createPiProxyModelBinding({
+      model: orgModel(),
+      origin: ORIGIN,
+      mintBearer: () => "loopback-close",
+    })!;
+    let real: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
+    const buildMcpTools: NonNullable<PiChatInput["buildMcpTools"]> = async (opts) => {
+      real = await buildPlatformMcpTools(opts);
+      return { ...real, close: () => new Promise<void>(() => {}) };
+    };
+
+    let released = 0;
+    const warnSpy = mock(() => {});
+    const originalWarn = logger.warn;
+    logger.warn = warnSpy as unknown as typeof logger.warn;
+    const startedAt = Date.now();
+    try {
+      const res = runPiChat({
+        slot: {
+          release: () => {
+            released += 1;
+          },
+        },
+        modelBinding: binding,
+        presetId: "preset_live",
+        orgId: "org_live",
+        userId: "user_live",
+        chatSessionId: null,
+        messages: userTurn("dis bonjour"),
+        system: "You are a helpful assistant.",
+        generation: {},
+        platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
+        abortSignal: new AbortController().signal,
+        onError: (error) => String(error),
+        recordUsage: () => {},
+        buildMcpTools,
+      });
+      const text = await res.text();
+
+      // The body closed and the slot went with it, within the grace (5 s) plus
+      // the turn's own construction — far below the 20 s this test allows.
+      expect(released).toBe(1);
+      expect(Date.now() - startedAt).toBeLessThan(15_000);
+      // Said so, in the same shape as the session-abort case.
+      const warned = warnSpy.mock.calls.map((c) => (c as unknown[])[0]);
+      expect(warned).toContain("Pi chat MCP close did not settle — tearing the turn down anyway");
+      // And the turn the client got is whole: the wedged close cost it nothing.
+      const types = text
+        .split("\n")
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice(5).trim())
+        .filter((d) => d && d !== "[DONE]")
+        .map((d) => (JSON.parse(d) as { type: string }).type);
+      expect(types.at(0)).toBe("start");
+      expect(types.at(-1)).toBe("finish");
+      expect(types).toContain("text-delta");
+    } finally {
+      logger.warn = originalWarn;
+      await real?.close();
+    }
+  }, 20_000);
+
+  it("logs the turn's construction timings once, every phase a number", async () => {
+    // Where a turn's fixed cost goes is invisible without this line: the
+    // handshake, the SDK import, the projection, the runtime, the loader, the
+    // session, and how long the model then took to answer at all. One entry
+    // per turn, keyed by session; on the happy path every phase was reached.
+    const infoSpy = mock(() => {});
+    const originalInfo = logger.info;
+    logger.info = infoSpy as unknown as typeof logger.info;
+    try {
+      await runTurn(() => "loopback-timings");
+    } finally {
+      logger.info = originalInfo;
+    }
+
+    const lines = infoSpy.mock.calls.filter(
+      (c) => (c as unknown[])[0] === "chat turn construction",
+    );
+    expect(lines).toHaveLength(1);
+    const fields = (lines[0] as unknown[])[1] as Record<string, unknown>;
+    for (const key of [
+      "mcpHandshakeMs",
+      "sdkLoadMs",
+      "projectionMs",
+      "runtimeMs",
+      "loaderMs",
+      "sessionMs",
+      "constructionMs",
+      "firstModelEventMs",
+    ]) {
+      expect(typeof fields[key]).toBe("number");
+      expect(fields[key] as number).toBeGreaterThanOrEqual(0);
+    }
+    expect(fields).toHaveProperty("chatSessionId", null);
+    // The model's first event comes after the prompt was issued, which comes
+    // after construction — the ordering the numbers must reflect.
+    expect(fields.firstModelEventMs as number).toBeGreaterThanOrEqual(
+      fields.constructionMs as number,
+    );
+  }, 30_000);
 
   it("carries the caller's fetch all the way into the MCP transport", async () => {
     // The route→engine hop is asserted in `chat-stream-handler.test.ts`, which
