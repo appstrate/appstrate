@@ -306,9 +306,8 @@ const DEFAULT_PACKAGE_HINT_LIMIT = 15;
  * `search_operations`.
  *
  * Bounded IN SQL. This runs twice per chat turn (agents, then skills) on the
- * TTFT path, and it used to load every accessible row — `draft_manifest` JSONB
- * included — to keep `limit` of them. The enabled filter and the LIMIT now sit
- * in the query, so only the returned rows' manifests cross the wire, and
+ * TTFT path: the enabled filter and the LIMIT sit in the query, so only the
+ * returned rows' manifests (`draft_manifest` JSONB) cross the wire, and
  * `total` rides along as a window count over the filtered set (evaluated
  * before the LIMIT, so it is the size of the whole catalog, not of the page).
  * The ordering is `accessiblePackagesOrder` — the same total order as

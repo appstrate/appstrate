@@ -68,8 +68,8 @@ function handleConnectionUpdate(qc: QueryClient) {
  *
  * `sessionId` undefined (frame did not parse, or the reconnect reconciliation
  * where the missed frames' ids are unknowable) → every member of the three
- * families, which is the pre-scoping behaviour: a missed signal must
- * degrade to "too many refetches", never to a stale sidebar.
+ * families: a missed signal must degrade to "too many refetches", never to a
+ * stale sidebar.
  */
 export function matchesChatSessionQuery(
   queryKey: readonly unknown[],
@@ -127,7 +127,7 @@ function parseChatSessionId(raw: string): string | undefined {
   try {
     json = JSON.parse(raw);
   } catch {
-    return undefined; // malformed frame → unscoped, same as before scoping
+    return undefined; // malformed frame → unscoped
   }
   const parsed = chatSessionUpdateEventSchema.safeParse(json);
   return parsed.success ? parsed.data.sessionId : undefined;

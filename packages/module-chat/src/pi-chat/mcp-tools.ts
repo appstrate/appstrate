@@ -53,8 +53,9 @@ interface PiToolResult {
  * point. The model-visible channel: `content` is what pi-ai serializes to
  * the MODEL, so connect links are redacted there; the connect URL surfaces
  * ONLY through the typed `connectOffer` field the connect card reads. `details`
- * (UI JSON view) carries the redacted payload — the live URL lives in exactly
- * one place.
+ * (Pi's in-memory UI channel; stripped before persistence by
+ * `ui-stream-mapper.ts`) carries the redacted payload — the live URL lives in
+ * exactly one place.
  */
 export function toPiToolResult(payload: unknown): PiToolResult {
   const { redacted, offer } = splitConnectPayload(payload);
@@ -88,8 +89,9 @@ export function mcpResultToPi(result: {
     }
     return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
   });
-  // `details` is UI-only (never serialized to the model) but persisted — so it
-  // is redacted too; the connect card reads the typed `connectOffer` field.
+  // `details` is Pi's in-memory UI channel (never serialized to the model,
+  // stripped before persistence) — redacted all the same, so the live URL
+  // exists only in the typed `connectOffer` field the connect card reads.
   let details: unknown;
   if (result.structuredContent !== undefined) {
     const sc = splitConnectPayload(result.structuredContent);

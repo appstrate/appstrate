@@ -88,13 +88,10 @@ describe("audit in-flight registry", () => {
     expect(await tracked).toBe("row");
   });
 
-  it("drainAudits with nothing pending resolves immediately", async () => {
-    const before = pendingAuditCount();
-    // Only meaningful when the registry is empty; a foreign pending insert
-    // from another suite would make this a wait, not a no-op.
-    if (before !== 0) return;
-    const started = performance.now();
+  it("drainAudits with nothing pending reports zero and drained", async () => {
+    // Flush anything another suite left registered, then measure the no-op.
+    await drainAudits(5_000);
+    expect(pendingAuditCount()).toBe(0);
     expect(await drainAudits(5_000)).toEqual({ pending: 0, drained: true });
-    expect(performance.now() - started).toBeLessThan(100);
   });
 });

@@ -15,9 +15,8 @@ import { logger } from "./logger.ts";
 /**
  * Decode an AI SDK UI-message SSE byte stream into its chunk objects.
  *
- * Exported for the equivalence tests only: they need the same decoder in front
- * of the legacy `readUIMessageStream` path to compare it against
- * {@link extractAssistantMessage} on identical input.
+ * Exported for the equivalence tests, which feed identical input to the AI
+ * SDK's `readUIMessageStream` and to {@link extractAssistantMessage}.
  */
 export function sseToChunks(
   byteStream: ReadableStream<Uint8Array>,
@@ -68,15 +67,13 @@ export function sseToChunks(
  * boundaries but never a `start`. So the whole stream assembles ONE message,
  * and only its final state matters.
  *
- * Single pass, no per-chunk snapshot. `readUIMessageStream` — what stood here —
- * `structuredClone`s the whole in-progress message on EVERY chunk
- * (`ai/dist/index.js`, `readUIMessageStream`'s `write`), so a turn cost
- * O(chunks × message size) on the event loop every other user's stream shares,
- * and one large tool output in `parts` multiplied every later text delta by its
- * size. Only the last snapshot was ever read. `createUIMessageStream`'s
- * `onFinish` (`handleUIMessageStreamFinish`) runs the same processor with a
- * no-op `write` and hands over `state.message` itself, uncloned, once, when the
- * merged stream ends — the `flush()` of its terminal transform. Verified
+ * Single pass, no per-chunk snapshot: `createUIMessageStream`'s `onFinish`
+ * (`handleUIMessageStreamFinish`) runs the AI SDK's message processor with a
+ * no-op `write` and hands over `state.message` itself, uncloned, once, when
+ * the merged stream ends — the `flush()` of its terminal transform. (The
+ * SDK's `readUIMessageStream` would instead `structuredClone` the whole
+ * in-progress message on EVERY chunk, O(chunks × message size) on the event
+ * loop every other user's stream shares, for a snapshot only read once.) Verified
  * against the vendored source: an `error` chunk only reaches `onError` and does
  * not stop the stream, so `onFinish` still fires; `isAborted` only reports an
  * `abort` chunk (the AI SDK's client-abort marker, which this engine never
@@ -86,7 +83,7 @@ export function sseToChunks(
  * assistant message before the first chunk, so `onFinish` always has one to
  * hand over, and the `start` chunk is the one every writer above emits exactly
  * once per turn. A stream that ends without it (nothing at all, or a lone
- * `error` chunk) yields `undefined`, as it did before.
+ * `error` chunk) yields `undefined`.
  *
  * Reading the stream to the end is what drives generation to completion on this
  * teed branch — the disconnect-survival guarantee (see `finalize-stream.ts`).

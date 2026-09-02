@@ -198,9 +198,11 @@ describe("finalizeChatStream — record-branch batching", () => {
 
     // Client: chunk-for-chunk with the engine (start + text-start + deltas + …).
     expect(clientReads).toBeGreaterThanOrEqual(CHUNKS);
-    // Record: batched. The unbatched producer appends once per chunk (≥ 200).
+    // Record: batched. The unbatched producer appends once per chunk, i.e.
+    // exactly `clientReads` times; coalescing must cut that by far more than
+    // half however slowly the source ticks.
     expect(appends()).toBeGreaterThan(0);
-    expect(appends()).toBeLessThan(50);
+    expect(appends()).toBeLessThan(clientReads / 2);
   });
 
   it("replays the batched recording to the same assistant message", async () => {

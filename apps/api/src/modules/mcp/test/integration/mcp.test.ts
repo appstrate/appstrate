@@ -508,14 +508,9 @@ describe("mcp audit + rate limiting", () => {
           }),
         }),
       );
-      // Negative control: under the previous `await Promise.allSettled(pendingAudits)`
-      // the response could not resolve while the insert was pending, and this
-      // race would yield "timeout".
-      const outcome = await Promise.race([
-        request.then((res) => res.status),
-        Bun.sleep(500).then(() => "timeout" as const),
-      ]);
-      expect(outcome).toBe(200);
+      // Negative control: a router that awaits the insert cannot answer while
+      // it is pending — this `await` then never resolves and the test times out.
+      expect((await request).status).toBe(200);
 
       // The insert is registered and still pending — a bounded drain reports
       // it as not drained rather than losing it.

@@ -358,8 +358,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // (search/describe) are metadata browsing and are not audited.
     //
     // Audit inserts are NOT awaited on the response path — every chat tool
-    // call goes through here, and the insert's round-trip was paid twice per
-    // call. The trail still survives a process recycle: the promise is handed
+    // call goes through here, and its two Hono passes would each pay the
+    // insert's round-trip. The trail still survives a process recycle: the promise is handed
     // to `trackAudit`, and graceful shutdown (`lib/shutdown.ts`) drains the
     // registry before the DB connection closes. What is lost is only what a
     // hard kill would have lost anyway. The insert is itself best-effort and

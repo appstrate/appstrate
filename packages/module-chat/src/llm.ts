@@ -106,11 +106,9 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
 /**
  * Space-scoped operations (agents, runs, …) need a space context. A
  * session carries none by default, so resolve the org's default space
- * and forward it as `X-Space-Id` on the MCP request. Cached per org —
- * the default space rarely changes, but it CAN (an admin re-points it), so
- * an entry expires after {@link SPACE_CACHE_TTL_MS} and the next turn
- * re-reads. Without the expiry a process kept routing every turn's MCP
- * calls at the old space until restart.
+ * and forward it as `X-Space-Id` on the MCP request. Cached per org; an
+ * entry expires after {@link SPACE_CACHE_TTL_MS} so a process never routes
+ * MCP calls at a space that stopped being the default for longer than that.
  */
 export const SPACE_CACHE_TTL_MS = 5 * 60_000;
 

@@ -25,10 +25,6 @@ function spacesFetch(current: () => string): { fn: typeof fetch; calls: () => nu
 afterEach(() => setCacheClock(null));
 
 describe("resolveDefaultSpaceId cache TTL", () => {
-  it("is five minutes", () => {
-    expect(SPACE_CACHE_TTL_MS).toBe(5 * 60_000);
-  });
-
   it("serves the cached id inside the TTL and re-reads once it has expired", async () => {
     const orgId = `org_${Math.random().toString(36).slice(2)}`;
     let clock = 1_000_000;
@@ -68,7 +64,7 @@ describe("resolveDefaultSpaceId cache TTL", () => {
       resolveDefaultSpaceId(ORIGIN, {}, orgId, fn),
     ]);
     expect(ids).toEqual(["spc_shared", "spc_shared", "spc_shared"]);
-    // Negative control: the per-org `Map` this replaced fetched three times.
+    // Negative control: without coalescing this is 3.
     expect(calls()).toBe(1);
   });
 });

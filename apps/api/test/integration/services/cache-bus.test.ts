@@ -12,10 +12,10 @@
  * mocks.
  */
 
-import { describe, it, expect, beforeAll, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { createCache, type CacheInvalidation } from "@appstrate/core/cache";
+import { configureCacheBus, createCache, type CacheInvalidation } from "@appstrate/core/cache";
 import { CACHE_INVALIDATE_CHANNEL, initCacheBus } from "../../../src/lib/cache-bus.ts";
 
 const cache = createCache<number>({ name: "test-cache-bus", ttlMs: 60_000 });
@@ -45,6 +45,9 @@ describe("cache invalidation bus (NOTIFY)", () => {
   afterEach(() => {
     cache.clear();
   });
+
+  // Later suites in this process must not NOTIFY on every invalidate.
+  afterAll(() => configureCacheBus(null));
 
   it("drops the local entry when another replica invalidates it", async () => {
     cache.set("k", 1);

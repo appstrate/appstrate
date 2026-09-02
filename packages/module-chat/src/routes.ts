@@ -246,13 +246,13 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       const stream = await getResumableContext().resume(session.activeStreamId);
       if (!stream) {
         // No recording under the marker's id. Two things look like this: a
-        // turn claimed a moment ago whose store acquisition has not landed yet
-        // (marker written, `context.run()` a few statements later), and a
-        // marker whose producer is gone (crash, restart, an in-memory store on
-        // a previous process). The marker's age tells them apart — `setActiveStream`
-        // stamps `updated_at` with the marker, and no live turn spends
-        // `STALE_MARKER_MIN_AGE_MS` between its claim and its acquisition. A
-        // young marker is left alone: 204, as before.
+        // live turn whose recording is not there (acquisition still a few
+        // statements away, acquisition failed, key evicted), and a marker
+        // whose producer is gone (crash, restart, an in-memory store on a
+        // previous process). The marker's age tells them apart —
+        // `setActiveStream` stamps `updated_at` with the marker, and no live
+        // turn outlives `STALE_MARKER_MIN_AGE_MS` (the turn deadline plus a
+        // teardown allowance). A young marker is left alone: 204.
         const markerAgeMs = Date.now() - session.updatedAt.getTime();
         if (markerAgeMs < STALE_MARKER_MIN_AGE_MS) return c.body(null, 204);
         // Stale: nothing will ever clear it from here on — `clearActiveStream`

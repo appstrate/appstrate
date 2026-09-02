@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The platform's one read-through cache primitive.
- *
- * Every process-local TTL cache in the platform used to be its own `Map` with
- * its own expiry check, its own eviction and its own invalidation function —
- * six of them, none coalescing concurrent loads, none able to tell another
- * replica that a value changed. This module is what they all build on now:
+ * The platform's one read-through cache primitive. Every process-local TTL
+ * cache in the platform and its modules is an instance of it:
  *
  *  - **read-through**: `get(key, loader)` returns the cached value or runs the
- *    loader ONCE per key while it is in flight (request coalescing). Sixteen
- *    llm-proxy calls resolving the same model preset at the start of a turn
- *    used to be sixteen row reads and sixteen decrypts; they are one.
+ *    loader ONCE per key while it is in flight (request coalescing) — the
+ *    llm-proxy calls that resolve one model preset at the start of a turn
+ *    share a single row read and decrypt.
  *  - **bounded**: a TTL per cache and a hard entry cap with insertion-order
  *    eviction, so a cache can never hold more than its declared budget.
  *  - **invalidation with a bus**: `invalidate(key)` and `clear()` drop the
@@ -48,8 +44,8 @@ export interface CacheInvalidation {
 
 /**
  * The transport for invalidations. `publish` must never throw and never block:
- * a lost broadcast degrades to the TTL, which is the behaviour every cache had
- * before the bus existed. Delivery calls {@link receiveCacheInvalidation}.
+ * a lost broadcast degrades to the TTL. Delivery calls
+ * {@link receiveCacheInvalidation}.
  */
 export interface CacheBus {
   publish(message: CacheInvalidation): void;

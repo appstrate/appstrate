@@ -255,6 +255,7 @@ export function getClientCached(clientId: string): Promise<OAuthClientRecord | n
   return clientCache.get(clientId, () => getClient(clientId));
 }
 
+/** @internal Test helper — drop every entry. */
 export function _resetClientCache(): void {
   clientCache.clear();
 }
@@ -723,7 +724,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
   // transaction-scoped advisory lock (same primitive core migrations and run
   // concurrency use, PGlite-compatible). The second replica blocks on the
   // lock, then observes the row the first inserted and reconciles/returns it.
-  return db.transaction(async (tx) => {
+  // The cache drop is broadcast to other replicas, so it must follow the
+  // commit: a replica told to drop while the UPDATE is still uncommitted
+  // re-reads the old row and re-caches it.
+  let reconciledClientId: string | null = null;
+  const instanceClientId = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('oidc:instance-client')::bigint)`);
 
     const [existing] = await tx
@@ -765,7 +770,7 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
             updatedAt: new Date(),
           })
           .where(eq(oauthClient.clientId, existing.clientId));
-        cacheInvalidate(existing.clientId);
+        reconciledClientId = existing.clientId;
         logger.warn("OIDC platform client reconciled to match APP_URL and public-client contract", {
           module: "oidc",
           clientId: existing.clientId,
@@ -816,6 +821,8 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     });
     return clientId;
   });
+  if (reconciledClientId) cacheInvalidate(reconciledClientId);
+  return instanceClientId;
 }
 
 // ─── Env-provisioned instance clients ─────────────────────────────────────────

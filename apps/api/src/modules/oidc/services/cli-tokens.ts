@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createCache } from "@appstrate/core/cache";
 /**
  * CLI token service (issue #165).
  *
@@ -67,6 +66,7 @@ import { createCache } from "@appstrate/core/cache";
  * device flow.
  */
 
+import { createCache } from "@appstrate/core/cache";
 import { randomBytes, createHash } from "node:crypto";
 import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
@@ -879,13 +879,7 @@ export async function checkFamilyAndTouch(params: {
  * via the dashboard.
  */
 const RUNNER_DEVICE_NAME_CACHE_TTL_MS = 60 * 1000;
-/** Coarse upper bound on the cache. The 60 s TTL means dead keys naturally
- *  expire on read, but `Map.delete` is never called on a TTL miss — so a
- *  stream of distinct family ids would grow the Map unbounded between
- *  reads of the same key. At ~10 k entries (~1 MB at typical key+name
- *  sizes) we wholesale-clear and let the cache rebuild from cold. Cheaper
- *  than maintaining LRU bookkeeping for a path whose miss is one indexed
- *  query. */
+/** Entry cap — past it the oldest entry is evicted (~1 MB at typical key+name sizes). */
 const RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES = 10_000;
 /** `familyId` → head device name (`null` = none). Bounded + TTL'd, invalidations broadcast. */
 const runnerDeviceNameCache = createCache<string | null>({

@@ -170,8 +170,7 @@ async function upsertMessage(
  *
  * `client` is the writer's DB slice — `db` in production. A caller that needs
  * to observe the statements this issues (a test counting round trips) passes
- * its own; it is the same seam `persistNotice` uses to run inside a
- * transaction.
+ * its own.
  */
 export async function persistUserMessage(
   sessionId: string,
@@ -326,9 +325,7 @@ interface NoticeOutcome {
  * are message pointers, monotonic via GREATEST — a replayed/late write can
  * never regress them.
  *
- * ONE statement on the common path. It used to be three — SELECT the session,
- * maybe scan for a title, UPDATE — on every persisted message. The title is
- * now written as `COALESCE(title, <candidate>)`, where the candidate is the
+ * ONE statement on the common path: the title is written as `COALESCE(title, <candidate>)`, where the candidate is the
  * text of the message being persisted (a user turn; see `titleCandidate`), so
  * a first user message titles the session in the same UPDATE that records it,
  * and a later one can never overwrite a title that is already there — the
@@ -410,9 +407,7 @@ function titleFromText(text: string): string | null {
  * How many of a session's earliest USER messages to inspect for a title.
  *
  * The loop below skips a user message with no text (one carrying only an
- * attachment, say), so this cannot be 1. It used to be unbounded — the query
- * read every message of the session, with no role filter — and it ran on
- * every turn for as long as `title` stayed null. Ten is far past the point
+ * attachment, say), so this cannot be 1. Ten is far past the point
  * where a conversation that has not yielded a title is going to.
  */
 const TITLE_SCAN_LIMIT = 10;

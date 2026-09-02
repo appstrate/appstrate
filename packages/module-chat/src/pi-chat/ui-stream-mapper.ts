@@ -433,14 +433,12 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
  * A Pi `AgentToolResult` carries its payload twice — `content[0].text` is the
  * JSON string the MODEL reads, `details` the same object for Pi's own in-memory
  * UI channel. Nothing in this module's UI reads `details` (`src/ui/tool-result.ts`
- * parses `content`; `src/ui/auth-offer.ts` reads the typed `connectOffer`), so
- * forwarding it meant every tool output was persisted, served by the history
- * GET, and re-uploaded by the client on every later turn at twice its size.
- * The wire/persisted shape is therefore the model channel plus the typed
- * offer: `content`, `connectOffer`, `isError` and whatever else the result
- * carries, minus `details`. The in-memory Pi result itself is untouched
- * (`mcp-tools.ts` still builds it with `details`); older persisted rows that
- * carry one are still read fine — nothing looks for it.
+ * parses `content`; `src/ui/auth-offer.ts` reads the typed `connectOffer`), and
+ * every tool output is persisted, served by the history GET and re-uploaded by
+ * the client on every later turn — so the wire/persisted shape is the model
+ * channel plus the typed offer: `content`, `connectOffer`, `isError` and
+ * whatever else the result carries, minus `details`. The in-memory Pi result
+ * itself is untouched (`mcp-tools.ts` builds it with `details`).
  */
 function persistedToolOutput(result: unknown): unknown {
   if (result == null) return null;

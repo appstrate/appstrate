@@ -64,6 +64,7 @@ import type { AppstrateModule } from "@appstrate/core/module";
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `./storage` · `./storage-s3` · `./storage-fs`                              | Storage abstraction with S3 (configurable endpoint, so MinIO/R2 work) and filesystem drivers. |
 | `./logger`                                                                 | Structured pino logging. Appstrate code never uses `console.*`.                               |
+| `./cache`                                                                  | Read-through TTL cache with request coalescing and a replica invalidation bus.                |
 | `./telemetry`                                                              | OpenTelemetry façade — a no-op unless an observability module is loaded.                      |
 | `./env` · `./errors` · `./api-errors` · `./safe-json` · `./sse` · `./html` | Environment access, error taxonomy, JSON/SSE/HTML helpers.                                    |
 | `./ssrf`                                                                   | SSRF guards (re-exported from `@appstrate/afps-shared`).                                      |

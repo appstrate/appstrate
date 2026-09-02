@@ -27,13 +27,11 @@ export const SAFETY_NET_REFETCH_MS = 60_000;
  * the `chat_session_update` frames the server emits on `setActiveStream` /
  * `clearActiveStream` — that push is the primary signal, and it is what makes
  * the spinner react within a round trip. This interval only covers a LOST
- * frame (SSE reconnect window, dropped NOTIFY). The server's resume-miss sweep
- * now clears a marker whose producer is gone, so the worst case for a lost
- * frame is ≤10 s of stale spinner on one row — not a stuck one. At 3 s this
- * was a list GET every 3 s for the whole duration of every turn, on every
- * open tab, for a signal that arrives by push anyway. Only active while at
- * least one session reports `generating`, so the idle cost stays the slow
- * interval.
+ * frame (SSE reconnect window, dropped NOTIFY): the next poll reads the row's
+ * real state. A marker whose producer died is cleared by the resume route
+ * when that conversation is next opened (or at boot without Redis), not by
+ * this poll. Only active while at least one session reports `generating`, so
+ * the idle cost stays the slow interval.
  */
 export const GENERATING_REFETCH_MS = 10_000;
 

@@ -36,6 +36,7 @@ import {
 } from "assistant-stream/resumable";
 import { createIoredisResumableStreamStore } from "assistant-stream/resumable/ioredis";
 import { logger } from "./logger.ts";
+import { CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
 
 let context: ResumableStreamContext | null = null;
 let client: Redis | null = null;
@@ -65,11 +66,10 @@ const STREAM_TTL_MS = 30 * 60_000;
  * `stores/redis-impl.js`, default 100 ms). Only resume readers — a second tab,
  * a reload mid-turn — go through it; the connected client reads its own tee
  * branch and never polls (see `finalize-stream.ts`). The trade-off is therefore
- * confined to that path: a resumed tab sees the tail up to 250 ms late (a
- * fraction of a token batch as the record branch now flushes on a 50 ms
- * window), and each resumed reader costs Redis 4 polls/s instead of 10 — a
- * 2.5× drop per reader, which is what matters when a long turn is watched from
- * several tabs.
+ * confined to that path: a resumed tab sees the tail up to 250 ms late (the
+ * record branch flushes on a 50 ms window, so that is a fraction of a batch),
+ * and each resumed reader costs Redis 4 polls/s — what matters when a long
+ * turn is watched from several tabs.
  */
 const RESUME_POLL_INTERVAL_MS = 250;
 
@@ -257,18 +257,20 @@ export async function sweepStaleActiveStreams(): Promise<number> {
 /**
  * A marker younger than this is never treated as stale by the resume route.
  *
- * The store is acquired a few statements AFTER the marker is written
- * (`claimTurn` → user-message insert → engine construction → `context.run()`),
- * so for a few tens of milliseconds every live turn looks exactly like a
- * crashed one: marker set, no recording. A resume GET landing in that window
- * (a second tab opening the conversation as the first one sends) must not
- * wipe a live turn's marker — that would strand its resume on 204 and reopen
- * the `persistNotice` window the claim ordering closes. `setActiveStream`
- * stamps `updated_at` in the same statement as the marker, so "marker older
- * than a minute with no recording" is stale by construction: no turn spends a
- * minute between its claim and its store acquisition.
+ * A live turn can look exactly like a crashed one — marker set, no recording —
+ * for its WHOLE duration, not just the few statements between `claimTurn` and
+ * `context.run()`: a store acquisition that fails (`finalize-stream.ts`
+ * continues without a recording) or a Redis key evicted mid-turn leaves the
+ * marker with nothing under it while the turn keeps streaming. A resume GET
+ * (a second tab, a reload) must not wipe a live turn's marker — that strands
+ * its resume on 204 and reopens the `persistNotice` window the claim ordering
+ * closes. What bounds a live turn is `CHAT_TURN_DEADLINE_MS`: past it the
+ * turn is aborted and its own teardown clears the marker. `setActiveStream`
+ * stamps `updated_at` in the same statement as the marker, so a marker older
+ * than the deadline plus a teardown allowance with no recording is stale by
+ * construction.
  */
-export const STALE_MARKER_MIN_AGE_MS = 60_000;
+export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
 
 /**
  * Mark a session's in-flight stream so a reloaded client can reconnect to it.

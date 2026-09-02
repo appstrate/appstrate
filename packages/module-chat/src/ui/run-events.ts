@@ -42,12 +42,12 @@ export function isTerminalStatus(status: string | null | undefined): status is R
  *
  * A card mounted with a TERMINAL `initialStatus` (a `run_and_wait` result, or a
  * reopened conversation whose launch card carries the final status) has nothing
- * to tail: the run will never emit another log line or `run_update`. Opening
- * the stream anyway used to cost a connection plus a second 1000-row log sweep
- * and a duplicate `/api/files` read on the snapshot frame. Without a tail the
- * one-shot `/api/runs/:id` read owns the completion signal (it already handles
+ * to tail: the run will never emit another log line or `run_update`, and a
+ * stream would only cost a connection, a second 1000-row log sweep and a
+ * duplicate `/api/files` read on the snapshot frame. Without a tail the
+ * one-shot `/api/runs/:id` read owns the completion signal (it handles
  * `!willTail && terminal`), so the evidence rule (`shouldRaiseSweepDone`) is
- * unchanged — only the redundant reads are gone.
+ * the same either way.
  *
  * `hasSseContext` is "an SSE URL could be built AND `EventSource` exists".
  */

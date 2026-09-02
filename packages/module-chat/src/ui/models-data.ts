@@ -66,12 +66,12 @@ export interface OrgModelOption {
 export async function fetchModels(
   getHeaders?: () => Record<string, string>,
 ): Promise<OrgModelOption[]> {
+  const res = await fetch("/api/models", {
+    credentials: "include",
+    headers: { ...getHeaders?.() },
+  });
+  if (!res.ok) throw new Error(`/api/models returned ${res.status}`);
   try {
-    const res = await fetch("/api/models", {
-      credentials: "include",
-      headers: { ...getHeaders?.() },
-    });
-    if (!res.ok) return [];
     // Stripe-canonical list envelope `{ object: "list", data, hasMore }` — the
     // single shape `/api/models` returns (apps/api `listResponse`; `data` is
     // required by the OpenAPI schema). Same read as the server-side

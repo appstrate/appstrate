@@ -95,27 +95,36 @@ export function pendingAuditCount(): number {
 }
 
 /**
- * Await every tracked audit insert, capped at `timeoutMs`. `pending` is the
- * count that was in flight when the drain started; `drained` is false when the
- * cap fired first (the remaining inserts stay registered and the caller — the
- * shutdown handler — decides what to log).
+ * Await every tracked audit insert, capped at `timeoutMs`. Loops until the
+ * registry is empty — an HTTP request still finishing during shutdown may
+ * register an insert after the first snapshot — or the cap fires. `pending`
+ * is the number of inserts awaited; `drained` is false when the cap fired
+ * first (the remaining inserts stay registered and the caller — the shutdown
+ * handler — decides what to log).
  */
 export async function drainAudits(
   timeoutMs: number,
 ): Promise<{ pending: number; drained: boolean }> {
-  const pending = [...inFlightAudits];
-  if (pending.length === 0) return { pending: 0, drained: true };
+  let awaited = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), timeoutMs);
     timer.unref?.();
   });
-  const outcome = await Promise.race([
-    Promise.allSettled(pending).then(() => "settled" as const),
-    timeout,
-  ]);
-  if (timer) clearTimeout(timer);
-  return { pending: pending.length, drained: outcome === "settled" };
+  try {
+    while (inFlightAudits.size > 0) {
+      const pending = [...inFlightAudits];
+      awaited += pending.length;
+      const outcome = await Promise.race([
+        Promise.allSettled(pending).then(() => "settled" as const),
+        timeout,
+      ]);
+      if (outcome === "timeout") return { pending: awaited, drained: false };
+    }
+    return { pending: awaited, drained: true };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**

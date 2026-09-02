@@ -10,8 +10,7 @@
  * dropped on the replica that took a write is dropped on every replica within
  * a round trip — without making Redis a requirement of cache coherence. A
  * broadcast that is lost (process exit mid-notify, a replica whose LISTEN is
- * down) degrades to the cache's TTL, which is what every cache did before the
- * bus existed. No data depends on delivery.
+ * down) degrades to the cache's TTL. No data depends on delivery.
  *
  * The payload is the invalidation itself: a cache name, a key or `null`, and
  * the publishing process's id. Keys are identifiers (org ids, model ids,
@@ -68,7 +67,6 @@ function publish(message: CacheInvalidation): void {
  */
 export async function initCacheBus(): Promise<void> {
   if (initialized) return;
-  initialized = true;
   await listenClient.listen(CACHE_INVALIDATE_CHANNEL, (payload) => {
     const message = parseInvalidation(payload);
     if (!message) {
@@ -80,5 +78,6 @@ export async function initCacheBus(): Promise<void> {
     receiveCacheInvalidation(message);
   });
   configureCacheBus({ publish });
+  initialized = true;
   logger.info("Cache invalidation bus initialized", { channel: CACHE_INVALIDATE_CHANNEL });
 }

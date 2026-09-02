@@ -87,7 +87,11 @@ const subscribeVisibility = (cb: () => void) => {
 const getVisible = () => document.visibilityState === "visible";
 
 /** React Query key for the chat model catalog (module-local, not the typed client). */
-const MODELS_QUERY_KEY = ["chat", "models"] as const;
+// Prefixed like the shell's typed-client key for `GET /api/models` on purpose:
+// every `invalidateQueries({ queryKey: ["get", "/api/models"] })` the shell
+// issues on a catalog change (model added, credential paired, auto-seed) then
+// reaches this entry too. The third segment keeps it a separate cache entry.
+const MODELS_QUERY_KEY = ["get", "/api/models", { consumer: "chat" }] as const;
 /** A catalog change (credential added/revoked) is rare; re-entering `/chat` is not. */
 const MODELS_STALE_MS = 60_000;
 /** Stable empty list so the composer slot memo below does not miss on `undefined`. */
@@ -168,9 +172,11 @@ export function ChatPage({
   // The model catalog is a React Query, not a per-mount fetch: leaving and
   // re-entering `/chat` within `staleTime` reuses the cached list instead of
   // re-hitting `/api/models` at exactly the moment the composer is trying to
-  // become usable. The key carries no org scope on purpose — the shell wipes
-  // the whole cache on org switch (`queryClient.removeQueries`), the same
-  // contract the session list relies on.
+  // become usable. No org scope in the key — the shell wipes the whole cache
+  // on org switch (`queryClient.removeQueries`), the same contract the
+  // session list relies on. A failed GET rejects (see `fetchModels`), so an
+  // outage is an error state React Query retries — never an empty catalog
+  // served as fresh for `staleTime`.
   const modelsQuery = useQuery({
     queryKey: MODELS_QUERY_KEY,
     queryFn: () => fetchModels(getHeaders),
