@@ -240,40 +240,38 @@ describe("syncInstanceClientsFromEnv — drift", () => {
     await expect(syncInstanceClientsFromEnv()).rejects.toThrow(/scopes/);
   });
 
-  // ── The beta.51 upgrade trap ────────────────────────────────────────────────
-  //
-  // Migration 0046 rewrote `oauth_clients.scopes` from `documents:*` to
-  // `files:*`. An operator whose `OIDC_INSTANCE_CLIENTS` still names the retired
-  // spelling therefore boots into a `scopes` drift they never caused. The
-  // generic drift remedy — DELETE the row and restart — is destructive AND
-  // useless here: the re-create is rejected by `assertValidScopes` on the same
-  // env value, so the platform still refuses to boot and the row backing every
-  // satellite session is gone.
-  it("names the retired scope rename instead of telling the operator to delete the row", async () => {
-    // Stored row as migration 0046 leaves it.
-    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
-    await syncInstanceClientsFromEnv();
-
-    // Env the operator never edited — still the pre-rename spelling.
-    setDeclaration([validEntry({ scopes: ["openid", "profile", "documents:read"] })]);
-    let caught: unknown;
-    try {
+  // A scope string that a data migration rewrote (`documents:*` -> `files:*`,
+  // `applications:*` -> `spaces:*`) used to get its own diagnostic naming the
+  // rename. That branch was retirement machinery and went with the transition
+  // (`docs/NO_TRANSITIONAL_CODE.md` §4): the retired spelling is now an unknown
+  // scope like any other, and an operator whose env still names it gets the
+  // ordinary drift path. These pin that it is REFUSED — the property that
+  // matters — and that no rename vocabulary survives anywhere in the message.
+  for (const retired of ["documents:read", "applications:read"]) {
+    it(`refuses the retired spelling ${retired} as an unknown scope, naming no rename`, async () => {
+      setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
       await syncInstanceClientsFromEnv();
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(InstanceClientSyncError);
-    const message = (caught as Error).message;
-    expect(message).toContain("documents:read -> files:read");
-    expect(message).toContain("OIDC_INSTANCE_CLIENTS");
-    // The remedy that does not work must not be offered.
-    expect(message).not.toContain("DELETE FROM oauth_clients");
-  });
 
-  // Control for the case above: an ordinary scope drift keeps the generic
-  // remedy. Without the retired-spelling branch the two cases are
-  // indistinguishable and this assertion is the one that stays true.
-  it("still offers the delete remedy for an ordinary scope drift", async () => {
+      setDeclaration([validEntry({ scopes: ["openid", "profile", retired] })]);
+      let caught: unknown;
+      try {
+        await syncInstanceClientsFromEnv();
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(InstanceClientSyncError);
+      const message = (caught as Error).message;
+      expect(message).toContain("OIDC_INSTANCE_CLIENTS");
+      expect(message).not.toContain("renamed");
+      expect(message).not.toContain("-> files:read");
+      expect(message).not.toContain("-> spaces:read");
+    });
+  }
+
+  // Control: an ordinary scope drift takes the same path and offers the generic
+  // remedy. With the retired branch gone the two cases are one case, which is
+  // the point — this is what the retired spellings now get too.
+  it("offers the delete remedy for a scope drift", async () => {
     setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
     await syncInstanceClientsFromEnv();
 
@@ -288,10 +286,7 @@ describe("syncInstanceClientsFromEnv — drift", () => {
     expect((caught as Error).message).toContain("DELETE FROM oauth_clients");
   });
 
-  // The second half of the trap: after the DELETE the entry is `not-found`, the
-  // create path validates the SAME env value, and it must also say what the
-  // scope was renamed to rather than "unknown scope".
-  it("names the retired scope rename on the create path too", async () => {
+  it("refuses a retired spelling on the create path too", async () => {
     setDeclaration([validEntry({ scopes: ["openid", "profile", "documents:read"] })]);
     let caught: unknown;
     try {
@@ -300,33 +295,7 @@ describe("syncInstanceClientsFromEnv — drift", () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(InstanceClientSyncError);
-    const message = (caught as Error).message;
-    expect(message).toContain("documents:read -> files:read");
-    expect(message).not.toContain("DELETE FROM oauth_clients");
-  });
-
-  // The rename map is DATA, so the SECOND rename that rewrites persisted scope
-  // strings — `applications:*` → `spaces:*`, `scripts/migration/0003` — lands on
-  // the same diagnostic instead of the destructive, non-working generic remedy.
-  // Its control is "still offers the delete remedy for an ordinary scope drift"
-  // above: without the retired branch the two cases are indistinguishable.
-  it("names the applications -> spaces rename on the drift path", async () => {
-    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
-    await syncInstanceClientsFromEnv();
-
-    // Env the operator never edited — still the pre-rename spelling.
-    setDeclaration([validEntry({ scopes: ["openid", "profile", "applications:read"] })]);
-    let caught: unknown;
-    try {
-      await syncInstanceClientsFromEnv();
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(InstanceClientSyncError);
-    const message = (caught as Error).message;
-    expect(message).toContain("applications:read -> spaces:read");
-    expect(message).toContain("OIDC_INSTANCE_CLIENTS");
-    expect(message).not.toContain("DELETE FROM oauth_clients");
+    expect((caught as Error).message).toContain("scopes");
   });
 
   it("treats redirectUris as order-insensitive (no drift on reorder)", async () => {

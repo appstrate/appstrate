@@ -97,15 +97,16 @@ describe("/api/spaces/:id/smtp-config", () => {
   });
 
   // These routes ran their own space-ownership SELECT with NO id-shape guard,
-  // so a retired `app_` id answered a generic 404 — indistinguishable from
-  // "that space is not yours", and silent about the real cause. They now go
-  // through the canonical `validateSpaceInOrg`, which asserts the shape first.
-  it("400s with the migration diagnostic for a retired `app_` id", async () => {
+  // so a wrong-prefix id answered a generic 404 — indistinguishable from "that
+  // space is not yours". They now go through the canonical
+  // `validateSpaceInOrg`, which asserts the shape first: a 400 on shape, before
+  // any lookup.
+  it("400s on shape for a wrong-prefix id, rather than 404ing from the lookup", async () => {
     const res = await app.request(`/api/spaces/app_${crypto.randomUUID()}/smtp-config`, {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(400);
-    expect(await res.text()).toContain("app_` → `spc_");
+    expect(await res.text()).toContain("Malformed space id");
   });
 
   it("400s for a malformed space id", async () => {

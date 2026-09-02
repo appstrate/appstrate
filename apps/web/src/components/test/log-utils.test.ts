@@ -435,8 +435,12 @@ describe("buildTurnRows — per-turn projection", () => {
       turnLog({ event: "turn", index: 3, inputTokens: 10, outputTokens: 5, cacheReadTokens: 20 }),
     ]);
     expect(rows[0]!.latencyMs).toBeUndefined();
-    // contextTokens falls back to input + cacheRead + cacheWrite when absent.
-    expect(rows[0]!.contextTokens).toBe(30);
+    // `contextTokens` reads 0 when absent — it is NOT recomputed from the
+    // parts. The emitter (`buildTurnProgress`) sets it unconditionally, so an
+    // absent value means a malformed payload, not an older emitter; the
+    // recompute that used to sit here plotted a bar nothing had measured
+    // (`docs/NO_TRANSITIONAL_CODE.md` §1).
+    expect(rows[0]!.contextTokens).toBe(0);
   });
 
   it("tolerates malformed or absent data without throwing", () => {
