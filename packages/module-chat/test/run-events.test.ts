@@ -25,6 +25,7 @@ import {
   parseRunUpdateFrame,
   producedFilesFromFileList,
   publishedFilesFromLogs,
+  shouldOpenLiveTail,
   shouldRaiseSweepDone,
   resolveAttachmentContent,
   safeJsonParse,
@@ -32,6 +33,28 @@ import {
   visibleLogEntries,
   type RunLogLine,
 } from "../src/ui/run-events.ts";
+
+describe("shouldOpenLiveTail", () => {
+  it("opens the tail for a run that is in flight or of unknown status", () => {
+    expect(shouldOpenLiveTail({ initialStatus: "running", hasSseContext: true })).toBe(true);
+    expect(shouldOpenLiveTail({ initialStatus: "pending", hasSseContext: true })).toBe(true);
+    expect(shouldOpenLiveTail({ initialStatus: undefined, hasSseContext: true })).toBe(true);
+  });
+
+  it("does not open the tail for a card mounted on a terminal status (negative control)", () => {
+    // A `run_and_wait` result / reopened conversation: nothing more will be
+    // emitted, the one-shot `/api/runs/:id` read owns `sweepDone`.
+    expect(shouldOpenLiveTail({ initialStatus: "success", hasSseContext: true })).toBe(false);
+    expect(shouldOpenLiveTail({ initialStatus: "failed", hasSseContext: true })).toBe(false);
+    expect(shouldOpenLiveTail({ initialStatus: "timeout", hasSseContext: true })).toBe(false);
+    expect(shouldOpenLiveTail({ initialStatus: "cancelled", hasSseContext: true })).toBe(false);
+  });
+
+  it("never opens without org/space context or EventSource", () => {
+    expect(shouldOpenLiveTail({ initialStatus: "running", hasSseContext: false })).toBe(false);
+    expect(shouldOpenLiveTail({ initialStatus: undefined, hasSseContext: false })).toBe(false);
+  });
+});
 
 describe("run-events helpers", () => {
   it("identifies run launch operations and terminal statuses", () => {

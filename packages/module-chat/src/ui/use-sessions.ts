@@ -21,17 +21,29 @@ import { fetchSessions, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessio
 export { SESSIONS_QUERY_KEY } from "./sessions.ts";
 
 /** Reconciliation-only refetch — SSE is the primary freshness signal. */
-const SAFETY_NET_REFETCH_MS = 60_000;
+export const SAFETY_NET_REFETCH_MS = 60_000;
 /**
- * Fast backstop while a turn is generating. The `generating` flip is announced
- * by a fire-and-forget NOTIFY (realtime.ts) — if that frame is lost (SSE
- * reconnect window, dropped NOTIFY) the sidebar spinner would otherwise stick
- * for up to the 60s safety net. Only active while at least one session reports
- * `generating`, so the idle cost stays the slow interval.
+ * Backstop while a turn is generating. The `generating` flips are announced by
+ * the `chat_session_update` frames the server emits on `setActiveStream` /
+ * `clearActiveStream` — that push is the primary signal, and it is what makes
+ * the spinner react within a round trip. This interval only covers a LOST
+ * frame (SSE reconnect window, dropped NOTIFY). The server's resume-miss sweep
+ * now clears a marker whose producer is gone, so the worst case for a lost
+ * frame is ≤10 s of stale spinner on one row — not a stuck one. At 3 s this
+ * was a list GET every 3 s for the whole duration of every turn, on every
+ * open tab, for a signal that arrives by push anyway. Only active while at
+ * least one session reports `generating`, so the idle cost stays the slow
+ * interval.
  */
-const GENERATING_REFETCH_MS = 3_000;
+export const GENERATING_REFETCH_MS = 10_000;
 
-function sessionsRefetchInterval(query: { state: { data?: SessionSummary[] } }): number {
+/**
+ * `refetchInterval` callback for the session-list query. Exported for its
+ * test; the two constants above are the only thing it decides between.
+ */
+export function sessionsRefetchInterval(query: {
+  state: { data?: SessionSummary[] | undefined };
+}): number {
   return query.state.data?.some((s) => s.generating)
     ? GENERATING_REFETCH_MS
     : SAFETY_NET_REFETCH_MS;

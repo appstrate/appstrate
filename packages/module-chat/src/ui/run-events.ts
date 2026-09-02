@@ -38,6 +38,27 @@ export function isTerminalStatus(status: string | null | undefined): status is R
 }
 
 /**
+ * Whether `useRunLogStream` should open the live SSE tail for a run.
+ *
+ * A card mounted with a TERMINAL `initialStatus` (a `run_and_wait` result, or a
+ * reopened conversation whose launch card carries the final status) has nothing
+ * to tail: the run will never emit another log line or `run_update`. Opening
+ * the stream anyway used to cost a connection plus a second 1000-row log sweep
+ * and a duplicate `/api/files` read on the snapshot frame. Without a tail the
+ * one-shot `/api/runs/:id` read owns the completion signal (it already handles
+ * `!willTail && terminal`), so the evidence rule (`shouldRaiseSweepDone`) is
+ * unchanged — only the redundant reads are gone.
+ *
+ * `hasSseContext` is "an SSE URL could be built AND `EventSource` exists".
+ */
+export function shouldOpenLiveTail(args: {
+  initialStatus: string | null | undefined;
+  hasSseContext: boolean;
+}): boolean {
+  return args.hasSseContext && !isTerminalStatus(args.initialStatus);
+}
+
+/**
  * Automatic artefacts belong to a call that mounted live, never to completed
  * history. Capture this result once at card mount; later phase changes must not
  * revoke a live card's eligibility before its final file event arrives.

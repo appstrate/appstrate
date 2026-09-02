@@ -39,6 +39,7 @@ import {
   parseRunResource,
   parseRunUpdateFrame,
   producedFilesFromFileList,
+  shouldOpenLiveTail,
   shouldRaiseSweepDone,
   type ChatRunFile,
   type RunLogLine,
@@ -90,12 +91,14 @@ interface RunLogStream {
    * publication can arrive:
    *
    *  - the terminal `run_update` handler, after its final log sweep AND the
-   *    `/api/files` read have both settled. This also covers a card that
-   *    mounts on an already-finished run: the SSE is opened even then, and the
-   *    server answers with a `run_update` snapshot that takes this path.
-   *  - the one-shot run read, when no live tail can be opened at all (missing
-   *    `X-Org-Id` / `X-Space-Id`, or no `EventSource`) and the run comes
-   *    back terminal — nothing else will ever report on this run.
+   *    `/api/files` read have both settled. This is the path for a run that
+   *    was in flight (or of unknown status) when the card mounted.
+   *  - the one-shot run read, when no live tail is opened at all (missing
+   *    `X-Org-Id` / `X-Space-Id`, no `EventSource`, or an `initialStatus`
+   *    already terminal — `shouldOpenLiveTail`) and the run comes back
+   *    terminal — nothing else will ever report on this run. A card that
+   *    mounts on an already-finished run takes THIS path: no stream, no
+   *    second log sweep, the authoritative `/api/files` read alone.
    *
    * Never inferred from the ABSENCE of a live tail. `live` used to serve as
    * this gate and could not: it starts `false`, flips true only on the SSE
@@ -114,7 +117,8 @@ interface RunLogStream {
  * @param runId       the launched run id (`run_…`), or undefined to stay idle.
  * @param initialStatus status already known from the launch result (e.g.
  *                      `run_and_wait` returns a terminal run) — seeds the badge
- *                      and lets the hook skip the SSE when already terminal.
+ *                      and skips the SSE tail when already terminal
+ *                      (`shouldOpenLiveTail`).
  */
 export function useRunLogStream(
   runId: string | undefined,
@@ -167,8 +171,13 @@ export function useRunLogStream(
     // below needs to know whether anything else will ever report on this run.
     // NOTE this says the tail is OPENABLE, not that it ever opened — see the
     // `es.onerror` fallback for the case where the connection never lands.
+    // A terminal `initialStatus` opts out: nothing more will be emitted, and
+    // the one-shot read below then owns the completion signal.
     const sseUrl = buildRunSseUrl({ runId, orgId, spaceId });
-    const willTail = !!sseUrl && typeof EventSource !== "undefined";
+    const willTail = shouldOpenLiveTail({
+      initialStatus,
+      hasSseContext: !!sseUrl && typeof EventSource !== "undefined",
+    });
 
     const apply = (incoming: RunLogLine[]) => {
       if (cancelled || incoming.length === 0) return;
@@ -241,11 +250,11 @@ export function useRunLogStream(
         if (run.completedAt) setCompletedAt((prev) => prev ?? run.completedAt ?? undefined);
         if (typeof run.duration === "number")
           setDuration((prev) => prev ?? run.duration ?? undefined);
-        // No live tail will ever open (missing org/space context, or no
-        // EventSource): this read is the last word on a terminal run, so it
-        // also owns the completion signal. With a tail, the `run_update`
-        // snapshot below owns it instead — it lands after a strictly larger
-        // read.
+        // No live tail will ever open (missing org/space context, no
+        // EventSource, or the card mounted on an already-terminal status):
+        // this read is the last word on a terminal run, so it also owns the
+        // completion signal. With a tail, the `run_update` snapshot below owns
+        // it instead — it lands after a strictly larger read.
         //
         // No final log sweep is attempted on this path, so it claims none: the
         // history fetch above is fire-and-forget and its outcome is not part of
@@ -268,8 +277,10 @@ export function useRunLogStream(
       }
     })();
 
-    // 2. Live tail. Skipped only when org/space context or EventSource is unavailable.
-    //    Even terminal initial results still open briefly to receive the SSE snapshot.
+    // 2. Live tail. Skipped when org/space context or EventSource is
+    //    unavailable, and when the card mounted on an already-terminal status
+    //    (`shouldOpenLiveTail`): the snapshot frame such a stream would answer
+    //    with only re-runs the final sweep the one-shot read already covers.
     if (!sseUrl || !willTail) {
       return () => {
         cancelled = true;

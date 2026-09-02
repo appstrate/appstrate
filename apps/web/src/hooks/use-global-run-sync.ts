@@ -8,6 +8,7 @@ import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
+import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
 import {
   runKeys,
   runsKeys,
@@ -50,6 +51,55 @@ function handleConnectionUpdate(qc: QueryClient) {
 }
 
 /**
+ * Which cached queries a `chat_session_update` for `sessionId` must refetch.
+ * Pure — exported for its test.
+ *
+ * Three families, matched on their React Query keys:
+ *  - the module's session list (`["chat","sessions"]`) — ALWAYS: it is the
+ *    signal-only protocol's single source of the session DTO.
+ *  - the typed session detail, `["get","/api/chat/sessions/{id}",init]` with
+ *    `init.params.path.id` (openapi-react-query key shape) — only the one
+ *    whose path id is this session.
+ *  - the typed file list, `["get","/api/files",init]` with
+ *    `init.params.query.context_chat_session_id` — only the page filtered on
+ *    this session. A run's file tab (`run_id` filter), the gallery (no
+ *    filter) or another conversation's sidebar must not refetch on every
+ *    frame of a turn that is not theirs (≥5 frames per turn).
+ *
+ * `sessionId` undefined (frame did not parse, or the reconnect reconciliation
+ * where the missed frames' ids are unknowable) → every member of the three
+ * families, which is the pre-scoping behaviour: a missed signal must
+ * degrade to "too many refetches", never to a stale sidebar.
+ */
+export function matchesChatSessionQuery(
+  queryKey: readonly unknown[],
+  sessionId: string | undefined,
+): boolean {
+  const [method, path, init] = queryKey;
+  if (method === CHAT_SESSIONS_QUERY_KEY[0] && path === CHAT_SESSIONS_QUERY_KEY[1]) return true;
+  if (method !== "get") return false;
+  if (path === "/api/chat/sessions/{id}") {
+    return sessionId === undefined || readPathId(init) === sessionId;
+  }
+  if (path === "/api/files") {
+    return sessionId === undefined || readContextChatSessionId(init) === sessionId;
+  }
+  return false;
+}
+
+function readPathId(init: unknown): unknown {
+  const params = (init as { params?: { path?: { id?: unknown } } } | undefined)?.params;
+  return params?.path?.id;
+}
+
+function readContextChatSessionId(init: unknown): unknown {
+  const params = (
+    init as { params?: { query?: { context_chat_session_id?: unknown } } } | undefined
+  )?.params;
+  return params?.query?.context_chat_session_id;
+}
+
+/**
  * Refetch the chat conversation list when the chat module signals a session
  * change (message persisted, read marker advanced on another device, rename,
  * delete, `generating` flip). Signal-only frame → invalidate, the list GET is
@@ -60,15 +110,27 @@ function handleConnectionUpdate(qc: QueryClient) {
  * `@appstrate/module-chat/unread`, already imported by the nav badge);
  * importing the constant is harmless when the chat feature is disabled — no
  * chat query is mounted, the invalidation matches nothing.
+ *
+ * The context sidebar's typed session detail and file list are scoped to the
+ * frame's session (`matchesChatSessionQuery`): the wire frame is the
+ * `chat_session_update` NOTIFY payload after the fan-out's camelCase +
+ * schema pass (`{ sessionId, orgId, userId }`, `services/realtime.ts`).
+ * `raw` undefined = reconnect reconciliation → unscoped.
  */
-function handleChatSessionUpdate(qc: QueryClient) {
-  void qc.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
-  // The context sidebar reads the active session detail and the union of its
-  // direct/run-linked files. A message persistence signal can create the
-  // session itself or materialize a new attachment, so both typed query
-  // families need the same immediate reconciliation as the conversation list.
-  void qc.invalidateQueries({ queryKey: ["get", "/api/chat/sessions/{id}"] });
-  void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
+function handleChatSessionUpdate(qc: QueryClient, raw?: string) {
+  const sessionId = raw === undefined ? undefined : parseChatSessionId(raw);
+  void qc.invalidateQueries({ predicate: (q) => matchesChatSessionQuery(q.queryKey, sessionId) });
+}
+
+function parseChatSessionId(raw: string): string | undefined {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return undefined; // malformed frame → unscoped, same as before scoping
+  }
+  const parsed = chatSessionUpdateEventSchema.safeParse(json);
+  return parsed.success ? parsed.data.sessionId : undefined;
 }
 
 /**
@@ -290,7 +352,7 @@ export function useGlobalRunSync() {
           } else if (event === "connection_update" && data) {
             handleConnectionUpdate(qcRef.current);
           } else if (event === "chat_session_update" && data) {
-            handleChatSessionUpdate(qcRef.current);
+            handleChatSessionUpdate(qcRef.current, data);
           }
         }
       }
