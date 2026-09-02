@@ -40,6 +40,7 @@
 
 import { eq, or, inArray, asc, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { createCache } from "@appstrate/core/cache";
 import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
@@ -216,60 +217,33 @@ export async function hashSecret(plaintext: string): Promise<string> {
   return Buffer.from(new Uint8Array(digest)).toString("hex");
 }
 
-// ─── Short-TTL client cache ───────────────────────────────────────────────────
-//
-// The OIDC auth strategy hits `getClient()` on every authenticated request to
-// verify the client is still enabled (defense-in-depth against stale tokens
-// from disabled clients). That would put a DB round-trip on the hot path of
-// every API call authenticated via OIDC. The server-rendered login/consent
-// pages also re-read the same client across a GET → POST pair, adding two
-// more queries per browser login.
-//
-// Solution: a tiny in-process TTL cache keyed by `clientId`. Reads fall
-// through on miss or expiry; mutations (update / delete / rotate) invalidate
-// the entry synchronously so `updateClient(id, { disabled: true })` takes
-// effect immediately on the next request instead of waiting out the TTL.
-// `createClient` does NOT need to invalidate because new `clientId` values
-// are guaranteed to be absent from the map.
-//
-// Best-effort only: the cache lives per-process, so in a multi-replica
-// deployment a disabled client may remain cached for up to TTL on OTHER
-// replicas. That is acceptable — the worst-case window is one TTL, and the
-// mutation path is already rare compared to the read path it protects.
+// Per-process TTL. An invalidation is broadcast to every replica through the
+// platform cache bus, so a disabled client is dropped everywhere within a
+// round trip; a lost broadcast leaves it cached for at most one TTL window
+// on the replicas that missed it.
 const CLIENT_CACHE_TTL_MS = 30_000;
 // Hard ceiling on distinct cached entries. Because `getClientCached` also
 // caches `null` for UNKNOWN clientIds (to soak up repeated probes), an
 // attacker spraying random client_ids at any OIDC-authenticated endpoint
 // would otherwise grow this Map without bound — a slow memory-exhaustion
-// vector. Expired entries also linger until their key is re-read, so size
-// never self-corrects without an explicit sweep. The cap + sweep below keep
-// the Map bounded regardless of probe volume.
+// vector. The entry cap below keeps the cache bounded regardless of probe
+// volume (oldest entry evicted past it).
 const CLIENT_CACHE_MAX_ENTRIES = 10_000;
-const clientCache = new Map<string, { record: OAuthClientRecord | null; expiresAt: number }>();
+/**
+ * `clientId` → record, or `null` for an unknown client (cached too, to soak
+ * up repeated probes — the entry cap above bounds what a spray can allocate).
+ * A `@appstrate/core/cache`: bounded, TTL'd, concurrent lookups of one client
+ * coalesce, and an invalidation is broadcast to every replica through the
+ * platform cache bus (`lib/cache-bus.ts`).
+ */
+const clientCache = createCache<OAuthClientRecord | null>({
+  name: "oidc-oauth-client",
+  ttlMs: CLIENT_CACHE_TTL_MS,
+  max: CLIENT_CACHE_MAX_ENTRIES,
+});
 
 function cacheInvalidate(clientId: string): void {
-  clientCache.delete(clientId);
-}
-
-/**
- * Keep `clientCache` under `CLIENT_CACHE_MAX_ENTRIES`. Runs only when the map
- * is at capacity, so it is amortized-cheap on the hot path. First drops every
- * expired entry; if live entries alone still breach the cap, evicts oldest by
- * insertion order (Map iteration is insertion-ordered) until back under budget.
- */
-function evictClientCacheIfNeeded(now: number): void {
-  if (clientCache.size < CLIENT_CACHE_MAX_ENTRIES) return;
-  for (const [key, entry] of clientCache) {
-    if (entry.expiresAt <= now) clientCache.delete(key);
-  }
-  if (clientCache.size >= CLIENT_CACHE_MAX_ENTRIES) {
-    const overflow = clientCache.size - CLIENT_CACHE_MAX_ENTRIES + 1;
-    let removed = 0;
-    for (const key of clientCache.keys()) {
-      clientCache.delete(key);
-      if (++removed >= overflow) break;
-    }
-  }
+  clientCache.invalidate(clientId);
 }
 
 /**
@@ -277,17 +251,10 @@ function evictClientCacheIfNeeded(now: number): void {
  * strategy, page rendering). Returns `null` for unknown clientIds (also
  * cached to soak up probes for non-existent clients).
  */
-export async function getClientCached(clientId: string): Promise<OAuthClientRecord | null> {
-  const now = Date.now();
-  const cached = clientCache.get(clientId);
-  if (cached && cached.expiresAt > now) return cached.record;
-  const record = await getClient(clientId);
-  evictClientCacheIfNeeded(now);
-  clientCache.set(clientId, { record, expiresAt: now + CLIENT_CACHE_TTL_MS });
-  return record;
+export function getClientCached(clientId: string): Promise<OAuthClientRecord | null> {
+  return clientCache.get(clientId, () => getClient(clientId));
 }
 
-/** @internal Test helper — drop every entry. */
 export function _resetClientCache(): void {
   clientCache.clear();
 }
@@ -707,12 +674,12 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  *
  * ## Cache propagation across replicas
  *
- * `cacheInvalidate()` only clears the local per-process cache (see
- * `CLIENT_CACHE_TTL_MS`). Other replicas may serve stale URIs from
- * their local cache for up to one TTL window (~30s). Acceptable in
- * practice because reconciliation only happens at boot, and all
- * replicas boot with the same `APP_URL` and therefore reconcile
- * independently — the old cached value never gets exercised.
+ * `cacheInvalidate()` clears the local entry and broadcasts the
+ * invalidation on the platform cache bus (`lib/cache-bus.ts`), so other
+ * replicas drop theirs within a round trip. A lost broadcast falls back
+ * to one TTL window (~30s, `CLIENT_CACHE_TTL_MS`) — acceptable because
+ * reconciliation only happens at boot, and all replicas boot with the
+ * same `APP_URL` and therefore reconcile independently.
  *
  * Called from `oidcModule.init()` at boot.
  *

@@ -25,11 +25,7 @@ import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
-import {
-  getCachedApiVersionEntry,
-  setCachedApiVersionEntry,
-  invalidateOrgApiVersion,
-} from "./org-settings-cache.ts";
+import { orgApiVersionCache } from "./org-settings-cache.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -104,7 +100,7 @@ export async function createOrganization(
   // The initial `orgSettings` write above is a settings writer like any other:
   // a pin read for this id that raced the insert (and cached "no pin" for a
   // row that did not exist yet) must not outlive the commit.
-  invalidateOrgApiVersion(org.id);
+  orgApiVersionCache.invalidate(org.id);
 
   return toOrgResult(org);
 }
@@ -207,12 +203,10 @@ export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
  * can never read the row differently.
  */
 export async function getCachedOrgApiVersion(orgId: string): Promise<string | null> {
-  const cached = getCachedApiVersionEntry(orgId);
-  if (cached !== undefined) return cached;
-
-  const pin = (await getOrgSettings(orgId)).api_version ?? null;
-  setCachedApiVersionEntry(orgId, pin);
-  return pin;
+  return orgApiVersionCache.get(
+    orgId,
+    async () => (await getOrgSettings(orgId)).api_version ?? null,
+  );
 }
 
 /**
@@ -255,7 +249,7 @@ export async function updateOrgSettings(
   // The statement above is auto-committed (no enclosing transaction), so the
   // row is durable by the time the pin entry is dropped — the next cached
   // read cannot re-cache the pre-update value.
-  invalidateOrgApiVersion(orgId);
+  orgApiVersionCache.invalidate(orgId);
 
   return (row?.orgSettings as OrgSettings) ?? {};
 }
@@ -576,7 +570,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
 
   // Hygiene, not a confinement boundary: a cached pin for a deleted org is
   // inert (membership is gone, org-context 403s), but it need not linger.
-  invalidateOrgApiVersion(orgId);
+  orgApiVersionCache.invalidate(orgId);
 }
 
 export async function isSlugAvailable(slug: string): Promise<boolean> {

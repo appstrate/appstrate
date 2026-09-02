@@ -18,6 +18,7 @@ import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
+import { createCache } from "@appstrate/core/cache";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelCost } from "@appstrate/core/module";
 
@@ -113,13 +114,17 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
  */
 export const SPACE_CACHE_TTL_MS = 5 * 60_000;
 
-// Only RESOLVED ids are cached — never a miss. A miss (transient failure OR an
-// empty 200) is left uncached so the next turn retries: an empty
-// `/api/spaces` is anomalous (every org normally has a default space), so
-// caching it would strip space-scoped MCP tools org-wide.
-const spaceCache = new Map<string, { id: string; expiresAt: number }>();
+// Only RESOLVED ids are cached — never a miss (the `store` predicate below). A
+// miss (transient failure OR an empty 200) is left uncached so the next turn
+// retries: an empty `/api/spaces` is anomalous (every org normally has a
+// default space), so caching it would strip space-scoped MCP tools org-wide.
+// Concurrent turns of one org share a single lookup.
+const spaceCache = createCache<string | undefined>({
+  name: "chat-default-space",
+  ttlMs: SPACE_CACHE_TTL_MS,
+});
 
-export async function resolveDefaultSpaceId(
+export function resolveDefaultSpaceId(
   origin: string,
   headers: Record<string, string>,
   orgId: string,
@@ -127,12 +132,18 @@ export async function resolveDefaultSpaceId(
   // so the default-space lookup rides the loopback-auth seam. A plain
   // `fetch` default would silently bypass it — symmetry with listModels.
   fetchImpl: typeof fetch,
-  // The clock the TTL is judged against — injectable so the expiry can be
-  // exercised without waiting it out.
-  now: () => number = Date.now,
 ): Promise<string | undefined> {
-  const cached = spaceCache.get(orgId);
-  if (cached !== undefined && cached.expiresAt > now()) return cached.id;
+  return spaceCache.get(orgId, () => fetchDefaultSpaceId(origin, headers, orgId, fetchImpl), {
+    store: (id) => id !== undefined,
+  });
+}
+
+async function fetchDefaultSpaceId(
+  origin: string,
+  headers: Record<string, string>,
+  orgId: string,
+  fetchImpl: typeof fetch,
+): Promise<string | undefined> {
   try {
     const res = await fetchImpl(`${origin}/api/spaces`, { headers });
     if (!res.ok) {
@@ -158,10 +169,7 @@ export async function resolveDefaultSpaceId(
       return undefined; // not the contract — don't cache
     }
     const id = (body.data.find((s) => s.isDefault) ?? body.data[0])?.id;
-    if (id) {
-      spaceCache.set(orgId, { id, expiresAt: now() + SPACE_CACHE_TTL_MS });
-      return id;
-    }
+    if (id) return id;
     return undefined; // empty 200 — anomalous, don't cache
   } catch (err) {
     logger.warn("chat: default-space lookup failed", { orgId, err: String(err) });

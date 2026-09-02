@@ -21,7 +21,7 @@ import {
   listOrgsWithUnsupportedApiVersion,
   orgSettingsPatchSchema,
 } from "../../../src/services/organizations.ts";
-import { configureOrgApiVersionCache } from "../../../src/services/org-settings-cache.ts";
+import { setCacheClock } from "@appstrate/core/cache";
 import { orgSettingsSchema } from "@appstrate/core/permissions";
 import { toSlug } from "@appstrate/core/naming";
 import { CURRENT_API_VERSION, listSupportedVersions } from "../../../src/lib/api-versions.ts";
@@ -137,11 +137,11 @@ describe("organizations service", () => {
 
     beforeEach(() => {
       clock = Date.now();
-      configureOrgApiVersionCache({ now: () => clock });
+      setCacheClock(() => clock);
     });
 
     afterEach(() => {
-      configureOrgApiVersionCache({});
+      setCacheClock(null);
     });
 
     it("serves a repeated read from memory — a direct pin update is NOT seen until the TTL", async () => {
