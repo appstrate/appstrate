@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -16,9 +16,12 @@ import {
   removeMember,
   updateMemberRole,
   getOrgSettings,
+  getCachedOrgApiVersion,
+  updateOrgSettings,
   listOrgsWithUnsupportedApiVersion,
   orgSettingsPatchSchema,
 } from "../../../src/services/organizations.ts";
+import { configureOrgApiVersionCache } from "../../../src/services/org-settings-cache.ts";
 import { orgSettingsSchema } from "@appstrate/core/permissions";
 import { toSlug } from "@appstrate/core/naming";
 import { CURRENT_API_VERSION, listSupportedVersions } from "../../../src/lib/api-versions.ts";
@@ -116,6 +119,97 @@ describe("organizations service", () => {
         api_version: CURRENT_API_VERSION,
         future_key: "kept",
       } as never);
+    });
+  });
+
+  // ── getCachedOrgApiVersion ────────────────────────────────
+
+  // The api-version middleware resolves the `api_version` pin on every
+  // strategy-authenticated request (chat `chatloop_` hops, API keys), so the
+  // pin — and ONLY the pin — reads through a 10 s per-org cache
+  // (`services/org-settings-cache.ts`). `getOrgSettings` itself stays
+  // uncached (the oidc SSO gate depends on it reading fresh). These pin the
+  // three properties that make the pin cache safe to rely on: a repeated read
+  // is served from memory, a service-layer write is visible immediately, and
+  // the TTL is the backstop for writes that bypass the service layer.
+  describe("getCachedOrgApiVersion", () => {
+    let clock: number;
+
+    beforeEach(() => {
+      clock = Date.now();
+      configureOrgApiVersionCache({ now: () => clock });
+    });
+
+    afterEach(() => {
+      configureOrgApiVersionCache({});
+    });
+
+    it("serves a repeated read from memory — a direct pin update is NOT seen until the TTL", async () => {
+      const org = await createOrganization("Cached Org", "cached-org", userId);
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+
+      // Write the row directly, bypassing the service writer (so nothing
+      // invalidates). Negative control: without the cache the next read
+      // would return "2020-01-01" and this assertion would fail.
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+      // The uncached reader sees the row as it is — it is not behind the cache.
+      expect((await getOrgSettings(org.id)).api_version).toBe("2020-01-01");
+
+      // Past the TTL the entry expires and the direct write becomes visible.
+      clock += 10_001;
+      expect(await getCachedOrgApiVersion(org.id)).toBe("2020-01-01");
+    });
+
+    it("updateOrgSettings invalidates — the next cached read sees the fresh row immediately", async () => {
+      const org = await createOrganization("Fresh Org", "fresh-org", userId);
+      // Prime the cache with the creation-time pin, then plant a different pin
+      // directly so the cached and stored values disagree.
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+
+      // A service-layer write to ANY settings key busts the pin entry: same
+      // clock tick, well inside the TTL — only the invalidation explains
+      // seeing the stored pin here.
+      await updateOrgSettings(org.id, { dashboard_sso_enabled: true });
+      expect(await getCachedOrgApiVersion(org.id)).toBe("2020-01-01");
+    });
+
+    it("caches an unpinned org as null — the null is a hit, not a re-query per read", async () => {
+      const org = await createOrganization("Unpinned Org", "unpinned-org", userId);
+      await db
+        .update(organizations)
+        .set({ orgSettings: { dashboard_sso_enabled: true } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBeNull();
+
+      // A direct pin write after the null was cached is NOT seen — proving
+      // the null itself is a cached value.
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBeNull();
+    });
+
+    it("entries are per org — one org's cached pin does not shadow another's", async () => {
+      const a = await createOrganization("Org A", "org-a", userId);
+      const b = await createOrganization("Org B", "org-b", userId);
+      expect(await getCachedOrgApiVersion(a.id)).toBe(CURRENT_API_VERSION);
+
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, b.id));
+      expect(await getCachedOrgApiVersion(b.id)).toBe("2020-01-01");
+      expect(await getCachedOrgApiVersion(a.id)).toBe(CURRENT_API_VERSION);
     });
   });
 

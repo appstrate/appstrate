@@ -11,6 +11,7 @@ import { sql } from "drizzle-orm";
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { withDeadlockRetry } from "./deadlock-retry.ts";
+import { clearOrgApiVersionCache } from "../../src/services/org-settings-cache.ts";
 
 export { db, closeDb };
 
@@ -171,4 +172,8 @@ export async function truncateAll(): Promise<void> {
     },
   });
   resetFsStorage();
+  // Process-local read-through caches keyed on rows that no longer exist must
+  // reset with the rows, or a test reusing an id would read the previous
+  // test's api_version pin for up to the TTL.
+  clearOrgApiVersionCache();
 }

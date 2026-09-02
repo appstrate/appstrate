@@ -27,7 +27,7 @@ import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "../../src/middleware/space-context.ts";
 import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
-import { getOrgSettings } from "../../src/services/organizations.ts";
+import { getCachedOrgApiVersion } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
 import { initSystemIntegrations } from "../../src/services/integration-client-registry.ts";
@@ -215,11 +215,12 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   });
 
   // API versioning — mirrors production: read settings stashed on context
-  // by `requireOrgContext` (session auth), fall back to a direct lookup for
-  // auth paths that resolve orgId inline (API key, module strategies).
+  // by `requireOrgContext` (session auth), fall back to the cached pin reader
+  // for auth paths that resolve orgId inline (API key, module strategies).
   const apiVersionMiddleware = apiVersion(async (orgId, c) => {
-    const settings = c.get("orgSettings") ?? (await getOrgSettings(orgId));
-    return settings.api_version ?? null;
+    const settings = c.get("orgSettings");
+    if (settings) return settings.api_version ?? null;
+    return getCachedOrgApiVersion(orgId);
   });
   app.use("*", async (c, next) => {
     if (skipAuth(c.req.path, modulePublicPaths, c.req.raw.headers)) return next();
