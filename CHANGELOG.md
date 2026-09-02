@@ -44,7 +44,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   locally. `manifest.json` and `RECORD` are dropped from the skill directory,
   and `SKILL.md`'s frontmatter is rewritten only where the spec forces it —
   `name` to match the directory, `description` filled in from the manifest
-  when the skill declares none. Directory names are the slugified frontmatter
+  when the skill declares none. A skill with no description anywhere is synced
+  exactly as authored and named once on stderr — Codex may ignore it until a
+  version with a description is published, and Claude Code has nothing to
+  decide when to invoke it on. The sync does not invent one: refusing the
+  publish is the fix, and it belongs upstream. Directory names are the slugified frontmatter
   `name`; a collision inside the space renames the later skill (ordered by
   package id) to `<scope>-<name>` and says so on stderr.
 

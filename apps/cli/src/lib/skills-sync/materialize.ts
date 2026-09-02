@@ -169,11 +169,25 @@ export interface MaterializeSkillInput {
   files: Record<string, Uint8Array>;
   /**
    * `description` from the AFPS manifest, injected into the frontmatter when
-   * the skill declares none. Empty when the manifest has none either — the
-   * resulting skill is then missing a field the spec requires, which is the
-   * author's to fix and not something the sync should invent text for.
+   * the skill declares none. May be empty, in which case NOTHING is injected:
+   * the sync does not invent text on the author's behalf. It reports instead
+   * (see {@link MaterializedSkill.missingDescription}), and the fix belongs
+   * upstream, where publishing a version without a description should be
+   * refused in the first place.
    */
   manifestDescription: string;
+}
+
+export interface MaterializedSkill {
+  /** Path relative to the skill directory → bytes, in sorted key order. */
+  files: Record<string, Uint8Array>;
+  /**
+   * True when neither the frontmatter nor the manifest carried a description.
+   * The skill is still materialized, byte-for-byte as authored; the command
+   * surfaces this once per skill — the materializer stays pure and reports
+   * rather than prints.
+   */
+  missingDescription: boolean;
 }
 
 /**
@@ -182,24 +196,24 @@ export interface MaterializeSkillInput {
  * Insertion order is sorted so callers that iterate (writing to disk, hashing)
  * see a stable sequence without having to re-sort.
  */
-export function materializeSkill(input: MaterializeSkillInput): Record<string, Uint8Array> {
+export function materializeSkill(input: MaterializeSkillInput): MaterializedSkill {
   const out: Record<string, Uint8Array> = {};
   const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const manifestDescription = input.manifestDescription.trim();
+  let missingDescription = false;
 
   for (const path of Object.keys(input.files).sort()) {
     assertSafeEntry(path);
     if (DROPPED_ENTRIES.has(path)) continue;
     const bytes = input.files[path]!;
-    out[path] =
-      path === SKILL_ENTRY
-        ? encoder.encode(
-            normalizeSkillMd(
-              new TextDecoder().decode(bytes),
-              input.slug,
-              input.manifestDescription,
-            ),
-          )
-        : bytes;
+    if (path !== SKILL_ENTRY) {
+      out[path] = bytes;
+      continue;
+    }
+    const content = decoder.decode(bytes);
+    missingDescription = manifestDescription.length === 0 && !declaresDescription(content);
+    out[path] = encoder.encode(normalizeSkillMd(content, input.slug, manifestDescription));
   }
 
   if (!out[SKILL_ENTRY]) {
@@ -209,7 +223,24 @@ export function materializeSkill(input: MaterializeSkillInput): Record<string, U
       "Every Appstrate skill stores its body as SKILL.md — the artifact is malformed.",
     );
   }
-  return out;
+  return { files: out, missingDescription };
+}
+
+/**
+ * Whether `SKILL.md` already carries a non-empty `description`.
+ *
+ * Same two cases `normalizeSkillMd` treats as "present": a non-empty inline
+ * value, or a key whose value spans an indented continuation block. Shared so
+ * the report and the injection cannot disagree about what "has a description"
+ * means.
+ */
+function declaresDescription(content: string): boolean {
+  const { text } = toScanForm(content);
+  if (extractSkillMeta(text).description.length > 0) return true;
+  const match = text.match(FRONTMATTER_RE);
+  if (!match) return false;
+  const entry = scanEntries(match[1]!.split("\n")).find((e) => e.key === "description");
+  return entry?.hasBlock === true;
 }
 
 /**
@@ -232,25 +263,12 @@ export function normalizeSkillMd(
   slug: string,
   manifestDescription: string,
 ): string {
-  // A UTF-8 BOM defeats every `^---` anchor here and in `extractSkillMeta`,
-  // so a BOM'd file would be read as having no frontmatter and get a second
-  // one prepended. Strip it once, and do not re-emit it: nothing downstream
-  // wants it, and its only effect was to break the parse.
-  const stripped = content.startsWith("\uFEFF") ? content.slice(1) : content;
-  // CRLF is normalized away for the whole pass and restored on the way out.
-  // Scanning it in place does not work: a JS `.` excludes `\r`, so every
-  // key-line regex here (and in `extractSkillMeta`) silently matched nothing
-  // on a CRLF file, `scanEntries` returned zero entries, and the name rewrite
-  // prepended a SECOND `name:` key instead of replacing the first.
-  const eol = /^[^\n]*\r\n/.test(stripped) ? "\r\n" : "\n";
-  const text = eol === "\r\n" ? stripped.replace(/\r\n/g, "\n") : stripped;
+  const { text, eol } = toScanForm(content);
   const restore = (value: string): string =>
     eol === "\r\n" ? value.replace(/\n/g, "\r\n") : value;
 
   const meta = extractSkillMeta(text);
-  // Same anchor `extractSkillMeta` uses, so "which block is the frontmatter"
-  // has exactly one answer across the CLI and the platform.
-  const match = text.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
+  const match = text.match(FRONTMATTER_RE);
 
   if (!match) {
     const header = [
@@ -306,6 +324,29 @@ export function normalizeSkillMd(
   // the block begins right after the opening `---` line.
   const blockStart = match[0]!.indexOf("\n") + 1;
   return restore(text.slice(0, blockStart) + rewritten + text.slice(blockStart + block.length));
+}
+
+/**
+ * The frontmatter block. Same anchor `extractSkillMeta` uses, so "which block
+ * is the frontmatter" has exactly one answer across the CLI and the platform.
+ */
+const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
+
+/**
+ * Put `content` in the form every scan below assumes, and say how to put it
+ * back.
+ *
+ * A UTF-8 BOM defeats every `^---` anchor here and in `extractSkillMeta`, so a
+ * BOM'd file reads as having no frontmatter and gets a second one prepended;
+ * it is stripped once and never re-emitted. CRLF cannot be scanned in place
+ * either: a JS `.` excludes `\r`, so every key-line regex silently matched
+ * nothing, `scanEntries` returned no entries, and the name rewrite prepended a
+ * SECOND `name:` key instead of replacing the first.
+ */
+function toScanForm(content: string): { text: string; eol: string } {
+  const stripped = content.startsWith("\uFEFF") ? content.slice(1) : content;
+  const eol = /^[^\n]*\r\n/.test(stripped) ? "\r\n" : "\n";
+  return { text: eol === "\r\n" ? stripped.replace(/\r\n/g, "\n") : stripped, eol };
 }
 
 /** One top-level frontmatter key and the lines its value occupies. */

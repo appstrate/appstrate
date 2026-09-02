@@ -216,7 +216,11 @@ describe("materializeSkill", () => {
       "SKILL.md": CONFORMING_SKILL,
       "reference/table.csv": "a,b\n1,2\n",
     });
-    const out = materializeSkill({ slug: "pdf-tools", files, manifestDescription: "unused" });
+    const { files: out } = materializeSkill({
+      slug: "pdf-tools",
+      files,
+      manifestDescription: "unused",
+    });
 
     expect(Object.keys(out).sort()).toEqual(["SKILL.md", "reference/table.csv"]);
     expect(decoder.decode(out["reference/table.csv"]!)).toBe("a,b\n1,2\n");
@@ -229,8 +233,16 @@ describe("materializeSkill", () => {
       "SKILL.md": CONFORMING_SKILL.replace("name: pdf-tools", "name: PDF Tools"),
       "assets/logo.bin": new Uint8Array([1, 2, 3, 4]),
     });
-    const first = materializeSkill({ slug: "pdf-tools", files, manifestDescription: "d" });
-    const second = materializeSkill({ slug: "pdf-tools", files, manifestDescription: "d" });
+    const { files: first } = materializeSkill({
+      slug: "pdf-tools",
+      files,
+      manifestDescription: "d",
+    });
+    const { files: second } = materializeSkill({
+      slug: "pdf-tools",
+      files,
+      manifestDescription: "d",
+    });
 
     expect(Object.keys(first)).toEqual(Object.keys(second));
     for (const path of Object.keys(first)) {
@@ -239,7 +251,7 @@ describe("materializeSkill", () => {
   });
 
   it("keys entries in sorted order so writers hash a stable sequence", () => {
-    const out = materializeSkill({
+    const { files: out } = materializeSkill({
       slug: "pdf-tools",
       files: {
         "z.txt": encoder.encode("z"),
@@ -249,6 +261,66 @@ describe("materializeSkill", () => {
       manifestDescription: "d",
     });
     expect(Object.keys(out)).toEqual(["SKILL.md", "a/b.txt", "z.txt"]);
+  });
+
+  it("leaves an empty description exactly as authored and flags the skill", () => {
+    // The sync does not invent a description: publishing without one is what
+    // should be refused, upstream. Here it is reported, not papered over.
+    const source = "---\nname: meeting-notes-fr\ndescription:\n---\n\nBody.\n";
+    const { files, missingDescription } = materializeSkill({
+      slug: "meeting-notes-fr",
+      files: { "SKILL.md": encoder.encode(source) },
+      manifestDescription: "   ",
+    });
+
+    expect(decoder.decode(files["SKILL.md"]!)).toBe(source);
+    expect(missingDescription).toBe(true);
+  });
+
+  it("does the same on a CRLF file", () => {
+    const source = "---\r\nname: meeting-notes-fr\r\ndescription:\r\n---\r\n\r\nBody.\r\n";
+    const { files, missingDescription } = materializeSkill({
+      slug: "meeting-notes-fr",
+      files: { "SKILL.md": encoder.encode(source) },
+      manifestDescription: "",
+    });
+
+    expect(decoder.decode(files["SKILL.md"]!)).toBe(source);
+    expect(missingDescription).toBe(true);
+  });
+
+  it("flags a skill whose description key is missing entirely, adding nothing", () => {
+    const source = "---\nname: meeting-notes-fr\n---\n\nBody.\n";
+    const { files, missingDescription } = materializeSkill({
+      slug: "meeting-notes-fr",
+      files: { "SKILL.md": encoder.encode(source) },
+      manifestDescription: "",
+    });
+
+    expect(decoder.decode(files["SKILL.md"]!)).toBe(source);
+    expect(missingDescription).toBe(true);
+  });
+
+  it("still injects the manifest description when there is one", () => {
+    const { files, missingDescription } = materializeSkill({
+      slug: "pdf-tools",
+      files: { "SKILL.md": encoder.encode("---\nname: pdf-tools\ndescription:\n---\n\nBody.\n") },
+      manifestDescription: "Work with PDFs.",
+    });
+
+    expect(decoder.decode(files["SKILL.md"]!)).toContain('description: "Work with PDFs."');
+    expect(missingDescription).toBe(false);
+  });
+
+  it("leaves a skill that declares its own description untouched and unflagged", () => {
+    const { files, missingDescription } = materializeSkill({
+      slug: "pdf-tools",
+      files: { "SKILL.md": encoder.encode(CONFORMING_SKILL) },
+      manifestDescription: "",
+    });
+
+    expect(decoder.decode(files["SKILL.md"]!)).toBe(CONFORMING_SKILL);
+    expect(missingDescription).toBe(false);
   });
 
   it("rejects a traversing entry", () => {

@@ -910,6 +910,29 @@ describe("skills sync — the plugin tree is repaired, not just extended", () =>
   });
 });
 
+describe("skills sync — missing descriptions", () => {
+  it("syncs the skill as authored and says so once, without failing the run", async () => {
+    // Empty on BOTH sides, which is what the UI produces when the author
+    // leaves the description blank. The sync reports it; it does not invent
+    // text on the author's behalf.
+    const source = "---\nname: meeting-notes-fr\ndescription:\n---\n\nBody.\n";
+    createSkillServer([
+      { id: "@pierre-cabriere/meeting-notes-fr", skillMd: source, description: "" },
+    ]).install();
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({ printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toBe(
+      "Note: @pierre-cabriere/meeting-notes-fr has no description; publish a version with one so agents know when to use it.\n",
+    );
+    expect(await readText(join(pluginRoot(), "skills", "meeting-notes-fr", "SKILL.md"))).toBe(
+      source,
+    );
+  });
+});
+
 describe("skills sync — request concurrency", () => {
   it("never holds more than eight package-route requests open", async () => {
     const many = Array.from({ length: 24 }, (_, i) => ({

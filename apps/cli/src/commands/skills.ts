@@ -138,6 +138,10 @@ export async function skillsSyncCommand(
     runFailures += 1;
     io.stderr.write(`${message}\n`);
   };
+  /** Worth telling the user, but not worth an exit code. */
+  const note = (message: string): void => {
+    io.stderr.write(`${message}\n`);
+  };
   // Vacuously true when no plugin was asked for; only consulted under
   // `--print-path`.
   let pluginOk = !targets.includes("claude-plugin");
@@ -175,6 +179,7 @@ export async function skillsSyncCommand(
         catalogue.bySlug,
         failSkill,
         failRun,
+        note,
       );
       if (!printPath) reportPlans(plans, io.stdout);
     });
@@ -266,11 +271,12 @@ async function executePlans(
   bySlug: SkillsBySlug,
   failSkill: (message: string) => void,
   failRun: (message: string) => void,
+  note: (message: string) => void,
 ): Promise<boolean> {
   // One download per skill, however many targets want it: the materialized
   // bytes are identical everywhere, only the destination differs.
   const wanted = new Set(plans.flatMap((plan) => plan.write));
-  const trees = await fetchTrees(profileName, source, [...wanted], bySlug, failSkill);
+  const trees = await fetchTrees(profileName, source, [...wanted], bySlug, failSkill, note);
 
   // Seeded from what is already recorded: this run touches only the targets it
   // was asked for, and `appstrate skills sync` with no `--target` is the
@@ -347,18 +353,18 @@ async function fetchTrees(
   slugs: string[],
   bySlug: SkillsBySlug,
   failSkill: (message: string) => void,
+  note: (message: string) => void,
 ): Promise<Map<string, SkillTree>> {
   const trees = new Map<string, SkillTree>();
   const results = await mapWithConcurrency(slugs, MAX_CONCURRENCY, async (slug) => {
     const skill = bySlug.get(slug)!;
     try {
-      const files = await fetchSkillFiles(profileName, skill, source);
       const materialized = materializeSkill({
         slug,
-        files,
+        files: await fetchSkillFiles(profileName, skill, source),
         manifestDescription: skill.manifestDescription,
       });
-      return { skill, tree: { slug, files: materialized } };
+      return { skill, tree: { slug, files: materialized.files }, ...materialized };
     } catch (err) {
       return { skill, error: err };
     }
@@ -366,8 +372,18 @@ async function fetchTrees(
   for (const result of results) {
     if ("error" in result) {
       failSkill(`Failed ${result.skill.packageId}: ${formatError(result.error)}`);
-    } else {
-      trees.set(result.tree.slug, result.tree);
+      continue;
+    }
+    trees.set(result.tree.slug, result.tree);
+    // Not a failure, and not something to paper over either: the frontmatter
+    // is materialized exactly as authored. An agent picks a skill by its
+    // description, so one without any is a skill that never gets chosen — but
+    // inventing text here would hide that from the only person who can fix it,
+    // and the real fix is upstream, at publish time.
+    if (result.missingDescription) {
+      note(
+        `Note: ${result.skill.packageId} has no description; publish a version with one so agents know when to use it.`,
+      );
     }
   }
   return trees;
