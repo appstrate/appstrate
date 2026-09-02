@@ -502,10 +502,9 @@ function ConversationInner({
     // (`useChat` passes it to `~registerMessagesCallback`); `status` is a
     // separate, unthrottled subscription, so "submitted → streaming → ready"
     // still lands the instant it happens. A frame is the floor that stays
-    // invisible: the markdown smoothing (`markdown-text.tsx`) drains each
-    // delivery over a 60 ms window, so consecutive frame-sized deliveries
-    // overlap into one continuous reveal, where a 50 ms batch reads as a
-    // pulse — each batch restarts the reveal at a different rate. Each chunk
+    // invisible: the markdown smoothing (`markdown-text.tsx`) reveals text at
+    // a paced rate from a backlog, so frame-sized deliveries feed that
+    // backlog continuously, where a 50 ms batch reads as a pulse. Each chunk
     // still structured-clones the in-flight message
     // (`ReactChatState.replaceMessage`) — this only bounds how often the
     // thread re-renders and re-parses on top of that.
