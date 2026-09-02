@@ -45,6 +45,33 @@ describe("resumable streams", () => {
     expect(await getResumableContext().resume(crypto.randomUUID())).toBeNull();
   });
 
+  it("deletes the recording once the turn is over and the grace has elapsed", async () => {
+    // Nothing can resume a finished turn (`clearActiveStream` drops the pointer
+    // to it), so its bytes used to sit in the store for the whole 30-minute TTL
+    // for nothing. With the grace collapsed to zero the recording is gone as
+    // soon as the turn settles; the test above, on the default grace, is the
+    // control that a resume INSIDE the window still replays.
+    const streamId = crypto.randomUUID();
+    let settled!: () => void;
+    const done = new Promise<void>((r) => (settled = r));
+    const res = await finalizeChatStream({
+      engineResponse: engine("gone once settled"),
+      streamId,
+      recordingGraceMs: 0,
+      onSettled: () => settled(),
+    });
+    await res.body!.pipeTo(new WritableStream());
+    await done;
+    // Negative control: the recording exists at settle time — the release is
+    // what removes it, not the turn ending. (`status`, not `resume`: a resume
+    // reader would hold the recording's last state open.)
+    expect(await getResumableContext().status(streamId)).not.toBe("missing");
+    // The release is one macrotask past settle (grace 0); the producer's own
+    // final appends are microtasks and precede it.
+    await Bun.sleep(50);
+    expect(await getResumableContext().resume(streamId)).toBeNull();
+  });
+
   /**
    * The nominal path must NOT round-trip through the store: `context.run()` hands
    * back a store reader even to the producer, and serving that to the connected
