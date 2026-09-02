@@ -8,6 +8,80 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
+  out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
+  re-imported by `lib/boot.ts`, `services/input-parser.ts` and
+  `services/system-packages.ts`. `appstrate skills sync` needs the same pool
+  against the rate-limited package routes; a copy in the CLI would have been
+  the third in the repo, and the first two had already diverged on
+  abort-on-rejection.
+
+- **`appstrate skills sync` — the org's skills in Claude Code and Codex,
+  refreshed without a manual step.** One CLI command materializes every skill
+  installed in the profile's pinned space as an [Agent
+  Skills](https://agentskills.io/specification) directory, into any of three
+  targets: `claude-plugin` (a complete Claude Code plugin under
+  `$XDG_DATA_HOME/appstrate/claude-plugin/`, the default), `codex`
+  (`~/.agents/skills/`) and `claude-user` (`~/.claude/skills/`).
+
+  The auto-sync is entirely a client-side mechanism — **no server change, no
+  hook, no daemon**. Claude Code plugin marketplaces accept a `command`
+  source: a locally installed tool prints the path of a directory holding a
+  complete plugin, Claude Code re-runs it once per session in the background,
+  and reloads the plugin when the directory's content hash changes. So
+  `--print-path` writes the plugin path as the ONLY stdout line (everything
+  else, warnings included, goes to stderr) and the output is deterministic —
+  no timestamps, no `version` in `plugin.json`, sorted entries — because a
+  re-run that changed nothing must hash identically or every session would
+  install a "new" version. The command never prompts and never assumes a TTY:
+  no login, no org/space pin, an expired refresh token and `--print-path`
+  without the plugin target each exit 1 with a one-line remedy that Claude
+  Code surfaces under `/plugin` → Errors.
+
+  `--source published` (default) syncs each skill's `latest` published version
+  and verifies the downloaded bytes against the server's `X-Integrity` before
+  unpacking; `--source draft` syncs working copies for authors iterating
+  locally. `manifest.json` and `RECORD` are dropped from the skill directory,
+  and `SKILL.md`'s frontmatter is rewritten only where the spec forces it —
+  `name` to match the directory, `description` filled in from the manifest
+  when the skill declares none. Directory names are the slugified frontmatter
+  `name`; a collision inside the space renames the later skill (ordered by
+  package id) to `<scope>-<name>` and says so on stderr.
+
+  A state file at `$XDG_DATA_HOME/appstrate/skills-sync/state.json` records
+  which directory each target owns and from which artifact. It is what makes
+  the diff cheap (unchanged integrity → no download, which matters against the
+  package routes' 50-per-window rate limit) and what makes the shared targets
+  safe: `~/.agents/skills/` and `~/.claude/skills/` also hold hand-written
+  skills, so a destination that file does not claim is neither overwritten nor
+  deleted — it is reported and skipped, with no automatic rename. Staging
+  happens under a dot-prefixed `<root>/.appstrate-staging/` so an in-flight
+  build is never scannable as a skill, and a skill whose refresh fails keeps
+  the version already on disk rather than being dropped from the rebuilt tree.
+  `--dry-run` reports the per-target plan and writes nothing.
+
+  Only one sync runs at a time: the body holds a `mkdir`-based lock under
+  `<data>/skills-sync/` (60 s wait, 10-minute staleness reap), because two
+  Claude Code sessions opened together each fire the background command and
+  two concurrent runs race the atomic swaps and last-writer-wins the ledger.
+
+  Ownership is recorded together with the root it was written under, because
+  `HOME` is not a constant: the same profile under cron, `launchd`, `sudo -E`
+  or a devcontainer resolves a different `~/.agents/skills`, and a ledger whose
+  root does not match is read as claiming nothing. Deletion is decided against
+  the CATALOGUE, never against what resolved — a skill the server still lists
+  but whose version could not be read is kept, with its directory name reserved
+  so a transient 500 cannot hand `/appstrate:<slug>` to another skill.
+
+  Exit codes are graded: without `--print-path` any failure exits 1; with it,
+  only a whole-run failure does (auth, the catalogue call, writing the plugin
+  tree or the ledger) — a write failure on the `codex` / `claude-user`
+  passenger targets is a per-skill failure. Claude Code discards a run that
+  exits non-zero, so one unpublished skill, or an anomaly in a directory the
+  plugin does not live in, must not cost the user a plugin that is otherwise
+  correct. `--print-path` refuses `--dry-run`: a dry run writes no plugin, so
+  there is no path worth printing.
+
 - **Two release gates joined `bun run check`: `verify:release-version` and
   `verify:env-docs`.** Both close a hole that a green check had been reporting
   as fine.

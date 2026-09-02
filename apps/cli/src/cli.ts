@@ -12,6 +12,7 @@
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
  *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
+ *   - `appstrate skills`:  sync the space's skills to Claude Code / Codex.
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -49,6 +50,8 @@ import {
   spaceCurrentCommand,
   spaceCreateCommand,
 } from "./commands/space.ts";
+import { skillsSyncCommand } from "./commands/skills.ts";
+import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -118,6 +121,26 @@ installSignalHandlers();
  */
 function collect(val: string, prev: string[]): string[] {
   return [...prev, val];
+}
+
+/**
+ * `--target` on `appstrate skills sync`: repeatable, validated against the
+ * enum. No commander default, so the help text does not advertise a literal
+ * `[]` — `skillsSyncCommand` owns the "no target means claude-plugin" rule.
+ */
+function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[] {
+  if (!(SYNC_TARGETS as readonly string[]).includes(val)) {
+    throw new InvalidArgumentError(`expected one of ${SYNC_TARGETS.join(", ")}, got "${val}"`);
+  }
+  return [...(prev ?? []), val as SyncTarget];
+}
+
+/** `--source` on `appstrate skills sync`. */
+function parseSkillSource(val: string): "published" | "draft" {
+  if (val !== "published" && val !== "draft") {
+    throw new InvalidArgumentError(`expected published or draft, got "${val}"`);
+  }
+  return val;
 }
 
 // Catch stray unhandled rejections + uncaughts before Bun's default
@@ -504,6 +527,46 @@ spaceGroup
       name: typeof name === "string" ? name : undefined,
     });
   });
+
+// ─── `appstrate skills …` — sync org skills to Claude Code / Codex ─────
+
+const skillsGroup = program
+  .command("skills")
+  .description("Sync the pinned space's skills to Claude Code and Codex");
+
+skillsGroup
+  .command("sync")
+  .description(
+    "Materialize the pinned space's skills as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+  )
+  .option(
+    "--target <target>",
+    `Destination to write (repeatable): ${SYNC_TARGETS.join(" | ")}. Default: claude-plugin.`,
+    collectTarget,
+  )
+  .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
+  .option(
+    "--print-path",
+    "Print the Claude Code plugin directory as the only stdout line (what a marketplace `command` source consumes). Requires --target claude-plugin.",
+  )
+  .option("--dry-run", "Report what would change and write nothing.")
+  .action(
+    async (opts: {
+      target?: SyncTarget[];
+      source?: "published" | "draft";
+      printPath?: boolean;
+      dryRun?: boolean;
+    }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await skillsSyncCommand({
+        profile: globalOpts.profile,
+        target: opts.target,
+        source: opts.source,
+        printPath: opts.printPath,
+        dryRun: opts.dryRun,
+      });
+    },
+  );
 
 // ─── `appstrate models …` — discover model presets on the instance ────
 
