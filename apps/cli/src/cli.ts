@@ -123,11 +123,7 @@ function collect(val: string, prev: string[]): string[] {
   return [...prev, val];
 }
 
-/**
- * `--target` on `appstrate skills sync`: repeatable, validated against the
- * enum. No commander default, so the help text does not advertise a literal
- * `[]` — `skillsSyncCommand` owns the "no target means claude-plugin" rule.
- */
+/** Repeatable `--target`. No commander default: the command owns that rule. */
 function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[] {
   if (!(SYNC_TARGETS as readonly string[]).includes(val)) {
     throw new InvalidArgumentError(`expected one of ${SYNC_TARGETS.join(", ")}, got "${val}"`);

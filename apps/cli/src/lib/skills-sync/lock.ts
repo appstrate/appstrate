@@ -1,20 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Cross-process mutual exclusion for `appstrate skills sync`.
- *
- * The design runs this command unattended, once per session, in the
- * background — so two Claude Code sessions opened together run it at the same
- * time. Nothing in the sync is safe under that: two atomic swaps of the same
- * plugin root race (the loser renames the winner's tree aside and deletes it),
- * and the ledger is a read-modify-write whose last writer wins, so one run can
- * publish a ledger that forgets everything the other just created.
- *
- * A directory is the lock because `mkdir` is the one filesystem primitive that
- * is atomically create-or-fail everywhere, with no `O_EXCL` caveats and no
- * cleanup ambiguity. `mtime` dates it, so a lock left behind by a killed
- * process expires instead of wedging every future run — the one failure mode
- * a naive lockfile has and a background command cannot afford.
+ * Two Claude Code sessions opened together each fire the background command,
+ * and nothing survives that: the swaps race and the ledger's last writer wins.
+ * A directory is the lock because `mkdir` is atomically create-or-fail
+ * everywhere; `mtime` dates it, so a killed process's lock expires.
  */
 
 import { mkdir, rm, stat } from "node:fs/promises";
@@ -22,20 +12,17 @@ import { join } from "node:path";
 import { getDataDir } from "../config.ts";
 
 export interface SyncLockOptions {
-  /** Give up after this long and let the caller report a busy sync. */
   timeoutMs?: number;
-  /** Gap between acquisition attempts. */
   pollMs?: number;
   /** A lock older than this belonged to a process that is gone. */
   staleMs?: number;
 }
 
 const DEFAULTS: Required<SyncLockOptions> = {
-  // Long enough for a large org's first sync to finish, short enough that a
-  // background run gives up well inside a marketplace command's timeout.
+  // Fits a large org's first sync, inside a marketplace command's timeout.
   timeoutMs: 60_000,
   pollMs: 500,
-  // Far above any plausible sync, so this only ever fires for a dead process.
+  // Far above any plausible sync: only ever fires for a dead process.
   staleMs: 10 * 60_000,
 };
 
@@ -50,13 +37,7 @@ export function getLockPath(): string {
   return join(getDataDir(), "skills-sync", "lock");
 }
 
-/**
- * Run `body` while holding the sync lock.
- *
- * Released in a `finally`, so a throwing body does not wedge the next run.
- * Throws {@link SyncLockBusyError} when the lock could not be taken inside
- * `timeoutMs`.
- */
+/** Released in a `finally`. Throws {@link SyncLockBusyError} past `timeoutMs`. */
 export async function withSyncLock<T>(
   body: () => Promise<T>,
   options: SyncLockOptions = {},
@@ -82,8 +63,7 @@ export async function withSyncLock<T>(
 
 async function tryAcquire(path: string): Promise<boolean> {
   try {
-    // No `recursive`: with it, `mkdir` succeeds on an existing directory and
-    // the lock stops being a lock.
+    // No `recursive`: it would succeed on an existing directory.
     await mkdir(path, { mode: 0o700 });
     return true;
   } catch (err) {
@@ -98,8 +78,7 @@ async function reapIfStale(path: string, staleMs: number): Promise<boolean> {
     const stats = await stat(path);
     if (Date.now() - stats.mtimeMs < staleMs) return false;
   } catch {
-    // Vanished between the failed `mkdir` and here — the next attempt takes it.
-    return true;
+    return true; // vanished since the failed `mkdir` — the next attempt takes it
   }
   await rm(path, { recursive: true, force: true }).catch(() => {});
   return true;

@@ -60,20 +60,10 @@ export function getConfigDir(): string {
 }
 
 /**
- * The home directory every generated-data path hangs off.
- *
- * `HOME` first, `os.homedir()` as the fallback. That order is not a test
- * affordance: it is what Codex and Claude Code themselves resolve, so the
- * directories this CLI writes must be resolved the same way or a run under a
- * redirected `HOME` (cron, launchd, `sudo -E`, a devcontainer) writes its
- * skills where neither tool looks. Bun's `os.homedir()` resolves the passwd
- * entry once and never re-reads the variable, so it cannot be the only source.
- *
- * ONE helper, shared by `getDataDir` and `lib/skills-sync/targets.ts`: the
- * ledger that records which directories the sync owns and the directories
- * themselves must agree about where home is, or the ledger describes a tree
- * nobody is looking at. `getConfigDir` deliberately keeps `os.homedir()` — its
- * behaviour predates this and changing it would move existing profiles.
+ * `HOME` first, because that is what Codex and Claude Code resolve and Bun's
+ * `os.homedir()` reads the passwd entry once. Shared with
+ * `lib/skills-sync/targets.ts` so the ownership ledger and the directories it
+ * claims cannot disagree about where home is.
  */
 export function homeDir(): string {
   const fromEnv = process.env.HOME;
@@ -81,16 +71,9 @@ export function homeDir(): string {
 }
 
 /**
- * Resolve the directory holding CLI-generated *data* — content the CLI
- * materializes for other tools to read, as opposed to the user's own
- * configuration. Today that is the Claude Code plugin tree and the
- * skills-sync state file (`lib/skills-sync/`).
- *
- * Same shape as `getConfigDir`, one XDG variable over: `XDG_DATA_HOME`
- * (`~/.local/share/appstrate` when unset). Kept separate because the two
- * trees have different lifetimes — wiping the generated plugin must never
- * take `config.toml` with it, and a user backing up `~/.config` should not
- * pick up a regenerable cache of someone else's skills.
+ * What the CLI materializes for other tools to read, as opposed to the user's
+ * configuration: separate from `getConfigDir` because wiping the generated
+ * plugin must never take `config.toml` with it.
  */
 export function getDataDir(): string {
   const xdg = process.env.XDG_DATA_HOME;

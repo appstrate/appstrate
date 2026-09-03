@@ -416,9 +416,11 @@ appstrate skills sync --target claude-plugin --target codex --print-path
 
 It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update`. Skills then appear as `/appstrate:<skill>`.
 
-**What lands in a skill directory.** Every file of the published artifact except `manifest.json` and `RECORD` (Appstrate packaging, not skill content), with `SKILL.md`'s frontmatter normalized to the two fields the spec requires: `name` is rewritten to the directory name when it differs, and `description` is filled in from the manifest when the skill declares none. A skill with no description anywhere is synced exactly as authored and named once on stderr: Codex may ignore it until a version with a description is published, and Claude Code has nothing to decide when to invoke it on. Nothing else is touched. The output is deterministic — no timestamps, no sync metadata — because a `mode: "copy"` plugin's version _is_ the hash of its contents.
+**What lands in a skill directory.** Every file of the published artifact except `manifest.json` and `RECORD` (Appstrate packaging, not skill content), with one rewrite in `SKILL.md`: the frontmatter `name` is pointed at the directory name when it differs, because the spec requires the two to match. Nothing else is touched — no description is invented, no key is reordered. The output is deterministic — no timestamps, no sync metadata — because a `mode: "copy"` plugin's version _is_ the hash of its contents.
 
-**Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and Appstrate ids are `@scope/name`, which is not a legal skill name. The directory is therefore the slugified frontmatter `name` (falling back to the package's `name` segment). If two skills in the space claim the same slug, the second one — ordered by package id, so the choice is reproducible — becomes `<scope>-<name>`, then `<scope>-<name>-2`, `-3`, … until the name is free. Every rename is reported on stderr.
+Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills YAML, but artifacts published before that rule existed are still synced exactly as authored. Each one is named once on stderr (`… does not pass the skill frontmatter rule …`): Claude Code and Codex may skip it, and the fix is to republish it from Appstrate.
+
+**Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and Appstrate ids are `@scope/name`, which is not a legal skill name. The directory is therefore the frontmatter `name` when it is already legal, falling back to the slugified package `name` segment. If two skills in the space claim the same slug, the second one — ordered by package id, so the choice is reproducible — becomes `<scope>-<name>`, then `<scope>-<name>-2`, `-3`, … until the name is free. Every rename is reported on stderr.
 
 **Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors.
 
@@ -461,30 +463,7 @@ A cron entry every 15 minutes — cron's `PATH` is minimal, so give the absolute
 */15 * * * * /usr/local/bin/appstrate skills sync --target codex >/dev/null 2>&1
 ```
 
-On macOS, prefer `launchd`. Write `~/Library/LaunchAgents/dev.appstrate.skills-sync.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>dev.appstrate.skills-sync</string>
-    <key>ProgramArguments</key>
-    <array>
-      <string>/usr/local/bin/appstrate</string>
-      <string>skills</string>
-      <string>sync</string>
-      <string>--target</string>
-      <string>codex</string>
-    </array>
-    <key>StartInterval</key>
-    <integer>900</integer>
-  </dict>
-</plist>
-```
-
-Load it with `launchctl load ~/Library/LaunchAgents/dev.appstrate.skills-sync.plist` (`command -v appstrate` gives the path to put in both snippets).
+On macOS, prefer a `launchd` user agent running the same command every 900 seconds (`command -v appstrate` gives the absolute path).
 
 **The scheduler must reach your OS keyring.** The sync reads the profile's token from the keyring, and a keyring is bound to a session, not to a user id: a `launchd` **user agent** runs inside your logged-in session and can unlock the login keychain, while a system cron job (or anything under `sudo`) may not — the sync then fails with the "not logged in" remedy even though you are. That is why `launchd` is the recommended path on macOS. Remember that `HOME` differs per context too: a scheduler resolving a different `~/.agents/skills` than your shell does gets a state file that claims nothing, and every directory there is refused rather than overwritten.
 

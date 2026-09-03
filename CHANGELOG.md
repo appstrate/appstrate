@@ -42,15 +42,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and verifies the downloaded bytes against the server's `X-Integrity` before
   unpacking; `--source draft` syncs working copies for authors iterating
   locally. `manifest.json` and `RECORD` are dropped from the skill directory,
-  and `SKILL.md`'s frontmatter is rewritten only where the spec forces it —
-  `name` to match the directory, `description` filled in from the manifest
-  when the skill declares none. A skill with no description anywhere is synced
-  exactly as authored and named once on stderr — Codex may ignore it until a
-  version with a description is published, and Claude Code has nothing to
-  decide when to invoke it on. The sync does not invent one: refusing the
-  publish is the fix, and it belongs upstream. Directory names are the slugified frontmatter
-  `name`; a collision inside the space renames the later skill (ordered by
-  package id) to `<scope>-<name>` and says so on stderr.
+  and exactly one thing is rewritten in `SKILL.md`: the frontmatter `name`,
+  pointed at the directory the skill lands in, because the Agent Skills spec
+  requires the two to match. Nothing else is touched and no content is
+  invented — the platform refuses to publish a `SKILL.md` whose frontmatter is
+  not valid Agent Skills YAML, and an artifact published before that rule is
+  synced exactly as authored and named once on stderr, with `checkSkillMarkdown`'s
+  own reason, so the author can republish it. Directory names are the
+  frontmatter `name` when it is already legal, else the slugified package
+  `name` segment; a collision inside the space renames the later skill
+  (ordered by package id) to `<scope>-<name>` and says so on stderr.
 
   A state file at `$XDG_DATA_HOME/appstrate/skills-sync/state.json` records
   which directory each target owns and from which artifact. It is what makes
