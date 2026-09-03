@@ -10,7 +10,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { translateSkillFrontmatterError } from "../lib/skill-frontmatter-messages";
+import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 
 type BumpType = "patch" | "minor" | "major";
 
@@ -75,10 +75,8 @@ export function CreateVersionModal({
         onClose();
       },
       onError: (err) => {
-        // The publish gate re-checks the STORED SKILL.md against AFPS §3.3, so
-        // this modal is a second place a frontmatter code can arrive — the
-        // editor is not the only one. Same translation, or the server's own
-        // English `detail` when the code is not one this owns.
+        // The publish gate re-checks the stored SKILL.md, so a frontmatter
+        // code can arrive here too — not only in the editor.
         setError("root", {
           message: translateSkillFrontmatterError(err, t) ?? getErrorMessage(err),
         });

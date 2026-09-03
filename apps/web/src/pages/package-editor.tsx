@@ -10,8 +10,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
-import { skillFrontmatterError } from "../lib/skill-frontmatter";
-import { translateSkillFrontmatterError } from "../lib/skill-frontmatter-messages";
+import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { FormField } from "../components/form-field";
@@ -387,16 +386,15 @@ function PackageEditorInner({
           tab: "content",
         };
       }
-      // AFPS §3.3 — the SAME checker the create / save / publish routes run.
-      // Caught here so the author fixes the frontmatter in the editor instead
-      // of reading a 400 back.
+      // The SAME checker the create / save / publish routes run, so the
+      // author fixes the frontmatter here instead of reading a 400 back.
       const frontmatter = skillFrontmatterError(s.content);
       if (frontmatter) {
         return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: "content" };
       }
       return null;
     },
-    // A §3.3 violation the client-side check could not anticipate — a draft
+    // For a violation the client-side check could not anticipate — a draft
     // stored before this gate existed, reopened and saved.
     translateError: (err) => translateSkillFrontmatterError(err, t),
   });
