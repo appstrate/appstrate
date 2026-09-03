@@ -3,15 +3,15 @@
 /**
  * The cross-process lock `appstrate skills sync` holds for its whole body.
  *
- * Tested through the helper rather than the command: the production timings
- * are a 60-second wait, a 2-second heartbeat and a 15-second staleness
- * window, and a suite that exercised them for real would take minutes to say
- * what a handful of millisecond-scale cases say here. The command wires the defaults; these
- * cases pin the behaviour those defaults select.
+ * Tested through the helper rather than the command: the production wait is
+ * 60 seconds, and a suite that exercised it for real would take a minute to
+ * say what these millisecond-scale cases say. The one property that matters
+ * most — the kernel releases the lock when the holder is killed — is proven
+ * with a real child process and a real SIGKILL.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getLockPath, SyncLockBusyError, withSyncLock } from "../src/lib/skills-sync/lock.ts";
@@ -31,10 +31,11 @@ afterEach(async () => {
 });
 
 describe("withSyncLock", () => {
-  it("runs the body and releases the lock", async () => {
-    const result = await withSyncLock(async () => "done");
-    expect(result).toBe("done");
-    expect(await exists(getLockPath())).toBe(false);
+  it("runs the body and leaves the lock file in place, unlocked", async () => {
+    expect(await withSyncLock(async () => "done")).toBe("done");
+    // The file is never unlinked (see the source); a second run takes it.
+    expect(await exists(getLockPath())).toBe(true);
+    expect(await withSyncLock(async () => "again", { timeoutMs: 30, pollMs: 5 })).toBe("again");
   });
 
   it("releases the lock when the body throws", async () => {
@@ -43,7 +44,7 @@ describe("withSyncLock", () => {
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
-    expect(await exists(getLockPath())).toBe(false);
+    expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
   });
 
   it("serializes two overlapping runs rather than interleaving them", async () => {
@@ -77,71 +78,48 @@ describe("withSyncLock", () => {
     expect(order).toEqual(["first:start", "first:end", "second:start"]);
   });
 
-  it("records its own pid as the lock's owner", async () => {
-    await withSyncLock(async () => {
-      expect(await readFile(join(getLockPath(), "owner"), "utf-8")).toBe(String(process.pid));
+  it("gives up with a busy error while a live holder keeps the lock", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const entry = new Promise<void>((resolve) => (entered = resolve));
+    const holder = withSyncLock(async () => {
+      entered();
+      await held;
     });
-  });
-
-  it("gives up with a busy error when the holder is alive and never lets go", async () => {
-    await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
-    await mkdir(getLockPath());
-    // This process IS the holder, so the owner is provably alive.
-    await writeFile(join(getLockPath(), "owner"), String(process.pid));
+    await entry;
 
     await expect(
       withSyncLock(async () => "never", { timeoutMs: 30, pollMs: 5 }),
     ).rejects.toBeInstanceOf(SyncLockBusyError);
-    // The foreign lock is left exactly where it was.
-    expect(await exists(getLockPath())).toBe(true);
+    release();
+    await holder;
   });
 
-  it("reaps a fresh lock whose owner pid is dead", async () => {
-    await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
-    await mkdir(getLockPath());
-    // A process that has already exited: the pid it had is provably dead.
-    const gone = Bun.spawnSync(["true"]).pid;
-    await writeFile(join(getLockPath(), "owner"), String(gone));
-
-    // Fresh mtime, so the age rule alone would report busy: the owner rule
-    // is what makes this pass.
-    expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
-    expect(await exists(getLockPath())).toBe(false);
-  });
-
-  it("keeps the lock's mtime beating while the body runs", async () => {
-    await withSyncLock(
-      async () => {
-        const stale = new Date(Date.now() - 60_000);
-        await utimes(getLockPath(), stale, stale);
-        await new Promise((resolve) => setTimeout(resolve, 40));
-        // A holder that stopped beating would still read as `stale` here.
-        expect((await stat(getLockPath())).mtimeMs).toBeGreaterThan(stale.getTime() + 30_000);
-      },
-      { heartbeatMs: 5 },
+  it("is released by the kernel when the holder is SIGKILLed", async () => {
+    // A real process holds the lock through this module, then dies the way
+    // a background sync dies when its Claude Code session closes.
+    const holder = Bun.spawn(
+      [
+        "bun",
+        "-e",
+        `const { withSyncLock } = await import(${JSON.stringify(
+          new URL("../src/lib/skills-sync/lock.ts", import.meta.url).pathname,
+        )});
+         await withSyncLock(async () => { console.log("held"); await new Promise(() => {}); });`,
+      ],
+      { env: { ...process.env, XDG_DATA_HOME: dataHome }, stdout: "pipe" },
     );
-  });
+    const reader = holder.stdout.getReader();
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toContain("held");
 
-  it("reaps a lock whose owner pid is alive but whose heartbeat stopped", async () => {
-    await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
-    await mkdir(getLockPath());
-    // A reused pid, a zombie or a frozen holder all look like this: the pid
-    // answers, the beat does not.
-    await writeFile(join(getLockPath(), "owner"), String(process.pid));
-    const longAgo = new Date(Date.now() - 60_000);
-    await utimes(getLockPath(), longAgo, longAgo);
+    await expect(
+      withSyncLock(async () => "never", { timeoutMs: 30, pollMs: 5 }),
+    ).rejects.toBeInstanceOf(SyncLockBusyError);
 
-    expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
-  });
-
-  it("reaps an ownerless lock old enough to prove its owner is gone", async () => {
-    await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
-    await mkdir(getLockPath());
-    const longAgo = new Date(Date.now() - 60 * 60_000);
-    await utimes(getLockPath(), longAgo, longAgo);
-
-    // Same short timeout as the busy case above: without the staleness rule
-    // this call would fail the same way, so the assertion discriminates.
+    holder.kill("SIGKILL");
+    await holder.exited;
     expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
   });
 });
