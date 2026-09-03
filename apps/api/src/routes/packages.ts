@@ -1020,9 +1020,8 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("Content cannot be empty", "content");
     }
 
-    // Runs on the RESOLVED content — the body's when supplied, the stored
-    // draft's when carried forward: a draft that cannot be published must not
-    // be savable in silence.
+    // The RESOLVED content: the body's when supplied, the stored draft's when
+    // carried forward.
     if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
     // A manifest-only integration PUT has no authored `content`. When the
@@ -1368,14 +1367,13 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
         (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
         detail.content[rcfg.storageFileName];
       if (fileData) {
-        // BOM-preserving: this string is judged by the content gate below AND
-        // written back as the draft, so it must be the version's bytes.
+        // BOM-preserving: gated below AND written back as the draft.
         content = decodeSkillMarkdown(fileData);
       }
     }
 
-    // A restore WRITES authored content, so it is gated like every other write.
-    // Checked before `updateOrgItem` so a violation writes nothing.
+    // A restore WRITES authored content. Before `updateOrgItem`, so a
+    // violation writes nothing.
     if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
     const updated = await updateOrgItem(
@@ -1866,9 +1864,8 @@ export function createPackagesRouter() {
     const zipBytes = new Uint8Array(upload);
     try {
       const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
-      // `parsePackageZip` applies the lenient LOADER rule, because it is also
-      // how already-published artifacts are read. An import is author input,
-      // so the producer gate runs here.
+      // `parsePackageZip` applies the lenient loader rule (it also reads
+      // already-published artifacts); an import is author input.
       assertArchiveContentConforms(parsed.type, parsed.files, "file");
       return { parsed, artifact: upload };
     } catch (err) {

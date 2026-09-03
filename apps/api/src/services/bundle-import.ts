@@ -610,21 +610,14 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
   if (errors.length > 0) throw validationFailed(errors);
 }
 
-/**
- * The producer content gate on the bundle's ROOT package.
- *
- * ROOT ONLY: the root is what the operator is publishing — author input. Every
- * other entry is a dependency COPY of an already-published artifact the bundler
- * carried along, and this route is the sanctioned path for re-ingesting
- * platform-produced artifacts, so gating those would permanently refuse any
- * bundle transitively depending on a pre-rule package.
- */
+// ROOT ONLY: the root is author input; every other entry is a dependency copy of
+// an already-published artifact, and gating those would permanently refuse any
+// bundle transitively depending on a pre-rule package.
 function assertBundleRootConforms(bundle: Bundle): void {
   const root = bundle.packages.get(bundle.root);
   if (!root) return;
   const parsed = parsePackageIdentity(bundle.root);
-  // System packages are authoritative platform inputs the importer reuses
-  // verbatim rather than writing — same skip as the two gates around this one.
+  // Platform inputs reused verbatim — same skip as the gates around this one.
   if (parsed && isSystemPackage(parsed.packageId)) return;
   const type = (root.manifest as { type?: PackageType }).type;
   if (!type) return;

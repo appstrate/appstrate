@@ -30,14 +30,11 @@ export async function tryParseSkillOnlyZip(
   const skillRaw = files["SKILL.md"];
   if (!skillRaw) return { ok: false, reason: "not_a_skill" };
 
-  // BOM-preserving on purpose — see `decodeSkillMarkdown`.
   const skillMd = decodeSkillMarkdown(skillRaw);
 
-  // The archive declared itself a skill by carrying a SKILL.md, so a bad
-  // frontmatter is answered as itself rather than as `not_a_skill` (which the
-  // caller reports as the generic "manifest.json not found"). This is the only
-  // gate on the bare-ZIP path: the manifest below is SYNTHESISED, so
-  // `parsePackageZip` never sees this archive.
+  // Carrying a SKILL.md answered the `not_a_skill` question, so a bad
+  // frontmatter is reported as itself. The only gate on this path: the manifest
+  // below is SYNTHESISED, so `parsePackageZip` never sees this archive.
   assertContentConforms("skill", skillMd, "file");
 
   const meta = extractSkillMeta(skillMd);

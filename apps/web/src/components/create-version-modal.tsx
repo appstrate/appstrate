@@ -76,7 +76,7 @@ export function CreateVersionModal({
       },
       onError: (err) => {
         // The publish gate re-checks the stored SKILL.md, so a frontmatter
-        // code can arrive here too — not only in the editor.
+        // code arrives here too.
         setError("root", {
           message: translateSkillFrontmatterError(err, t) ?? getErrorMessage(err),
         });

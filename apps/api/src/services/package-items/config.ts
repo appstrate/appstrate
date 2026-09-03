@@ -17,13 +17,7 @@ export interface PackageTypeConfig {
   type: PackageType;
   storageFolder: "agents" | "skills" | "integrations" | "mcp-servers";
   label: string;
-  /**
-   * Producer-side check for this type's authored content, run by every path
-   * that WRITES it. Returns the first violation, or `null`.
-   *
-   * Distinct from `checkCompanionFiles`, which also runs on the loader side
-   * over already-published, immutable bundles and therefore stays lenient.
-   */
+  /** Producer-side check for this type's authored content, run by every path that WRITES it. */
   validateContent?: (content: string) => CompanionFileViolation | null;
 }
 
@@ -42,11 +36,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
   "mcp-server": { type: "mcp-server", storageFolder: "mcp-servers", label: "MCP Servers" },
 };
 
-/**
- * Run a type's {@link PackageTypeConfig.validateContent} over authored content
- * and answer a 400 carrying the violation reason as the machine-readable
- * `code`, so a client can tell "no description" from "bad name".
- */
+/** 400 with the violation reason as the machine-readable `code`. */
 export function assertContentConforms(
   type: PackageType,
   content: string,
@@ -65,11 +55,7 @@ export function assertContentConforms(
   ]);
 }
 
-/**
- * Same gate, applied to the content entry of an archive the caller is about to
- * write. Decoded with `decodeSkillMarkdown`, which keeps a leading BOM the
- * default `TextDecoder` would eat — the gate has to see the byte it rejects.
- */
+/** The same gate over an archive's content entry, BOM preserved. */
 export function assertArchiveContentConforms(
   type: PackageType,
   files: Record<string, Uint8Array> | Map<string, Uint8Array>,

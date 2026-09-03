@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * SKILL.md frontmatter errors, client side.
- *
- * The RULE is not restated here: `checkSkillMarkdown`
- * (`@appstrate/afps-shared/companion-files`) is the same checker every server
- * write path runs, so the editor cannot drift into accepting a SKILL.md the
- * server refuses (or nagging about one it accepts).
- */
+/** SKILL.md frontmatter errors, client side — `checkSkillMarkdown` is the server's own checker. */
 
 import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { ApiError } from "../api/errors";
 
-/**
- * i18n key per companion reason. Keys are literal dotted strings so the
- * extraction pass can see them. No `SKILL_MISSING_SKILL_MD`: that one asks
- * whether the FILE exists in an archive, which neither the editor (whose
- * content IS the file) nor a write-path 400 can raise here.
- */
+/** Keys are literal dotted strings so the i18n extraction pass can see them. */
 const MESSAGE_KEY: Record<string, string> = {
   SKILL_INVALID_FRONTMATTER: "editor.errorSkillInvalidFrontmatter",
   SKILL_MISSING_FRONTMATTER_NAME: "editor.errorSkillFrontmatterName",
@@ -26,12 +14,7 @@ const MESSAGE_KEY: Record<string, string> = {
   SKILL_INVALID_FRONTMATTER_DESCRIPTION: "editor.errorSkillDescriptionTooLong",
 };
 
-/**
- * Run the shared companion check over an in-editor SKILL.md. Returns the i18n
- * key of the message to show plus the checker's own sentence as `detail` —
- * which names the offending line or bound, and which the translated strings
- * promise — or `null` when it conforms.
- */
+/** The i18n key plus the checker's own sentence as `detail` (it names the exact fault). */
 export function skillFrontmatterError(content: string): { key: string; detail: string } | null {
   const violation = checkSkillMarkdown(content);
   if (!violation) return null;
@@ -41,13 +24,7 @@ export function skillFrontmatterError(content: string): { key: string; detail: s
   };
 }
 
-/**
- * Turn a failed skill write into the message the author reads, or `null` to let
- * the server's own `detail` stand.
- *
- * `ApiError.details` IS the problem body's `errors` array (`toApiError`,
- * `api/client.ts`) — not an object with an `errors` key.
- */
+/** The message for a failed skill write, or `null` to let the server's `detail` stand. */
 export function translateSkillFrontmatterError(
   err: unknown,
   t: (key: string, options?: { detail: string }) => string,

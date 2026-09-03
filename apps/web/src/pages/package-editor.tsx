@@ -386,16 +386,13 @@ function PackageEditorInner({
           tab: "content",
         };
       }
-      // The SAME checker the create / save / publish routes run, so the
-      // author fixes the frontmatter here instead of reading a 400 back.
+      // The same checker the write routes run — fixed here, not via a 400.
       const frontmatter = skillFrontmatterError(s.content);
       if (frontmatter) {
         return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: "content" };
       }
       return null;
     },
-    // For a violation the client-side check could not anticipate — a draft
-    // stored before this gate existed, reopened and saved.
     translateError: (err) => translateSkillFrontmatterError(err, t),
   });
 

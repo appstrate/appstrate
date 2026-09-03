@@ -646,7 +646,6 @@ export async function createVersionFromDraft(params: {
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
-  /** The entries that become the immutable artifact, for the content gate below. */
   let frozenEntries: Record<string, Uint8Array> | undefined;
   if (pkg.type === "agent") {
     const storedFiles = await downloadPackageFiles(
@@ -683,11 +682,8 @@ export async function createVersionFromDraft(params: {
     frozenEntries = entries;
   }
 
-  // The gate reads the bytes that ACTUALLY get frozen. For a skill the
-  // artifact's `SKILL.md` comes from STORAGE (the `entries` above), while
-  // `packages.draft_content` is a second copy the update handler keeps in step
-  // — validating the column would leave the one byte sequence that becomes
-  // immutable unchecked whenever the two drift.
+  // The bytes that ACTUALLY get frozen: the artifact's content entry comes from
+  // STORAGE, and `packages.draft_content` is a second copy that can drift.
   if (frozenEntries) assertArchiveContentConforms(pkg.type, frozenEntries, "content");
 
   // A schema-valid mcp-server draft can still point at a companion file that

@@ -38,16 +38,18 @@ convention for new API, not a break.
   **It is deliberately NOT part of `checkCompanionFiles`, whose behaviour is
   byte-for-byte unchanged** — including its private `hasFrontmatterName` probe,
   which is NOT routed through the new parser. That function also runs on the
-  LOADER side, over already-published immutable bundles: a skill published
-  before this rule existed has to keep loading, or every run of an agent
-  depending on it fails for a defect nobody can now fix. Its acceptance set may
-  therefore never shrink — not even to the column-0 reading the new parser
-  uses, which would newly reject `  name: x`, `metadata:\n  name: x` and
-  `skill_name: x`. Callers that WRITE skill content call `checkSkillMarkdown`;
-  callers that LOAD a bundle keep calling `checkCompanionFiles`.
+  LOADER side, over already-published immutable bundles, and published
+  artifacts exist whose frontmatter `yaml` cannot parse at all: 17 skills in
+  production carry an unquoted `description: … : …`, which `yaml` refuses with
+  "Nested mappings are not allowed in compact mappings". Routing the loader
+  through the parser would stop every run of every agent depending on one of
+  them, for a defect nobody can fix in an immutable artifact. Its acceptance
+  set may therefore never shrink. Callers that WRITE skill content call
+  `checkSkillMarkdown`; callers that LOAD a bundle keep calling
+  `checkCompanionFiles`.
 
   **Containment: what the gate accepts is a SUBSET of what the loader
-  accepts.** YAML is the more permissive of the two readings — `name:\n  triage`
+  accepts.** Each reading accepts documents the other refuses — `name:\n  triage`
   and `name : triage` are valid YAML the loader's substring probe cannot see,
   and accepting them would mint an IMMUTABLE version the run launcher then
   refuses to load. So `checkSkillMarkdown` ends by requiring `hasFrontmatterName`

@@ -20,14 +20,12 @@ describe("skillFrontmatterError", () => {
     expect(
       skillFrontmatterError("---\nname: Word_Count\ndescription: Counts words.\n---\nBody."),
     ).toMatchObject({ key: "editor.errorSkillInvalidName" });
-    // `DEFAULT_SKILL_CONTENT` with only the name filled in.
     expect(skillFrontmatterError("---\nname: word-count\ndescription: \n---\n\n")).toMatchObject({
       key: "editor.errorSkillFrontmatterDescription",
     });
     expect(
       skillFrontmatterError(`---\nname: word-count\ndescription: ${"d".repeat(1025)}\n---\n`),
     ).toMatchObject({ key: "editor.errorSkillDescriptionTooLong" });
-    // A duplicate key is a YAML fault, not a length fault.
     expect(
       skillFrontmatterError("---\nname: word-count\ndescription: a\ndescription: b\n---\n"),
     ).toMatchObject({ key: "editor.errorSkillInvalidFrontmatter" });
@@ -41,8 +39,6 @@ describe("skillFrontmatterError", () => {
     ).toBeNull();
   });
 
-  // The translated strings promise "the exact fault"; the checker's own
-  // sentence is the only part that names the offending line or bound.
   it("carries the checker's own message as `detail`", () => {
     expect(
       skillFrontmatterError("---\nname: word-count\ndescription: a: b\n---\n")?.detail,
@@ -50,11 +46,9 @@ describe("skillFrontmatterError", () => {
   });
 });
 
-// The mapper is pure; what broke in review was the SHAPE it reads —
-// `ApiError.details` IS the problem body's `errors` array, and reading
-// `details.errors` matched nothing while type-checking fine. So build the error
-// the way the app does, from a real problem+json Response through the client's
-// own `toApiError`, and translate it against the real locale bundles.
+// The mapper is pure; what broke in review was the SHAPE it reads, so build the
+// error the way the app does — a real problem+json through `toApiError` — and
+// translate it against the real locale bundles.
 function apiError(code: string, message = "…"): Promise<unknown> {
   return toApiError(
     new Response(
@@ -71,11 +65,7 @@ function apiError(code: string, message = "…"): Promise<unknown> {
   );
 }
 
-/**
- * `t` backed by the real flat dotted-key locale JSON, with i18next's
- * `{{detail}}` interpolation done the same way — so a message that promises a
- * detail and never receives one shows up as a literal `{{detail}}`.
- */
+/** Real locale JSON + i18next's `{{detail}}` interpolation, so a dropped detail shows up. */
 const translator =
   (bundle: Record<string, string>) => (key: string, options?: { detail: string }) =>
     (bundle[key] ?? key).replace("{{detail}}", options?.detail ?? "");

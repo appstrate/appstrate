@@ -75,11 +75,7 @@ export function defaultSkillManifest(
   };
 }
 
-/**
- * Skeleton a NEW skill's SKILL.md opens with. Deliberately not yet valid: both
- * fields are required, and a new skill has no package id at seed time to
- * prefill `name` from. The editor's own check names the missing one on save.
- */
+/** Deliberately not yet valid: a new skill has no package id to prefill `name` from. */
 export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
 // ─── Default manifest for integration ───────────────────────

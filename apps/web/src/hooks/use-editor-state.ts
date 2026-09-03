@@ -33,10 +33,7 @@ interface UseEditorStateOptions<S extends EditorStateBase> {
    * for updates and draft saves — do not include it here.
    */
   toWireBody: (state: S) => Record<string, unknown>;
-  /**
-   * Translate a failed create/update into the message the author reads, or
-   * `null` to keep the server's own English `detail`.
-   */
+  /** The message the author reads, or `null` to keep the server's English `detail`. */
   translateError?: (err: Error) => string | null;
   /**
    * Pre-submit validation hook. Return an error message + the tab to
@@ -110,9 +107,8 @@ export function useEditorState<S extends EditorStateBase>(
 
   const saveDraft = useCallback(async () => {
     if (!isEdit || !packageId) return;
-    // Same pre-submit `validate` as `handleSubmit`: this path used to bypass
-    // it, so a rule the submit button enforced could be walked around by
-    // navigating away and clicking "Save draft".
+    // Same pre-submit `validate` as `handleSubmit`: this path bypassed it, so
+    // a rule the submit button enforced could be walked around from the modal.
     const invalid = validate?.(state);
     if (invalid) {
       setError(invalid.error);

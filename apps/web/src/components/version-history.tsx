@@ -85,9 +85,8 @@ export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps
           if (confirmState.type === "restore") {
             restoreVersion.mutate(confirmState.version, {
               onSuccess: () => setConfirmState(null),
-              // A restore WRITES a draft, so it can answer 400. With no
-              // `onError` the modal hung on its spinner saying nothing; closing
-              // it makes the toast visible.
+              // A restore WRITES a draft, so it can answer 400; with no
+              // `onError` the modal hung on its spinner.
               onError: (err) => {
                 setConfirmState(null);
                 toast.error(translateSkillFrontmatterError(err, t) ?? getErrorMessage(err));
