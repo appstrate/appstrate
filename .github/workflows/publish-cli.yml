@@ -185,3 +185,10 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           generate_release_notes: true
+          # Never GitHub's "latest": `appstrate self-update`, `bootstrap.sh`
+          # and `bootstrap-runner.sh` resolve `releases/latest` and expect a
+          # platform `v*` tag carrying the CLI binaries. Every non-`v*`
+          # release published before this line was "latest" until the next
+          # `v*` tag and broke all three in the meantime (cli@1.0.0-beta.56:
+          # `vcli@1.0.0-beta.56/checksums.txt.minisig` → 404).
+          make_latest: false

@@ -195,6 +195,14 @@ describe("resolveTargetVersion", () => {
     expect(calls).toEqual(["https://api.github.com/repos/appstrate/appstrate/releases/latest"]);
   });
 
+  it("names a non-platform latest release instead of building a v-prefixed URL", async () => {
+    await expect(
+      resolveTargetVersion(undefined, {
+        fetchText: async () => JSON.stringify({ tag_name: "cli@1.0.0-beta.56" }),
+      }),
+    ).rejects.toThrow(/"cli@1\.0\.0-beta\.56", not a platform v\* release/);
+  });
+
   it("throws on malformed GitHub response", async () => {
     await expect(
       resolveTargetVersion(undefined, { fetchText: async () => "not json" }),

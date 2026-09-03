@@ -343,6 +343,18 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   runs predating the stamp, such rows now carry the runtime dot instead of the
   speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
 
+### Fixed
+
+- **`appstrate self-update`, `bootstrap.sh` and `bootstrap-runner.sh` no longer
+  break for the days between an npm release and the next platform tag.** The
+  `cli@`, `core@` and `afps-shared@` publish workflows each create a GitHub
+  Release, and GitHub made the newest one "latest" — so `releases/latest`
+  answered `cli@1.0.0-beta.56`, the CLI prefixed it with `v` and asked for
+  `vcli@1.0.0-beta.56/checksums.txt.minisig` (404). Every one of the 15
+  non-`v*` releases to date opened such a window. Those workflows now pass
+  `make_latest: false`, and the CLI names a non-platform `latest` tag instead
+  of building a URL from it.
+
 ### Removed
 
 - **BREAKING (operators): migration `0055` drops `org_invitations.accepted_by`
