@@ -777,7 +777,8 @@ $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
 ├── claude-plugin/                       # generated Claude Code plugin (`appstrate skills sync`)
-└── skills-sync/state.json               # which skill directory each target owns, and from which artifact
+├── skills-sync/state.json               # which skill directory each target owns, and from which artifact
+└── skills-sync/sync.lock                # flock(2) target serializing concurrent syncs (never removed)
 ```
 
 `skills-sync/state.json` lives outside every target tree on purpose: the generated plugin's version is the hash of its contents, so a state blob inside it would make each sync look like a new plugin version. It is also the only record of which directories in the shared `~/.agents/skills/` and `~/.claude/skills/` belong to the sync.
