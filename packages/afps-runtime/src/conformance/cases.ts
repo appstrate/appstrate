@@ -876,9 +876,7 @@ const L4_RUN_EVENT_ENVELOPE: ConformanceCase = {
 //   - agent     → prompt.md present + non-empty at archive root (§3.2/§3.4)
 //   - skill     → SKILL.md present + a YAML frontmatter `name` (§3.3). NOT
 //                 `description`: §3.3 spells it SHOULD, and the loader reads
-//                 immutable published bundles. The platform's stricter
-//                 producer rule (`checkSkillMarkdown`) lives on its write
-//                 paths, never here.
+//                 immutable published bundles.
 //   - mcp-server → `server.entry_point` payload present in archive (§3.4)
 //
 // Each case builds a minimal `.afps` archive with the violation and asserts
@@ -940,10 +938,8 @@ const L1_SKILL_FRONTMATTER_NAME_ONLY: ConformanceCase = {
   run: (adapter) => {
     const bytes = zipSync({
       "manifest.json": enc(JSON.stringify(SKILL_MANIFEST)),
-      // §3.3 spells `description` SHOULD. The LOADER must honour that: bundles
-      // are immutable, and a skill published without a description has to keep
-      // loading or every run of an agent depending on it fails at launch. The
-      // platform enforces the stricter producer rule at authoring time instead.
+      // Bundles are immutable: a skill published without a description has to
+      // keep loading, or every run of an agent depending on it fails at launch.
       "SKILL.md": enc("---\nname: triage\n---\nbody"),
     });
     try {

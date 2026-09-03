@@ -50,14 +50,10 @@ const VALID_SKILL = {
 };
 
 /**
- * SKILL.md fixture with conforming YAML frontmatter.
- *
- * PRODUCER paths (`checkSkillMarkdown` — editor create/save, publish, restore,
- * fork, import roots) enforce the full AFPS §3.3 rule: a `name` matching the
- * Agent Skills naming rule and a non-empty `description` of at most 1024 code
- * points. The LOADER — this validator and the bundle loader — asks only for an
- * inline frontmatter `name`, because it reads already-published, immutable
- * artifacts. This fixture satisfies both.
+ * SKILL.md fixture satisfying both rules: the loader (this validator and the
+ * bundle loader) asks only for an inline frontmatter `name`, while the write
+ * paths (`checkSkillMarkdown`) also require a conforming name and a
+ * non-empty `description`.
  */
 const VALID_SKILL_MD = enc("---\nname: skill\ndescription: A test skill.\n---\nbody");
 

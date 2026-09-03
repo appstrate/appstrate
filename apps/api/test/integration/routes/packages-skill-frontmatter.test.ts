@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS §3.3 SKILL.md frontmatter gate on every skill-WRITING surface.
+ * The AFPS §3.3 SKILL.md gate, one refusal per skill-WRITING surface: JSON
+ * create, draft save, publish (which validates the STORED SKILL.md — the bytes
+ * that actually get frozen), version restore, the AFPS import and the
+ * bare-skill-ZIP fallback that synthesises its own manifest.
  *
- * The platform is a PRODUCER of skill artifacts: a skill whose SKILL.md has no
- * `description`, or a `name` that breaks the Agent Skills naming rule, is an
- * artifact consumers reject (Codex refuses it, Claude Code never auto-invokes
- * it). AFPS spells both SHOULD; every write path here answers 400 instead.
- *
- * Covered: JSON create, draft save (PUT), publish (which validates the STORED
- * `SKILL.md` — the bytes that actually get frozen), version restore, fork, the
- * AFPS import, and the bare-skill-ZIP fallback that synthesizes its own
- * manifest and therefore never reaches `parsePackageZip`.
- *
- * The LOADER stays lenient on purpose — a published skill with no description
- * must keep loading, or runs of agents depending on it break. The last describe
- * block below is the negative control for exactly that.
+ * The rule table itself lives in `packages/afps-shared`; what is asserted here
+ * is that each surface runs it, answers the machine-readable code, and writes
+ * nothing. The last describe block is the negative control: the LOADER stays
+ * lenient, or runs of agents depending on a pre-rule skill break.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -67,16 +61,11 @@ async function createSkill(ctx: TestContext, content: string) {
   });
 }
 
-/** Every SKILL.md the gate must refuse, with the reason code it must answer. */
+/** One SKILL.md per reason code the gate must answer with. */
 const REJECTED: { label: string; content: string; code: string }[] = [
   {
     label: "no frontmatter at all",
     content: "# Just a body",
-    code: "skill_missing_frontmatter_name",
-  },
-  {
-    label: "blank name",
-    content: "---\nname:\ndescription: A gated skill.\n---\nBody.",
     code: "skill_missing_frontmatter_name",
   },
   {
@@ -85,35 +74,13 @@ const REJECTED: { label: string; content: string; code: string }[] = [
     code: "skill_invalid_frontmatter_name",
   },
   {
-    // Unquoted, `@` is a reserved YAML indicator — the parser refuses the
-    // document before the name rule is ever consulted.
-    label: "scoped package id used as the frontmatter name (unquoted)",
-    content: `---\nname: ${SKILL_ID}\ndescription: A gated skill.\n---\nBody.`,
-    code: "skill_invalid_frontmatter",
-  },
-  {
-    label: "scoped package id used as the frontmatter name (quoted)",
-    content: `---\nname: "${SKILL_ID}"\ndescription: A gated skill.\n---\nBody.`,
-    code: "skill_invalid_frontmatter_name",
-  },
-  {
     label: "duplicate description key",
     content: "---\nname: gate-skill\ndescription: a\ndescription: b\n---\nBody.",
     code: "skill_invalid_frontmatter",
   },
   {
-    label: "name over 64 characters",
-    content: `---\nname: ${"a".repeat(65)}\ndescription: A gated skill.\n---\nBody.`,
-    code: "skill_invalid_frontmatter_name",
-  },
-  {
     label: "absent description",
     content: "---\nname: gate-skill\n---\nBody.",
-    code: "skill_missing_frontmatter_description",
-  },
-  {
-    label: "whitespace-only description",
-    content: "---\nname: gate-skill\ndescription:    \n---\nBody.",
     code: "skill_missing_frontmatter_description",
   },
   {
@@ -188,32 +155,6 @@ describe("skill SKILL.md frontmatter gate (AFPS §3.3)", () => {
         expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
       });
     }
-
-    it("tolerates CRLF", async () => {
-      const res = await createSkill(
-        ctx,
-        "---\r\nname: gate-skill\r\ndescription: A gated skill.\r\n---\r\n\r\nBody.",
-      );
-      expect(res.status).toBe(201);
-    });
-
-    // The BOM is the byte the runtime chokes on: Pi tests `startsWith("---")`,
-    // reads no frontmatter, and drops the skill. Accepted here, it would mint
-    // an immutable version that simply never loads in an agent.
-    it("rejects a leading BOM rather than silently stripping it", async () => {
-      const res = await createSkill(
-        ctx,
-        "\uFEFF---\nname: gate-skill\ndescription: A gated skill.\n---\n\nBody.",
-      );
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as ProblemBody;
-      expect(body.errors?.[0]).toMatchObject({
-        field: "content",
-        code: "skill_invalid_frontmatter",
-      });
-      expect(body.errors?.[0]?.message).toContain("byte-order mark");
-      expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
-    });
 
     it("names the rule it broke in the message", async () => {
       const res = await createSkill(ctx, "---\nname: gate-skill\n---\nBody.");

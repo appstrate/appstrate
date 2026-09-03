@@ -130,13 +130,6 @@ export function checkCompanionFiles(
         path: "SKILL.md",
       };
     }
-    // LENIENT on purpose, and deliberately NOT the shared parser — see
-    // {@link checkSkillMarkdown}. This function runs on the LOADER side too
-    // (`extractRootFromAfps` → the run launcher's package catalog), where the
-    // archive is an already-published, immutable artifact. Its acceptance set
-    // must never shrink: anything it rejects is an agent that stops running
-    // for a defect nobody can fix in place. `hasFrontmatterName` is therefore
-    // frozen — the permissive substring probe, unchanged.
     if (!hasFrontmatterName(new TextDecoder().decode(bytes))) {
       return {
         reason: "SKILL_MISSING_FRONTMATTER_NAME",
@@ -185,21 +178,12 @@ function isEffectivelyEmpty(bytes: Uint8Array): boolean {
 }
 
 /**
- * LOADER-side name probe. FROZEN — byte-for-byte what it was before the
- * producer-side rule existed, and deliberately NOT routed through
- * {@link parseSkillFrontmatter}.
- *
- * The distinction that forces the duplication: this probe decides whether an
- * ALREADY-PUBLISHED bundle loads, and a published bundle is immutable. Any
- * input it used to accept and would now reject is an agent that stops running
- * for a defect nobody can fix in place. The shared parser reads only column-0
- * keys — correct for authoring, but it would newly reject `  name: triage`,
- * `metadata:\n  name: triage` and `skill_name: triage`, all of which this
- * substring probe accepts and some published artifact may well contain.
- *
- * So its acceptance set may never shrink. Nothing here is to be "unified" with
- * the parser below: they answer different questions for different sides of the
- * artifact lifecycle.
+ * Loader-side name probe, deliberately not routed through
+ * {@link parseSkillFrontmatter}: it decides whether an already-published —
+ * therefore immutable — bundle loads, so its acceptance set may never shrink.
+ * The parser reads only column-0 keys and would newly reject `  name: x`,
+ * `metadata:\n  name: x` and `skill_name: x`, which some published artifact may
+ * well contain.
  */
 function hasFrontmatterName(content: string): boolean {
   const fmMatch = content.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
@@ -216,39 +200,27 @@ function hasFrontmatterName(content: string): boolean {
 }
 
 // ─────────────────────────────────────────────
-// SKILL.md YAML frontmatter — the PRODUCER-side parser
+// SKILL.md YAML frontmatter — the producer-side parser
 // ─────────────────────────────────────────────
 
-/**
- * Maximum length of a skill frontmatter `name`, in Unicode CODE POINTS (Agent
- * Skills specification, https://agentskills.io/specification).
- */
+/** Agent Skills `name` bound, in Unicode code points. */
 export const SKILL_NAME_MAX_LENGTH = 64;
 
 /**
- * Maximum length of a skill frontmatter `description`, in Unicode CODE POINTS
- * — the Agent Skills specification (https://agentskills.io/specification)
- * counts characters, and a code point is what "character" means there.
- *
- * NOT a parity constant: Pi measures `description.length`, i.e. UTF-16 units,
- * and only emits a warning past the bound rather than dropping the skill. The
- * platform enforces the spec instead, because the artifact it mints is
- * immutable and other consumers (Codex, Claude Code) are not so forgiving.
+ * Agent Skills `description` bound, in Unicode code points — the spec counts
+ * characters. Pi measures UTF-16 units and only warns past the bound; the
+ * platform enforces the spec, because the artifact it mints is immutable.
  */
 export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 
 /**
- * Agent Skills `name` rule: lowercase `a-z`, `0-9` and `-` only, no leading or
- * trailing hyphen, no consecutive hyphens. Length is checked separately
- * against {@link SKILL_NAME_MAX_LENGTH} so the violation message can name the
- * bound.
+ * Agent Skills `name` rule: lowercase `a-z`, `0-9` and `-`, no leading,
+ * trailing or consecutive hyphen. Length is checked separately so the
+ * violation message can name the bound.
  *
- * NOT the same namespace as a package id. A package id is `@scope/name`
- * validated by `SLUG_PATTERN` (`@appstrate/core/naming`) — unbounded in
- * length and tolerant of `--`. The frontmatter `name` is the BARE skill slug
- * an agent runtime addresses (`triage`, never `@acme/triage`), and it is the
- * Agent Skills rule that governs it. The two are deliberately different and
- * neither validator may be substituted for the other.
+ * A different namespace from a package id (`@scope/name` under `SLUG_PATTERN`,
+ * unbounded and `--`-tolerant): this is the bare skill slug an agent runtime
+ * addresses. Neither validator may be substituted for the other.
  */
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -266,16 +238,11 @@ export function isValidSkillName(name: string): boolean {
 export interface SkillFrontmatter {
   /** Whether a closed `--- … ---` frontmatter block was found. */
   found: boolean;
-  /**
-   * True when the document opens with `---` but never closes the block. Told
-   * apart from "no frontmatter at all" so the author gets the actual fault.
-   */
+  /** The document opens with `---` but never closes the block. */
   unterminated: boolean;
   /**
-   * Why the block could not be read as `{ name, description }` — a YAML syntax
-   * error, a document that is not a mapping, or a field that is not a string.
-   * `null` when the block parsed cleanly. Never thrown: `extractSkillMeta`'s
-   * contract is to degrade to empty fields plus a warning.
+   * Why the block could not be read as `{ name, description }`, or `null`.
+   * Never thrown: `extractSkillMeta` degrades to empty fields plus a warning.
    */
   error: string | null;
   /** Frontmatter `name`, or `""` when absent/blank. */
@@ -287,35 +254,17 @@ export interface SkillFrontmatter {
 /**
  * Parse the `name` / `description` of a `SKILL.md` YAML frontmatter block.
  *
- * PARITY WITH THE CONSUMER IS THE POINT. The runtime that actually loads a
- * skill — `@earendil-works/pi-coding-agent`, `dist/utils/frontmatter.js` —
- * normalises newlines, requires the document to start with `---`, cuts the
- * block at the first `\n---`, and hands the slice to `yaml`'s `parse`. This
- * function does the same, against the same library at the same major, so the
- * gate cannot accept a document the consumer then fails to PARSE.
+ * Parity with the consumer is the point: the runtime that loads a skill
+ * (`@earendil-works/pi-coding-agent`, `dist/utils/frontmatter.js`) normalises
+ * newlines, requires a leading `---`, cuts the block at the first `\n---` and
+ * hands the slice to `yaml`'s `parse`. This does the same against the same
+ * library at the same major, so the gate cannot accept a document the consumer
+ * then fails to parse. `uniqueKeys` and `strict` are passed explicitly so a
+ * future default change cannot loosen the gate in silence.
  *
- * Parsing is where parity is exact. The RULES are not symmetric, on purpose:
- * Pi only WARNS on a name or description that breaks the Agent Skills spec
- * (and measures the description in UTF-16 units, so `"🙂".length` is 2), while
- * this gate refuses it. The bounds below therefore follow the SPEC — which
- * says characters, hence code points — not Pi's warning threshold. Being
- * stricter than the consumer is safe: it costs an author one edit. Being
- * looser is not: it mints an immutable artifact the consumer drops.
- *
- * The hand-rolled scanner this replaces got that wrong in both directions: it
- * accepted `description: a: b` and `name:x`, which `yaml` refuses outright,
- * and it had to re-implement block scalars, quoted escapes, comments,
- * continuation lines and duplicate detection — each an opportunity to diverge
- * from a spec the library already implements. `uniqueKeys` and `strict` are
- * passed explicitly rather than left to their defaults so a future default
- * change cannot loosen the gate in silence.
- *
- * NOTHING is normalised away that the runtime keeps — a leading BOM above all.
- * Pi tests `normalized.startsWith("---")`, which a BOM defeats, so it reads no
- * frontmatter at all and drops the skill. Stripping the BOM here would make
- * this function read a name and description the runtime never sees, which is
- * exactly the divergence it exists to prevent; {@link checkSkillMarkdown}
- * refuses such a file instead.
+ * Nothing the runtime keeps is normalised away — a leading BOM above all: Pi
+ * tests `startsWith("---")`, so it reads no frontmatter behind one, and a
+ * parser that saw through it would report fields the runtime never sees.
  */
 export function parseSkillFrontmatter(content: string): SkillFrontmatter {
   const empty = { found: false, unterminated: false, error: null, name: "", description: "" };
@@ -359,13 +308,9 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter {
 }
 
 /**
- * Read one frontmatter field as a trimmed string.
- *
- * An ABSENT key and an empty YAML scalar (`description:`, which parses to
- * `null`, as does an explicit `description: null`) are indistinguishable once
- * parsed and both mean "not provided" — they yield `""` so the caller reports
- * the field as MISSING. Any other non-string (a number, a boolean, a list, a
- * nested mapping) is a malformed document, not a missing field.
+ * Read one frontmatter field as a trimmed string. An absent key and an empty
+ * scalar (`description:` / `description: null`) both mean "not provided" and
+ * yield `""`; any other non-string is a malformed document.
  */
 function readStringField(record: Record<string, unknown>, key: string): string | { error: string } {
   const value = record[key];
@@ -390,14 +335,10 @@ function startsWithBom(content: string): boolean {
 }
 
 /**
- * Decode `SKILL.md` bytes for {@link checkSkillMarkdown}.
- *
- * `ignoreBOM: true` is the whole point, and its name is backwards: it means
- * "do not CONSUME the BOM", i.e. keep U+FEFF as a character. A default
- * `TextDecoder` silently swallows it, so a write path that decoded stored or
- * archived bytes the ordinary way would hand the gate a BOM-free string, pass
- * it, and freeze bytes the runtime cannot read. Every write path that starts
- * from bytes rather than from a request body decodes through THIS function.
+ * Decode `SKILL.md` bytes for {@link checkSkillMarkdown}. `ignoreBOM: true`
+ * reads backwards: it means "do not CONSUME the BOM". A default `TextDecoder`
+ * swallows it, which would hand the gate a BOM-free string and freeze bytes
+ * the runtime cannot read.
  */
 export function decodeSkillMarkdown(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
@@ -410,41 +351,28 @@ function firstLine(err: unknown): string {
 }
 
 // ─────────────────────────────────────────────
-// SKILL.md — the PRODUCER-side gate
+// SKILL.md — the producer-side gate
 // ─────────────────────────────────────────────
 
 /**
- * Validate a `SKILL.md`'s frontmatter against the FULL AFPS §3.3 rule, as a
+ * Validate a `SKILL.md`'s frontmatter against the full AFPS §3.3 rule, as a
  * producer must: a `name` conforming to the Agent Skills specification
  * (https://agentskills.io/specification) and a non-empty `description` of at
  * most {@link SKILL_DESCRIPTION_MAX_LENGTH} code points. Returns the first
  * violation, or `null`.
  *
- * WHY THIS IS SEPARATE FROM {@link checkCompanionFiles}. That function runs on
- * both sides of the artifact lifecycle, and the loader side reads
- * already-published, immutable bundles: a skill published before this rule
- * existed must keep loading, or every run of an agent that depends on it fails
- * at launch for a defect nobody can now fix in place. So the rule is applied
- * at the moment content is AUTHORED — editor create, draft save, publish,
- * restore, fork, and the ROOT of every import — and never at load. AFPS spells
- * both fields SHOULD; the platform mints these artifacts and holds itself to
- * MUST.
- *
- * Takes the decoded text, not a file source: every write path already has the
- * `SKILL.md` in hand (a request body, a draft column, a ZIP entry), and
- * "is SKILL.md present at all" is `checkCompanionFiles`'s question.
+ * Separate from {@link checkCompanionFiles} because that one also runs on the
+ * loader side, over already-published immutable bundles: a skill published
+ * before this rule existed must keep loading. AFPS spells both fields SHOULD;
+ * the platform mints these artifacts and holds itself to MUST.
  */
 export function checkSkillMarkdown(content: string): CompanionFileViolation | null {
-  // FIRST, because everything below reads a document the runtime cannot: Pi's
-  // `parseFrontmatter` tests `startsWith("---")`, which a BOM defeats, so it
-  // reads an empty frontmatter and `loadSkillFromFile` returns `skill: null` —
-  // the skill is silently dropped at run time. The platform's own loader is
-  // more forgiving (it decodes archive bytes through a default `TextDecoder`,
-  // which eats the BOM), so nothing downstream would have complained: the
-  // version would be minted, immutable, and simply never load in the agent.
-  //
-  // Rejected rather than stripped: silently rewriting an author's bytes would
-  // make the artifact disagree with the file they wrote.
+  // First, because everything below would read a document the runtime cannot:
+  // Pi reads no frontmatter behind a BOM and drops the skill, while the
+  // platform's own loader eats the BOM — so nothing downstream would complain
+  // and the version would be minted, immutable, and never load. Rejected
+  // rather than stripped, so the artifact still matches the file the author
+  // wrote.
   if (startsWithBom(content)) {
     return {
       reason: "SKILL_INVALID_FRONTMATTER",
@@ -506,18 +434,11 @@ export function checkSkillMarkdown(content: string): CompanionFileViolation | nu
     };
   }
 
-  // CONTAINMENT: what this gate accepts must be a SUBSET of what the loader
-  // accepts. The two read the frontmatter differently on purpose — a real YAML
-  // parser here, a frozen substring probe there — and YAML is the more
-  // permissive of the two: `name:\n  triage`, `name : triage` and a
-  // BOM-prefixed document are all valid YAML that `hasFrontmatterName` cannot
-  // see. Without this check, create and publish would mint an IMMUTABLE version
-  // the run launcher then refuses to load — the one failure mode this whole
-  // split exists to prevent, and unfixable once published.
-  //
-  // Stated as a check rather than by loosening the loader, because the loader's
-  // acceptance set may never shrink, and rather than by tightening the parser,
-  // because the parser must keep matching the runtime.
+  // Containment: what this gate accepts must be a SUBSET of what the loader
+  // accepts. YAML is the more permissive of the two — `name:\n  triage` and
+  // `name : triage` are valid YAML the substring probe cannot see — so without
+  // this check, publishing would mint an immutable version the run launcher
+  // then refuses to load.
   if (!hasFrontmatterName(content)) {
     return {
       reason: "SKILL_INVALID_FRONTMATTER_NAME",

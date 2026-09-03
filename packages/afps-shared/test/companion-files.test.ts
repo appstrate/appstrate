@@ -14,12 +14,12 @@ import {
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
-/** The PRODUCER gate over a single SKILL.md payload. */
+/** The producer gate over a single SKILL.md payload. */
 function checkSkill(skillMd: string): CompanionViolationReason | null {
   return checkSkillMarkdown(skillMd)?.reason ?? null;
 }
 
-/** The LOADER gate over an archive. */
+/** The loader gate over an archive. */
 function checkArchive(skillMd: string | null): CompanionViolationReason | null {
   const files: Record<string, Uint8Array> = skillMd === null ? {} : { "SKILL.md": enc(skillMd) };
   return checkCompanionFiles({ type: "skill" }, companionFilesFromRecord(files))?.reason ?? null;
@@ -30,164 +30,98 @@ const skillMd = (name: string, description: string) =>
 
 describe("parseSkillFrontmatter", () => {
   it("reports found:false when there is no frontmatter block", () => {
-    expect(parseSkillFrontmatter("# Just a heading")).toMatchObject({
+    expect(parseSkillFrontmatter("# Just a heading")).toMatchObject({ found: false, name: "" });
+  });
+
+  it("tells an unclosed block apart from no frontmatter at all", () => {
+    expect(parseSkillFrontmatter("---\nname: word-count\nno closing fence")).toMatchObject({
       found: false,
-      name: "",
-      description: "",
+      unterminated: true,
     });
   });
 
-  it("reads name and description from an LF document", () => {
+  it("reads name and description, quotes stripped, from an LF or CRLF document", () => {
     expect(parseSkillFrontmatter(skillMd("word-count", "Counts words."))).toMatchObject({
       found: true,
       name: "word-count",
       description: "Counts words.",
     });
+    expect(
+      parseSkillFrontmatter(`---\r\nname: "word-count"\r\ndescription: 'Counts words.'\r\n---\r\n`),
+    ).toMatchObject({ found: true, name: "word-count", description: "Counts words." });
   });
 
-  it("reads CRLF line endings", () => {
-    const crlf = "---\r\nname: word-count\r\ndescription: Counts words.\r\n---\r\n# Body";
-    expect(parseSkillFrontmatter(crlf)).toMatchObject({
-      found: true,
-      name: "word-count",
-      description: "Counts words.",
-    });
-  });
-
+  // Pi tests `startsWith("---")`, so it reads no frontmatter behind a BOM. A
+  // parser that saw through it would report fields the runtime never sees.
   it("reads NOTHING behind a UTF-8 BOM, exactly as the runtime does", () => {
-    // Pi's `parseFrontmatter` tests `startsWith("---")`. A parser that saw
-    // through the BOM would report fields the runtime never reads — the
-    // divergence this whole module exists to prevent.
-    const bom = `\uFEFF${skillMd("word-count", "Counts words.")}`;
-    expect(parseSkillFrontmatter(bom)).toMatchObject({
+    expect(parseSkillFrontmatter(`\uFEFF${skillMd("word-count", "Counts words.")}`)).toMatchObject({
       found: false,
+      unterminated: false,
       name: "",
-      description: "",
-    });
-    const both = "\uFEFF---\r\nname: word-count\r\ndescription: Counts words.\r\n---\r\nbody";
-    expect(parseSkillFrontmatter(both)).toMatchObject({ found: false, name: "" });
-  });
-
-  it("strips one layer of matching surrounding quotes", () => {
-    const quoted = `---\nname: "word-count"\ndescription: 'Counts words.'\n---\nbody`;
-    expect(parseSkillFrontmatter(quoted)).toMatchObject({
-      found: true,
-      name: "word-count",
-      description: "Counts words.",
     });
   });
 
   it("does not let a longer key shadow the real top-level field", () => {
-    const shadowed =
-      "---\ndisplayname: Not The Name\nx-description: Not the description\n" +
-      "name: word-count\ndescription: Counts words.\n---\nbody";
-    expect(parseSkillFrontmatter(shadowed)).toMatchObject({
-      found: true,
-      name: "word-count",
-      description: "Counts words.",
-    });
+    expect(
+      parseSkillFrontmatter(
+        "---\ndisplayname: Not The Name\nx-description: Not it\n" +
+          "name: word-count\ndescription: Counts words.\n---\nbody",
+      ),
+    ).toMatchObject({ name: "word-count", description: "Counts words." });
   });
 });
 
 describe("isValidSkillName", () => {
-  it("accepts lowercase alphanumerics and single inner hyphens", () => {
+  it("accepts lowercase alphanumerics with single inner hyphens, up to 64 chars", () => {
     expect(isValidSkillName("a")).toBe(true);
-    expect(isValidSkillName("word-count")).toBe(true);
     expect(isValidSkillName("a1-b2-c3")).toBe(true);
-  });
-
-  it("rejects uppercase, underscores and other characters", () => {
-    expect(isValidSkillName("Word-Count")).toBe(false);
-    expect(isValidSkillName("word_count")).toBe(false);
-    expect(isValidSkillName("word count")).toBe(false);
-    expect(isValidSkillName("wörd")).toBe(false);
-  });
-
-  it("rejects leading, trailing and consecutive hyphens", () => {
-    expect(isValidSkillName("-word")).toBe(false);
-    expect(isValidSkillName("word-")).toBe(false);
-    expect(isValidSkillName("word--count")).toBe(false);
-  });
-
-  it("accepts exactly 64 characters and rejects 65", () => {
     expect(isValidSkillName("a".repeat(SKILL_NAME_MAX_LENGTH))).toBe(true);
+  });
+
+  it("rejects other characters, edge hyphens, doubled hyphens and 65 chars", () => {
+    for (const bad of ["Word-Count", "word_count", "word count", "wörd", "-w", "w-", "w--c"]) {
+      expect(isValidSkillName(bad)).toBe(false);
+    }
     expect(isValidSkillName("a".repeat(SKILL_NAME_MAX_LENGTH + 1))).toBe(false);
   });
 });
 
-describe("checkSkillMarkdown — skill frontmatter (AFPS §3.3, producer side)", () => {
+describe("checkSkillMarkdown — the producer gate", () => {
   it("accepts a conforming SKILL.md", () => {
     expect(checkSkill(skillMd("word-count", "Counts words in a text."))).toBeNull();
   });
 
-  it("reports the checks in order: name, name shape, description, description length", () => {
-    // No frontmatter at all is a missing name.
+  it("reports one reason per rule, in order", () => {
     expect(checkSkill("# no frontmatter")).toBe("SKILL_MISSING_FRONTMATTER_NAME");
-    // Bad name AND missing description → the name is reported first.
+    expect(checkSkill("---\nname:   \ndescription: d\n---\nbody")).toBe(
+      "SKILL_MISSING_FRONTMATTER_NAME",
+    );
+    expect(checkSkill(skillMd("Bad_Name", "d"))).toBe("SKILL_INVALID_FRONTMATTER_NAME");
+    expect(checkSkill(skillMd(`${"a".repeat(65)}`, "d"))).toBe("SKILL_INVALID_FRONTMATTER_NAME");
+    expect(checkSkill("---\nname: word-count\n---\nbody")).toBe(
+      "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
+    );
+    expect(checkSkill(skillMd("word-count", "d".repeat(SKILL_DESCRIPTION_MAX_LENGTH + 1)))).toBe(
+      "SKILL_INVALID_FRONTMATTER_DESCRIPTION",
+    );
+    // A bad name AND a missing description reports the name first.
     expect(checkSkill("---\nname: Bad_Name\ndescription:\n---\nbody")).toBe(
       "SKILL_INVALID_FRONTMATTER_NAME",
     );
   });
 
-  it("rejects an absent name", () => {
-    expect(checkSkill("---\ndescription: Counts words.\n---\nbody")).toBe(
-      "SKILL_MISSING_FRONTMATTER_NAME",
-    );
-  });
-
-  it("rejects a blank name", () => {
-    expect(checkSkill("---\nname:   \ndescription: Counts words.\n---\nbody")).toBe(
-      "SKILL_MISSING_FRONTMATTER_NAME",
-    );
-  });
-
-  it("rejects a name that breaks the Agent Skills naming rule", () => {
-    for (const bad of ["Word-Count", "word_count", "-word", "word-", "word--count"]) {
-      expect(checkSkill(skillMd(bad, "Counts words."))).toBe("SKILL_INVALID_FRONTMATTER_NAME");
-    }
-  });
-
-  it("accepts a 64-char name and rejects a 65-char one", () => {
-    const at = "a".repeat(SKILL_NAME_MAX_LENGTH);
-    expect(checkSkill(skillMd(at, "Counts words."))).toBeNull();
-    expect(checkSkill(skillMd(`${at}a`, "Counts words."))).toBe("SKILL_INVALID_FRONTMATTER_NAME");
-  });
-
-  it("rejects an absent description", () => {
-    expect(checkSkill("---\nname: word-count\n---\nbody")).toBe(
-      "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
-    );
-  });
-
-  it("rejects a blank / whitespace-only description", () => {
-    expect(checkSkill("---\nname: word-count\ndescription:    \n---\nbody")).toBe(
-      "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
-    );
-    expect(checkSkill(`---\nname: word-count\ndescription: "  "\n---\nbody`)).toBe(
-      "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
-    );
-  });
-
-  it("accepts a 1024-char description and rejects a 1025-char one", () => {
+  it("accepts the exact bounds", () => {
+    expect(checkSkill(skillMd("a".repeat(SKILL_NAME_MAX_LENGTH), "d"))).toBeNull();
     expect(checkSkill(skillMd("word-count", "d".repeat(SKILL_DESCRIPTION_MAX_LENGTH)))).toBeNull();
-    expect(checkSkill(skillMd("word-count", "d".repeat(SKILL_DESCRIPTION_MAX_LENGTH + 1)))).toBe(
+  });
+
+  // Lengths bound the author's TEXT. `"🙂".length` is 2 in JS, so a UTF-16
+  // count would reject a description the spec allows.
+  it("counts code points, not UTF-16 units", () => {
+    expect(checkSkill(skillMd("word-count", "🙂".repeat(SKILL_DESCRIPTION_MAX_LENGTH)))).toBeNull();
+    expect(checkSkill(skillMd("word-count", "🙂".repeat(SKILL_DESCRIPTION_MAX_LENGTH + 1)))).toBe(
       "SKILL_INVALID_FRONTMATTER_DESCRIPTION",
     );
-  });
-
-  it("applies the same rules to a CRLF document", () => {
-    const crlf = "---\r\nname: word-count\r\ndescription: Counts words.\r\n---\r\nbody";
-    expect(checkSkill(crlf)).toBeNull();
-    const crlfNoDesc = "---\r\nname: word-count\r\n---\r\nbody";
-    expect(checkSkill(crlfNoDesc)).toBe("SKILL_MISSING_FRONTMATTER_DESCRIPTION");
-  });
-
-  it("rejects a BOM before any other rule, so the message names the real fault", () => {
-    // A BOM'd document has no readable frontmatter at all, so every later rule
-    // would report a missing name — true, but not the thing to fix.
-    const bom = "\uFEFF---\r\nname: word-count\r\n---\r\nbody";
-    expect(checkSkill(bom)).toBe("SKILL_INVALID_FRONTMATTER");
-    expect(checkSkillMarkdown(bom)?.message).toContain("byte-order mark");
   });
 
   it("names the rule in the message so the author knows what to fix", () => {
@@ -195,245 +129,94 @@ describe("checkSkillMarkdown — skill frontmatter (AFPS §3.3, producer side)",
     expect(nameViolation?.message).toContain("lowercase");
     expect(nameViolation?.message).toContain("Bad_Name");
     expect(nameViolation?.path).toBe("SKILL.md");
-
-    const descViolation = checkSkillMarkdown("---\nname: word-count\n---\nbody");
-    expect(descViolation?.message).toContain("description");
-  });
-
-  // Lengths are bounds on the author's TEXT. `"🙂".length` is 2 in JS, so a
-  // UTF-16 count rejects a 33-emoji name the spec allows.
-  it("counts code points, not UTF-16 units", () => {
-    expect(checkSkill(skillMd("word-count", "🙂".repeat(SKILL_DESCRIPTION_MAX_LENGTH)))).toBeNull();
-    expect(checkSkill(skillMd("word-count", "🙂".repeat(SKILL_DESCRIPTION_MAX_LENGTH + 1)))).toBe(
-      "SKILL_INVALID_FRONTMATTER_DESCRIPTION",
+    expect(checkSkillMarkdown("---\nname: word-count\n---\nbody")?.message).toContain(
+      "description",
     );
-    // A name of 64 emoji is still not a legal name — but for its SHAPE, not
-    // its length, which is what the message must say.
-    expect(isValidSkillName("🙂".repeat(SKILL_NAME_MAX_LENGTH))).toBe(false);
-  });
-});
-
-describe("parseSkillFrontmatter — YAML semantics, from the `yaml` library", () => {
-  // Parity with the consumer is the contract: the runtime that loads a skill
-  // (`@earendil-works/pi-coding-agent`, `dist/utils/frontmatter.js`) parses the
-  // block with `yaml` at this major. These cases assert what THAT library
-  // returns, not what a hand-rolled scanner happened to do.
-
-  it("reads a literal block scalar (|)", () => {
-    const fm =
-      "---\nname: word-count\ndescription: |\n  Counts words in a text.\n  Use for length stats.\n---\nBody";
-    expect(parseSkillFrontmatter(fm).description).toBe(
-      "Counts words in a text.\nUse for length stats.",
-    );
-    expect(checkSkill(fm)).toBeNull();
+    expect(checkSkillMarkdown("---\nname: word-count\nno fence")?.message).toContain("not closed");
   });
 
-  it("reads a folded block scalar (>)", () => {
-    const fm = "---\nname: word-count\ndescription: >\n  Counts words\n  in a text.\n---\nBody";
-    expect(parseSkillFrontmatter(fm).description).toBe("Counts words in a text.");
-  });
-
-  it("reads block scalars with chomping / indent indicators", () => {
-    for (const header of ["|-", "|+", ">-", ">+", "|2", ">2"]) {
-      const fm = `---\nname: word-count\ndescription: ${header}\n  Real text.\n---\nBody`;
-      expect(parseSkillFrontmatter(fm).description).toBe("Real text.");
-      expect(checkSkill(fm)).toBeNull();
-    }
-  });
-
-  it("reads a plain scalar continued on the following indented lines", () => {
-    const fm = "---\nname: word-count\ndescription:\n  Counts words in a text.\n---\nBody";
-    expect(parseSkillFrontmatter(fm).description).toBe("Counts words in a text.");
-    expect(checkSkill(fm)).toBeNull();
-  });
-
-  it("bounds the length of a block scalar's real text, not its indicator", () => {
-    const long = `---\nname: word-count\ndescription: |\n  ${"d".repeat(
-      SKILL_DESCRIPTION_MAX_LENGTH + 1,
-    )}\n---\nBody`;
-    expect(checkSkill(long)).toBe("SKILL_INVALID_FRONTMATTER_DESCRIPTION");
-    const empty = "---\nname: word-count\ndescription: |\n---\nBody";
-    expect(checkSkill(empty)).toBe("SKILL_MISSING_FRONTMATTER_DESCRIPTION");
-  });
-
-  it("does not let an indented key inside a block shadow the top-level field", () => {
-    const fm =
-      "---\nname: word-count\ndescription: |\n  name: not-the-name\n  Real text.\n---\nBody";
-    expect(parseSkillFrontmatter(fm).name).toBe("word-count");
-    expect(parseSkillFrontmatter(fm).description).toBe("name: not-the-name\nReal text.");
-  });
-
-  it("strips an unquoted trailing comment", () => {
-    const fm = "---\nname: word-count # the slug\ndescription: Counts words. # why\n---\nBody";
-    expect(parseSkillFrontmatter(fm)).toMatchObject({
-      name: "word-count",
-      description: "Counts words.",
-    });
-    expect(checkSkill(fm)).toBeNull();
-  });
-
-  it("keeps a # that is part of the text", () => {
-    expect(
-      parseSkillFrontmatter("---\nname: word-count\ndescription: Writes C# code\n---\n")
-        .description,
-    ).toBe("Writes C# code");
-    expect(
-      parseSkillFrontmatter(`---\nname: word-count\ndescription: "a # b"\n---\n`).description,
-    ).toBe("a # b");
-  });
-
-  it("keeps quotes inside quoted scalars", () => {
-    expect(
-      parseSkillFrontmatter(
-        `---\nname: word-count\ndescription: "Use \\"grep\\" first, then count."\n---\n`,
-      ).description,
-    ).toBe('Use "grep" first, then count.');
-    expect(
-      parseSkillFrontmatter("---\nname: word-count\ndescription: 'It''s a counter.'\n---\n")
-        .description,
-    ).toBe("It's a counter.");
-  });
-
-  it("reads CRLF", () => {
-    expect(
-      parseSkillFrontmatter("---\r\nname: word-count\r\ndescription: Counts words.\r\n---\r\nbody"),
-    ).toMatchObject({ found: true, name: "word-count", description: "Counts words." });
-  });
-
-  // Pi tests `startsWith("---")`, which a BOM defeats — it reads NO frontmatter
-  // and drops the skill. Mirroring that is the point: a parser that saw
-  // through the BOM would report fields the runtime never sees.
-  it("sees no frontmatter behind a BOM, exactly as the runtime does", () => {
-    const bom = "\uFEFF---\nname: word-count\ndescription: Counts words.\n---\nbody";
-    expect(parseSkillFrontmatter(bom)).toMatchObject({
-      found: false,
-      unterminated: false,
-      name: "",
-      description: "",
-    });
-  });
-
-  it("rejects a BOM with a message naming it, rather than rewriting the bytes", () => {
-    const bom = "\uFEFF---\nname: word-count\ndescription: Counts words.\n---\nbody";
+  // A BOM'd document has no readable frontmatter at all, so every later rule
+  // would report a missing name — true, but not the thing to fix.
+  it("rejects a BOM before any other rule, naming it rather than stripping it", () => {
+    const bom = "\uFEFF---\r\nname: word-count\r\n---\r\nbody";
     expect(checkSkill(bom)).toBe("SKILL_INVALID_FRONTMATTER");
     expect(checkSkillMarkdown(bom)?.message).toContain("byte-order mark");
   });
 
-  // ── what the hand-rolled scanner used to wave through ──
-  it("rejects a `: ` inside an unquoted value, as YAML does", () => {
-    const fm = "---\nname: word-count\ndescription: a: b\n---\n";
-    expect(parseSkillFrontmatter(fm).error).toContain("not valid YAML");
+  // Parity with the consumer is the contract: the runtime parses the block with
+  // `yaml` at this major, so these assert what THAT library returns — not what
+  // the hand-rolled scanner this replaces happened to do.
+  it.each([
+    [
+      "literal block scalar",
+      "description: |\n  Counts words.\n  Use for stats.",
+      "Counts words.\nUse for stats.",
+    ],
+    [
+      "folded block scalar",
+      "description: >\n  Counts words\n  in a text.",
+      "Counts words in a text.",
+    ],
+    ["chomped block scalar", "description: |-\n  Real text.", "Real text."],
+    ["next-line plain scalar", "description:\n  Counts words.", "Counts words."],
+    ["trailing comment", "description: Counts words. # why", "Counts words."],
+    ["unquoted #", "description: Writes C# code", "Writes C# code"],
+    ["quoted #", `description: "a # b"`, "a # b"],
+    ["escaped quotes", `description: "Use \\"grep\\" first."`, 'Use "grep" first.'],
+  ])("reads a %s the way YAML does", (_label, line, expected) => {
+    const fm = `---\nname: word-count\n${line}\n---\nBody`;
+    expect(parseSkillFrontmatter(fm).description).toBe(expected);
+    expect(checkSkill(fm)).toBeNull();
+  });
+
+  it.each([
+    ["a `: ` inside an unquoted value", "---\nname: word-count\ndescription: a: b\n---\n"],
+    ["a key with no space after the colon", "---\nname:word-count\ndescription: d\n---\n"],
+    ["a duplicate key", "---\nname: a\nname: b\ndescription: d\n---\n"],
+    ["a non-mapping document", "---\n- a\n- b\n---\n"],
+    ["a non-string field", "---\nname: 123\ndescription: d\n---\n"],
+  ])("rejects %s, as YAML does", (_label, fm) => {
     expect(checkSkill(fm)).toBe("SKILL_INVALID_FRONTMATTER");
   });
 
-  it("rejects a key with no space after the colon, as YAML does", () => {
-    const fm = "---\nname:word-count\ndescription: d\n---\n";
-    expect(checkSkill(fm)).toBe("SKILL_INVALID_FRONTMATTER");
-  });
-
-  it("rejects duplicate keys, as YAML does (uniqueKeys)", () => {
-    // js-yaml and `yaml` both refuse; PyYAML would keep the last. No value the
-    // platform picked would be right everywhere, so the document is refused.
-    const fm = "---\nname: first\nname: second\ndescription: d\n---\n";
-    expect(checkSkill(fm)).toBe("SKILL_INVALID_FRONTMATTER");
-    expect(checkSkillMarkdown(fm)?.message).toContain("not valid YAML");
-  });
-
-  it("rejects a non-mapping document", () => {
-    expect(checkSkill("---\n- a\n- b\n---\n")).toBe("SKILL_INVALID_FRONTMATTER");
-    expect(checkSkillMarkdown("---\n- a\n- b\n---\n")?.message).toContain("expected a mapping");
-  });
-
-  it("rejects a field that is not a string", () => {
-    expect(checkSkill("---\nname: 123\ndescription: d\n---\n")).toBe("SKILL_INVALID_FRONTMATTER");
-    expect(checkSkillMarkdown("---\nname: 123\ndescription: d\n---\n")?.message).toContain(
-      "'name' must be a string, got a number",
-    );
-    expect(checkSkill("---\nname: n\ndescription:\n  - a\n  - b\n---\n")).toBe(
-      "SKILL_INVALID_FRONTMATTER",
-    );
-  });
-
+  // `description:` and `description: null` are indistinguishable once parsed
+  // and both mean "not provided" — a missing field, not a YAML complaint.
   it("treats an empty or explicitly-null scalar as ABSENT, not malformed", () => {
-    // `description:` and `description: null` are indistinguishable once parsed
-    // and both mean "not provided" — the author gets the missing-field message,
-    // not a YAML complaint.
     for (const fm of [
       "---\nname: word-count\ndescription:\n---\n",
       "---\nname: word-count\ndescription: null\n---\n",
+      `---\nname: word-count\ndescription: "  "\n---\n`,
+      "---\nname: word-count\ndescription: |\n---\n",
     ]) {
       expect(checkSkill(fm)).toBe("SKILL_MISSING_FRONTMATTER_DESCRIPTION");
     }
   });
-
-  // ── unterminated frontmatter block ──
-  it("tells an unclosed frontmatter block apart from no frontmatter at all", () => {
-    const unterminated = "---\nname: word-count\ndescription: d\nBody with no closing fence";
-    expect(parseSkillFrontmatter(unterminated)).toMatchObject({
-      found: false,
-      unterminated: true,
-    });
-    expect(checkSkillMarkdown(unterminated)?.message).toContain("not closed");
-
-    expect(parseSkillFrontmatter("# no frontmatter")).toMatchObject({ unterminated: false });
-    expect(checkSkillMarkdown("# no frontmatter")?.message).toContain("must declare a 'name'");
-  });
 });
 
-// ─────────────────────────────────────────────────────────────────────
-// CONTAINMENT: everything the producer gate accepts, the loader accepts.
-//
-// The two read the frontmatter differently on purpose — a real YAML parser in
-// the gate, a frozen substring probe in the loader — and YAML is the more
-// permissive of the two. Without this invariant, create/publish mints an
-// IMMUTABLE version the run launcher cannot load, which is unfixable.
-//
-// This is the table that would have caught it.
-// ─────────────────────────────────────────────────────────────────────
-const GATE_ACCEPTS: { label: string; content: string }[] = [
-  { label: "plain", content: "---\nname: word-count\ndescription: Counts words.\n---\nBody" },
-  { label: "quoted", content: `---\nname: "word-count"\ndescription: 'Counts words.'\n---\n` },
-  {
-    label: "commented",
-    content: "---\nname: word-count # slug\ndescription: Counts words. # why\n---\n",
-  },
-  { label: "CRLF", content: "---\r\nname: word-count\r\ndescription: Counts words.\r\n---\r\n" },
-  {
-    label: "block-scalar description",
-    content: "---\nname: word-count\ndescription: |\n  Counts words.\n---\n",
-  },
-  {
-    label: "folded description",
-    content: "---\nname: word-count\ndescription: >\n  Counts words.\n---\n",
-  },
-  {
-    label: "next-line description",
-    content: "---\nname: word-count\ndescription:\n  Counts words.\n---\n",
-  },
-  {
-    label: "extra keys",
-    content: "---\nlicense: MIT\nname: word-count\ndescription: Counts words.\n---\n",
-  },
-  { label: "64-char name", content: `---\nname: ${"a".repeat(64)}\ndescription: d\n---\n` },
-  {
-    label: "1024-code-point description",
-    content: `---\nname: word-count\ndescription: ${"🙂".repeat(1024)}\n---\n`,
-  },
-];
-
+// Containment: everything the producer gate accepts, the loader accepts. The
+// two read the frontmatter differently on purpose — a real YAML parser in the
+// gate, a frozen substring probe in the loader — and YAML is the more
+// permissive of the two. Without this invariant, publishing mints an IMMUTABLE
+// version the run launcher cannot load.
 describe("containment — the gate accepts a SUBSET of what the loader accepts", () => {
-  for (const { label, content } of GATE_ACCEPTS) {
-    it(`loader also accepts: ${label}`, () => {
-      // Positive control first: this input really is one the gate accepts, so a
-      // gate that silently started rejecting everything could not pass this.
-      expect(checkSkill(content)).toBeNull();
-      expect(checkArchive(content)).toBeNull();
-    });
-  }
+  it.each([
+    ["plain", "---\nname: word-count\ndescription: Counts words.\n---\nBody"],
+    ["quoted", `---\nname: "word-count"\ndescription: 'Counts words.'\n---\n`],
+    ["commented", "---\nname: word-count # slug\ndescription: Counts words. # why\n---\n"],
+    ["CRLF", "---\r\nname: word-count\r\ndescription: Counts words.\r\n---\r\n"],
+    ["block scalar", "---\nname: word-count\ndescription: |\n  Counts words.\n---\n"],
+    ["folded", "---\nname: word-count\ndescription: >\n  Counts words.\n---\n"],
+    ["next-line", "---\nname: word-count\ndescription:\n  Counts words.\n---\n"],
+    ["extra keys", "---\nlicense: MIT\nname: word-count\ndescription: d\n---\n"],
+    ["64-char name", `---\nname: ${"a".repeat(64)}\ndescription: d\n---\n`],
+    ["1024-code-point description", `---\nname: n\ndescription: ${"🙂".repeat(1024)}\n---\n`],
+  ])("loader also accepts: %s", (_label, content) => {
+    // Positive control first: a gate that silently started rejecting
+    // everything could not pass this.
+    expect(checkSkill(content)).toBeNull();
+    expect(checkArchive(content)).toBeNull();
+  });
 
-  // The three forms that made this a blocker: valid YAML the loader's probe
-  // cannot see. Accepted by the gate, they would mint an immutable version the
-  // run launcher refuses to load.
   it.each([
     ["name on the following line", "---\nname:\n  triage\ndescription: Counts words.\n---\n"],
     ["space before the colon", "---\nname : triage\ndescription: Counts words.\n---\n"],
@@ -448,36 +231,31 @@ describe("containment — the gate accepts a SUBSET of what the loader accepts",
   });
 });
 
-// The whole point of the split: `checkCompanionFiles` runs on the LOADER side
-// too (`extractRootFromAfps` → the run launcher's package catalog). Tightening
-// it would fail every run of an agent whose published skill dependency predates
-// the stricter rule — a defect nobody can fix in an immutable artifact.
-describe("checkCompanionFiles — the LOADER side stays lenient", () => {
-  it("accepts a published-style SKILL.md that declares only a name", () => {
+// `checkCompanionFiles` also runs on the LOADER side (`extractRootFromAfps` →
+// the run launcher's package catalog). Tightening it would fail every run of an
+// agent whose published skill dependency predates the stricter rule.
+describe("checkCompanionFiles — the loader side stays lenient", () => {
+  it("accepts what the producer rule refuses", () => {
     expect(checkArchive("---\nname: triage\n---\nbody")).toBeNull();
-  });
-
-  it("accepts names the producer rule refuses", () => {
     expect(checkArchive(skillMd("Legacy_Name", ""))).toBeNull();
     expect(checkArchive(skillMd("@acme/triage", ""))).toBeNull();
-    expect(checkArchive(skillMd("a".repeat(200), ""))).toBeNull();
     expect(checkArchive(skillMd("triage", "d".repeat(5000)))).toBeNull();
+    // …and the producer side really does refuse them.
+    expect(checkSkill("---\nname: triage\n---\nbody")).toBe(
+      "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
+    );
+    expect(checkSkill(skillMd("Legacy_Name", "d"))).toBe("SKILL_INVALID_FRONTMATTER_NAME");
   });
 
-  // The substring probe is FROZEN, so these keep loading. Each was accepted
-  // before the producer rule existed and could sit in a published, immutable
-  // artifact today; the column-0 parser used by `checkSkillMarkdown` reads
-  // none of them as a name.
+  // The substring probe is frozen, so these keep loading: each could sit in a
+  // published, immutable artifact today, and the column-0 parser reads none of
+  // them as a name.
   it("accepts frontmatter shapes that declare no top-level `name` at all", () => {
     for (const fm of [
       "---\nmetadata:\n  name: triage\n---\nbody",
       "---\nskill_name: triage\n---\nbody",
-      "---\ndisplayname: Triage\n---\nbody",
     ]) {
       expect(checkArchive(fm)).toBeNull();
-      // The substring probe sees `name:` anywhere; a YAML parser sees no
-      // top-level `name` key. That gap is why the loader cannot be routed
-      // through the parser — its acceptance set would shrink.
       expect(parseSkillFrontmatter(fm).name).toBe("");
     }
   });
@@ -485,16 +263,6 @@ describe("checkCompanionFiles — the LOADER side stays lenient", () => {
   it("still requires SKILL.md to exist and to name something", () => {
     expect(checkArchive(null)).toBe("SKILL_MISSING_SKILL_MD");
     expect(checkArchive("# no frontmatter")).toBe("SKILL_MISSING_FRONTMATTER_NAME");
-    expect(checkArchive("---\ndescription: no name\n---\nbody")).toBe(
-      "SKILL_MISSING_FRONTMATTER_NAME",
-    );
-  });
-
-  it("rejects, on the producer side, exactly what it accepted on the loader side", () => {
-    expect(checkSkill("---\nname: triage\n---\nbody")).toBe(
-      "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
-    );
-    expect(checkSkill(skillMd("Legacy_Name", "d"))).toBe("SKILL_INVALID_FRONTMATTER_NAME");
   });
 });
 

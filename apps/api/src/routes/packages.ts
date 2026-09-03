@@ -1368,7 +1368,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
         (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
         detail.content[rcfg.storageFileName];
       if (fileData) {
-        // BOM-preserving: this string is judged by the §3.3 gate below AND
+        // BOM-preserving: this string is judged by the content gate below AND
         // written back as the draft, so it must be the version's bytes.
         content = decodeSkillMarkdown(fileData);
       }

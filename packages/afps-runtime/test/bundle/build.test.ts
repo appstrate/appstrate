@@ -443,11 +443,9 @@ describe("extractRootFromAfps / buildBundleFromAfps", () => {
     expect(root.files.get("manifest.json")).toBeDefined();
   });
 
-  // The run launcher's package catalog reads every INSTALLED skill through
-  // this function. A published skill that declares only a frontmatter `name`
-  // — legal per §3.3, which spells `description` SHOULD — must keep loading,
-  // or the platform's producer-side rule would retroactively break runs of
-  // agents depending on artifacts nobody can edit any more.
+  // The run launcher's package catalog reads every installed skill through
+  // this function, so a published skill declaring only a frontmatter `name`
+  // must keep loading — the producer rule must not break runs retroactively.
   it("loads a published skill whose SKILL.md declares only a frontmatter name", () => {
     const zip = zipSync({
       "manifest.json": enc(

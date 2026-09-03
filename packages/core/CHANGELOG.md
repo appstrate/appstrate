@@ -14,25 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the PARSE now comes from `parseSkillFrontmatter`
   (`@appstrate/afps-shared/companion-files`, raised to `^0.8.0`), which reads
   the block with the **`yaml` library at the same major the skill runtime uses**
-  — so this function, the platform's §3.3 gate, and the agent that ultimately
-  loads the skill can no longer disagree about what a `SKILL.md` declares.
+  — so this function, the platform's write-path gate and the agent that loads
+  the skill can no longer disagree about what a `SKILL.md` declares.
 
   Consequences of a real YAML parse: block scalars, folded scalars, plain
-  scalars continued on the following indented lines, quoted scalars containing
-  escaped quotes, inline `# comments` and CRLF documents are all read the
-  way the runtime reads them — including a leading BOM, behind which the
-  runtime reads NO frontmatter, so neither does this; and forms YAML rejects — `description: a: b`,
-  `name:x`, a duplicate key, a non-mapping document, a non-string field — now
-  yield empty fields plus a warning instead of a plausible-looking wrong value.
-  It still **never throws**: a parse failure is reported through `warnings`,
-  which is this function's existing contract.
+  scalars continued on the following indented lines, quoted scalars with
+  escaped quotes, inline `# comments` and CRLF documents are all read the way
+  the runtime reads them — including a leading BOM, behind which the runtime
+  reads NO frontmatter, so neither does this. Forms YAML rejects
+  (`description: a: b`, `name:x`, a duplicate key, a non-mapping document, a
+  non-string field) now yield empty fields plus a warning instead of a
+  plausible-looking wrong value. It still **never throws**: a parse failure is
+  reported through `warnings`, this function's existing contract.
 
   **`parsePackageZip` is unchanged, byte for byte.** It keeps applying the
   LOADER-side companion rule — skill `SKILL.md` present with a frontmatter
-  `name`, decided by the same permissive substring probe as before,
-  deliberately NOT the YAML parser — because it is also how already-published,
-  immutable artifacts are read. The stricter producer rule
-  (`checkSkillMarkdown`) is enforced by the platform's write paths, never here.
+  `name`, decided by the same permissive substring probe as before — because it
+  is also how already-published, immutable artifacts are read.
 
   **Requires `@appstrate/afps-shared@0.8.0` on npm before this release is
   published.**

@@ -29,35 +29,31 @@ convention for new API, not a break.
   AFPS §3.3 gate. Returns the first violation of: frontmatter `name` present →
   `name` conforming to the [Agent Skills
   specification](https://agentskills.io/specification) (1-64 code points of
-  lowercase `a-z`, `0-9` and `-`, no leading or trailing hyphen, no consecutive
-  hyphens) → `description` present → `description` at most 1024 code points.
-  Three new `CompanionViolationReason` values carry the new outcomes:
+  lowercase `a-z`, `0-9` and `-`, no leading, trailing or consecutive hyphen) →
+  `description` present → `description` at most 1024 code points. Three new
+  `CompanionViolationReason` values carry the new outcomes:
   `SKILL_INVALID_FRONTMATTER_NAME`, `SKILL_MISSING_FRONTMATTER_DESCRIPTION`,
   `SKILL_INVALID_FRONTMATTER_DESCRIPTION`.
 
   **It is deliberately NOT part of `checkCompanionFiles`, whose behaviour is
   byte-for-byte unchanged** — including its private `hasFrontmatterName` probe,
-  which is NOT routed through the new parser. That function runs on both sides
-  of the artifact lifecycle, and the LOADER side reads already-published,
-  immutable bundles: a skill published before this rule existed has to keep
-  loading, or every run of an agent depending on it fails for a defect nobody
-  can now fix in place. Its acceptance set may therefore never shrink — not
-  even to the more correct column-0 reading the new parser uses, which would
-  newly reject `  name: x`, `metadata:\n  name: x` and `skill_name: x`. AFPS
-  spells both fields SHOULD, so the loader honours SHOULD and the producer
-  holds itself to MUST. Callers that WRITE skill content call
-  `checkSkillMarkdown`; callers that LOAD a bundle keep calling
-  `checkCompanionFiles`.
+  which is NOT routed through the new parser. That function also runs on the
+  LOADER side, over already-published immutable bundles: a skill published
+  before this rule existed has to keep loading, or every run of an agent
+  depending on it fails for a defect nobody can now fix. Its acceptance set may
+  therefore never shrink — not even to the column-0 reading the new parser
+  uses, which would newly reject `  name: x`, `metadata:\n  name: x` and
+  `skill_name: x`. Callers that WRITE skill content call `checkSkillMarkdown`;
+  callers that LOAD a bundle keep calling `checkCompanionFiles`.
 
   **Containment: what the gate accepts is a SUBSET of what the loader
-  accepts.** The two read the frontmatter differently on purpose, and YAML is
-  the more permissive of the two — `name:\n  triage` and `name : triage` are
-  valid YAML that the loader's substring probe cannot see. Accepted, they would
-  mint an IMMUTABLE version the run launcher then refuses to load, which is
-  unfixable. So `checkSkillMarkdown` ends by requiring `hasFrontmatterName` to
-  agree, and answers `SKILL_INVALID_FRONTMATTER_NAME` with
-  `name must be written inline on one line` when it does not. A table test
-  asserts the invariant over every accepted form.
+  accepts.** YAML is the more permissive of the two readings — `name:\n  triage`
+  and `name : triage` are valid YAML the loader's substring probe cannot see,
+  and accepting them would mint an IMMUTABLE version the run launcher then
+  refuses to load. So `checkSkillMarkdown` ends by requiring `hasFrontmatterName`
+  to agree, answering `SKILL_INVALID_FRONTMATTER_NAME` with `name must be
+written inline on one line` when it does not. A table test asserts the
+  invariant over every accepted form.
 
 - **`parseSkillFrontmatter`** (`./companion-files`) — the one `SKILL.md`
   frontmatter reader. Returns `{ found, unterminated, error, name, description }`.
@@ -66,53 +62,42 @@ convention for new API, not a break.
   platform stores can no longer disagree about what a `SKILL.md` declares.
 
   **It parses with the `yaml` library (a new dependency, `^2.9.0`), because
-  that is what the consumer does.** The runtime that actually loads a skill —
+  that is what the consumer does.** The runtime that loads a skill —
   `@earendil-works/pi-coding-agent`, `dist/utils/frontmatter.js` — normalises
   newlines, requires a leading `---`, cuts the block at the first `\n---` and
-  hands the slice to `yaml`'s `parse`. This function mirrors that, against the
+  hands the slice to `yaml`'s `parse`. This function mirrors that against the
   same library at the same major, so the gate cannot accept a document the
-  consumer then fails to read. The hand-rolled scanner it replaces got that
-  wrong in both directions: it accepted `description: a: b` and `name:x`, which
-  YAML refuses outright, and it had to re-implement block scalars, quoted
-  escapes, comments, continuation lines and duplicate detection — 129 lines of
-  code where there are now 73, each of them an opportunity to diverge from a
-  spec the library already implements. `uniqueKeys` and `strict` are passed
-  explicitly so a future default change cannot loosen the gate in silence.
+  consumer then fails to read. `uniqueKeys` and `strict` are passed explicitly
+  so a future default change cannot loosen the gate in silence.
 
   A leading BOM is NOT stripped, because the runtime does not strip it either:
   Pi tests `startsWith("---")`, reads no frontmatter behind a byte-order mark
-  and drops the skill. `checkSkillMarkdown` answers
-  `SKILL_INVALID_FRONTMATTER` naming the BOM rather than rewriting the author's
-  bytes. The companion export **`decodeSkillMarkdown(bytes)`** exists for the
-  same reason: a default `TextDecoder` silently eats a BOM, so every write path
-  that starts from stored or archived bytes decodes through it
-  (`ignoreBOM: true`) and the gate actually sees the byte it must reject.
+  and drops the skill. `checkSkillMarkdown` answers `SKILL_INVALID_FRONTMATTER`
+  naming the BOM rather than rewriting the author's bytes. The companion export
+  **`decodeSkillMarkdown(bytes)`** exists for the same reason: a default
+  `TextDecoder` silently eats a BOM, so every write path that starts from
+  stored or archived bytes decodes through it (`ignoreBOM: true`).
 
-  Parity is exact for PARSING, not for the rules: Pi only WARNS on a name or
-  description that breaks the Agent Skills spec, and measures the description
-  in UTF-16 units. The bounds here follow the spec (characters, hence code
-  points). The asymmetry is one-directional by design — stricter than the
-  consumer, never looser.
+  Parity is exact for PARSING, not for the rules: Pi only WARNS on a spec
+  violation and measures the description in UTF-16 units, while the bounds here
+  follow the spec (characters, hence code points). The asymmetry is
+  one-directional by design — stricter than the consumer, never looser.
 
 - **`SKILL_INVALID_FRONTMATTER`** — a fifth `CompanionViolationReason`, for a
   block that cannot be read as `{ name, description }` at all: a YAML syntax
-  error, a document that is not a mapping, a duplicate key, or a field that is
-  not a string. The library's own message is included
-  (`frontmatter is not valid YAML: …`). An empty or explicitly-null scalar is
-  NOT this — `description:` and `description: null` are indistinguishable once
-  parsed and both mean "not provided", so they keep answering
+  error, a non-mapping document, a duplicate key, or a non-string field. The
+  library's own message is included (`frontmatter is not valid YAML: …`). An
+  empty or explicitly-null scalar is NOT this — `description:` and
+  `description: null` both mean "not provided" and keep answering
   `SKILL_MISSING_FRONTMATTER_DESCRIPTION`.
 
 - **`isValidSkillName`**, **`SKILL_NAME_MAX_LENGTH`** (`64`),
   **`SKILL_DESCRIPTION_MAX_LENGTH`** (`1024`) and the **`SkillFrontmatter`**
   type (`./companion-files`) — the naming rule and its bounds, exported so a
-  caller can pre-validate a name it is about to write instead of restating the
-  regex. Both bounds count Unicode CODE POINTS, not UTF-16 units.
-
-  This is a different namespace from a package id: a package id is
-  `@scope/name` under `SLUG_PATTERN` (unbounded, `--` allowed), while the
-  frontmatter `name` is the bare skill slug an agent runtime addresses. Neither
-  validator may be substituted for the other.
+  caller can pre-validate a name instead of restating the regex. Both bounds
+  count Unicode CODE POINTS, not UTF-16 units. This is a different namespace
+  from a package id (`@scope/name` under `SLUG_PATTERN`, unbounded and
+  `--`-tolerant): neither validator may be substituted for the other.
 
 ## [0.7.0]
 

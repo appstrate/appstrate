@@ -18,13 +18,11 @@ custom-skill/
 
 1. **`SKILL.md`** describes the skill's purpose in YAML frontmatter (`name`, `description`). The agent reads this file to understand what the skill does and when to invoke it.
 
-   Both fields are **required** and validated on every path that WRITES a skill — editor create and save, publish, version restore, fork, ZIP/bundle/GitHub import, MCP import — where a violation is a `400`. Reading an already-published skill is not gated, so a skill published before this rule keeps loading and running; fix it by editing its draft and publishing again.
+   Both fields are **required** and validated on every path that WRITES a skill — editor create and save, publish, version restore, ZIP/bundle/GitHub/MCP import — where a violation is a `400`. Reading an already-published skill is not gated, so a skill published before this rule keeps loading; fix it by editing its draft and publishing again.
 
-   The block is parsed with the [`yaml`](https://eemeli.org/yaml/) library, at the same major the skill runtime itself uses — so anything the agent can parse, Appstrate accepts, and anything YAML rejects (`description: a: b`, `name:x`, a duplicate key, a non-string value) Appstrate rejects too, with code `skill_invalid_frontmatter`. Save the file **without a byte-order mark**: the runtime looks for a literal `---` at offset zero and reads no frontmatter behind a BOM, so Appstrate refuses one rather than publishing a skill no agent would load.
+   The block is parsed with the [`yaml`](https://eemeli.org/yaml/) library at the same major the skill runtime uses, so anything the agent can parse Appstrate accepts, and anything YAML rejects (`description: a: b`, `name:x`, a duplicate key, a non-string value) Appstrate rejects too. Save the file **without a byte-order mark**: the runtime looks for a literal `---` at offset zero and reads no frontmatter behind a BOM.
 
-   `name` follows the [Agent Skills specification](https://agentskills.io/specification): 1-64 characters of lowercase `a-z`, `0-9` and `-`, no leading or trailing hyphen, no consecutive hyphens. Write it **inline on one line** — `name:` with the value on the next line is valid YAML, but Appstrate's package loader cannot read it, so it is refused rather than published into a version no run could load. It is also a **different namespace from the package id**: the frontmatter `name` is the bare skill slug (`word-count`) that an agent runtime addresses, while the package id is `@acme/word-count` under its own, unbounded slug rule. Never put the scoped id in the frontmatter.
-
-   `description` must be non-empty and at most 1024 characters — without it Codex rejects the skill and Claude Code never auto-invokes it. Block scalars work, so a long description can be written as:
+   `name` follows the [Agent Skills specification](https://agentskills.io/specification) — 1-64 characters of lowercase `a-z`, `0-9` and `-`, no leading, trailing or consecutive hyphen — written **inline on one line**, and is the bare skill slug (`word-count`), not the scoped package id (`@acme/word-count`). `description` must be non-empty and at most 1024 characters; block scalars work:
 
    ```yaml
    description: |

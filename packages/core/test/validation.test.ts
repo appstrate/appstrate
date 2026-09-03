@@ -1087,10 +1087,9 @@ description: A skill without name
     expect(result.warnings.some((w) => w.includes("frontmatter"))).toBe(true);
   });
 
-  // The parse comes from `@appstrate/afps-shared/companion-files` — the same
-  // one `checkCompanionFiles` gates imports with. These two lock the
-  // delegation: a Windows-authored SKILL.md the gate accepts must not read as
-  // metadata-less here.
+  // These two lock the delegation to `parseSkillFrontmatter`: a
+  // Windows-authored SKILL.md the gate accepts must not read as metadata-less
+  // here, and a BOM'd one must read as nothing at all.
   it("reads CRLF line endings", () => {
     const result = extractSkillMeta("---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\nBody");
     expect(result.name).toBe("my-skill");
@@ -1098,10 +1097,6 @@ description: A skill without name
     expect(result.warnings).toHaveLength(0);
   });
 
-  // Deliberately NOT read: the skill runtime tests `startsWith("---")`, so it
-  // sees no frontmatter behind a byte-order mark and drops the skill. Reading
-  // fields the runtime never sees is the divergence the shared parser exists
-  // to prevent — the write paths refuse such a file outright.
   it("reads nothing behind a UTF-8 BOM, exactly as the runtime does", () => {
     const result = extractSkillMeta("\uFEFF---\nname: my-skill\ndescription: A skill\n---\nBody");
     expect(result.name).toBe("");

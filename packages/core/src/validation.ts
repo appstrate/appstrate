@@ -641,11 +641,11 @@ export function validateManifest(
 /**
  * Extract name and description from a SKILL.md file's YAML frontmatter.
  *
- * The PARSE is not done here: it comes from `parseSkillFrontmatter`
+ * The parse comes from `parseSkillFrontmatter`
  * (`@appstrate/afps-shared/companion-files`), which reads the block with the
- * `yaml` library at the same major the skill RUNTIME uses. Two parsers would
- * let this function read a name the gate rejects (or vice versa) — the
- * warnings below are the only thing this wrapper adds, and it never throws.
+ * same `yaml` major the skill runtime uses — two parsers would let this
+ * function read a name the write-path gate rejects. The warnings below are all
+ * this wrapper adds, and it never throws.
  *
  * @param content - The full text content of a SKILL.md file
  * @returns Extracted name, description, and any parsing warnings
@@ -665,10 +665,8 @@ export function extractSkillMeta(content: string): {
     warnings.push("No YAML frontmatter detected (expected --- ... --- block)");
     return { name: "", description: "", warnings };
   }
-  // A YAML syntax error, a non-mapping document or a non-string field is a
-  // WARNING here, never a throw: this function's contract is to report what it
-  // could read. The write paths refuse such a document through
-  // `checkSkillMarkdown`; this one still has to answer a reader.
+  // A parse failure is a warning here, never a throw: this function reports
+  // what it could read. Refusing such a document is the write paths' job.
   if (error) {
     warnings.push(`Could not read YAML frontmatter: ${error}`);
     return { name: "", description: "", warnings };

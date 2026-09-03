@@ -197,9 +197,8 @@ describe("parsePackageZip", () => {
     }
   });
 
-  // The LOADER-side check stays lenient: a published skill whose SKILL.md
-  // declares only a `name` must keep parsing, or every run of an agent that
-  // depends on it fails at launch. The strict producer rule is
+  // The loader-side check stays lenient: a published skill whose SKILL.md
+  // declares only a `name` must keep parsing. The strict producer rule is
   // `checkSkillMarkdown`, exercised by the API's write paths.
   it("accepts a skill whose SKILL.md declares only a frontmatter name", () => {
     const zip = makeZip({
