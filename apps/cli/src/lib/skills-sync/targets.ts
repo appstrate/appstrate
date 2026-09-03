@@ -53,6 +53,15 @@ const PLUGIN_FILES: Readonly<Record<string, string>> = {
 
 const PLUGIN_ROOT_ENTRIES = [".claude-plugin", "README.md", "skills"];
 
+const PLUGIN_UPDATE_COMMAND = `claude plugin update ${PLUGIN_NAME}@appstrate`;
+
+function pluginFixedFiles(): Record<string, Uint8Array> {
+  const encoder = new TextEncoder();
+  return Object.fromEntries(
+    Object.entries(PLUGIN_FILES).map(([path, text]) => [path, encoder.encode(text)]),
+  );
+}
+
 export interface SkillTree {
   slug: string;
   files: Record<string, Uint8Array>;
@@ -90,7 +99,7 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
     "   ```",
     "",
     "   With several organizations, add `--org <slug>`.",
-    "2. Reload the plugin with `claude plugin update appstrate@appstrate`, or start a new " +
+    `2. Reload the plugin with \`${PLUGIN_UPDATE_COMMAND}\`, or start a new ` +
       "Claude Code session. The organization's skills then replace this one.",
     "",
   ].join("\n");
@@ -103,7 +112,7 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
       additionalContext:
         `The ${PLUGIN_NAME} plugin is installed but not connected: ${problem}. ` +
         `Offer to run \`${remedy} --instance <url>\` for the user (it opens the browser; ` +
-        `they only approve there), then \`claude plugin update appstrate@appstrate\`. ` +
+        `they only approve there), then \`${PLUGIN_UPDATE_COMMAND}\`. ` +
         `The /${PLUGIN_NAME}:${SETUP_SLUG} skill has the details.`,
     },
   };
@@ -121,7 +130,7 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
   };
   const encoder = new TextEncoder();
   return {
-    ...Object.fromEntries(Object.entries(PLUGIN_FILES).map(([k, v]) => [k, encoder.encode(v)])),
+    ...pluginFixedFiles(),
     "hooks/hooks.json": encoder.encode(`${JSON.stringify(hooks, null, 2)}\n`),
     [`skills/${SETUP_SLUG}/SKILL.md`]: encoder.encode(skillMd),
   };
@@ -177,11 +186,7 @@ export async function writePluginTree(
   const failures: SkillWriteFailure[] = [];
   // Beside, not inside: the plugin root is the directory being replaced.
   await withStaging(root, join(dirname(root), STAGING_DIR), async (staging) => {
-    for (const [path, contents] of Object.entries(PLUGIN_FILES)) {
-      const dest = join(staging, path);
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, contents);
-    }
+    await writeTreeInto(staging, pluginFixedFiles());
     await mkdir(join(staging, "skills"), { recursive: true });
     for (const slug of [...carryOver].sort()) {
       try {

@@ -116,7 +116,8 @@ export async function skillsSyncCommand(
     },
     note: (message) => io.stderr.write(`${message}\n`),
   };
-  let pluginOk = !targets.includes("claude-plugin");
+  // Only read under `--print-path`, which already requires `claude-plugin`.
+  let pluginOk = false;
 
   try {
     await withSyncLock(async () => {
@@ -314,7 +315,7 @@ async function executePlans(
         next.targets[plan.target] = {
           source,
           root,
-          managed: Object.fromEntries([...managed].sort(([a], [b]) => a.localeCompare(b))),
+          managed: Object.fromEntries(managed),
         };
       }
     }
