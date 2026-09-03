@@ -37,7 +37,8 @@ import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { resolveActiveProfile, requireLoggedIn } from "../lib/config.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
-import { materializeSkill } from "../lib/skills-sync/materialize.ts";
+import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
+import { materializeSkill, SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import {
   assignSlugs,
@@ -359,30 +360,29 @@ async function fetchTrees(
   const results = await mapWithConcurrency(slugs, MAX_CONCURRENCY, async (slug) => {
     const skill = bySlug.get(slug)!;
     try {
-      const materialized = materializeSkill({
+      const files = materializeSkill({
         slug,
         files: await fetchSkillFiles(profileName, skill, source),
-        manifestDescription: skill.manifestDescription,
       });
-      return { skill, tree: { slug, files: materialized.files }, ...materialized };
+      return { skill, tree: { slug, files } };
     } catch (err) {
       return { skill, error: err };
     }
   });
+  const decoder = new TextDecoder();
   for (const result of results) {
     if ("error" in result) {
       failSkill(`Failed ${result.skill.packageId}: ${formatError(result.error)}`);
       continue;
     }
     trees.set(result.tree.slug, result.tree);
-    // Not a failure, and not something to paper over either: the frontmatter
-    // is materialized exactly as authored. An agent picks a skill by its
-    // description, so one without any is a skill that never gets chosen — but
-    // inventing text here would hide that from the only person who can fix it,
-    // and the real fix is upstream, at publish time.
-    if (result.missingDescription) {
+    // Legacy artifacts predate the platform's frontmatter gate, and the sync
+    // copies them as authored rather than inventing content. Saying so is the
+    // only way the author learns why the tools ignore the skill.
+    const violation = checkSkillMarkdown(decoder.decode(result.tree.files[SKILL_ENTRY]!));
+    if (violation) {
       note(
-        `Note: ${result.skill.packageId} has no description; publish a version with one so agents know when to use it.`,
+        `Note: ${result.skill.packageId} does not pass the skill frontmatter rule (${violation.message}); Claude Code and Codex may not load it — republish it from Appstrate.`,
       );
     }
   }

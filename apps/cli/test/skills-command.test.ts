@@ -158,8 +158,8 @@ describe("skills sync — claude-plugin target", () => {
 
   it("renames a colliding skill and says so on stderr", async () => {
     createSkillServer([
-      { id: "@acme/pdf-tools", skillMd: skillMd("PDF Tools") },
-      { id: "@other/reports", skillMd: skillMd("PDF Tools") },
+      { id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools") },
+      { id: "@other/reports", skillMd: skillMd("pdf-tools") },
     ]).install();
     const { io, stderr } = createMemoryIO();
 
@@ -618,16 +618,16 @@ describe("skills sync — a failed resolution is not a deletion", () => {
   it("does not let a failed resolution hand its slug to another skill", async () => {
     // Both claim `pdf-tools`; `@acme/pdf-tools` sorts first and keeps it.
     createSkillServer([
-      { id: "@acme/pdf-tools", skillMd: skillMd("PDF Tools") },
-      { id: "@zz/other", skillMd: skillMd("PDF Tools") },
+      { id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools") },
+      { id: "@zz/other", skillMd: skillMd("pdf-tools") },
     ]).install();
     const { io } = createMemoryIO();
     await skillsSyncCommand({}, io);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["pdf-tools", "zz-other"]);
 
     createSkillServer([
-      { id: "@acme/pdf-tools", skillMd: skillMd("PDF Tools"), resolveError: 500 },
-      { id: "@zz/other", skillMd: skillMd("PDF Tools") },
+      { id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools"), resolveError: 500 },
+      { id: "@zz/other", skillMd: skillMd("pdf-tools") },
     ]).install();
     await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
 
@@ -910,26 +910,35 @@ describe("skills sync — the plugin tree is repaired, not just extended", () =>
   });
 });
 
-describe("skills sync — missing descriptions", () => {
+describe("skills sync — non-conforming frontmatter", () => {
   it("syncs the skill as authored and says so once, without failing the run", async () => {
-    // Empty on BOTH sides, which is what the UI produces when the author
-    // leaves the description blank. The sync reports it; it does not invent
-    // text on the author's behalf.
-    const source = "---\nname: meeting-notes-fr\ndescription:\n---\n\nBody.\n";
-    createSkillServer([
-      { id: "@pierre-cabriere/meeting-notes-fr", skillMd: source, description: "" },
-    ]).install();
+    // A legacy published artifact: `yaml` refuses the unquoted second colon.
+    // The sync copies it verbatim and reports it; it never rewrites the body.
+    const source = "---\nname: meeting-notes-fr\ndescription: Notes: weekly\n---\n\nBody.\n";
+    createSkillServer([{ id: "@pierre-cabriere/meeting-notes-fr", skillMd: source }]).install();
     const { io, stdout, stderr } = createMemoryIO();
 
     await skillsSyncCommand({ printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
-    expect(stderr()).toBe(
-      "Note: @pierre-cabriere/meeting-notes-fr has no description; publish a version with one so agents know when to use it.\n",
+    expect(stderr()).toContain(
+      "Note: @pierre-cabriere/meeting-notes-fr does not pass the skill frontmatter rule (",
+    );
+    expect(stderr()).toContain(
+      "Claude Code and Codex may not load it — republish it from Appstrate.",
     );
     expect(await readText(join(pluginRoot(), "skills", "meeting-notes-fr", "SKILL.md"))).toBe(
       source,
     );
+  });
+
+  it("says nothing about a skill whose frontmatter conforms", async () => {
+    createSkillServer([{ id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools") }]).install();
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({ printPath: true }, io);
+
+    expect(stderr()).toBe("");
   });
 });
 

@@ -2,11 +2,8 @@
 
 /**
  * The pure half of `appstrate skills sync`: ZIP entries → skill directory.
- *
- * Everything here runs without a network or a filesystem, which is the point
- * of splitting `lib/skills-sync/materialize.ts` out — the three rules that
- * decide what Claude Code and Codex actually load (determinism, the drop list,
- * the frontmatter rewrite) are assertable in isolation.
+ * No network, no filesystem — the drop list, the name rewrite and the
+ * determinism rule are assertable in isolation.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -69,16 +66,17 @@ Body text.
 `;
 
 describe("skillSlug", () => {
-  it("derives the slug from the frontmatter name", () => {
-    expect(skillSlug("PDF Tools", "pdf-tools")).toBe("pdf-tools");
+  it("keeps a frontmatter name that is already a legal Agent Skills name", () => {
+    expect(skillSlug("pdf-tools", "something-else")).toBe("pdf-tools");
   });
 
-  it("falls back to the package name segment when the frontmatter name slugifies to nothing", () => {
+  it("falls back to the package name segment when the frontmatter name is not legal", () => {
+    expect(skillSlug("PDF Tools", "pdf-tools")).toBe("pdf-tools");
     expect(skillSlug("日本語", "reporting")).toBe("reporting");
   });
 
-  it("collapses punctuation runs and trims edge hyphens", () => {
-    expect(skillSlug("  Weekly -- Report!  ", "x")).toBe("weekly-report");
+  it("slugifies the package name segment and trims edge hyphens", () => {
+    expect(skillSlug("", "  Weekly -- Report!  ")).toBe("weekly-report");
   });
 
   it("refuses a name that cannot become a legal Agent Skills name", () => {
@@ -109,102 +107,56 @@ describe("collisionSlug", () => {
 
 describe("normalizeSkillMd", () => {
   it("leaves a conforming file byte-for-byte alone", () => {
-    expect(normalizeSkillMd(CONFORMING_SKILL, "pdf-tools", "from manifest")).toBe(CONFORMING_SKILL);
+    expect(normalizeSkillMd(CONFORMING_SKILL, "pdf-tools")).toBe(CONFORMING_SKILL);
   });
 
   it("rewrites only the name line when it differs from the slug", () => {
     const source = CONFORMING_SKILL.replace("name: pdf-tools", "name: PDF Tools");
-    const out = normalizeSkillMd(source, "pdf-tools", "from manifest");
+    const out = normalizeSkillMd(source, "pdf-tools");
     expect(out).toBe(CONFORMING_SKILL);
     expect(out).toContain("allowed-tools: Read, Bash");
   });
 
-  it("injects the manifest description when the frontmatter has none", () => {
-    const source = `---\nname: pdf-tools\n---\n\nBody.\n`;
-    const out = normalizeSkillMd(source, "pdf-tools", "Work with PDFs.");
-    expect(out).toBe(`---\nname: pdf-tools\ndescription: "Work with PDFs."\n---\n\nBody.\n`);
-  });
-
-  it("quotes an injected description so a colon or a bracket cannot break the YAML", () => {
-    const source = `---\nname: pdf-tools\n---\nBody.\n`;
-    const out = normalizeSkillMd(source, "pdf-tools", 'Reports: [draft] with "quotes"');
-    expect(out).toContain('description: "Reports: [draft] with \\"quotes\\""');
-  });
-
-  it("does not overwrite a description the skill already declares", () => {
-    const out = normalizeSkillMd(CONFORMING_SKILL, "pdf-tools", "SOMETHING ELSE");
-    expect(out).toContain("description: Work with PDFs.");
-    expect(out).not.toContain("SOMETHING ELSE");
-  });
-
-  it("replaces a multi-line name value together with its continuation lines", () => {
-    const source = `---\nname:\n  Long\n  Name\ndescription: Work with PDFs.\n---\n\nBody.\n`;
-    const out = normalizeSkillMd(source, "pdf-tools", "from manifest");
-    expect(out).toBe(`---\nname: pdf-tools\ndescription: Work with PDFs.\n---\n\nBody.\n`);
-  });
-
-  it("treats a multi-line description as present and leaves it untouched", () => {
-    const source = `---\nname: pdf-tools\ndescription:\n  line one\n  line two\n---\n\nBody.\n`;
-    const out = normalizeSkillMd(source, "pdf-tools", "SHOULD NOT APPEAR");
-    expect(out).toBe(source);
-    expect(out).not.toContain("SHOULD NOT APPEAR");
-  });
-
-  it("keeps a literal block scalar intact while rewriting the name above it", () => {
-    const source = `---\nname: PDF Tools\ndescription: |\n  first\n\n  second\nallowed-tools: Read\n---\n\nBody.\n`;
-    const out = normalizeSkillMd(source, "pdf-tools", "ignored");
-    expect(out).toBe(
-      `---\nname: pdf-tools\ndescription: |\n  first\n\n  second\nallowed-tools: Read\n---\n\nBody.\n`,
+  it("handles a name declared after other keys", () => {
+    const source = "---\ndescription: Work with PDFs.\nname: PDF Tools\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
+      "---\ndescription: Work with PDFs.\nname: pdf-tools\n---\n\nBody.\n",
     );
   });
 
-  it("does not duplicate a bare name key that carries a block value", () => {
-    const source = `---\ndescription: Work with PDFs.\nname:\n  pdf tools\n---\n\nBody.\n`;
-    const out = normalizeSkillMd(source, "pdf-tools", "ignored");
-    expect(out.match(/^name:/gm)).toHaveLength(1);
-    expect(out).toContain("name: pdf-tools");
-    expect(out).not.toContain("  pdf tools");
+  it("prepends the name when the block only carries it inside a nested mapping", () => {
+    const source = "---\nmeta:\n  name: inner\n  description: inner desc\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
+      "---\nname: pdf-tools\nmeta:\n  name: inner\n  description: inner desc\n---\n\nBody.\n",
+    );
+  });
+
+  it("does not mistake an indented key inside a nested mapping for the top-level one", () => {
+    const source = "---\nmeta:\n  name: inner\nname: PDF Tools\ndescription: Work.\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
+      "---\nmeta:\n  name: inner\nname: pdf-tools\ndescription: Work.\n---\n\nBody.\n",
+    );
   });
 
   it("rewrites CRLF frontmatter in place and keeps CRLF line endings", () => {
     const source = "---\r\nname: PDF Tools\r\ndescription: Work.\r\n---\r\n\r\nBody.\r\n";
-    const out = normalizeSkillMd(source, "pdf-tools", "from manifest");
+    const out = normalizeSkillMd(source, "pdf-tools");
     expect(out).toBe("---\r\nname: pdf-tools\r\ndescription: Work.\r\n---\r\n\r\nBody.\r\n");
     // The bug this pins prepended a SECOND key rather than replacing the first.
     expect(out.match(/^name:/gm)).toHaveLength(1);
   });
 
-  it("fills an empty description value without losing the injected name", () => {
-    const out = normalizeSkillMd("---\ndescription:\n---\n\nBody.\n", "pdf-tools", "From manifest");
-    expect(out).toBe('---\nname: pdf-tools\ndescription: "From manifest"\n---\n\nBody.\n');
-    expect(out.match(/^description:/gm)).toHaveLength(1);
-  });
-
-  it("handles description declared before name", () => {
-    const source = "---\ndescription: Work with PDFs.\nname: PDF Tools\n---\n\nBody.\n";
-    const out = normalizeSkillMd(source, "pdf-tools", "ignored");
-    expect(out).toBe("---\ndescription: Work with PDFs.\nname: pdf-tools\n---\n\nBody.\n");
-  });
-
-  it("does not mistake an indented key inside a nested mapping for the top-level one", () => {
-    const source =
-      "---\nmeta:\n  name: inner\n  description: inner desc\nname: PDF Tools\n---\n\nBody.\n";
-    const out = normalizeSkillMd(source, "pdf-tools", "From manifest");
-    expect(out).toBe(
-      '---\nmeta:\n  name: inner\n  description: inner desc\nname: pdf-tools\ndescription: "From manifest"\n---\n\nBody.\n',
+  it("leaves a file whose frontmatter yaml cannot parse otherwise untouched", () => {
+    // Legacy published artifacts exist with an unquoted `description: a : b`.
+    // The sync still points the name at the directory and copies the rest.
+    const source = "---\nname: legacy\ndescription: Reports: weekly\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "legacy-skill")).toBe(
+      "---\nname: legacy-skill\ndescription: Reports: weekly\n---\n\nBody.\n",
     );
   });
 
-  it("sees through a UTF-8 BOM instead of prepending a second frontmatter", () => {
-    const out = normalizeSkillMd(`\uFEFF${CONFORMING_SKILL}`, "pdf-tools", "ignored");
-    expect(out).toBe(CONFORMING_SKILL);
-    expect(out.match(/^---$/gm)).toHaveLength(2);
-    expect(out.startsWith("\uFEFF")).toBe(false);
-  });
-
-  it("adds a frontmatter block to a file that has none", () => {
-    const out = normalizeSkillMd("Just a body.\n", "pdf-tools", "Work with PDFs.");
-    expect(out).toBe(`---\nname: pdf-tools\ndescription: "Work with PDFs."\n---\n\nJust a body.\n`);
+  it("leaves a file with no frontmatter block exactly as authored", () => {
+    expect(normalizeSkillMd("Just a body.\n", "pdf-tools")).toBe("Just a body.\n");
   });
 });
 
@@ -216,11 +168,7 @@ describe("materializeSkill", () => {
       "SKILL.md": CONFORMING_SKILL,
       "reference/table.csv": "a,b\n1,2\n",
     });
-    const { files: out } = materializeSkill({
-      slug: "pdf-tools",
-      files,
-      manifestDescription: "unused",
-    });
+    const out = materializeSkill({ slug: "pdf-tools", files });
 
     expect(Object.keys(out).sort()).toEqual(["SKILL.md", "reference/table.csv"]);
     expect(decoder.decode(out["reference/table.csv"]!)).toBe("a,b\n1,2\n");
@@ -233,16 +181,8 @@ describe("materializeSkill", () => {
       "SKILL.md": CONFORMING_SKILL.replace("name: pdf-tools", "name: PDF Tools"),
       "assets/logo.bin": new Uint8Array([1, 2, 3, 4]),
     });
-    const { files: first } = materializeSkill({
-      slug: "pdf-tools",
-      files,
-      manifestDescription: "d",
-    });
-    const { files: second } = materializeSkill({
-      slug: "pdf-tools",
-      files,
-      manifestDescription: "d",
-    });
+    const first = materializeSkill({ slug: "pdf-tools", files });
+    const second = materializeSkill({ slug: "pdf-tools", files });
 
     expect(Object.keys(first)).toEqual(Object.keys(second));
     for (const path of Object.keys(first)) {
@@ -251,76 +191,27 @@ describe("materializeSkill", () => {
   });
 
   it("keys entries in sorted order so writers hash a stable sequence", () => {
-    const { files: out } = materializeSkill({
+    const out = materializeSkill({
       slug: "pdf-tools",
       files: {
         "z.txt": encoder.encode("z"),
         "SKILL.md": encoder.encode(CONFORMING_SKILL),
         "a/b.txt": encoder.encode("b"),
       },
-      manifestDescription: "d",
     });
     expect(Object.keys(out)).toEqual(["SKILL.md", "a/b.txt", "z.txt"]);
   });
 
-  it("leaves an empty description exactly as authored and flags the skill", () => {
+  it("copies a SKILL.md with no description exactly as authored", () => {
     // The sync does not invent a description: publishing without one is what
-    // should be refused, upstream. Here it is reported, not papered over.
+    // should be refused, upstream. Here it is copied, and the command reports it.
     const source = "---\nname: meeting-notes-fr\ndescription:\n---\n\nBody.\n";
-    const { files, missingDescription } = materializeSkill({
+    const out = materializeSkill({
       slug: "meeting-notes-fr",
       files: { "SKILL.md": encoder.encode(source) },
-      manifestDescription: "   ",
     });
 
-    expect(decoder.decode(files["SKILL.md"]!)).toBe(source);
-    expect(missingDescription).toBe(true);
-  });
-
-  it("does the same on a CRLF file", () => {
-    const source = "---\r\nname: meeting-notes-fr\r\ndescription:\r\n---\r\n\r\nBody.\r\n";
-    const { files, missingDescription } = materializeSkill({
-      slug: "meeting-notes-fr",
-      files: { "SKILL.md": encoder.encode(source) },
-      manifestDescription: "",
-    });
-
-    expect(decoder.decode(files["SKILL.md"]!)).toBe(source);
-    expect(missingDescription).toBe(true);
-  });
-
-  it("flags a skill whose description key is missing entirely, adding nothing", () => {
-    const source = "---\nname: meeting-notes-fr\n---\n\nBody.\n";
-    const { files, missingDescription } = materializeSkill({
-      slug: "meeting-notes-fr",
-      files: { "SKILL.md": encoder.encode(source) },
-      manifestDescription: "",
-    });
-
-    expect(decoder.decode(files["SKILL.md"]!)).toBe(source);
-    expect(missingDescription).toBe(true);
-  });
-
-  it("still injects the manifest description when there is one", () => {
-    const { files, missingDescription } = materializeSkill({
-      slug: "pdf-tools",
-      files: { "SKILL.md": encoder.encode("---\nname: pdf-tools\ndescription:\n---\n\nBody.\n") },
-      manifestDescription: "Work with PDFs.",
-    });
-
-    expect(decoder.decode(files["SKILL.md"]!)).toContain('description: "Work with PDFs."');
-    expect(missingDescription).toBe(false);
-  });
-
-  it("leaves a skill that declares its own description untouched and unflagged", () => {
-    const { files, missingDescription } = materializeSkill({
-      slug: "pdf-tools",
-      files: { "SKILL.md": encoder.encode(CONFORMING_SKILL) },
-      manifestDescription: "",
-    });
-
-    expect(decoder.decode(files["SKILL.md"]!)).toBe(CONFORMING_SKILL);
-    expect(missingDescription).toBe(false);
+    expect(decoder.decode(out["SKILL.md"]!)).toBe(source);
   });
 
   it("rejects a traversing entry", () => {
@@ -331,7 +222,6 @@ describe("materializeSkill", () => {
           "SKILL.md": encoder.encode(CONFORMING_SKILL),
           "../../etc/passwd": encoder.encode("x"),
         },
-        manifestDescription: "d",
       }),
     ).toThrow(/Refusing archive entry/);
   });
@@ -344,7 +234,6 @@ describe("materializeSkill", () => {
           "SKILL.md": encoder.encode(CONFORMING_SKILL),
           "/etc/passwd": encoder.encode("x"),
         },
-        manifestDescription: "d",
       }),
     ).toThrow(/Refusing archive entry/);
   });
@@ -357,18 +246,13 @@ describe("materializeSkill", () => {
           "SKILL.md": encoder.encode(CONFORMING_SKILL),
           "nested/": new Uint8Array(),
         },
-        manifestDescription: "d",
       }),
     ).toThrow(/Refusing archive entry/);
   });
 
   it("rejects an artifact with no SKILL.md", () => {
     expect(() =>
-      materializeSkill({
-        slug: "pdf-tools",
-        files: { "notes.md": encoder.encode("hi") },
-        manifestDescription: "d",
-      }),
+      materializeSkill({ slug: "pdf-tools", files: { "notes.md": encoder.encode("hi") } }),
     ).toThrow(/no SKILL.md/);
   });
 });

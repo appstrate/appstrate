@@ -103,6 +103,7 @@
       },
       "devDependencies": {
         "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/afps-shared": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@appstrate/shared-types": "workspace:*",

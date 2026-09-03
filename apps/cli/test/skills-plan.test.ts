@@ -47,7 +47,6 @@ function resolved(overrides: Partial<ResolvedSkill> & { packageId: string }): Re
     version: "1.0.0",
     integrity: "sha256-x",
     frontmatterName: "",
-    manifestDescription: "",
     ...overrides,
   };
 }
@@ -73,7 +72,6 @@ describe("resolveSkill", () => {
     const skill = await resolveSkill("default", "@acme/pdf", "published");
     expect(skill?.version).toBe("2.3.1");
     expect(skill?.frontmatterName).toBe("PDF Tools");
-    expect(skill?.manifestDescription).toBe("A skill.");
     expect(skill?.integrity).toMatch(/^sha256-/);
   });
 
@@ -89,8 +87,8 @@ describe("resolveSkill", () => {
 describe("assignSlugs", () => {
   it("gives the short slug to the first claimant and renames the rest", () => {
     const planned = assignSlugs([
-      resolved({ packageId: "@acme/pdf-tools", frontmatterName: "PDF Tools" }),
-      resolved({ packageId: "@other/reports", frontmatterName: "PDF Tools" }),
+      resolved({ packageId: "@acme/pdf-tools", frontmatterName: "pdf-tools" }),
+      resolved({ packageId: "@other/reports", frontmatterName: "pdf-tools" }),
     ]);
 
     expect(planned[0]?.slug).toBe("pdf-tools");
@@ -103,8 +101,8 @@ describe("assignSlugs", () => {
     // Same two skills as above, swapped: the one that comes first keeps the
     // short slug, so the caller's sort by package id is what makes the
     // assignment reproducible.
-    const a = resolved({ packageId: "@acme/pdf-tools", frontmatterName: "PDF Tools" });
-    const b = resolved({ packageId: "@other/reports", frontmatterName: "PDF Tools" });
+    const a = resolved({ packageId: "@acme/pdf-tools", frontmatterName: "pdf-tools" });
+    const b = resolved({ packageId: "@other/reports", frontmatterName: "pdf-tools" });
 
     expect(assignSlugs([b, a]).map((s) => s.slug)).toEqual(["pdf-tools", "acme-pdf-tools"]);
   });
@@ -114,9 +112,9 @@ describe("assignSlugs", () => {
     // `@acme/bar` and `@acme/foo` reduce to `acme-foo` through the
     // `<scope>-<name>` fallback. Three claimants, three directories.
     const planned = assignSlugs([
-      resolved({ packageId: "@a/b", frontmatterName: "Acme Foo" }),
-      resolved({ packageId: "@acme/bar", frontmatterName: "Foo" }),
-      resolved({ packageId: "@acme/foo", frontmatterName: "Foo" }),
+      resolved({ packageId: "@a/b", frontmatterName: "acme-foo" }),
+      resolved({ packageId: "@acme/bar", frontmatterName: "foo" }),
+      resolved({ packageId: "@acme/foo", frontmatterName: "foo" }),
     ]);
 
     const slugs = planned.map((s) => s.slug);

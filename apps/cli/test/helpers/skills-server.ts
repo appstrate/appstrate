@@ -19,6 +19,9 @@ import { zipArtifact } from "@appstrate/core/zip";
 
 const encoder = new TextEncoder();
 
+/** The sync never reads it; the stub carries it because the real DTOs do. */
+const MANIFEST_DESCRIPTION = "A skill.";
+
 /** Draft-side state of a fixture, read by `--source draft`. */
 export interface DraftFixture {
   /** `SKILL.md` of the working copy. Defaults to the published one. */
@@ -41,8 +44,6 @@ export interface SkillFixture {
   id: string;
   /** Full `SKILL.md` text, frontmatter included. */
   skillMd: string;
-  /** AFPS manifest `description`. */
-  description?: string;
   /** Published version label. */
   version?: string;
   /** Extra archive entries, path → text. */
@@ -94,7 +95,7 @@ function prepare(fixture: SkillFixture): Prepared {
         type: "skill",
         name: fixture.id,
         version: fixture.version ?? "1.0.0",
-        description: fixture.description ?? "A skill.",
+        description: MANIFEST_DESCRIPTION,
       }),
     ),
     "SKILL.md": encoder.encode(fixture.skillMd),
@@ -151,7 +152,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
         data: prepared.map((p) => ({
           id: p.fixture.id,
           name: p.name,
-          description: p.fixture.description ?? "A skill.",
+          description: MANIFEST_DESCRIPTION,
           source: p.fixture.source ?? "local",
           version: p.version,
           updatedAt: "2026-01-01T00:00:00.000Z",
@@ -179,7 +180,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
           type: "skill",
           name: found.fixture.id,
           version: found.version,
-          description: found.fixture.description ?? "A skill.",
+          description: MANIFEST_DESCRIPTION,
         },
         content: found.fixture.skillMd,
         yanked: false,
@@ -215,7 +216,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
       return json({
         id: found.fixture.id,
         name: found.name,
-        description: found.fixture.description ?? "A skill.",
+        description: MANIFEST_DESCRIPTION,
         content: draftSkillMd(found),
         source: found.fixture.source ?? "local",
         version: found.version,
@@ -224,7 +225,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
           type: "skill",
           name: found.fixture.id,
           version: found.version,
-          description: found.fixture.description ?? "A skill.",
+          description: MANIFEST_DESCRIPTION,
         },
         lock_version: found.fixture.draft.lockVersion ?? 1,
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -293,7 +294,7 @@ function draftEntries(p: Prepared): Record<string, { text: string; inline: boole
         type: "skill",
         name: p.fixture.id,
         version: p.version,
-        description: p.fixture.description ?? "A skill.",
+        description: MANIFEST_DESCRIPTION,
       }),
       inline: true,
     },

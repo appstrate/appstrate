@@ -76,8 +76,6 @@ export interface ResolvedSkill {
   integrity: string;
   /** Frontmatter `name` of the skill's `SKILL.md`, empty when it has none. */
   frontmatterName: string;
-  /** AFPS manifest `description`, empty when the manifest has none. */
-  manifestDescription: string;
   /**
    * Draft only: the file index whose ETag produced `integrity`, kept so the
    * download does not re-request it.
@@ -135,7 +133,6 @@ async function resolvePublished(
     version?: unknown;
     integrity?: unknown;
     content?: unknown;
-    manifest?: unknown;
   }
   let detail: VersionDetail;
   try {
@@ -159,14 +156,12 @@ async function resolvePublished(
     version: detail.version,
     integrity: detail.integrity,
     frontmatterName: frontmatterNameOf(detail.content),
-    manifestDescription: manifestDescriptionOf(detail.manifest),
   };
 }
 
 async function resolveDraft(profileName: string, packageId: string): Promise<ResolvedSkill | null> {
   interface DraftDetail {
     content?: unknown;
-    manifest?: unknown;
     lock_version?: unknown;
   }
   let detail: DraftDetail;
@@ -202,7 +197,6 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
     version: "draft",
     integrity: `draft:${lock}:${etag}`,
     frontmatterName: frontmatterNameOf(detail.content),
-    manifestDescription: manifestDescriptionOf(detail.manifest),
     // Carried rather than re-requested: the index answered here IS the index
     // the download needs, and the ETag that makes it the change token is only
     // meaningful for the body it came with. Two calls would also be two
@@ -358,12 +352,6 @@ async function fetchDraftFiles(
 
 function frontmatterNameOf(content: unknown): string {
   return typeof content === "string" ? extractSkillMeta(content).name : "";
-}
-
-function manifestDescriptionOf(manifest: unknown): string {
-  if (!manifest || typeof manifest !== "object") return "";
-  const description = (manifest as Record<string, unknown>).description;
-  return typeof description === "string" ? description : "";
 }
 
 // ---------------------------------------------------------------------------

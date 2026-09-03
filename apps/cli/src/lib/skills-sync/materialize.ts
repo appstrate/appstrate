@@ -1,72 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate skill package → Agent Skills directory.
+ * Appstrate skill artifact → Agent Skills directory: the pure half of
+ * `appstrate skills sync`. No network, no filesystem.
  *
- * The pure half of `appstrate skills sync`: given the files of one skill
- * artifact, produce the exact bytes of the directory Claude Code and Codex
- * will read. No network, no filesystem — so every rule below is unit-testable
- * on its own.
- *
- * Three rules carry the whole translation:
- *
- *  - **The directory name is the skill's identity.** The Agent Skills spec
- *    requires the frontmatter `name` to equal the parent directory name, and
- *    Claude Code derives the `/appstrate:<name>` command from it. Appstrate
- *    ids are `@scope/name`, which is not a legal skill name, and Appstrate
- *    only ever checked that the frontmatter `name` is non-empty — so a slug
- *    has to be derived, and the frontmatter rewritten to agree with it.
- *  - **Rewrite the minimum.** `name` is replaced only when it differs from
- *    the slug; `description` is injected only when the skill has none (both
- *    Codex and the spec require it). Every other byte of `SKILL.md` — and
- *    every other file — passes through verbatim, because unknown frontmatter
- *    keys are Claude Code's own extensions and dropping them would silently
- *    change behaviour.
- *  - **The output is a function of the input.** No timestamps, no sync
- *    metadata, sorted keys. A `mode: "copy"` plugin's version IS the hash of
- *    its contents, so a byte-identical re-run must hash identically or every
- *    session would install a "new" plugin version.
+ * The output is a function of the input — sorted keys, no timestamps, no sync
+ * metadata — because a `mode: "copy"` plugin's version IS the hash of its
+ * contents, so a byte-identical re-run must hash identically.
  */
 
+import { isValidSkillName, SKILL_NAME_MAX_LENGTH } from "@appstrate/afps-shared/companion-files";
 import { extractSkillMeta } from "@appstrate/core/validation";
-import { SLUG_REGEX, toSlug } from "@appstrate/core/naming";
-
-/**
- * Spec ceiling on a skill name (agentskills.io/specification: 1-64 chars,
- * `[a-z0-9-]`, no leading or trailing hyphen). The CHARSET half of that rule
- * is `SLUG_REGEX` from `@appstrate/core/naming`, reused rather than restated:
- * every value checked here has been through `toSlug`, which collapses runs of
- * non-alphanumerics to a single hyphen, so the two accept exactly the same
- * strings. Only the length cap is local, because `SLUG_REGEX` has none.
- */
-const SKILL_NAME_MAX_LEN = 64;
-
-/** A slugified value that is a legal Agent Skills `name`. */
-function isSkillName(value: string): boolean {
-  return value.length > 0 && value.length <= SKILL_NAME_MAX_LEN && SLUG_REGEX.test(value);
-}
+import { toSlug } from "@appstrate/core/naming";
 
 /**
  * ZIP entries that are Appstrate packaging, not skill content.
  *
- * `manifest.json` is the AFPS manifest — its `description` is consumed for the
- * frontmatter injection below and then dropped; shipping it would put an
- * Appstrate-shaped file in a directory Claude Code and Codex scan. `RECORD` is
- * the packaging checksum listing, meaningless once the archive is unpacked.
- *
  * Exported because the draft path in `./plan.ts` must know the same set BEFORE
- * fetching: on that path each file is a separate rate-limited request, so
- * "drop it after downloading it" is two wasted round-trips per skill. One
- * definition, or the two lists drift and the draft tree stops matching the
- * published one.
+ * fetching: there, each file is a separate rate-limited request, so "drop it
+ * after downloading it" is two wasted round-trips per skill.
  */
 export const DROPPED_ENTRIES: ReadonlySet<string> = new Set(["manifest.json", "RECORD"]);
 
 /**
- * The one file an Agent Skills directory must contain — and therefore the one
- * that proves a materialized skill is actually present on disk. Exported for
- * that second reason: `commands/skills.ts` tests for it rather than for the
- * directory, because a directory can survive its `SKILL.md`.
+ * The one file an Agent Skills directory must contain. Exported because
+ * `commands/skills.ts` tests for it rather than for the directory: a directory
+ * can survive its `SKILL.md`.
  */
 export const SKILL_ENTRY = "SKILL.md";
 
@@ -84,17 +43,15 @@ export class SkillMaterializeError extends Error {
 /**
  * Derive the Agent Skills slug for a package.
  *
- * Preference order is frontmatter `name` → the package's `name` segment,
- * because the frontmatter name is what the author typed and what Appstrate
- * shows; the package segment is already slug-shaped and makes a reliable
- * fallback for a skill whose frontmatter name slugifies to nothing (e.g. a
- * name written entirely in a non-Latin script).
+ * The frontmatter `name` wins when it is already legal — that is what the
+ * author typed, what Appstrate shows, and what the platform now enforces on
+ * every write. Legacy artifacts predating that rule fall back to the package's
+ * `name` segment, which is slug-shaped by construction.
  */
 export function skillSlug(frontmatterName: string, packageNameSegment: string): string {
-  const fromFrontmatter = toSlug(frontmatterName, SKILL_NAME_MAX_LEN).replace(/-+$/, "");
-  if (isSkillName(fromFrontmatter)) return fromFrontmatter;
-  const fromPackage = toSlug(packageNameSegment, SKILL_NAME_MAX_LEN).replace(/-+$/, "");
-  if (isSkillName(fromPackage)) return fromPackage;
+  if (isValidSkillName(frontmatterName)) return frontmatterName;
+  const fromPackage = toSlug(packageNameSegment, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
+  if (isValidSkillName(fromPackage)) return fromPackage;
   throw new SkillMaterializeError(
     "unslugifiable_name",
     `Cannot derive a skill directory name from "${frontmatterName}" or "${packageNameSegment}"`,
@@ -106,19 +63,16 @@ export function skillSlug(frontmatterName: string, packageNameSegment: string): 
  * The deterministic collision fallback: `<scope>-<name>` for the package id,
  * then `-2`, `-3`, … until free. Applied to the *later* of two skills that
  * claim the same slug, ordered by package id, so which one keeps the short
- * name never depends on server ordering or on which skill was published
- * first.
+ * name never depends on server ordering.
  *
- * The numeric tail is not paranoia: `@a/b` named "Acme Foo", `@acme/bar` named
- * "Foo" and `@acme/foo` named "Foo" all reduce to `acme-foo` — the first via
- * its frontmatter, the other two via this fallback. Returning a duplicate
- * would hand two skills the same directory and abort the whole sync on the
- * `wx` write.
+ * The numeric tail is not decoration: `@a/b` named "acme-foo", `@acme/bar` and
+ * `@acme/foo` all reduce to `acme-foo`, and returning a duplicate would hand
+ * two skills the same directory and abort the whole sync on the `wx` write.
  */
 export function collisionSlug(packageId: string, taken: ReadonlySet<string>): string {
   const withoutAt = packageId.replace(/^@/, "").replace("/", "-");
-  const base = toSlug(withoutAt, SKILL_NAME_MAX_LEN).replace(/-+$/, "");
-  if (!isSkillName(base)) {
+  const base = toSlug(withoutAt, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
+  if (!isValidSkillName(base)) {
     throw new SkillMaterializeError(
       "unslugifiable_name",
       `Cannot derive a collision-free skill directory name from "${packageId}"`,
@@ -129,20 +83,18 @@ export function collisionSlug(packageId: string, taken: ReadonlySet<string>): st
   for (let n = 2; ; n += 1) {
     const suffix = `-${n}`;
     // Trim the BASE, not the suffix: a truncated counter would collide again.
-    const head = base.slice(0, SKILL_NAME_MAX_LEN - suffix.length).replace(/-+$/, "");
+    const head = base.slice(0, SKILL_NAME_MAX_LENGTH - suffix.length).replace(/-+$/, "");
     const candidate = `${head}${suffix}`;
-    if (!taken.has(candidate) && isSkillName(candidate)) return candidate;
+    if (!taken.has(candidate) && isValidSkillName(candidate)) return candidate;
   }
 }
 
 /**
  * Reject an archive entry path that must never reach the filesystem.
  *
- * `unzipArtifact` already drops these while unzipping, so nothing here is
- * expected to fire on a well-formed artifact. It stays because that filter is
- * one library away from the `writeFile` call and this is the boundary that
- * actually creates files: the guard has to live where the damage would be
- * done, not where the bytes happened to come from.
+ * `unzipArtifact` already drops these while unzipping. The guard stays because
+ * this is the boundary that actually creates files: it has to live where the
+ * damage would be done, not where the bytes happened to come from.
  */
 function assertSafeEntry(path: string): void {
   const unsafe =
@@ -167,53 +119,26 @@ export interface MaterializeSkillInput {
   slug: string;
   /** Every entry of the artifact, packaging files included. */
   files: Record<string, Uint8Array>;
-  /**
-   * `description` from the AFPS manifest, injected into the frontmatter when
-   * the skill declares none. May be empty, in which case NOTHING is injected:
-   * the sync does not invent text on the author's behalf. It reports instead
-   * (see {@link MaterializedSkill.missingDescription}), and the fix belongs
-   * upstream, where publishing a version without a description should be
-   * refused in the first place.
-   */
-  manifestDescription: string;
-}
-
-export interface MaterializedSkill {
-  /** Path relative to the skill directory → bytes, in sorted key order. */
-  files: Record<string, Uint8Array>;
-  /**
-   * True when neither the frontmatter nor the manifest carried a description.
-   * The skill is still materialized, byte-for-byte as authored; the command
-   * surfaces this once per skill — the materializer stays pure and reports
-   * rather than prints.
-   */
-  missingDescription: boolean;
 }
 
 /**
- * Produce the files of one skill directory, keyed by path relative to it.
- *
- * Insertion order is sorted so callers that iterate (writing to disk, hashing)
- * see a stable sequence without having to re-sort.
+ * Produce the files of one skill directory, keyed by path relative to it, in
+ * sorted key order so callers that iterate (writing to disk, hashing) see a
+ * stable sequence without re-sorting.
  */
-export function materializeSkill(input: MaterializeSkillInput): MaterializedSkill {
+export function materializeSkill(input: MaterializeSkillInput): Record<string, Uint8Array> {
   const out: Record<string, Uint8Array> = {};
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const manifestDescription = input.manifestDescription.trim();
-  let missingDescription = false;
 
   for (const path of Object.keys(input.files).sort()) {
     assertSafeEntry(path);
     if (DROPPED_ENTRIES.has(path)) continue;
     const bytes = input.files[path]!;
-    if (path !== SKILL_ENTRY) {
-      out[path] = bytes;
-      continue;
-    }
-    const content = decoder.decode(bytes);
-    missingDescription = manifestDescription.length === 0 && !declaresDescription(content);
-    out[path] = encoder.encode(normalizeSkillMd(content, input.slug, manifestDescription));
+    out[path] =
+      path === SKILL_ENTRY
+        ? encoder.encode(normalizeSkillMd(decoder.decode(bytes), input.slug))
+        : bytes;
   }
 
   if (!out[SKILL_ENTRY]) {
@@ -223,107 +148,34 @@ export function materializeSkill(input: MaterializeSkillInput): MaterializedSkil
       "Every Appstrate skill stores its body as SKILL.md — the artifact is malformed.",
     );
   }
-  return { files: out, missingDescription };
+  return out;
 }
 
 /**
- * Whether `SKILL.md` already carries a non-empty `description`.
- *
- * Same two cases `normalizeSkillMd` treats as "present": a non-empty inline
- * value, or a key whose value spans an indented continuation block. Shared so
- * the report and the injection cannot disagree about what "has a description"
- * means.
+ * Point the frontmatter `name` at the directory the skill is written under —
+ * the one rewrite the Agent Skills spec forces, since it requires `name` to
+ * equal the parent directory name. Every other byte passes through as
+ * authored: unknown keys are Claude Code's own extensions, and a description
+ * the sync invented would hide a publishing mistake from the only person who
+ * can fix it.
  */
-function declaresDescription(content: string): boolean {
-  const { text } = toScanForm(content);
-  if (extractSkillMeta(text).description.length > 0) return true;
-  const match = text.match(FRONTMATTER_RE);
-  if (!match) return false;
-  const entry = scanEntries(match[1]!.split("\n")).find((e) => e.key === "description");
-  return entry?.hasBlock === true;
-}
+export function normalizeSkillMd(content: string, slug: string): string {
+  if (extractSkillMeta(content).name === slug) return content;
+  const match = content.match(FRONTMATTER_RE);
+  if (!match) return content;
 
-/**
- * Rewrite `SKILL.md`'s frontmatter to the two invariants the consumers
- * enforce, and nothing else.
- *
- * A file with no frontmatter block at all gets one — Claude Code and Codex
- * both skip a `SKILL.md` without it, so passing it through verbatim would
- * materialize a directory neither tool loads.
- *
- * Replacement is by ENTRY, not by line: YAML lets a value span the key line
- * plus an indented continuation block (`description:` followed by two indented
- * lines, a `|` literal, a `>` folded scalar, a nested mapping). Overwriting
- * only the key line would leave those continuation lines behind as an
- * unparseable fragment — turning a skill with an unusual description into a
- * skill Claude Code refuses to load at all.
- */
-export function normalizeSkillMd(
-  content: string,
-  slug: string,
-  manifestDescription: string,
-): string {
-  const { text, eol } = toScanForm(content);
-  const restore = (value: string): string =>
-    eol === "\r\n" ? value.replace(/\n/g, "\r\n") : value;
-
-  const meta = extractSkillMeta(text);
-  const match = text.match(FRONTMATTER_RE);
-
-  if (!match) {
-    const header = [
-      "---",
-      `name: ${slug}`,
-      `description: ${yamlString(manifestDescription)}`,
-      "---",
-      "",
-    ];
-    return restore(`${header.join("\n")}\n${text}`);
-  }
-
-  const block = match[1]!;
-  let lines = block.split("\n");
-  const entries = scanEntries(lines);
-  const nameEntry = entries.find((e) => e.key === "name");
-  const descEntry = entries.find((e) => e.key === "description");
-
-  // A description that spans a continuation block is PRESENT even though
-  // `extractSkillMeta`'s single-line regex cannot read it. Injecting the
-  // manifest's on top would duplicate the key.
-  const hasDescription = meta.description.length > 0 || descEntry?.hasBlock === true;
-
-  const edits: { start: number; end: number; line: string }[] = [];
-  let prepend: string | null = null;
-  let append: string | null = null;
-  if (meta.name !== slug) {
-    const line = `name: ${slug}`;
-    if (nameEntry) edits.push({ start: nameEntry.start, end: nameEntry.end, line });
-    else prepend = line;
-  }
-  if (!hasDescription && manifestDescription.length > 0) {
-    const line = `description: ${yamlString(manifestDescription)}`;
-    if (descEntry) edits.push({ start: descEntry.start, end: descEntry.end, line });
-    else append = line;
-  }
-  // Splices first, bottom-up, so each recorded range is still valid when its
-  // turn comes. Only THEN the prepend: inserting a line ahead of the block
-  // shifts every recorded index by one, and doing it first made the
-  // description splice overwrite the name line it had just added.
-  for (const edit of edits.sort((a, b) => b.start - a.start)) {
-    lines.splice(edit.start, edit.end - edit.start + 1, edit.line);
-  }
-  if (prepend !== null) lines = [prepend, ...lines];
-  if (append !== null) lines = [...lines, append];
-
-  const rewritten = lines.join("\n");
-  if (rewritten === block) return restore(text);
-  // Splice by offset rather than `text.replace(block, …)`: the block text is
-  // user content and could legitimately recur later in the document, and a
-  // string replacement would also re-interpret `$` sequences in `rewritten`.
-  // The frontmatter regex is anchored at the start, so `match.index` is 0 and
-  // the block begins right after the opening `---` line.
+  // Splice by offset rather than `String.replace`: the block is user content
+  // that could recur later in the document, and a replacement would also
+  // re-interpret `$` sequences.
   const blockStart = match[0]!.indexOf("\n") + 1;
-  return restore(text.slice(0, blockStart) + rewritten + text.slice(blockStart + block.length));
+  const block = match[1]!;
+  const line = /^name:[^\r\n]*/m.exec(block);
+  if (!line) {
+    const eol = block.includes("\r\n") ? "\r\n" : "\n";
+    return `${content.slice(0, blockStart)}name: ${slug}${eol}${content.slice(blockStart)}`;
+  }
+  const at = blockStart + line.index;
+  return `${content.slice(0, at)}name: ${slug}${content.slice(at + line[0].length)}`;
 }
 
 /**
@@ -331,82 +183,3 @@ export function normalizeSkillMd(
  * is the frontmatter" has exactly one answer across the CLI and the platform.
  */
 const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
-
-/**
- * Put `content` in the form every scan below assumes, and say how to put it
- * back.
- *
- * A UTF-8 BOM defeats every `^---` anchor here and in `extractSkillMeta`, so a
- * BOM'd file reads as having no frontmatter and gets a second one prepended;
- * it is stripped once and never re-emitted. CRLF cannot be scanned in place
- * either: a JS `.` excludes `\r`, so every key-line regex silently matched
- * nothing, `scanEntries` returned no entries, and the name rewrite prepended a
- * SECOND `name:` key instead of replacing the first.
- */
-function toScanForm(content: string): { text: string; eol: string } {
-  const stripped = content.startsWith("\uFEFF") ? content.slice(1) : content;
-  const eol = /^[^\n]*\r\n/.test(stripped) ? "\r\n" : "\n";
-  return { text: eol === "\r\n" ? stripped.replace(/\r\n/g, "\n") : stripped, eol };
-}
-
-/** One top-level frontmatter key and the lines its value occupies. */
-interface FrontmatterEntry {
-  key: string;
-  /** Index of the `key:` line within the block. */
-  start: number;
-  /** Index of the last line belonging to this entry (== `start` when inline). */
-  end: number;
-  /** True when the value continues onto indented lines below the key. */
-  hasBlock: boolean;
-}
-
-/**
- * Locate every top-level key in a frontmatter block and the extent of its
- * value. Deliberately not a YAML parser: it only needs to answer "which lines
- * would I destroy if I overwrote this key", and the indentation rule answers
- * that for block scalars, folded scalars and nested mappings alike.
- */
-function scanEntries(lines: string[]): FrontmatterEntry[] {
-  const entries: FrontmatterEntry[] = [];
-  const keyLine = /^([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(.*)$/;
-  for (let i = 0; i < lines.length; i += 1) {
-    const match = lines[i]!.match(keyLine);
-    if (!match) continue;
-    let end = i;
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const line = lines[j]!;
-      if (/^\s+\S/.test(line)) {
-        end = j;
-        continue;
-      }
-      // A blank line belongs to the entry only when an indented line follows
-      // it — that is a paragraph break inside a block scalar, not the end of
-      // the value.
-      if (line.trim() === "") {
-        const next = lines.slice(j + 1).find((l) => l.trim() !== "");
-        if (next !== undefined && /^\s+\S/.test(next)) continue;
-      }
-      break;
-    }
-    entries.push({ key: match[1]!, start: i, end, hasBlock: end > i });
-    i = end;
-  }
-  return entries;
-}
-
-/**
- * Emit a value as a double-quoted YAML scalar.
- *
- * Manifest descriptions are free text — a leading `[`, an embedded `: `, or a
- * newline each break a plain scalar in a different way, and one of them turns
- * the whole frontmatter block into a parse error rather than a bad field.
- * Quoting unconditionally costs nothing and has one behaviour.
- */
-function yamlString(value: string): string {
-  const escaped = value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/[\r\n]+/g, " ")
-    .trim();
-  return `"${escaped}"`;
-}
