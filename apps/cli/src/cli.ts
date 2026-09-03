@@ -52,6 +52,7 @@ import {
 } from "./commands/space.ts";
 import { skillsSyncCommand } from "./commands/skills.ts";
 import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
+import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -132,7 +133,7 @@ function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[
 }
 
 /** `--source` on `appstrate skills sync`. */
-function parseSkillSource(val: string): "published" | "draft" {
+function parseSkillSource(val: string): SkillSource {
   if (val !== "published" && val !== "draft") {
     throw new InvalidArgumentError(`expected published or draft, got "${val}"`);
   }
@@ -549,7 +550,7 @@ skillsGroup
   .action(
     async (opts: {
       target?: SyncTarget[];
-      source?: "published" | "draft";
+      source?: SkillSource;
       printPath?: boolean;
       dryRun?: boolean;
     }) => {

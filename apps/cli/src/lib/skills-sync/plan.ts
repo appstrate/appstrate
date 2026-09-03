@@ -24,11 +24,10 @@ import { destinationExists, skillDir, targetRoot, type SyncTarget } from "./targ
 
 export const MAX_CONCURRENCY = 8;
 
-export type SkillSource = "published" | "draft";
+export type SkillSource = TargetState["source"];
 
 class SkillSyncError extends Error {
   constructor(
-    public readonly code: "integrity_mismatch" | "malformed_response",
     message: string,
     public readonly hint?: string,
   ) {
@@ -109,7 +108,6 @@ async function resolvePublished(
   }
   if (typeof detail.version !== "string" || typeof detail.integrity !== "string") {
     throw new SkillSyncError(
-      "malformed_response",
       `Version detail for ${packageId} is missing version or integrity`,
       "The instance is running an incompatible API version.",
     );
@@ -145,7 +143,6 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
   );
   if (!res.ok) {
     throw new SkillSyncError(
-      "malformed_response",
       `Draft file index for ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
       "Re-run without `--source draft`, or check that the skill still exists.",
     );
@@ -212,7 +209,6 @@ async function fetchPublishedFiles(
   );
   if (!res.ok) {
     throw new SkillSyncError(
-      "malformed_response",
       `Download of ${skill.packageId}@${skill.version} failed: HTTP ${res.status} ${res.statusText}`,
     );
   }
@@ -223,7 +219,6 @@ async function fetchPublishedFiles(
   const verdict = verifyArtifactIntegrity(bytes, advertised);
   if (!verdict.valid) {
     throw new SkillSyncError(
-      "integrity_mismatch",
       `Integrity mismatch for ${skill.packageId}@${skill.version}: expected ${advertised}, downloaded ${verdict.computed}`,
       "Retry the sync. If it persists, the instance or a proxy is corrupting artifacts.",
     );
@@ -273,7 +268,6 @@ async function fetchDraftFiles(
     );
     if (!res.ok) {
       throw new SkillSyncError(
-        "malformed_response",
         `Draft file "${entry.path}" of ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
       );
     }
@@ -289,8 +283,8 @@ function frontmatterNameOf(content: unknown): string {
   return typeof content === "string" ? extractSkillMeta(content).name : "";
 }
 
-export /** Slug assignment is global, so every plan indexes into the same map. */
-type SkillsBySlug = ReadonlyMap<string, PlannedSkill>;
+/** Slug assignment is global, so every plan indexes into the same map. */
+export type SkillsBySlug = ReadonlyMap<string, PlannedSkill>;
 
 export interface TargetPlan {
   target: SyncTarget;

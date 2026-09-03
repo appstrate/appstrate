@@ -18,9 +18,10 @@ export const DROPPED_ENTRIES: ReadonlySet<string> = new Set(["manifest.json", "R
 
 export const SKILL_ENTRY = "SKILL.md";
 
+const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
+
 export class SkillMaterializeError extends Error {
   constructor(
-    public readonly code: "unsafe_entry" | "empty_artifact" | "unslugifiable_name",
     message: string,
     public readonly hint?: string,
   ) {
@@ -38,7 +39,6 @@ export function skillSlug(frontmatterName: string, packageNameSegment: string): 
   const fromPackage = toSlug(packageNameSegment, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
   if (isValidSkillName(fromPackage)) return fromPackage;
   throw new SkillMaterializeError(
-    "unslugifiable_name",
     `Cannot derive a skill directory name from "${frontmatterName}" or "${packageNameSegment}"`,
     "Agent Skills names are 1-64 characters of [a-z0-9-]. Rename the skill in Appstrate.",
   );
@@ -54,7 +54,6 @@ export function collisionSlug(packageId: string, taken: ReadonlySet<string>): st
   const base = toSlug(withoutAt, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
   if (!isValidSkillName(base)) {
     throw new SkillMaterializeError(
-      "unslugifiable_name",
       `Cannot derive a collision-free skill directory name from "${packageId}"`,
       "Agent Skills names are 1-64 characters of [a-z0-9-].",
     );
@@ -81,7 +80,6 @@ function assertSafeEntry(path: string): void {
     path.split("/").some((segment) => segment === ".." || segment === "." || segment === "");
   if (unsafe) {
     throw new SkillMaterializeError(
-      "unsafe_entry",
       `Refusing archive entry "${path}": absolute, traversing, or not a file`,
       "The published artifact is malformed. Re-publish the skill from Appstrate.",
     );
@@ -110,7 +108,6 @@ export function materializeSkill(input: MaterializeSkillInput): Record<string, U
 
   if (!out[SKILL_ENTRY]) {
     throw new SkillMaterializeError(
-      "empty_artifact",
       `Artifact contains no ${SKILL_ENTRY}`,
       "Every Appstrate skill stores its body as SKILL.md — the artifact is malformed.",
     );
@@ -140,5 +137,3 @@ export function normalizeSkillMd(content: string, slug: string): string {
   const at = blockStart + line.index;
   return `${content.slice(0, at)}name: ${slug}${content.slice(at + line[0].length)}`;
 }
-
-const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;

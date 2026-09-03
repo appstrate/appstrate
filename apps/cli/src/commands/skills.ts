@@ -61,6 +61,15 @@ interface LineSink {
   write(chunk: string): void;
 }
 
+interface Report {
+  /** Per-skill failure: information under `--print-path`, exit 1 otherwise. */
+  skill(message: string): void;
+  /** Whole-run failure: the plugin on disk is not what the server describes. */
+  run(message: string): void;
+  /** Worth telling the user, not worth an exit code. */
+  note(message: string): void;
+}
+
 export async function skillsSyncCommand(
   opts: SkillsSyncOptions,
   io: CommandIO = DEFAULT_IO,
@@ -95,22 +104,19 @@ export async function skillsSyncCommand(
     io.exit(1);
   }
 
-  // Two grades, because `--print-path` treats them differently: a skill
-  // failure is information, a run failure means the plugin on disk is not what
-  // the server describes.
+  // Two grades, because `--print-path` treats them differently.
   let skillFailures = 0;
   let runFailures = 0;
-  const failSkill = (message: string): void => {
-    skillFailures += 1;
-    io.stderr.write(`${message}\n`);
-  };
-  const failRun = (message: string): void => {
-    runFailures += 1;
-    io.stderr.write(`${message}\n`);
-  };
-  /** Worth telling the user, not worth an exit code. */
-  const note = (message: string): void => {
-    io.stderr.write(`${message}\n`);
+  const report: Report = {
+    skill: (message) => {
+      skillFailures += 1;
+      io.stderr.write(`${message}\n`);
+    },
+    run: (message) => {
+      runFailures += 1;
+      io.stderr.write(`${message}\n`);
+    },
+    note: (message) => io.stderr.write(`${message}\n`),
   };
   let pluginOk = !targets.includes("claude-plugin");
 
@@ -123,13 +129,13 @@ export async function skillsSyncCommand(
         );
       }
 
-      const catalogue = await resolveAll(profileName, source, state, targets, io, failSkill);
+      const catalogue = await resolveAll(profileName, source, state, targets, report);
       const plans = await Promise.all(
         targets.map((target) => diffTarget(target, catalogue, state, source)),
       );
       for (const plan of plans) {
         for (const slug of plan.blocked) {
-          failSkill(
+          report.skill(
             `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
           );
         }
@@ -139,20 +145,11 @@ export async function skillsSyncCommand(
         reportPlans(plans, io.stdout);
         return;
       }
-      pluginOk = await executePlans(
-        profileName,
-        source,
-        plans,
-        state,
-        catalogue.bySlug,
-        failSkill,
-        failRun,
-        note,
-      );
+      pluginOk = await executePlans(profileName, source, plans, state, catalogue.bySlug, report);
       if (!printPath) reportPlans(plans, io.stdout);
     });
   } catch (err) {
-    failRun(formatError(err));
+    report.run(formatError(err));
     pluginOk = false;
   }
 
@@ -170,8 +167,7 @@ async function resolveAll(
   source: SkillSource,
   state: SyncState,
   targets: SyncTarget[],
-  io: CommandIO,
-  fail: (message: string) => void,
+  report: Report,
 ): Promise<Catalogue> {
   const packageIds = await listSyncableSkills(profileName);
   const resolutions = await mapWithConcurrency(packageIds, MAX_CONCURRENCY, async (packageId) => {
@@ -187,10 +183,10 @@ async function resolveAll(
   for (const entry of resolutions) {
     if ("error" in entry) {
       unresolved.add(entry.packageId);
-      fail(`Skipped ${entry.packageId}: ${formatError(entry.error)}`);
+      report.skill(`Skipped ${entry.packageId}: ${formatError(entry.error)}`);
     } else if (!entry.skill) {
       const what = source === "draft" ? "draft" : "published version";
-      io.stderr.write(`Skipped ${entry.packageId}: no ${what} available.\n`);
+      report.note(`Skipped ${entry.packageId}: no ${what} available.`);
     } else {
       resolved.push(entry.skill);
     }
@@ -210,8 +206,8 @@ async function resolveAll(
   for (const skill of assignSlugs(resolved, reserved)) {
     bySlug.set(skill.slug, skill);
     if (skill.renamedFrom) {
-      io.stderr.write(
-        `Renamed ${skill.packageId} to "${skill.slug}" — "${skill.renamedFrom}" is already taken.\n`,
+      report.note(
+        `Renamed ${skill.packageId} to "${skill.slug}" — "${skill.renamedFrom}" is already taken.`,
       );
     }
   }
@@ -225,12 +221,10 @@ async function executePlans(
   plans: TargetPlan[],
   state: SyncState,
   bySlug: SkillsBySlug,
-  failSkill: (message: string) => void,
-  failRun: (message: string) => void,
-  note: (message: string) => void,
+  report: Report,
 ): Promise<boolean> {
   const wanted = new Set(plans.flatMap((plan) => plan.write));
-  const trees = await fetchTrees(profileName, source, [...wanted], bySlug, failSkill, note);
+  const trees = await fetchTrees(profileName, source, [...wanted], bySlug, report);
 
   // Seeded from what is recorded: starting empty dropped the ledgers of
   // targets this run was not asked for, which then refused their own output.
@@ -259,8 +253,8 @@ async function executePlans(
 
       const outcome =
         plan.target === "claude-plugin"
-          ? await applyPluginPlan(plan, fresh, carried, trees, failSkill, failRun)
-          : await applySharedPlan(plan, fresh, trees, failSkill);
+          ? await applyPluginPlan(plan, fresh, carried, trees, report)
+          : await applySharedPlan(plan, fresh, trees, report);
       pluginOk = pluginOk && outcome.ok;
       for (const slug of outcome.placed) managed.set(slug, ledgerEntry(bySlug.get(slug)!));
 
@@ -282,7 +276,7 @@ async function executePlans(
     try {
       await writeSyncState(next);
     } catch (err) {
-      failRun(`Failed to write the skills-sync state file: ${formatError(err)}`);
+      report.run(`Failed to write the skills-sync state file: ${formatError(err)}`);
       pluginOk = false;
     }
   }
@@ -295,8 +289,7 @@ async function fetchTrees(
   source: SkillSource,
   slugs: string[],
   bySlug: SkillsBySlug,
-  failSkill: (message: string) => void,
-  note: (message: string) => void,
+  report: Report,
 ): Promise<Map<string, SkillTree>> {
   const trees = new Map<string, SkillTree>();
   const results = await mapWithConcurrency(slugs, MAX_CONCURRENCY, async (slug) => {
@@ -314,7 +307,7 @@ async function fetchTrees(
   const decoder = new TextDecoder();
   for (const result of results) {
     if ("error" in result) {
-      failSkill(`Failed ${result.skill.packageId}: ${formatError(result.error)}`);
+      report.skill(`Failed ${result.skill.packageId}: ${formatError(result.error)}`);
       continue;
     }
     trees.set(result.tree.slug, result.tree);
@@ -322,7 +315,7 @@ async function fetchTrees(
     // them as authored; saying so is how the author learns why tools skip them.
     const violation = checkSkillMarkdown(decoder.decode(result.tree.files[SKILL_ENTRY]!));
     if (violation) {
-      note(
+      report.note(
         `Note: ${result.skill.packageId} does not pass the skill frontmatter rule (${violation.message}); Claude Code and Codex may not load it — republish it from Appstrate.`,
       );
     }
@@ -341,8 +334,7 @@ async function applyPluginPlan(
   fresh: string[],
   carried: string[],
   trees: Map<string, SkillTree>,
-  failSkill: (message: string) => void,
-  failRun: (message: string) => void,
+  report: Report,
 ): Promise<ApplyOutcome> {
   const root = targetRoot(plan.target);
   if (fresh.length === 0 && plan.removed.length === 0 && (await pluginTreeMatches(root, carried))) {
@@ -356,13 +348,13 @@ async function applyPluginPlan(
     );
     const placed = new Set(fresh);
     for (const failure of failures) {
-      failSkill(`Failed to write ${plan.target}/${failure.slug}: ${formatError(failure.error)}`);
+      report.skill(`Failed to write ${plan.target}/${failure.slug}: ${formatError(failure.error)}`);
       placed.delete(failure.slug);
     }
     return { placed, ok: true };
   } catch (err) {
     // The SWAP failed, so the plugin on disk is not what the server describes.
-    failRun(`Failed to write ${plan.target}: ${formatError(err)}`);
+    report.run(`Failed to write ${plan.target}: ${formatError(err)}`);
     return { placed: new Set(), ok: false };
   }
 }
@@ -372,7 +364,7 @@ async function applySharedPlan(
   plan: TargetPlan,
   fresh: string[],
   trees: Map<string, SkillTree>,
-  failSkill: (message: string) => void,
+  report: Report,
 ): Promise<ApplyOutcome> {
   const root = targetRoot(plan.target);
   const placed = new Set<string>();
@@ -381,7 +373,7 @@ async function applySharedPlan(
       await writeSharedSkill(plan.target, trees.get(slug)!, root);
       placed.add(slug);
     } catch (err) {
-      failSkill(`Failed to write ${plan.target}/${slug}: ${formatError(err)}`);
+      report.skill(`Failed to write ${plan.target}/${slug}: ${formatError(err)}`);
     }
   }
   // Guarded one by one so a stubborn leftover does not strand the deletions
@@ -390,7 +382,7 @@ async function applySharedPlan(
     try {
       await removeManagedDir(skillDir(plan.target, slug));
     } catch (err) {
-      failSkill(`Failed to remove ${plan.target}/${slug}: ${formatError(err)}`);
+      report.skill(`Failed to remove ${plan.target}/${slug}: ${formatError(err)}`);
     }
   }
   return { placed, ok: true };
