@@ -100,8 +100,12 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
   What changes for existing data is the DRAFT — every write, and only writes. A
   stored skill draft whose `SKILL.md` does not conform must be completed before
-  its next save or publish, and **restoring a legacy published version is
-  refused** for the same reason: a restore writes a draft. Forking is NOT gated
+  its next save or publish. **Operator step, after deploying this release:**
+  `bun scripts/migration/0007-skill-frontmatter-quote-descriptions.ts` (dry-run;
+  `--apply` to write) quotes the `description:` lines `yaml` cannot parse — 17
+  of production's 66 skills carry an unquoted `description: … : …`, which the
+  agent runtime already fails to load — and names the rest for a manual edit.
+  **Restoring a legacy published version is refused** for the same reason: a restore writes a draft. Forking is NOT gated
   — it byte-copies an already-published artifact, so nothing new enters the
   world. The skill editor, the publish modal and the version-restore
   confirmation translate the server's reason codes, so the author sees the

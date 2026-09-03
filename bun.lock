@@ -6,6 +6,7 @@
       "name": "appstrate",
       "dependencies": {
         "@afps-spec/schema": "^0.7.0",
+        "@appstrate/afps-shared": "workspace:*",
         "@appstrate/connect": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
