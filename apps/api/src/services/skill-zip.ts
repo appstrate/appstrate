@@ -1,28 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { unzipArtifact, stripWrapperPrefix, type ParsedPackageZip } from "@appstrate/core/zip";
-import {
-  checkSkillMarkdown,
-  decodeSkillMarkdown,
-  type CompanionFileViolation,
-} from "@appstrate/afps-shared/companion-files";
+import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";
 import { getPackageById } from "./package-items/crud.ts";
+import { assertContentConforms } from "./package-items/config.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 
 type SkillOnlyResult =
   | { ok: true; parsed: ParsedPackageZip }
   | { ok: false; reason: "not_a_skill" }
-  | { ok: false; reason: "unchanged" }
-  /**
-   * The archive IS a bare skill — it has a SKILL.md — but that SKILL.md
-   * violates §3.3. Distinguished from `not_a_skill` so the caller answers with
-   * the violation instead of the generic "manifest.json not found": the
-   * archive the operator uploaded is one edit away from valid, and telling
-   * them the manifest is missing points at a file this path synthesises.
-   */
-  | { ok: false; reason: "invalid_skill"; violation: CompanionFileViolation };
+  | { ok: false; reason: "unchanged" };
 
 export async function tryParseSkillOnlyZip(
   zipBytes: Uint8Array,
@@ -44,16 +33,13 @@ export async function tryParseSkillOnlyZip(
   // BOM-preserving on purpose — see `decodeSkillMarkdown`.
   const skillMd = decodeSkillMarkdown(skillRaw);
 
-  // §3.3 FIRST. The archive already declared itself a skill by carrying a
-  // SKILL.md — `not_a_skill` is reserved for the shape question above, so that
-  // "your frontmatter has no name" reaches the operator as itself instead of
-  // as the generic "manifest.json not found" this fallback exists to replace.
-  // This is also the only §3.3 gate on the bare-ZIP path: the manifest below is
-  // SYNTHESISED, so `parsePackageZip` never sees this archive.
-  const violation = checkSkillMarkdown(skillMd);
-  if (violation) return { ok: false, reason: "invalid_skill", violation };
+  // The archive declared itself a skill by carrying a SKILL.md, so a bad
+  // frontmatter is answered as itself rather than as `not_a_skill` (which the
+  // caller reports as the generic "manifest.json not found"). This is the only
+  // gate on the bare-ZIP path: the manifest below is SYNTHESISED, so
+  // `parsePackageZip` never sees this archive.
+  assertContentConforms("skill", skillMd, "file");
 
-  // Guaranteed non-empty and rule-conforming by the check above.
   const meta = extractSkillMeta(skillMd);
   const packageId = `@${orgSlug}/${meta.name}`;
   const existing = await getPackageById(packageId);

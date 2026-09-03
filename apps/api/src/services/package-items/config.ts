@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PackageType } from "@appstrate/core/validation";
+import {
+  checkSkillMarkdown,
+  decodeSkillMarkdown,
+  type CompanionFileViolation,
+} from "@appstrate/afps-shared/companion-files";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
+import { validationFailed } from "../../lib/errors.ts";
 
 // ─────────────────────────────────────────────
 // Package type configuration
@@ -10,17 +17,71 @@ export interface PackageTypeConfig {
   type: PackageType;
   storageFolder: "agents" | "skills" | "integrations" | "mcp-servers";
   label: string;
+  /**
+   * Producer-side check for this type's authored content, run by every path
+   * that WRITES it. Returns the first violation, or `null`.
+   *
+   * Distinct from `checkCompanionFiles`, which also runs on the loader side
+   * over already-published, immutable bundles and therefore stays lenient.
+   */
+  validateContent?: (content: string) => CompanionFileViolation | null;
 }
 
 export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
   agent: { type: "agent", storageFolder: "agents", label: "Agents" },
-  skill: { type: "skill", storageFolder: "skills", label: "Skills" },
+  skill: {
+    type: "skill",
+    storageFolder: "skills",
+    label: "Skills",
+    validateContent: checkSkillMarkdown,
+  },
   // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
   integration: { type: "integration", storageFolder: "integrations", label: "Integrations" },
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an
   // integration's `source.kind: "local"`.
   "mcp-server": { type: "mcp-server", storageFolder: "mcp-servers", label: "MCP Servers" },
 };
+
+/**
+ * Run a type's {@link PackageTypeConfig.validateContent} over authored content
+ * and answer a 400 carrying the violation reason as the machine-readable
+ * `code`, so a client can tell "no description" from "bad name".
+ */
+export function assertContentConforms(
+  type: PackageType,
+  content: string,
+  field: "content" | "file",
+  prefix = "",
+): void {
+  const violation = CONFIG_BY_TYPE[type].validateContent?.(content);
+  if (!violation) return;
+  throw validationFailed([
+    {
+      field,
+      code: violation.reason.toLowerCase(),
+      title: "Invalid Content",
+      message: `${prefix}${violation.message}`,
+    },
+  ]);
+}
+
+/**
+ * Same gate, applied to the content entry of an archive the caller is about to
+ * write. Decoded with `decodeSkillMarkdown`, which keeps a leading BOM the
+ * default `TextDecoder` would eat — the gate has to see the byte it rejects.
+ */
+export function assertArchiveContentConforms(
+  type: PackageType,
+  files: Record<string, Uint8Array> | Map<string, Uint8Array>,
+  field: "content" | "file",
+  prefix = "",
+): void {
+  if (!CONFIG_BY_TYPE[type].validateContent) return;
+  const path = PACKAGE_CONTENT_ENTRY[type]?.path;
+  const bytes =
+    path === undefined ? undefined : files instanceof Map ? files.get(path) : files[path];
+  assertContentConforms(type, bytes ? decodeSkillMarkdown(bytes) : "", field, prefix);
+}
 
 /** Resolve the S3 storage folder for a package type (e.g. "skill" → "skills"). */
 export function storageFolderForType(type: PackageType): PackageTypeConfig["storageFolder"] {

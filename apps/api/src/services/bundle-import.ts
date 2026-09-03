@@ -40,7 +40,6 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
-import { checkSkillMarkdown, decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq, notExists, sql } from "drizzle-orm";
@@ -51,6 +50,8 @@ import {
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
+import { assertArchiveContentConforms } from "./package-items/config.ts";
+import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
 import { installPackage } from "./space-packages.ts";
@@ -610,41 +611,24 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
 }
 
 /**
- * AFPS §3.3 on the bundle's ROOT package, when that package is a skill.
+ * The producer content gate on the bundle's ROOT package.
  *
- * ROOT ONLY, and the distinction is the whole point. The root is what the
- * operator is publishing — author input arriving from outside, so the producer
- * rule applies. Every other entry is a DEPENDENCY COPY: an already-published
- * artifact this platform (or another) minted earlier and the bundler carried
- * along so the import is self-contained. Gating those would make
- * `POST /import-bundle` — documented as the sanctioned read path for
- * re-ingesting platform-produced artifacts — permanently refuse any bundle
- * that transitively depends on a skill published before this rule, with no
- * bypass and nothing the operator could fix.
- *
- * The bundle LOADER is lenient for the same reason (`checkCompanionFiles`),
- * and a dependency copy is loaded, never produced.
+ * ROOT ONLY: the root is what the operator is publishing — author input. Every
+ * other entry is a dependency COPY of an already-published artifact the bundler
+ * carried along, and this route is the sanctioned path for re-ingesting
+ * platform-produced artifacts, so gating those would permanently refuse any
+ * bundle transitively depending on a pre-rule package.
  */
-function assertBundleRootSkillConforms(bundle: Bundle): void {
+function assertBundleRootConforms(bundle: Bundle): void {
   const root = bundle.packages.get(bundle.root);
   if (!root) return;
   const parsed = parsePackageIdentity(bundle.root);
   // System packages are authoritative platform inputs the importer reuses
   // verbatim rather than writing — same skip as the two gates around this one.
   if (parsed && isSystemPackage(parsed.packageId)) return;
-  if ((root.manifest as { type?: unknown }).type !== "skill") return;
-
-  const bytes = root.files.get("SKILL.md");
-  const violation = checkSkillMarkdown(bytes ? decodeSkillMarkdown(bytes) : "");
-  if (!violation) return;
-  throw validationFailed([
-    {
-      field: "file",
-      code: violation.reason.toLowerCase(),
-      title: "Invalid Content",
-      message: `${bundle.root}: ${violation.message}`,
-    },
-  ]);
+  const type = (root.manifest as { type?: PackageType }).type;
+  if (!type) return;
+  assertArchiveContentConforms(type, root.files, "file", `${bundle.root}: `);
 }
 
 /**
@@ -657,7 +641,7 @@ export async function preflightBundleImport(
   scope: BundleAssemblyScope,
 ): Promise<BundleImportPreflight> {
   const bundle = await readOrBuildBundle(bytes, scope);
-  assertBundleRootSkillConforms(bundle);
+  assertBundleRootConforms(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };

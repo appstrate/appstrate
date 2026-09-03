@@ -10,8 +10,8 @@
  *
  *   - returns `not_a_skill` for non-ZIP bytes
  *   - returns `not_a_skill` for a ZIP missing SKILL.md
- *   - returns `invalid_skill` (NOT `not_a_skill`) for a SKILL.md that is
- *     present but violates §3.3 — the archive already declared itself a skill
+ *   - throws the content-gate 400 (NOT `not_a_skill`) for a SKILL.md that is
+ *     present but non-conforming — the archive already declared itself a skill
  *   - returns `unchanged` when the new SKILL.md matches `existing.draftContent`
  *   - bumps the patch version of the latest known release on a content change
  *   - the strip-wrapper-prefix path is exercised (macOS-style ZIP wrappers)
@@ -25,6 +25,7 @@ import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { tryParseSkillOnlyZip } from "../../../src/services/skill-zip.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { createPackageVersion } from "../../../src/services/package-versions.ts";
 
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
@@ -66,33 +67,19 @@ describe("tryParseSkillOnlyZip", () => {
   });
 
   // `not_a_skill` answers the SHAPE question — is this even a skill archive.
-  // A ZIP that carries a SKILL.md has answered it, so a bad frontmatter is
-  // `invalid_skill` carrying the reason. Reported as `not_a_skill` it reached
+  // A ZIP that carries a SKILL.md has answered it, so a bad frontmatter throws
+  // the content-gate 400 naming the rule. Reported as `not_a_skill` it reached
   // the operator as "manifest.json not found", naming a file this path
   // synthesises and never asked them for.
-  it("returns invalid_skill when SKILL.md frontmatter is missing the name field", async () => {
-    const ctx = await createTestContext({ orgSlug: "skill-noname" });
-    const buf = zipFiles({
-      "SKILL.md": enc("---\ndescription: missing name.\n---\nBody."),
-    });
-    const result = await tryParseSkillOnlyZip(buf, ctx.org.slug);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe("invalid_skill");
-      if (result.reason === "invalid_skill") {
-        expect(result.violation.reason).toBe("SKILL_MISSING_FRONTMATTER_NAME");
-      }
-    }
-  });
-
-  it("returns invalid_skill when SKILL.md declares no description", async () => {
+  it("throws the content-gate error when SKILL.md declares no description", async () => {
     const ctx = await createTestContext({ orgSlug: "skill-nodesc" });
     const buf = zipFiles({ "SKILL.md": enc("---\nname: my-skill\n---\nBody.") });
-    const result = await tryParseSkillOnlyZip(buf, ctx.org.slug);
-    expect(result.ok).toBe(false);
-    if (!result.ok && result.reason === "invalid_skill") {
-      expect(result.violation.reason).toBe("SKILL_MISSING_FRONTMATTER_DESCRIPTION");
-    }
+    const err = (await tryParseSkillOnlyZip(buf, ctx.org.slug).catch((e) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.fieldErrors?.[0]).toMatchObject({
+      field: "file",
+      code: "skill_missing_frontmatter_description",
+    });
   });
 
   // The synthesised manifest takes `description` from the frontmatter. A

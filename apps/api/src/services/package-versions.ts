@@ -27,14 +27,9 @@ import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/v
 import { parseScopedName } from "@appstrate/core/naming";
 import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
-import {
-  checkSkillMarkdown,
-  decodeSkillMarkdown,
-  type CompanionViolationReason,
-} from "@appstrate/afps-shared/companion-files";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
-import { storageFolderForType } from "./package-items/config.ts";
+import { storageFolderForType, assertArchiveContentConforms } from "./package-items/config.ts";
 import { toISO } from "../lib/date-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -571,14 +566,7 @@ async function getLatestVersionIntegrity(packageId: string): Promise<string | nu
 
 type CreateVersionError = "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists";
 type CreateVersionResult =
-  | { id: number; version: string }
-  | { error: CreateVersionError; detail?: string }
-  /**
-   * AFPS §3.3: the `SKILL.md` about to be frozen does not conform. Carries the
-   * companion reason so the route can answer with the same machine-readable
-   * code the create/save paths use.
-   */
-  | { error: "invalid_skill_markdown"; reason: CompanionViolationReason; detail: string };
+  { id: number; version: string } | { error: CreateVersionError; detail?: string };
 
 /** Create an immutable version snapshot from the current draft (packages table).
  *  Uses manifest.version as-is — no auto-bump. Returns an error object if version is missing,
@@ -658,7 +646,7 @@ export async function createVersionFromDraft(params: {
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
-  /** The entries that become the immutable artifact, for the §3.3 gate below. */
+  /** The entries that become the immutable artifact, for the content gate below. */
   let frozenEntries: Record<string, Uint8Array> | undefined;
   if (pkg.type === "agent") {
     const storedFiles = await downloadPackageFiles(
@@ -695,25 +683,12 @@ export async function createVersionFromDraft(params: {
     frozenEntries = entries;
   }
 
-  // AFPS §3.3 on the bytes that ACTUALLY get frozen. The route cannot do this:
-  // for a skill the artifact's `SKILL.md` comes from STORAGE (the `entries`
-  // above), while `packages.draft_content` is a second copy the update handler
-  // keeps in step — validating the column would leave the one byte sequence
-  // that becomes immutable unchecked whenever the two drift.
-  if (pkg.type === "skill") {
-    const skillBytes = frozenEntries?.["SKILL.md"];
-    // `decodeSkillMarkdown`, not a bare `TextDecoder`: the default one eats a
-    // leading BOM, which would hide from the gate exactly the byte that stops
-    // the runtime from reading this artifact's frontmatter.
-    const violation = checkSkillMarkdown(skillBytes ? decodeSkillMarkdown(skillBytes) : "");
-    if (violation) {
-      return {
-        error: "invalid_skill_markdown",
-        reason: violation.reason,
-        detail: violation.message,
-      };
-    }
-  }
+  // The gate reads the bytes that ACTUALLY get frozen. For a skill the
+  // artifact's `SKILL.md` comes from STORAGE (the `entries` above), while
+  // `packages.draft_content` is a second copy the update handler keeps in step
+  // — validating the column would leave the one byte sequence that becomes
+  // immutable unchecked whenever the two drift.
+  if (frozenEntries) assertArchiveContentConforms(pkg.type, frozenEntries, "content");
 
   // A schema-valid mcp-server draft can still point at a companion file that
   // is absent from the stored payload. Reparse the exact bytes about to become
