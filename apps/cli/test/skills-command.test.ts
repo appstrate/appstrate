@@ -165,7 +165,10 @@ describe("skills sync — claude-plugin target", () => {
 
     await skillsSyncCommand({}, io);
 
-    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["other-reports", "pdf-tools"]);
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "other-reports",
+      "pdf-tools",
+    ]);
     expect(stderr()).toContain('Renamed @other/reports to "other-reports"');
   });
 
