@@ -34,6 +34,11 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
+import {
+  checkSkillMarkdown,
+  decodeSkillMarkdown,
+  type CompanionFileViolation,
+} from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
 import { unzipPackageArchive } from "../services/package-archive.ts";
@@ -480,7 +485,18 @@ interface PackageRouteConfig {
     requiredFile: string | null;
     contentFileExt: string | null;
   };
-  validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
+  /**
+   * PRODUCER-side check for this type's authored `content`, run wherever this
+   * router writes it: JSON create, ZIP create, draft save and version restore.
+   * Returns the first violation or `null`.
+   *
+   * Separate from `checkCompanionFiles` because that one also runs on the
+   * LOADER side, over already-published bundles — see `checkSkillMarkdown`.
+   * The two publish paths gate themselves: `createVersionFromDraft` checks the
+   * exact bytes it is about to freeze, and the import routes check right after
+   * parsing.
+   */
+  validateContent?: (content: string) => CompanionFileViolation | null;
   /**
    * Which storage file this type's editor `content` is written to — a per-type
    * editor-wiring fact.
@@ -559,6 +575,8 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     storageFileName: "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
+    // AFPS §3.3 producer gate — the one checker every write path shares.
+    validateContent: checkSkillMarkdown,
   },
   agent: {
     cfg: CONFIG_BY_TYPE.agent,
@@ -604,6 +622,51 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     jsonBodyCreate: false,
   },
 };
+
+/**
+ * Run a route config's {@link PackageRouteConfig.validateContent} and translate
+ * a violation into the 400 the archive paths already answer with — same status,
+ * same field, and the companion reason as the machine-readable `code` so a
+ * client can tell "no description" from "bad name" without parsing prose.
+ */
+function assertContentCompanion(rcfg: PackageRouteConfig, content: string): void {
+  const violation = rcfg.validateContent?.(content);
+  if (!violation) return;
+  throw validationFailed([
+    {
+      field: "content",
+      code: violation.reason.toLowerCase(),
+      title: "Invalid Content",
+      message: violation.message,
+    },
+  ]);
+}
+
+/**
+ * AFPS §3.3 on a parsed archive's primary content, for the paths that take an
+ * ARCHIVE rather than an editor body. No-op for every type but `skill`.
+ */
+function assertSkillMarkdown(
+  parsed: { manifest: { type?: unknown }; files: Record<string, Uint8Array> },
+  field: "file" | "content",
+): void {
+  if (parsed.manifest.type !== "skill") return;
+  // The ARCHIVE BYTES, not `parsed.content`: the canonical parser decodes with
+  // a default `TextDecoder`, which eats a leading BOM. Reading its output here
+  // would let a BOM'd SKILL.md through the gate and into an immutable version
+  // the runtime cannot read.
+  const bytes = parsed.files["SKILL.md"];
+  const violation = checkSkillMarkdown(bytes ? decodeSkillMarkdown(bytes) : "");
+  if (!violation) return;
+  throw validationFailed([
+    {
+      field,
+      code: violation.reason.toLowerCase(),
+      title: "Invalid Content",
+      message: violation.message,
+    },
+  ]);
+}
 
 // --- Handler factories ---
 
@@ -665,19 +728,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         "author",
       );
 
-      if (rcfg.validateContent) {
-        const validation = rcfg.validateContent(content);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "content",
-              code: "invalid_content",
-              title: "Invalid Content",
-              message,
-            })),
-          );
-        }
-      }
+      assertContentCompanion(rcfg, content);
 
       const packageId = validatedManifest.name;
 
@@ -803,19 +854,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     parsed.content = canonical.content;
     parsed.normalizedFiles = canonical.files;
 
-    if (rcfg.validateContent) {
-      const validation = rcfg.validateContent(parsed.content);
-      if (!validation.valid) {
-        throw validationFailed(
-          validation.errors.map((message) => ({
-            field: "content",
-            code: "invalid_content",
-            title: "Invalid Content",
-            message,
-          })),
-        );
-      }
-    }
+    assertContentCompanion(rcfg, parsed.content);
 
     let item;
     try {
@@ -1039,20 +1078,10 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("Content cannot be empty", "content");
     }
 
-    // Content validation
-    if (rcfg.validateContent && content) {
-      const validation = rcfg.validateContent(content);
-      if (!validation.valid) {
-        throw validationFailed(
-          validation.errors.map((message) => ({
-            field: "content",
-            code: "invalid_content",
-            title: "Invalid Content",
-            message,
-          })),
-        );
-      }
-    }
+    // Companion-file validation. A draft that cannot be published must not be
+    // savable in silence, so this runs on the RESOLVED content — the body's
+    // when supplied, the stored draft's when carried forward.
+    if (content) assertContentCompanion(rcfg, content);
 
     // A manifest-only integration PUT has no authored `content`. When the
     // overloaded column contains the manifest fallback (rather than a real
@@ -1333,6 +1362,18 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
           "manifest.server.entry_point",
         );
       }
+      // AFPS §3.3 on the bytes that would have been frozen — the STORED
+      // `SKILL.md`, which is what the artifact carries, not `draft_content`.
+      if (result.error === "invalid_skill_markdown") {
+        throw validationFailed([
+          {
+            field: "content",
+            code: result.reason.toLowerCase(),
+            title: "Invalid Content",
+            message: result.detail,
+          },
+        ]);
+      }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
@@ -1397,9 +1438,17 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
         (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
         detail.content[rcfg.storageFileName];
       if (fileData) {
-        content = new TextDecoder().decode(fileData);
+        // BOM-preserving: this string is judged by the §3.3 gate below AND
+        // written back as the draft, so it must be the version's bytes.
+        content = decodeSkillMarkdown(fileData);
       }
     }
+
+    // Restoring is a WRITE of authored content, so it is gated like the others:
+    // a version cut before the §3.3 rule existed must not be able to put an
+    // unpublishable — and now unsavable — draft back in the editor. Checked
+    // BEFORE `updateOrgItem` so a violation writes nothing.
+    if (content) assertContentCompanion(rcfg, content);
 
     const updated = await updateOrgItem(
       orgId,
@@ -1831,7 +1880,10 @@ export function createPackagesRouter() {
       });
       throw internalError();
     }
-    return c.json(detail, 201);
+    // Non-blocking notices ride ALONGSIDE the resource, never inside it: the
+    // detail DTO is the same object `GET` serializes, and a fork-time notice is
+    // not resource state. Present only when something was skipped.
+    return c.json(result.warnings ? { ...detail, warnings: result.warnings } : detail, 201);
   });
 
   // --- Package import/download/publish routes ---
@@ -1889,6 +1941,11 @@ export function createPackagesRouter() {
     const zipBytes = new Uint8Array(upload);
     try {
       const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      // `parsePackageZip` applies the LOADER-side companion rule, because it
+      // is also how already-published artifacts are read. An import is author
+      // input, so §3.3 is enforced here instead — the skill-only fallback
+      // below runs the same check inside `tryParseSkillOnlyZip`.
+      assertSkillMarkdown(parsed, "file");
       return { parsed, artifact: upload };
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
@@ -1904,6 +1961,16 @@ export function createPackagesRouter() {
         }
         if (result.reason === "unchanged") {
           throw conflict("skill_unchanged", "This skill already exists with the same content");
+        }
+        if (result.reason === "invalid_skill") {
+          throw validationFailed([
+            {
+              field: "file",
+              code: result.violation.reason.toLowerCase(),
+              title: "Invalid Content",
+              message: result.violation.message,
+            },
+          ]);
         }
         throw new ApiError({
           status: 400,

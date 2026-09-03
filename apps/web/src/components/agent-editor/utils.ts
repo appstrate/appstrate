@@ -75,6 +75,16 @@ export function defaultSkillManifest(
   };
 }
 
+/**
+ * Skeleton a NEW skill's SKILL.md opens with.
+ *
+ * Both fields are blank, and both are required by the AFPS §3.3 gate — so this
+ * seed is deliberately not yet valid. Prefilling `name` is not possible here:
+ * a new skill has no package id at seed time (the route is `/skills/new` and
+ * `defaultSkillManifest` seeds `@<org>/` with an empty name segment), so there
+ * is no name to copy. The editor's own check refuses to save either field
+ * empty and says which one is missing, which is the signal the author needs.
+ */
 export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
 // ─── Default manifest for integration ───────────────────────

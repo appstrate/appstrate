@@ -450,6 +450,39 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
 
 // --- Fork ---
 
+/** What the fork UI needs from a `201` fork response. */
+export interface ForkOutcome {
+  id: string;
+  forked_from: string | null;
+  /**
+   * Non-blocking notices about what the fork could NOT do — today, a skipped
+   * published version because the source `SKILL.md` predates the AFPS §3.3
+   * rule. Carried through explicitly: dropped, the fork looked complete and
+   * the missing version resurfaced much later as "no published version".
+   */
+  warnings?: string[];
+}
+
+/** Map a fork `201` body to {@link ForkOutcome}. */
+export function forkOutcome(data: {
+  id: string;
+  forked_from?: string | null;
+  warnings?: string[];
+}): ForkOutcome {
+  return { id: data.id, forked_from: data.forked_from ?? null, warnings: data.warnings };
+}
+
+/**
+ * Surface fork-time notices — one warning toast per message, the same channel
+ * import-time warnings use (`use-mutations.ts`), fired on the success the user
+ * just triggered and before the modal navigates away.
+ */
+export function surfaceForkWarnings(warnings: string[] | undefined): void {
+  for (const message of warnings ?? []) {
+    toast.warning(message);
+  }
+}
+
 export function useForkPackage() {
   const qc = useQueryClient();
   return useMutation({
@@ -460,11 +493,12 @@ export function useForkPackage() {
         params: { path: splitPackageRef(packageId) },
         body: name ? { name } : {},
       });
-      return { id: data!.id, forked_from: data!.forked_from ?? null };
+      return forkOutcome(data!);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      surfaceForkWarnings(data.warnings);
     },
   });
 }

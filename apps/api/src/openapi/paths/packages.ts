@@ -164,7 +164,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`.",
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code` (`skill_invalid_frontmatter`, `skill_missing_frontmatter_description`, `skill_invalid_frontmatter_name`, …); for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -257,7 +257,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`).",
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code` (`skill_invalid_frontmatter`, `skill_missing_frontmatter_description`, `skill_invalid_frontmatter_name`, …); for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -342,7 +342,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`).",
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code` (`skill_invalid_frontmatter`, `skill_missing_frontmatter_description`, `skill_invalid_frontmatter_name`, …).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -758,7 +758,11 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            'Validation error. A SKILL.md violating AFPS §3.3 answers `code: "validation_failed"` with the offending rule as the first `errors[]` entry\'s `code`: `skill_invalid_frontmatter` (the block is not valid YAML, is not a mapping, has a duplicate key, or a field that is not a string), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name` (shape, length, or a `name` the package loader cannot read inline), `skill_missing_frontmatter_description`, or `skill_invalid_frontmatter_description` (over 1024 code points). The frontmatter is parsed with the same `yaml` library the skill runtime uses; `name` is the bare Agent Skills slug written inline on one line, not the scoped package id.',
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -876,7 +880,11 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            'Validation error. A SKILL.md violating AFPS §3.3 answers `code: "validation_failed"` with the offending rule as the first `errors[]` entry\'s `code`: `skill_invalid_frontmatter` (the block is not valid YAML, is not a mapping, has a duplicate key, or a field that is not a string), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name` (shape, length, or a `name` the package loader cannot read inline), `skill_missing_frontmatter_description`, or `skill_invalid_frontmatter_description` (over 1024 code points). The frontmatter is parsed with the same `yaml` library the skill runtime uses; `name` is the bare Agent Skills slug written inline on one line, not the scoped package id.',
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
@@ -920,6 +928,11 @@ export const packagesPaths = {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            'Validation error. A SKILL.md violating AFPS §3.3 answers `code: "validation_failed"` with the offending rule as the first `errors[]` entry\'s `code`: `skill_invalid_frontmatter` (the block is not valid YAML, is not a mapping, has a duplicate key, or a field that is not a string), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name` (shape, length, or a `name` the package loader cannot read inline), `skill_missing_frontmatter_description`, or `skill_invalid_frontmatter_description` (over 1024 code points). The frontmatter is parsed with the same `yaml` library the skill runtime uses; `name` is the bare Agent Skills slug written inline on one line, not the scoped package id.',
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1064,7 +1077,11 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            'Validation error. A SKILL.md violating AFPS §3.3 answers `code: "validation_failed"` with the offending rule as the first `errors[]` entry\'s `code`: `skill_invalid_frontmatter` (the block is not valid YAML, is not a mapping, has a duplicate key, or a field that is not a string), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name` (shape, length, or a `name` the package loader cannot read inline), `skill_missing_frontmatter_description`, or `skill_invalid_frontmatter_description` (over 1024 code points). The frontmatter is parsed with the same `yaml` library the skill runtime uses; `name` is the bare Agent Skills slug written inline on one line, not the scoped package id.',
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -1574,12 +1591,27 @@ export const packagesPaths = {
                 // runtime (issue #657). Fields vary by type, so the response is
                 // a `oneOf`. Fork provenance is resource state: `forked_from`
                 // is part of both detail DTOs.
-                oneOf: [
-                  { $ref: "#/components/schemas/AgentDetail" },
-                  { $ref: "#/components/schemas/OrgPackageItemDetail" },
+                allOf: [
+                  {
+                    oneOf: [
+                      { $ref: "#/components/schemas/AgentDetail" },
+                      { $ref: "#/components/schemas/OrgPackageItemDetail" },
+                    ],
+                  },
+                  {
+                    type: "object",
+                    properties: {
+                      warnings: {
+                        type: "array",
+                        items: { type: "string" },
+                        description:
+                          "Non-blocking notices about what the fork could not do. Present only when the draft was created but its published version was skipped — today, a skill whose SKILL.md does not satisfy AFPS §3.3. Fix the draft and publish.",
+                      },
+                    },
+                  },
                 ],
                 description:
-                  "The forked package resource — same shape as the new package's GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`). The resource's `id` is the new package ID under org scope and `forked_from` carries the source package ID. No follow-up GET needed.",
+                  "The forked package resource — same shape as the new package's GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`) — plus an optional `warnings` array. The resource's `id` is the new package ID under org scope and `forked_from` carries the source package ID. No follow-up GET needed.",
               },
             },
           },

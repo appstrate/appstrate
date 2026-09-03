@@ -34,6 +34,13 @@ interface UseEditorStateOptions<S extends EditorStateBase> {
    */
   toWireBody: (state: S) => Record<string, unknown>;
   /**
+   * Translate a failed create/update into the message the author reads.
+   * Returns `null` to keep the server's own `detail`. Exists because a
+   * problem+json `detail` is English prose from the API: the editor that
+   * OWNS the field knows which of its own strings a given error code means.
+   */
+  translateError?: (err: Error) => string | null;
+  /**
    * Pre-submit validation hook. Return an error message + the tab to
    * focus, or `null` to proceed. Runs before the API call so we can
    * surface inline errors without hitting the server.
@@ -74,7 +81,8 @@ interface UseEditorStateReturn<S extends EditorStateBase> {
 export function useEditorState<S extends EditorStateBase>(
   opts: UseEditorStateOptions<S>,
 ): UseEditorStateReturn<S> {
-  const { initialState, packageType, packageId, isEdit, toWireBody, validate } = opts;
+  const { initialState, packageType, packageId, isEdit, toWireBody, validate, translateError } =
+    opts;
   const qc = useQueryClient();
   const createPkg = useCreatePackage(packageType);
   const updatePkg = useUpdatePackage(packageType, packageId || "");
@@ -102,24 +110,57 @@ export function useEditorState<S extends EditorStateBase>(
 
   const bumpJsonKey = useCallback(() => setJsonEditorKey((k) => k + 1), []);
 
+  const surfaceError = useCallback(
+    (err: Error) => setError(translateError?.(err) ?? err.message),
+    [translateError],
+  );
+
+  /**
+   * Save the in-progress draft from the unsaved-changes modal.
+   *
+   * Runs the SAME pre-submit `validate` as `handleSubmit`: this path used to
+   * bypass it, so a rule the submit button enforced could be walked around by
+   * navigating away and clicking "Save draft" — and the server's 400 then
+   * surfaced as a generic toast. Rejects (so the modal keeps the user on the
+   * page) with the message left in `error`, where the editor shell renders it.
+   */
   const saveDraft = useCallback(async () => {
     if (!isEdit || !packageId) return;
+    setError(null);
+    if (validate) {
+      const v = validate(state);
+      if (v) {
+        setError(v.error);
+        throw new Error(v.error);
+      }
+    }
     const cfg = PACKAGE_CONFIG[packageType];
     // PUT returns the updated package resource bare (issue #657) — read back
     // the NEW `lock_version` so a subsequent save doesn't go stale.
-    const { data: updated } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
-      params: { path: splitPackageRef(packageId) },
-      // `toWireBody` returns a `Record<string, unknown>`, so the spread body's
-      // `manifest`/`content` keys aren't statically known. Assert the wire
-      // shape the editor always produces (manifest + content + lock_version);
-      // it matches every update operation's spec body and the server
-      // validates.
-      body: {
-        ...toWireBody(state),
-        lock_version: state.lock_version!,
-      } as { manifest: Record<string, unknown>; content: string; lock_version: number },
-    });
-    setState((s) => ({ ...s, lock_version: updated!.lock_version ?? 0 }));
+    let updated;
+    try {
+      // The typed client THROWS on non-2xx (`problemDetailErrors` middleware),
+      // so the `{ error }` branch is never populated and `data` is present on
+      // the success path — but it is still read defensively below rather than
+      // with a `!`, which turned a surprising body into a TypeError.
+      ({ data: updated } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
+        params: { path: splitPackageRef(packageId) },
+        // `toWireBody` returns a `Record<string, unknown>`, so the spread body's
+        // `manifest`/`content` keys aren't statically known. Assert the wire
+        // shape the editor always produces (manifest + content + lock_version);
+        // it matches every update operation's spec body and the server
+        // validates.
+        body: {
+          ...toWireBody(state),
+          lock_version: state.lock_version!,
+        } as { manifest: Record<string, unknown>; content: string; lock_version: number },
+      }));
+    } catch (err) {
+      const failure = err instanceof Error ? err : new Error(String(err));
+      surfaceError(failure);
+      throw failure;
+    }
+    setState((s) => ({ ...s, lock_version: updated?.lock_version ?? 0 }));
     qc.invalidateQueries({ queryKey: packageKeys.all });
     qc.invalidateQueries({ queryKey: ["version-info"] });
     if (packageType === "agent") {
@@ -129,7 +170,7 @@ export function useEditorState<S extends EditorStateBase>(
       // newly-required reconnection/upgrade without a page reload.
       void invalidateIntegrationQueries(qc);
     }
-  }, [state, isEdit, packageId, packageType, qc, toWireBody]);
+  }, [state, isEdit, packageId, packageType, qc, toWireBody, validate, surfaceError]);
 
   const handleSubmit = useCallback(
     (e?: FormEvent, onValidationError?: (tab: string | undefined) => void) => {
@@ -158,15 +199,15 @@ export function useEditorState<S extends EditorStateBase>(
             ...(body as Parameters<typeof updatePkg.mutate>[0]),
             lock_version: state.lock_version!,
           },
-          { onError: (err) => setError(err.message) },
+          { onError: surfaceError },
         );
       } else {
         createPkg.mutate(body as Parameters<typeof createPkg.mutate>[0], {
-          onError: (err) => setError(err.message),
+          onError: surfaceError,
         });
       }
     },
-    [state, isEdit, validate, allowNavigation, toWireBody, createPkg, updatePkg],
+    [state, isEdit, validate, allowNavigation, toWireBody, createPkg, updatePkg, surfaceError],
   );
 
   const isPending = createPkg.isPending || updatePkg.isPending;

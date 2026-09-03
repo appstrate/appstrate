@@ -9,6 +9,7 @@ import {
 import { logger } from "../lib/logger.ts";
 
 import { zipArtifact } from "@appstrate/core/zip";
+import { checkSkillMarkdown, decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { getPackageById, createOrgItem } from "./package-items/crud.ts";
 import { uploadPackageFiles } from "./package-items/storage.ts";
@@ -26,6 +27,13 @@ interface ForkResult {
   packageId: string;
   type: string;
   forked_from: string;
+  /**
+   * Non-blocking notices about what the fork could NOT do. Present only when
+   * the draft was created but its published version was skipped — the caller
+   * must be told what to fix, or the fork looks complete and the missing
+   * version surfaces much later as "no published version".
+   */
+  warnings?: string[];
 }
 
 type ForkError =
@@ -203,8 +211,12 @@ async function forkWithConfig(
   const manifestText = JSON.stringify(updatedManifest, null, 2);
   const contentEntry = PACKAGE_CONTENT_ENTRY[cfg.type];
   const contentBytes = contentEntry ? zipEntries[contentEntry.path] : undefined;
+  // BOM-preserving decode: this string is both what the §3.3 gate below judges
+  // and what lands in `draft_content`, and the archive entry copied alongside
+  // it keeps its bytes either way — a default `TextDecoder` would make the
+  // column disagree with the file and hide a BOM from the gate.
   const content = contentBytes
-    ? new TextDecoder().decode(contentBytes)
+    ? decodeSkillMarkdown(contentBytes)
     : contentEntry?.required
       ? ""
       : manifestText;
@@ -240,18 +252,41 @@ async function forkWithConfig(
 
   const newZipBuffer = Buffer.from(zipArtifact(draftFiles, 6));
 
-  // Create a local published version
-  await createVersionAndUpload({
-    packageId: newPkg.id,
-    version: versionRow.version,
-    createdBy: userId ?? null,
-    zipBuffer: newZipBuffer,
-    manifest: updatedManifest,
-  });
+  // MINT ONLY WHAT WOULD SURVIVE A PUBLISH — the rule `createVersionSafe`
+  // (`routes/packages.ts`) already applies on the create path, for the same
+  // reason: a version is immutable, so freezing content the publish gate
+  // refuses creates an artifact nobody can ever repair.
+  //
+  // The DRAFT is still created. Forking is precisely how a user takes over a
+  // legacy skill they do not own in order to fix it; refusing the fork would
+  // leave them with no way to do that. So the fork succeeds, the version is
+  // skipped, and the warning says what to fix.
+  const warnings: string[] = [];
+  const skillViolation = cfg.type === "skill" ? checkSkillMarkdown(content) : null;
+  if (skillViolation) {
+    logger.info("fork: skipping published version, SKILL.md does not conform to AFPS §3.3", {
+      packageId: newPkg.id,
+      reason: skillViolation.reason,
+    });
+    warnings.push(
+      `No version was published for ${newPkg.id}: ${skillViolation.message}. ` +
+        `Fix SKILL.md in the draft, then publish.`,
+    );
+  } else {
+    // Create a local published version
+    await createVersionAndUpload({
+      packageId: newPkg.id,
+      version: versionRow.version,
+      createdBy: userId ?? null,
+      zipBuffer: newZipBuffer,
+      manifest: updatedManifest,
+    });
+  }
 
   return {
     packageId: newPkg.id,
     type: cfg.type,
     forked_from: sourcePackageId,
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

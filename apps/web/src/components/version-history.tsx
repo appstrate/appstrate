@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { formatDateField } from "../lib/format-date";
+import { translateSkillFrontmatterError } from "../lib/skill-frontmatter-messages";
 import { Spinner } from "./spinner";
 import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -82,10 +85,22 @@ export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps
           if (confirmState.type === "restore") {
             restoreVersion.mutate(confirmState.version, {
               onSuccess: () => setConfirmState(null),
+              // A restore WRITES a draft, so it is gated like every other write
+              // — a legacy version whose SKILL.md predates AFPS §3.3 answers
+              // 400. With no `onError` the modal simply hung on its spinner
+              // with nothing said. Closes the modal so the toast is visible.
+              onError: (err) => {
+                setConfirmState(null);
+                toast.error(translateSkillFrontmatterError(err, t) ?? getErrorMessage(err));
+              },
             });
           } else {
             deleteVersion.mutate(confirmState.version, {
               onSuccess: () => setConfirmState(null),
+              onError: (err) => {
+                setConfirmState(null);
+                toast.error(getErrorMessage(err));
+              },
             });
           }
         }}

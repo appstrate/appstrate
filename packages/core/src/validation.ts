@@ -16,6 +16,7 @@ import { integrationManifestSchema, type IntegrationManifest } from "./integrati
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
 import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
+import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -637,19 +638,15 @@ export function validateManifest(
   };
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
 /**
  * Extract name and description from a SKILL.md file's YAML frontmatter.
+ *
+ * The PARSE is not done here: it comes from `parseSkillFrontmatter`
+ * (`@appstrate/afps-shared/companion-files`), which reads the block with the
+ * `yaml` library at the same major the skill RUNTIME uses. Two parsers would
+ * let this function read a name the gate rejects (or vice versa) — the
+ * warnings below are the only thing this wrapper adds, and it never throws.
+ *
  * @param content - The full text content of a SKILL.md file
  * @returns Extracted name, description, and any parsing warnings
  */
@@ -659,21 +656,23 @@ export function extractSkillMeta(content: string): {
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const fmMatch = content.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
-  if (!fmMatch) {
+  const { found, unterminated, error, name, description } = parseSkillFrontmatter(content);
+  if (unterminated) {
+    warnings.push("YAML frontmatter block is not closed (expected a second --- line)");
+    return { name: "", description: "", warnings };
+  }
+  if (!found) {
     warnings.push("No YAML frontmatter detected (expected --- ... --- block)");
     return { name: "", description: "", warnings };
   }
-
-  const fm = fmMatch[1]!;
-  // Anchor to the start of a line (`^` + `m` flag) so a longer key that
-  // ends in the target token (e.g. `displayname:` / `x-description:`) does
-  // not shadow the real top-level `name:` / `description:` field.
-  const nameMatch = fm.match(/^name:[ \t]*(.+)/m);
-  const descMatch = fm.match(/^description:[ \t]*(.+)/m);
-
-  const name = nameMatch ? stripQuotes(nameMatch[1]!) : "";
-  const description = descMatch ? stripQuotes(descMatch[1]!) : "";
+  // A YAML syntax error, a non-mapping document or a non-string field is a
+  // WARNING here, never a throw: this function's contract is to report what it
+  // could read. The write paths refuse such a document through
+  // `checkSkillMarkdown`; this one still has to answer a reader.
+  if (error) {
+    warnings.push(`Could not read YAML frontmatter: ${error}`);
+    return { name: "", description: "", warnings };
+  }
 
   if (!name) {
     warnings.push("Missing 'name' field in YAML frontmatter");

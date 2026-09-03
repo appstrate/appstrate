@@ -10,7 +10,8 @@
  *
  *   - returns `not_a_skill` for non-ZIP bytes
  *   - returns `not_a_skill` for a ZIP missing SKILL.md
- *   - returns `not_a_skill` for SKILL.md missing required frontmatter
+ *   - returns `invalid_skill` (NOT `not_a_skill`) for a SKILL.md that is
+ *     present but violates §3.3 — the archive already declared itself a skill
  *   - returns `unchanged` when the new SKILL.md matches `existing.draftContent`
  *   - bumps the patch version of the latest known release on a content change
  *   - the strip-wrapper-prefix path is exercised (macOS-style ZIP wrappers)
@@ -64,14 +65,52 @@ describe("tryParseSkillOnlyZip", () => {
     if (!result.ok) expect(result.reason).toBe("not_a_skill");
   });
 
-  it("returns not_a_skill when SKILL.md frontmatter is missing the name field", async () => {
+  // `not_a_skill` answers the SHAPE question — is this even a skill archive.
+  // A ZIP that carries a SKILL.md has answered it, so a bad frontmatter is
+  // `invalid_skill` carrying the reason. Reported as `not_a_skill` it reached
+  // the operator as "manifest.json not found", naming a file this path
+  // synthesises and never asked them for.
+  it("returns invalid_skill when SKILL.md frontmatter is missing the name field", async () => {
     const ctx = await createTestContext({ orgSlug: "skill-noname" });
     const buf = zipFiles({
       "SKILL.md": enc("---\ndescription: missing name.\n---\nBody."),
     });
     const result = await tryParseSkillOnlyZip(buf, ctx.org.slug);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("not_a_skill");
+    if (!result.ok) {
+      expect(result.reason).toBe("invalid_skill");
+      if (result.reason === "invalid_skill") {
+        expect(result.violation.reason).toBe("SKILL_MISSING_FRONTMATTER_NAME");
+      }
+    }
+  });
+
+  it("returns invalid_skill when SKILL.md declares no description", async () => {
+    const ctx = await createTestContext({ orgSlug: "skill-nodesc" });
+    const buf = zipFiles({ "SKILL.md": enc("---\nname: my-skill\n---\nBody.") });
+    const result = await tryParseSkillOnlyZip(buf, ctx.org.slug);
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.reason === "invalid_skill") {
+      expect(result.violation.reason).toBe("SKILL_MISSING_FRONTMATTER_DESCRIPTION");
+    }
+  });
+
+  // The synthesised manifest takes `description` from the frontmatter. A
+  // regex reading the rest of the line made a block scalar's value the literal
+  // `"|"` — a manifest description of one pipe character, and a skill that
+  // passed a non-empty check while telling the agent nothing.
+  it("synthesises the real text of a block-scalar description", async () => {
+    const ctx = await createTestContext({ orgSlug: "skill-block" });
+    const buf = zipFiles({
+      "SKILL.md": enc(
+        "---\nname: my-skill\ndescription: |\n  Counts words in a text.\n---\n\nBody.",
+      ),
+    });
+    const result = await tryParseSkillOnlyZip(buf, ctx.org.slug);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.parsed.manifest.description).toBe("Counts words in a text.");
+    }
   });
 
   it("parses a fresh skill ZIP into a ParsedPackageZip", async () => {

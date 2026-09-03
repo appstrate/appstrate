@@ -33,6 +33,12 @@ import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import {
+  buildBundleFromCatalog,
+  extractRootFromAfps,
+  writeBundleToBuffer,
+  type PackageCatalog,
+} from "@appstrate/afps-runtime/bundle";
 
 const app = getTestApp();
 setPlatformApp(app);
@@ -554,6 +560,116 @@ describe("mcp file-backed package workflow", () => {
     expect(result.data).toMatchObject({ valid: false, importable: false });
     expect(String(result.data.error)).toContain("main.js");
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  it("reports a skill whose SKILL.md declares no description (AFPS §3.3)", async () => {
+    const manifest = {
+      name: "@mcppkgdoc/gate-skill",
+      version: "1.0.0",
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "Gate Skill",
+      description: "A gated skill.",
+    };
+    const bytes = zipSync({
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+      // Frontmatter with a conforming name but no `description` — an artifact
+      // no agent runtime can decide to invoke.
+      "SKILL.md": new TextEncoder().encode("---\nname: gate-skill\n---\nBody."),
+    } as unknown as Parameters<typeof zipSync>[0]);
+
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "gate-skill.afps", "application/zip", bytes);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "validate_package_file",
+        arguments: { file_uri: `appfile://${docId}` },
+      },
+    });
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    expect(result.data).toMatchObject({ valid: false, importable: false });
+    expect(String(result.data.error)).toContain("description");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  // The §3.3 gate is on the bundle ROOT — author input. A dependency copy is an
+  // already-published artifact carried along, and refusing it would make this
+  // tool unable to re-ingest anything transitively depending on a pre-rule
+  // skill. Same `preflightBundleImport` the HTTP route uses.
+  it("imports a bundle whose skill DEPENDENCY has a pre-rule SKILL.md", async () => {
+    const encode = (t: string) => new TextEncoder().encode(t);
+    const skillId = "@mcppkgdoc/legacy-skill";
+    const skillManifest = {
+      name: skillId,
+      version: "1.0.0",
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "Legacy Skill",
+    };
+    const agentManifest = {
+      name: "@mcppkgdoc/root-agent",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Root Agent",
+      description: "Depends on a pre-rule skill",
+      dependencies: { skills: { [skillId]: "^1.0.0" } },
+    };
+    const afps = zipSync({
+      "manifest.json": encode(JSON.stringify(agentManifest, null, 2)),
+      "prompt.md": encode("Prompt."),
+    } as unknown as Parameters<typeof zipSync>[0]);
+    const identity = `${skillId}@1.0.0` as const;
+    const catalog: PackageCatalog = {
+      resolve: async (name) => (name === skillId ? { identity } : null),
+      fetch: async () => ({
+        identity,
+        manifest: skillManifest as never,
+        files: new Map([
+          ["manifest.json", encode(JSON.stringify(skillManifest, null, 2))],
+          ["SKILL.md", encode("---\nname: legacy\n---\nLegacy body.")],
+        ]),
+        integrity: "sha256-recomputed-by-the-builder",
+      }),
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), catalog, {
+      depTypes: ["skills"],
+    });
+
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "legacy-dep.afps-bundle",
+      "application/zip",
+      writeBundleToBuffer(bundle),
+    );
+
+    const validated = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "validate_package_file", arguments: { file_uri: `appfile://${docId}` } },
+    });
+    expect(toolData(validated.envelope).data).toMatchObject({ valid: true, importable: true });
+
+    const imported = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "import_package_file", arguments: { file_uri: `appfile://${docId}` } },
+    });
+    expect(toolData(imported.envelope).isError).toBe(false);
+    const [stored] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, skillId));
+    expect(stored?.id).toBe(skillId);
   });
 
   it("validates then imports and installs a package without exposing its bytes to the model", async () => {

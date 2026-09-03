@@ -164,14 +164,14 @@ describe("package file explorer", () => {
         orgId: ctx.orgId,
         type: "skill",
         draftManifest: { ...manifestFor(skillId), type: "skill" },
-        draftContent: "---\nname: a-skill\n---\nbody",
+        draftContent: "---\nname: a-skill\ndescription: A skill.\n---\nbody",
       });
       await seedInstalledPackage(ctx.defaultSpaceId, skillId);
 
       const { entries } = await listFiles(ctx, skillId);
       expect(entries.map((e) => e.path)).toEqual(["SKILL.md", "manifest.json"]);
       expect(entries.find((e) => e.path === "SKILL.md")!.inline).toBe(
-        "---\nname: a-skill\n---\nbody",
+        "---\nname: a-skill\ndescription: A skill.\n---\nbody",
       );
     });
   });

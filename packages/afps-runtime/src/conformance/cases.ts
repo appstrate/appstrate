@@ -874,7 +874,11 @@ const L4_RUN_EVENT_ENVELOPE: ConformanceCase = {
 // `@appstrate/afps-shared/companion-files`):
 //
 //   - agent     → prompt.md present + non-empty at archive root (§3.2/§3.4)
-//   - skill     → SKILL.md present + YAML frontmatter `name` (§3.3)
+//   - skill     → SKILL.md present + a YAML frontmatter `name` (§3.3). NOT
+//                 `description`: §3.3 spells it SHOULD, and the loader reads
+//                 immutable published bundles. The platform's stricter
+//                 producer rule (`checkSkillMarkdown`) lives on its write
+//                 paths, never here.
 //   - mcp-server → `server.entry_point` payload present in archive (§3.4)
 //
 // Each case builds a minimal `.afps` archive with the violation and asserts
@@ -926,6 +930,33 @@ const L1_SKILL_MISSING_FRONTMATTER_NAME: ConformanceCase = {
       /name|frontmatter/i,
       "skill missing frontmatter name",
     );
+  },
+};
+
+const L1_SKILL_FRONTMATTER_NAME_ONLY: ConformanceCase = {
+  id: "L1.21",
+  level: "L1",
+  title: "accepts a skill bundle whose SKILL.md declares only a frontmatter name (§3.3)",
+  run: (adapter) => {
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(SKILL_MANIFEST)),
+      // §3.3 spells `description` SHOULD. The LOADER must honour that: bundles
+      // are immutable, and a skill published without a description has to keep
+      // loading or every run of an agent depending on it fails at launch. The
+      // platform enforces the stricter producer rule at authoring time instead.
+      "SKILL.md": enc("---\nname: triage\n---\nbody"),
+    });
+    try {
+      const bundle = adapter.loadBundle(bytes);
+      const rootPkg = bundle.packages.get(bundle.root);
+      if (!rootPkg) return fail("loadBundle returned no root package");
+      if (!rootPkg.files.has("SKILL.md")) return fail("loaded bundle missing SKILL.md");
+      return pass();
+    } catch (err) {
+      return fail(
+        `loader rejected a description-less skill: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
 };
 
@@ -1225,6 +1256,7 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_TOOLS_POLICY,
   L1_SKILL_MISSING_SKILL_MD,
   L1_SKILL_MISSING_FRONTMATTER_NAME,
+  L1_SKILL_FRONTMATTER_NAME_ONLY,
   L1_MCP_SERVER_ENTRY_POINT_PRESENT,
   L1_MCP_SERVER_ENTRY_POINT_MISSING,
   L1_REJECT_PATH_TRAVERSAL,

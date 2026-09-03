@@ -443,6 +443,28 @@ describe("extractRootFromAfps / buildBundleFromAfps", () => {
     expect(root.files.get("manifest.json")).toBeDefined();
   });
 
+  // The run launcher's package catalog reads every INSTALLED skill through
+  // this function. A published skill that declares only a frontmatter `name`
+  // — legal per §3.3, which spells `description` SHOULD — must keep loading,
+  // or the platform's producer-side rule would retroactively break runs of
+  // agents depending on artifacts nobody can edit any more.
+  it("loads a published skill whose SKILL.md declares only a frontmatter name", () => {
+    const zip = zipSync({
+      "manifest.json": enc(
+        JSON.stringify({
+          name: "@me/triage",
+          version: "1.0.0",
+          type: "skill",
+          schema_version: "0.1",
+        }),
+      ),
+      "SKILL.md": enc("---\nname: triage\n---\nbody"),
+    });
+    const root = extractRootFromAfps(zip);
+    expect(root.identity).toBe("@me/triage@1.0.0");
+    expect(new TextDecoder().decode(root.files.get("SKILL.md")!)).toContain("name: triage");
+  });
+
   it("rejects non-scoped manifest name", () => {
     const zip = zipSync({
       "manifest.json": enc(JSON.stringify({ ...ROOT, name: "unscoped" })),

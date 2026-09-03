@@ -112,6 +112,7 @@
     "apps/web": {
       "name": "@appstrate/web",
       "dependencies": {
+        "@appstrate/afps-shared": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/module-chat": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
@@ -196,11 +197,12 @@
     },
     "packages/afps-shared": {
       "name": "@appstrate/afps-shared",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "dependencies": {
         "@types/semver": "^7.8.0",
         "fflate": "^0.8.3",
         "semver": "^7.8.4",
+        "yaml": "^2.9.0",
       },
       "peerDependencies": {
         "typescript": ">=5 <8",
@@ -221,7 +223,7 @@
       "version": "9.0.0",
       "dependencies": {
         "@afps-spec/schema": "^0.7.0",
-        "@appstrate/afps-shared": "^0.7.0",
+        "@appstrate/afps-shared": "^0.8.0",
         "@types/json-schema": "7.0.15",
         "@types/semver": "^7.8.0",
         "ajv": "^8.20.0",
@@ -370,6 +372,7 @@
         "@appstrate/mcp-transport": "workspace:*",
       },
       "devDependencies": {
+        "@appstrate/afps-shared": "workspace:*",
         "@earendil-works/pi-ai": "0.84.2",
         "@earendil-works/pi-coding-agent": "0.84.2",
       },

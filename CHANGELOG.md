@@ -42,6 +42,86 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **BREAKING (wire): WRITING a skill whose `SKILL.md` frontmatter has no
+  `description`, or a `name` that breaks the Agent Skills naming rule, is now a 400.** The platform only required the `name` KEY to be present. A skill
+  created in the editor with the default skeleton — `name:` and `description:`
+  both blank — was accepted, published, and produced an artifact Codex rejects
+  outright and Claude Code never auto-invokes. AFPS §3.3 spells both fields
+  SHOULD; the platform is a PRODUCER of these artifacts and holds itself to
+  MUST.
+
+  The frontmatter is now parsed with the **`yaml` library, at the same major
+  the skill runtime itself uses** (`@earendil-works/pi-coding-agent` parses
+  `SKILL.md` with `yaml` 2.9), mirroring its delimiters and newline handling —
+  so the platform cannot accept a document the agent then fails to PARSE. Block
+  scalars, folded scalars, next-line values, quoted escapes, inline
+  `# comments` and CRLF all read correctly; what YAML refuses, the platform
+  refuses (`description: a: b`, `name:x`, a duplicate key, a non-mapping block,
+  a non-string field); and a leading **BOM is rejected** rather than stripped,
+  because the runtime tests `startsWith("---")`, reads no frontmatter behind a
+  byte-order mark, and silently drops the skill.
+
+  The RULES are deliberately stricter than the runtime's, which only WARNS on a
+  name or description that breaks the Agent Skills spec (and measures the
+  description in UTF-16 units). The bounds below follow the SPEC — characters,
+  hence code points. Being stricter costs an author one edit; being looser
+  mints an immutable artifact no agent will load. A parity test
+  (`packages/runner-pi/test/skill-frontmatter-parity.test.ts`) runs the real
+  runtime loader over 22 documents and asserts the asymmetry only ever points
+  that way.
+
+  A `SKILL.md` is accepted only when its frontmatter declares a `name` of 1-64
+  characters of lowercase `a-z`, `0-9` and `-` with no leading or trailing
+  hyphen and no consecutive hyphens ([Agent Skills
+  specification](https://agentskills.io/specification)) and a non-empty
+  `description` of at most 1024 characters — both counted in Unicode code
+  points, as the spec's "characters" means. That frontmatter `name` is the BARE skill slug (`triage`), a
+  different namespace from the `@scope/name` package id, which keeps its own
+  unbounded `SLUG_PATTERN` rule, and it must be written **inline on one line**:
+  `name:\n  triage` and `name : triage` are valid YAML the platform's package
+  loader cannot read, so writing one is refused rather than frozen into a
+  version no run could load.
+
+  The rule lives once, in `@appstrate/afps-shared`'s `checkSkillMarkdown`, and
+  runs on every path that WRITES skill content: `POST /api/packages/skills`,
+  `PUT /api/packages/skills/{scope}/{name}`, `POST .../versions`, `POST
+.../versions/{version}/restore`, `POST /api/packages/{scope}/{name}/fork`,
+  `POST /api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
+  `/import-bundle`, `/import-github`, and the MCP module's
+  `validate_package_file` / `import_package_file`. The 400 is an ordinary
+  problem+json whose first field error carries the machine-readable reason —
+  `skill_invalid_frontmatter` (the block is not valid YAML, not a mapping, has
+  a duplicate key, or a non-string field — the parser's own message is
+  included), `skill_missing_frontmatter_name`,
+  `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description`,
+  `skill_invalid_frontmatter_description` — so a client can tell "no
+  description" from "bad name" without parsing prose.
+
+  **READING and RE-IMPORTING existing artifacts are deliberately untouched,
+  and that is the load-bearing half.** Published versions are immutable: a
+  skill published without a description cannot be repaired in place, so gating
+  the read side would have failed every RUN of every agent depending on one.
+  `checkCompanionFiles` — which `extractRootFromAfps` and the run launcher's
+  package catalog call — therefore still asks only for a frontmatter `name`,
+  through the exact same permissive probe as before. And the strict rule
+  applies to the ROOT of an import only, never to a dependency copy a bundle
+  carries: `POST /api/packages/import-bundle` remains the sanctioned path for
+  re-ingesting platform-produced artifacts, including ones that transitively
+  depend on a pre-rule skill.
+
+  What changes for existing data is the DRAFT — every write, and only writes. A
+  stored skill draft whose `SKILL.md` does not conform must be completed before
+  its next save or publish. **Restoring a legacy published version is refused**
+  for the same reason: a restore writes a draft, and one that cannot be saved
+  or published is not a state the editor should be put back into. Forking such
+  a skill still SUCCEEDS — that is how a user takes over a legacy skill they do
+  not own in order to fix it — but the fork's published version is skipped and
+  the response carries a `warnings` entry, surfaced in the UI as a toast,
+  naming what to fix. The skill editor, the publish modal and the version-restore
+  confirmation all translate the server's reason codes, so the author sees the
+  missing field rather than an English `detail` — or, as the restore dialog did
+  before, nothing at all.
+
 - **Chat turns shed their fixed per-hop costs** (#1243). The preamble reads
   (models, default space, caller context, session) run in parallel; the
   resumable recording is coalesced (50 ms / 16 KiB) instead of one store

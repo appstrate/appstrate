@@ -51,7 +51,8 @@ import {
 const app = getTestApp();
 
 const SKILL_ID = "@testorg/read-guard-skill";
-const SKILL_BODY = "---\nname: read-guard-skill\n---\n\nSECRET SKILL BODY";
+const SKILL_BODY =
+  "---\nname: read-guard-skill\ndescription: A read-guard skill.\n---\n\nSECRET SKILL BODY";
 
 /**
  * Publish a real artifact so the version routes can reach their `200`. Without
