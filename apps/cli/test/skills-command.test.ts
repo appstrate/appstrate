@@ -942,6 +942,86 @@ describe("skills sync — non-conforming frontmatter", () => {
   });
 });
 
+describe("skills sync — fresh install", () => {
+  const setupSkill = (): string => join(pluginRoot(), "skills", "setup", "SKILL.md");
+
+  it("installs a setup skill under --print-path when the profile is not configured", async () => {
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({ profile: "nope", printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toBe('Profile "nope" not configured. Run: appstrate login --profile nope\n');
+    const skill = await readText(setupSkill());
+    expect(skill).toContain("name: setup");
+    expect(skill).toContain("appstrate login --profile nope");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+    expect(await exists(getStatePath())).toBe(false);
+  });
+
+  it("ships a SessionStart hook whose command prints the remedy to the user and the model", async () => {
+    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+
+    const hooks = JSON.parse(await readText(join(pluginRoot(), "hooks", "hooks.json"))) as {
+      hooks: { SessionStart: { matcher: string; hooks: { type: string; command: string }[] }[] };
+    };
+    const [entry] = hooks.hooks.SessionStart;
+    expect(entry?.matcher).toBe("startup");
+    const proc = Bun.spawnSync(["sh", "-c", entry!.hooks[0]!.command]);
+    expect(proc.exitCode).toBe(0);
+    const out = JSON.parse(proc.stdout.toString()) as {
+      systemMessage: string;
+      hookSpecificOutput: { hookEventName: string; additionalContext: string };
+    };
+    expect(out.systemMessage).toContain("appstrate login --profile nope");
+    expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    expect(out.hookSpecificOutput.additionalContext).toContain("--instance <url>");
+  });
+
+  it("names the missing space pin in the setup skill", async () => {
+    await seedLoggedInProfile("default", { orgId: "org_1" });
+    const { io } = createMemoryIO();
+
+    await skillsSyncCommand({ printPath: true }, io);
+
+    expect(await readText(setupSkill())).toContain("appstrate space switch");
+  });
+
+  it("is byte-identical across runs, so the plugin version does not churn", async () => {
+    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+    const first = await readText(setupSkill());
+    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+    expect(await readText(setupSkill())).toBe(first);
+  });
+
+  it("keeps an existing plugin and exits 1 instead when the profile is lost later", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await expect(
+      skillsSyncCommand({ profile: "nope", printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(stdout()).toBe("");
+    expect(stderr()).toContain("Run: appstrate login --profile nope");
+    expect(await exists(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toBe(true);
+    expect(await exists(setupSkill())).toBe(false);
+  });
+
+  it("replaces the setup skill with the real skills once connected", async () => {
+    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+    createSkillServer(ONE_SKILL).install();
+    const { io, stdout } = createMemoryIO();
+
+    await skillsSyncCommand({ printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    expect(await exists(join(pluginRoot(), "hooks"))).toBe(false);
+  });
+});
+
 describe("skills sync — request concurrency", () => {
   it("never holds more than eight package-route requests open", async () => {
     const many = Array.from({ length: 24 }, (_, i) => ({

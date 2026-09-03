@@ -30,6 +30,7 @@ const PLUGIN_NAME = "appstrate";
 
 const PLUGIN_MANIFEST = {
   name: PLUGIN_NAME,
+  author: { name: "Appstrate", url: "https://appstrate.dev" },
   description: "Skills from your Appstrate organization, kept in sync by `appstrate skills sync`.",
 };
 
@@ -52,6 +53,95 @@ const PLUGIN_FILES: Readonly<Record<string, string>> = {
 
 const PLUGIN_ROOT_ENTRIES = [".claude-plugin", "README.md", "skills"];
 
+export interface SkillTree {
+  slug: string;
+  files: Record<string, Uint8Array>;
+}
+
+const SETUP_SLUG = "setup";
+
+/**
+ * The plugin a machine gets before the CLI is connected, so the marketplace
+ * install succeeds and the remedy sits where the user works: one skill that
+ * says how, plus a `SessionStart` hook that says it at every session start —
+ * to the user, and to the model so it can offer to run the login itself.
+ * The first connected sync replaces the whole tree.
+ */
+export function setupPluginFiles(problem: string, remedy: string): Record<string, Uint8Array> {
+  const skillMd = [
+    "---",
+    `name: ${SETUP_SLUG}`,
+    "description: Connect this machine to Appstrate so the organization's skills sync into " +
+      "Claude Code. Use when the user mentions Appstrate skills, asks why they are missing, " +
+      "or wants to finish the Appstrate plugin setup.",
+    "---",
+    "",
+    "# Connect this machine to Appstrate",
+    "",
+    `The \`${PLUGIN_NAME}\` plugin syncs your Appstrate organization's skills into Claude Code, ` +
+      `but this machine is not connected yet: ${problem}.`,
+    "",
+    "1. Run the login. It opens the browser on the device-flow page; the user only has to " +
+      "approve there. Ask for the Appstrate instance URL if unknown (`https://app.appstrate.com` " +
+      "for the hosted service) and pass it as `--instance`:",
+    "",
+    "   ```sh",
+    `   ${remedy} --instance <url>`,
+    "   ```",
+    "",
+    "   With several organizations, add `--org <slug>`.",
+    "2. Reload the plugin with `claude plugin update appstrate@appstrate`, or start a new " +
+      "Claude Code session. The organization's skills then replace this one.",
+    "",
+  ].join("\n");
+  const hookOutput = {
+    systemMessage:
+      `Appstrate skills: this machine is not connected (${problem}). ` +
+      `Run \`${remedy}\`, or ask Claude to run it for you.`,
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext:
+        `The ${PLUGIN_NAME} plugin is installed but not connected: ${problem}. ` +
+        `Offer to run \`${remedy} --instance <url>\` for the user (it opens the browser; ` +
+        `they only approve there), then \`claude plugin update appstrate@appstrate\`. ` +
+        `The /${PLUGIN_NAME}:${SETUP_SLUG} skill has the details.`,
+    },
+  };
+  const hooks = {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: "startup",
+          hooks: [
+            { type: "command", command: `printf '%s' ${shellQuote(JSON.stringify(hookOutput))}` },
+          ],
+        },
+      ],
+    },
+  };
+  const encoder = new TextEncoder();
+  return {
+    ...Object.fromEntries(Object.entries(PLUGIN_FILES).map(([k, v]) => [k, encoder.encode(v)])),
+    "hooks/hooks.json": encoder.encode(`${JSON.stringify(hooks, null, 2)}\n`),
+    [`skills/${SETUP_SLUG}/SKILL.md`]: encoder.encode(skillMd),
+  };
+}
+
+/** POSIX single-quote quoting: the only escape is closing, backslash-quoting, reopening. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/** Atomic swap of the whole plugin root, same staging discipline as {@link writePluginTree}. */
+export async function writeSetupPlugin(
+  root: string,
+  files: Record<string, Uint8Array>,
+): Promise<void> {
+  await withStaging(root, join(dirname(root), STAGING_DIR), (staging) =>
+    writeTreeInto(staging, files),
+  );
+}
+
 /** `homeDir()` is the helper `getDataDir()` uses, so the ledger cannot disagree. */
 export function targetRoot(target: SyncTarget): string {
   switch (target) {
@@ -67,11 +157,6 @@ export function targetRoot(target: SyncTarget): string {
 export function skillDir(target: SyncTarget, slug: string): string {
   const root = targetRoot(target);
   return target === "claude-plugin" ? join(root, "skills", slug) : join(root, slug);
-}
-
-export interface SkillTree {
-  slug: string;
-  files: Record<string, Uint8Array>;
 }
 
 export interface SkillWriteFailure {

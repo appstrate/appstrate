@@ -411,10 +411,12 @@ claude plugin install appstrate@appstrate
 The recorded command string is:
 
 ```
-appstrate skills sync --target claude-plugin --target codex --print-path
+if command -v appstrate >/dev/null 2>&1; then exec appstrate skills sync --target claude-plugin --target codex --print-path; else exec npx -y appstrate@latest skills sync --target claude-plugin --target codex --print-path; fi
 ```
 
 It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update`. Skills then appear as `/appstrate:<skill>`.
+
+**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. This only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched.
 
 **What lands in a skill directory.** Every file of the published artifact except `manifest.json` and `RECORD` (Appstrate packaging, not skill content), with one rewrite in `SKILL.md`: the frontmatter `name` is pointed at the directory name when it differs, because the spec requires the two to match. Nothing else is touched — no description is invented, no key is reordered. The output is deterministic — no timestamps, no sync metadata — because a `mode: "copy"` plugin's version _is_ the hash of its contents.
 
@@ -422,7 +424,7 @@ Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills
 
 **Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and Appstrate ids are `@scope/name`, which is not a legal skill name. The directory is therefore the frontmatter `name` when it is already legal, falling back to the slugified package `name` segment. If two skills in the space claim the same slug, the second one — ordered by package id, so the choice is reproducible — becomes `<scope>-<name>`, then `<scope>-<name>-2`, `-3`, … until the name is free. Every rename is reported on stderr.
 
-**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors.
+**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors. The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
 
 | Condition                                                   | stderr                                                                                      |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |

@@ -32,6 +32,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ledger keyed by target and `HOME` root makes the shared roots safe (nothing it
   does not own is written or removed), a `mkdir` lock serializes concurrent
   sessions, and per-skill failures never cost the plugin under `--print-path`.
+  On a fresh machine the plugin install still succeeds before the CLI is
+  connected: it gets a single `/appstrate:setup` skill naming the missing step
+  and a `SessionStart` hook that surfaces it at every session start, both
+  replaced by the organization's skills on the first connected sync.
   Full behaviour: `apps/cli/README.md` → `appstrate skills`.
 
 - **Two release gates joined `bun run check`: `verify:release-version` and

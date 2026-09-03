@@ -10,7 +10,7 @@
  */
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { resolveActiveProfile, requireLoggedIn } from "../lib/config.ts";
+import { resolveActiveProfile, type Profile } from "../lib/config.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
 import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
@@ -41,9 +41,11 @@ import {
 import {
   pluginTreeMatches,
   removeManagedDir,
+  setupPluginFiles,
   skillDir,
   targetRoot,
   writePluginTree,
+  writeSetupPlugin,
   writeSharedSkill,
   type SkillTree,
   type SyncTarget,
@@ -94,13 +96,9 @@ export async function skillsSyncCommand(
   }
 
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile, io);
-  if (!profile.orgId) {
-    io.stderr.write("No organization pinned. Run: appstrate org switch\n");
-    io.exit(1);
-  }
-  if (!profile.spaceId) {
-    io.stderr.write("No space pinned. Run: appstrate space switch\n");
+  const gap = connectionGap(profileName, profile);
+  if (gap && !printPath) {
+    io.stderr.write(`${gap.problem}. Run: ${gap.remedy}\n`);
     io.exit(1);
   }
 
@@ -127,6 +125,11 @@ export async function skillsSyncCommand(
         io.stderr.write(
           "Sync state could not be used and has been ignored — this run re-materializes everything.\n",
         );
+      }
+
+      if (gap) {
+        pluginOk = await bootstrapPlugin(gap, state, source, report);
+        return;
       }
 
       const catalogue = await resolveAll(profileName, source, state, targets, report);
@@ -156,6 +159,51 @@ export async function skillsSyncCommand(
   const failed = printPath ? runFailures > 0 || !pluginOk : runFailures + skillFailures > 0;
   if (!failed && printPath) io.stdout.write(`${targetRoot("claude-plugin")}\n`);
   if (failed) io.exit(1);
+}
+
+interface ConnectionGap {
+  problem: string;
+  remedy: string;
+}
+
+/** What still separates this profile from a syncable space, if anything. */
+function connectionGap(profileName: string, profile: Profile | undefined): ConnectionGap | null {
+  if (!profile) {
+    return {
+      problem: `Profile "${profileName}" not configured`,
+      remedy: `appstrate login --profile ${profileName}`,
+    };
+  }
+  if (!profile.orgId) return { problem: "No organization pinned", remedy: "appstrate org switch" };
+  if (!profile.spaceId) return { problem: "No space pinned", remedy: "appstrate space switch" };
+  return null;
+}
+
+/**
+ * `--print-path` before the CLI is connected: a marketplace install must still
+ * succeed, so it gets a plugin whose only skill says how to connect. Only on a
+ * FRESH plugin — an existing one is kept and the run fails as before, so a
+ * lapsed login never takes working skills away.
+ */
+async function bootstrapPlugin(
+  gap: ConnectionGap,
+  state: SyncState,
+  source: SkillSource,
+  report: Report,
+): Promise<boolean> {
+  const message = `${gap.problem}. Run: ${gap.remedy}`;
+  if (Object.keys(ownedLedger("claude-plugin", state, source).managed).length > 0) {
+    report.run(message);
+    return false;
+  }
+  report.note(message);
+  try {
+    await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap.problem, gap.remedy));
+    return true;
+  } catch (err) {
+    report.run(`Failed to write claude-plugin: ${formatError(err)}`);
+    return false;
+  }
 }
 
 /**
