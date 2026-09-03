@@ -449,7 +449,7 @@ A skill whose refresh fails keeps the version already on disk and its state entr
 Skipped @acme/pdf-tools on codex: /home/you/.agents/skills/pdf-tools exists and is not managed by appstrate — remove or rename it
 ```
 
-There is no automatic rename: remove or rename the directory yourself and re-run. While a sync is in flight, staging happens under a dot-prefixed `.appstrate-staging/`, so neither Claude Code nor Codex can pick up a half-written skill.
+There is no automatic rename: remove or rename the directory yourself and re-run. While a sync is in flight, staging happens under a dot-prefixed `.appstrate-staging/`, so neither Claude Code nor Codex can pick up a half-written skill. Concurrent syncs (two Claude Code sessions opening together) are serialized by a lock under `skills-sync/`; it records its owner's pid and is reaped as soon as that process is gone, so a sync killed mid-run never blocks the next one.
 
 Ownership is recorded per target **together with the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten.
 

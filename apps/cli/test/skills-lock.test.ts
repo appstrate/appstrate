@@ -5,13 +5,13 @@
  *
  * Tested through the helper rather than the command: the production timings
  * are a 60-second wait and a 10-minute staleness window, and a suite that
- * exercised them for real would take eleven minutes to say what four
+ * exercised them for real would take eleven minutes to say what a handful of
  * millisecond-scale cases say here. The command wires the defaults; these
  * cases pin the behaviour those defaults select.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { lstat, mkdir, mkdtemp, rm, utimes } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getLockPath, SyncLockBusyError, withSyncLock } from "../src/lib/skills-sync/lock.ts";
@@ -77,9 +77,17 @@ describe("withSyncLock", () => {
     expect(order).toEqual(["first:start", "first:end", "second:start"]);
   });
 
-  it("gives up with a busy error when the holder never lets go", async () => {
+  it("records its own pid as the lock's owner", async () => {
+    await withSyncLock(async () => {
+      expect(await readFile(join(getLockPath(), "owner"), "utf-8")).toBe(String(process.pid));
+    });
+  });
+
+  it("gives up with a busy error when the holder is alive and never lets go", async () => {
     await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
     await mkdir(getLockPath());
+    // This process IS the holder, so the owner is provably alive.
+    await writeFile(join(getLockPath(), "owner"), String(process.pid));
 
     await expect(
       withSyncLock(async () => "never", { timeoutMs: 30, pollMs: 5 }),
@@ -88,7 +96,20 @@ describe("withSyncLock", () => {
     expect(await exists(getLockPath())).toBe(true);
   });
 
-  it("reaps a lock old enough to prove its owner is gone", async () => {
+  it("reaps a fresh lock whose owner pid is dead", async () => {
+    await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
+    await mkdir(getLockPath());
+    // A process that has already exited: the pid it had is provably dead.
+    const gone = Bun.spawnSync(["true"]).pid;
+    await writeFile(join(getLockPath(), "owner"), String(gone));
+
+    // Fresh mtime, so the age rule alone would report busy: the owner rule
+    // is what makes this pass.
+    expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
+    expect(await exists(getLockPath())).toBe(false);
+  });
+
+  it("reaps an ownerless lock old enough to prove its owner is gone", async () => {
     await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
     await mkdir(getLockPath());
     const longAgo = new Date(Date.now() - 60 * 60_000);
