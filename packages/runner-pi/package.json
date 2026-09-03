@@ -51,12 +51,12 @@
     "@appstrate/mcp-transport": "workspace:*"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2"
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4"
   },
   "devDependencies": {
     "@appstrate/afps-shared": "workspace:*",
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2"
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4"
   }
 }
