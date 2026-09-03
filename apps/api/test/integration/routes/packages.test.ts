@@ -2274,7 +2274,9 @@ describe("Packages API", () => {
             description: "Imported via ZIP",
           }),
         ),
-        "SKILL.md": enc("---\nname: @pkgorg/imported-skill\n---\n\nSkill body."),
+        "SKILL.md": enc(
+          "---\nname: imported-skill\ndescription: An imported skill.\n---\n\nSkill body.",
+        ),
       });
       const formData = new FormData();
       formData.append("file", new File([new Uint8Array(afps)], "skill.afps"));
@@ -2867,7 +2869,8 @@ describe("Packages API", () => {
             display_name: "Forkable Skill",
             description: "Skill arm of the fork oneOf",
           },
-          content: "# Skill\nDo the thing.",
+          content:
+            "---\nname: forkable-skill\ndescription: Skill arm of the fork oneOf.\n---\n# Skill\nDo the thing.",
         }),
       });
       expect(create.status).toBe(201);

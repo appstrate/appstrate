@@ -40,12 +40,15 @@ function buildAfps(manifest: Record<string, unknown>, content: string): Uint8Arr
   const files: Record<string, Uint8Array> = {
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
   };
-  // AFPS §3.3/§3.4 companion-file invariants enforced by the bundle loader:
-  // agents need a non-empty prompt.md, skills need a SKILL.md with a
-  // frontmatter `name`. Emit the right companion for the package type.
+  // AFPS §3.3/§3.4 companion files, satisfying both the loader rule (an inline
+  // frontmatter `name`; a non-empty prompt.md for an agent) and the stricter
+  // write-path rule (a bare-slug `name` plus a `description`).
   if (manifest.type === "skill") {
-    const name = typeof manifest.name === "string" ? manifest.name : "@test/skill";
-    files["SKILL.md"] = enc(`---\nname: ${name}\n---\n\n${content}`);
+    const id = typeof manifest.name === "string" ? manifest.name : "@test/skill";
+    const slug = id.split("/").pop()!;
+    files["SKILL.md"] = enc(
+      `---\nname: ${slug}\ndescription: Test skill ${slug}.\n---\n\n${content}`,
+    );
   } else {
     files["prompt.md"] = enc(content);
   }

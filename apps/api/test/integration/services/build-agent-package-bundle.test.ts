@@ -58,7 +58,7 @@ function buildSkillAfps(id: string, version: string, body: string): Uint8Array {
   };
   return zipSync({
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
-    "SKILL.md": enc(`---\nname: ${id}\n---\n\n${body}`),
+    "SKILL.md": enc(`---\nname: ${id.split("/").pop()}\ndescription: Test skill.\n---\n\n${body}`),
   });
 }
 
@@ -114,7 +114,9 @@ async function setSkillDraft(opts: {
   await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, opts.id));
   await uploadPackageFiles("skills", opts.orgId, opts.id, {
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
-    "SKILL.md": enc(`---\nname: ${opts.id}\n---\n\n${opts.body}`),
+    "SKILL.md": enc(
+      `---\nname: ${opts.id.split("/").pop()}\ndescription: Test skill.\n---\n\n${opts.body}`,
+    ),
   });
 }
 

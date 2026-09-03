@@ -10,6 +10,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
+import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { FormField } from "../components/form-field";
@@ -385,8 +386,14 @@ function PackageEditorInner({
           tab: "content",
         };
       }
+      // The same checker the write routes run — fixed here, not via a 400.
+      const frontmatter = skillFrontmatterError(s.content);
+      if (frontmatter) {
+        return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: "content" };
+      }
       return null;
     },
+    translateError: (err) => translateSkillFrontmatterError(err, t),
   });
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);

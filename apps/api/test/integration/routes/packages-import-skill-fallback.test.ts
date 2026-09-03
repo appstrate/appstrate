@@ -94,7 +94,7 @@ describe("POST /api/packages/import — published artifact bytes", () => {
             display_name: "Authored Skill",
           }),
         ),
-        "SKILL.md": enc("---\nname: authored-skill\n---\n\nBody."),
+        "SKILL.md": enc("---\nname: authored-skill\ndescription: An authored skill.\n---\n\nBody."),
         // A detached signature is the byte that must not be rewritten: any
         // re-zip would invalidate it.
         "SIGNATURE.jws": enc("detached-signature-placeholder"),

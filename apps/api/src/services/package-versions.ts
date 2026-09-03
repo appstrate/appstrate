@@ -29,7 +29,7 @@ import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
-import { storageFolderForType } from "./package-items/config.ts";
+import { storageFolderForType, assertArchiveContentConforms } from "./package-items/config.ts";
 import { toISO } from "../lib/date-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -646,6 +646,7 @@ export async function createVersionFromDraft(params: {
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
+  let frozenEntries: Record<string, Uint8Array> | undefined;
   if (pkg.type === "agent") {
     const storedFiles = await downloadPackageFiles(
       storageFolderForType(pkg.type),
@@ -678,7 +679,12 @@ export async function createVersionFromDraft(params: {
     const entries: Record<string, Uint8Array> = { ...files };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    frozenEntries = entries;
   }
+
+  // The bytes that ACTUALLY get frozen: the artifact's content entry comes from
+  // STORAGE, and `packages.draft_content` is a second copy that can drift.
+  if (frozenEntries) assertArchiveContentConforms(pkg.type, frozenEntries, "content");
 
   // A schema-valid mcp-server draft can still point at a companion file that
   // is absent from the stored payload. Reparse the exact bytes about to become

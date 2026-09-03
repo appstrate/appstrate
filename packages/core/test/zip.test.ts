@@ -197,6 +197,19 @@ describe("parsePackageZip", () => {
     }
   });
 
+  // The loader-side check stays lenient: a published skill whose SKILL.md
+  // declares only a `name` must keep parsing. The strict producer rule is
+  // `checkSkillMarkdown`, exercised by the API's write paths.
+  it("accepts a skill whose SKILL.md declares only a frontmatter name", () => {
+    const zip = makeZip({
+      "manifest.json": validSkillManifest(),
+      "SKILL.md": "---\nname: triage\n---\nbody",
+    });
+    const parsed = parsePackageZip(zip);
+    expect(parsed.type).toBe("skill");
+    expect(parsed.content).toContain("name: triage");
+  });
+
   it("parsePackageZip returns raw manifest without Zod defaults", () => {
     // Manifest with required fields only — NO optional defaults
     const manifest = {

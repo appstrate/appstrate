@@ -50,6 +50,8 @@ import {
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
+import { assertArchiveContentConforms } from "./package-items/config.ts";
+import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
 import { installPackage } from "./space-packages.ts";
@@ -608,6 +610,20 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
   if (errors.length > 0) throw validationFailed(errors);
 }
 
+// ROOT ONLY: the root is author input; every other entry is a dependency copy of
+// an already-published artifact, and gating those would permanently refuse any
+// bundle transitively depending on a pre-rule package.
+function assertBundleRootConforms(bundle: Bundle): void {
+  const root = bundle.packages.get(bundle.root);
+  if (!root) return;
+  const parsed = parsePackageIdentity(bundle.root);
+  // Platform inputs reused verbatim — same skip as the gates around this one.
+  if (parsed && isSystemPackage(parsed.packageId)) return;
+  const type = (root.manifest as { type?: PackageType }).type;
+  if (!type) return;
+  assertArchiveContentConforms(type, root.files, "file", `${bundle.root}: `);
+}
+
 /**
  * Pure-read import preflight shared by HTTP upload and file-backed MCP
  * tools. It performs the exact parse, callable-tool and conflict checks the
@@ -618,6 +634,7 @@ export async function preflightBundleImport(
   scope: BundleAssemblyScope,
 ): Promise<BundleImportPreflight> {
   const bundle = await readOrBuildBundle(bytes, scope);
+  assertBundleRootConforms(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };

@@ -556,6 +556,41 @@ describe("mcp file-backed package workflow", () => {
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
   });
 
+  it("reports a skill whose SKILL.md declares no description", async () => {
+    const manifest = {
+      name: "@mcppkgdoc/gate-skill",
+      version: "1.0.0",
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "Gate Skill",
+      description: "A gated skill.",
+    };
+    const bytes = zipSync({
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+      // A conforming name but no `description` — an artifact no agent runtime
+      // can decide to invoke.
+      "SKILL.md": new TextEncoder().encode("---\nname: gate-skill\n---\nBody."),
+    } as unknown as Parameters<typeof zipSync>[0]);
+
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "gate-skill.afps", "application/zip", bytes);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "validate_package_file",
+        arguments: { file_uri: `appfile://${docId}` },
+      },
+    });
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    expect(result.data).toMatchObject({ valid: false, importable: false });
+    expect(String(result.data.error)).toContain("description");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
   it("validates then imports and installs a package without exposing its bytes to the model", async () => {
     const packageId = "@mcppkgdoc/file-server";
     const runId = await seedRun(scope);

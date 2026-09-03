@@ -33,6 +33,8 @@ interface UseEditorStateOptions<S extends EditorStateBase> {
    * for updates and draft saves — do not include it here.
    */
   toWireBody: (state: S) => Record<string, unknown>;
+  /** The message the author reads, or `null` to keep the server's English `detail`. */
+  translateError?: (err: Error) => string | null;
   /**
    * Pre-submit validation hook. Return an error message + the tab to
    * focus, or `null` to proceed. Runs before the API call so we can
@@ -74,7 +76,8 @@ interface UseEditorStateReturn<S extends EditorStateBase> {
 export function useEditorState<S extends EditorStateBase>(
   opts: UseEditorStateOptions<S>,
 ): UseEditorStateReturn<S> {
-  const { initialState, packageType, packageId, isEdit, toWireBody, validate } = opts;
+  const { initialState, packageType, packageId, isEdit, toWireBody, validate, translateError } =
+    opts;
   const qc = useQueryClient();
   const createPkg = useCreatePackage(packageType);
   const updatePkg = useUpdatePackage(packageType, packageId || "");
@@ -104,6 +107,13 @@ export function useEditorState<S extends EditorStateBase>(
 
   const saveDraft = useCallback(async () => {
     if (!isEdit || !packageId) return;
+    // Same pre-submit `validate` as `handleSubmit`: this path bypassed it, so
+    // a rule the submit button enforced could be walked around from the modal.
+    const invalid = validate?.(state);
+    if (invalid) {
+      setError(invalid.error);
+      throw new Error(invalid.error);
+    }
     const cfg = PACKAGE_CONFIG[packageType];
     // PUT returns the updated package resource bare (issue #657) — read back
     // the NEW `lock_version` so a subsequent save doesn't go stale.
@@ -129,7 +139,7 @@ export function useEditorState<S extends EditorStateBase>(
       // newly-required reconnection/upgrade without a page reload.
       void invalidateIntegrationQueries(qc);
     }
-  }, [state, isEdit, packageId, packageType, qc, toWireBody]);
+  }, [state, isEdit, packageId, packageType, qc, toWireBody, validate]);
 
   const handleSubmit = useCallback(
     (e?: FormEvent, onValidationError?: (tab: string | undefined) => void) => {
@@ -158,15 +168,15 @@ export function useEditorState<S extends EditorStateBase>(
             ...(body as Parameters<typeof updatePkg.mutate>[0]),
             lock_version: state.lock_version!,
           },
-          { onError: (err) => setError(err.message) },
+          { onError: (err) => setError(translateError?.(err) ?? err.message) },
         );
       } else {
         createPkg.mutate(body as Parameters<typeof createPkg.mutate>[0], {
-          onError: (err) => setError(err.message),
+          onError: (err) => setError(translateError?.(err) ?? err.message),
         });
       }
     },
-    [state, isEdit, validate, allowNavigation, toWireBody, createPkg, updatePkg],
+    [state, isEdit, validate, allowNavigation, toWireBody, createPkg, updatePkg, translateError],
   );
 
   const isPending = createPkg.isPending || updatePkg.isPending;

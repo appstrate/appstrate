@@ -105,7 +105,9 @@ describe("platform timeout ceiling — author-time visibility", () => {
             timeout: 10800,
           }),
         ),
-        "SKILL.md": enc("---\nname: @ceilingorg/ceiling-skill\n---\n\nSkill body."),
+        "SKILL.md": enc(
+          "---\nname: ceiling-skill\ndescription: A ceiling skill.\n---\n\nSkill body.",
+        ),
       });
       const formData = new FormData();
       formData.append("file", new File([new Uint8Array(afps)], "skill.afps"));

@@ -17,6 +17,8 @@
  *     `bundle/validate-bundle.ts`; it is not a package subpath either.
  */
 
+import { parse as parseYaml } from "yaml";
+
 /**
  * Stable, machine-readable companion-file violation reasons.
  */
@@ -24,7 +26,11 @@ export type CompanionViolationReason =
   | "AGENT_MISSING_PROMPT"
   | "AGENT_EMPTY_PROMPT"
   | "SKILL_MISSING_SKILL_MD"
+  | "SKILL_INVALID_FRONTMATTER"
   | "SKILL_MISSING_FRONTMATTER_NAME"
+  | "SKILL_INVALID_FRONTMATTER_NAME"
+  | "SKILL_MISSING_FRONTMATTER_DESCRIPTION"
+  | "SKILL_INVALID_FRONTMATTER_DESCRIPTION"
   | "MCP_SERVER_MISSING_ENTRY_POINT";
 
 /**
@@ -77,8 +83,9 @@ export function companionFilesFromRecord(files: Record<string, Uint8Array>): Com
  *
  * The check is intentionally minimal and presence-focused:
  *   - `agent` → `prompt.md` present at root, non-empty bytes (§3.2).
- *   - `skill` → `SKILL.md` present at root, with YAML frontmatter `name`
- *     (§3.3). Missing `description` is tolerated per spec.
+ *   - `skill` → `SKILL.md` present at root, with a YAML frontmatter `name`
+ *     (§3.3). Missing `description` is tolerated — this is the LOADER gate;
+ *     the producer rule is {@link checkSkillMarkdown}.
  *   - `mcp-server` → file at `manifest.server.entry_point` present in the
  *     archive (§3.4 "self-contained — every runtime dep bundled").
  *   - `integration` → no required companion (§3.5).
@@ -169,6 +176,12 @@ function isEffectivelyEmpty(bytes: Uint8Array): boolean {
   return true;
 }
 
+/**
+ * Deliberately NOT {@link parseSkillFrontmatter}: published artifacts exist
+ * whose frontmatter `yaml` cannot parse at all (17 in production at the time of
+ * writing, each an unquoted `description: … : …`) and the run launcher has to
+ * keep serving them, so this probe's acceptance set may never shrink.
+ */
 function hasFrontmatterName(content: string): boolean {
   const fmMatch = content.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
   if (!fmMatch) return false;
@@ -177,8 +190,188 @@ function hasFrontmatterName(content: string): boolean {
   if (!nameMatch) return false;
   const raw = (nameMatch[1] ?? "").trim();
   if (raw.length === 0) return false;
-  // Strip surrounding quotes to mirror extractSkillMeta's stripQuotes.
   const unquoted = /^(['"])(.*)\1$/.exec(raw);
   const value = unquoted ? unquoted[2] : raw;
   return (value ?? "").trim().length > 0;
+}
+
+/** Agent Skills bounds, in code points. */
+export const SKILL_NAME_MAX_LENGTH = 64;
+export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+
+/** The bare slug an agent runtime addresses — NOT a `@scope/name` package id. */
+const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function codePointLength(value: string): number {
+  return [...value].length;
+}
+
+export function isValidSkillName(name: string): boolean {
+  return codePointLength(name) <= SKILL_NAME_MAX_LENGTH && SKILL_NAME_PATTERN.test(name);
+}
+
+/** Parsed `SKILL.md` frontmatter. Never throws; a parse failure is `error`. */
+export interface SkillFrontmatter {
+  found: boolean;
+  /** Opens with `---` but never closes the block. */
+  unterminated: boolean;
+  error: string | null;
+  name: string;
+  description: string;
+}
+
+/** Parses the way the skill runtime does, so the gate cannot accept what it fails to read. */
+export function parseSkillFrontmatter(content: string): SkillFrontmatter {
+  const empty = { found: false, unterminated: false, error: null, name: "", description: "" };
+
+  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!normalized.startsWith("---")) return empty;
+  const endIndex = normalized.indexOf("\n---", 3);
+  if (endIndex === -1) return { ...empty, unterminated: true };
+
+  const block = normalized.slice(4, endIndex);
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(block, { uniqueKeys: true, strict: true });
+  } catch (err) {
+    return {
+      ...empty,
+      found: true,
+      error: `frontmatter is not valid YAML: ${firstLine(err)}`,
+    };
+  }
+
+  const mapping = parsed ?? {};
+  if (typeof mapping !== "object" || Array.isArray(mapping)) {
+    return {
+      ...empty,
+      found: true,
+      error: "frontmatter is not valid YAML: expected a mapping of keys to values",
+    };
+  }
+
+  const record = mapping as Record<string, unknown>;
+  const name = readStringField(record, "name");
+  if (typeof name !== "string") return { ...empty, found: true, error: name.error };
+  const description = readStringField(record, "description");
+  if (typeof description !== "string") return { ...empty, found: true, error: description.error };
+
+  return { found: true, unterminated: false, error: null, name, description };
+}
+
+/** An absent key and an empty scalar both mean "not provided" and yield `""`. */
+function readStringField(record: Record<string, unknown>, key: string): string | { error: string } {
+  const value = record[key];
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") {
+    return {
+      error: `frontmatter is not valid YAML: '${key}' must be a string, got ${describeType(value)}`,
+    };
+  }
+  return value.trim();
+}
+
+function describeType(value: unknown): string {
+  if (Array.isArray(value)) return "a list";
+  if (typeof value === "object") return "a mapping";
+  return `a ${typeof value}`;
+}
+
+function startsWithBom(content: string): boolean {
+  return content.charCodeAt(0) === 0xfeff;
+}
+
+/** `ignoreBOM: true` reads backwards: it means "do not CONSUME the BOM". */
+export function decodeSkillMarkdown(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
+}
+
+function firstLine(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.split("\n")[0]!.trim();
+}
+
+/**
+ * The producer-side AFPS §3.3 gate: an Agent Skills `name`
+ * (https://agentskills.io/specification) plus a non-empty bounded `description`.
+ */
+export function checkSkillMarkdown(content: string): CompanionFileViolation | null {
+  // Rejected rather than stripped: Pi reads no frontmatter behind a BOM and
+  // drops the skill, while the platform's loader eats it — so the version
+  // would be minted, immutable, and simply never load.
+  if (startsWithBom(content)) {
+    return {
+      reason: "SKILL_INVALID_FRONTMATTER",
+      message:
+        "skill SKILL.md starts with a byte-order mark (U+FEFF); remove it — " +
+        "the runtime cannot read frontmatter behind a BOM",
+      path: "SKILL.md",
+    };
+  }
+
+  const { unterminated, error, name, description } = parseSkillFrontmatter(content);
+
+  if (unterminated) {
+    return {
+      reason: "SKILL_MISSING_FRONTMATTER_NAME",
+      message: "skill SKILL.md frontmatter block is not closed (expected a second '---' line)",
+      path: "SKILL.md",
+    };
+  }
+  if (error) {
+    return {
+      reason: "SKILL_INVALID_FRONTMATTER",
+      message: `skill SKILL.md ${error}`,
+      path: "SKILL.md",
+    };
+  }
+  if (!name) {
+    return {
+      reason: "SKILL_MISSING_FRONTMATTER_NAME",
+      message: "skill SKILL.md must declare a 'name' in YAML frontmatter",
+      path: "SKILL.md",
+    };
+  }
+  if (!isValidSkillName(name)) {
+    return {
+      reason: "SKILL_INVALID_FRONTMATTER_NAME",
+      message:
+        `skill SKILL.md 'name' must be 1-${SKILL_NAME_MAX_LENGTH} characters of lowercase ` +
+        `a-z, 0-9 and '-', with no leading or trailing hyphen and no consecutive hyphens ` +
+        `(got '${name}')`,
+      path: "SKILL.md",
+    };
+  }
+  if (!description) {
+    return {
+      reason: "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
+      message: "skill SKILL.md must declare a non-empty 'description' in YAML frontmatter",
+      path: "SKILL.md",
+    };
+  }
+  const descriptionLength = codePointLength(description);
+  if (descriptionLength > SKILL_DESCRIPTION_MAX_LENGTH) {
+    return {
+      reason: "SKILL_INVALID_FRONTMATTER_DESCRIPTION",
+      message:
+        `skill SKILL.md 'description' must be at most ${SKILL_DESCRIPTION_MAX_LENGTH} ` +
+        `characters (got ${descriptionLength})`,
+      path: "SKILL.md",
+    };
+  }
+
+  // Containment: `name:\n  triage` is valid YAML the loader's probe cannot
+  // read, so accepting it would mint a version the run launcher cannot load.
+  if (!hasFrontmatterName(content)) {
+    return {
+      reason: "SKILL_INVALID_FRONTMATTER_NAME",
+      message:
+        `skill SKILL.md 'name' must be written inline on one line, e.g. "name: my-skill" ` +
+        `(a name on a following line, or a space before the colon, makes the platform's ` +
+        `package loader unable to read it)`,
+      path: "SKILL.md",
+    };
+  }
+  return null;
 }

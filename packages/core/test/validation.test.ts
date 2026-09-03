@@ -1086,4 +1086,21 @@ description: A skill without name
     expect(result.description).toBe("");
     expect(result.warnings.some((w) => w.includes("frontmatter"))).toBe(true);
   });
+
+  // These two lock the delegation to `parseSkillFrontmatter`: a
+  // Windows-authored SKILL.md the gate accepts must not read as metadata-less
+  // here, and a BOM'd one must read as nothing at all.
+  it("reads CRLF line endings", () => {
+    const result = extractSkillMeta("---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\nBody");
+    expect(result.name).toBe("my-skill");
+    expect(result.description).toBe("A skill");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("reads nothing behind a UTF-8 BOM, exactly as the runtime does", () => {
+    const result = extractSkillMeta("\uFEFF---\nname: my-skill\ndescription: A skill\n---\nBody");
+    expect(result.name).toBe("");
+    expect(result.description).toBe("");
+    expect(result.warnings.some((w) => w.includes("frontmatter"))).toBe(true);
+  });
 });

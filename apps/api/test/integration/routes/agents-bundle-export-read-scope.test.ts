@@ -65,6 +65,8 @@ const BARE_AGENT_ID = "@scopeorg/bare-agent";
 const SKILL_ID = "@scopeorg/secret-skill";
 /** Distinctive marker: any 200 that carries it proves the bytes were served. */
 const SKILL_SECRET = "SECRET SKILL BODY";
+/** §3.3-conforming SKILL.md carrying the marker in its body. */
+const SKILL_MD = `---\nname: secret-skill\ndescription: A secret skill.\n---\n\n${SKILL_SECRET}`;
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -165,14 +167,14 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: skillManifest("1.0.0"),
-      draftContent: SKILL_SECRET,
+      draftContent: SKILL_MD,
     });
     await uploadPackageFiles("skills", ctx.orgId, SKILL_ID, {
       "manifest.json": enc(JSON.stringify(skillManifest("1.0.0"), null, 2)),
-      "SKILL.md": enc(`---\nname: ${SKILL_ID}\n---\n\n${SKILL_SECRET}`),
+      "SKILL.md": enc(SKILL_MD),
     });
     await publish(SKILL_ID, "1.0.0", skillManifest("1.0.0"), {
-      "SKILL.md": enc(`---\nname: ${SKILL_ID}\n---\n\n${SKILL_SECRET}`),
+      "SKILL.md": enc(SKILL_MD),
     });
   });
 

@@ -32,8 +32,14 @@ import {
 } from "../services/package-items/crud.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
-import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
+import {
+  CONFIG_BY_TYPE,
+  assertContentConforms,
+  assertArchiveContentConforms,
+  type PackageTypeConfig,
+} from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
+import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
 import { unzipPackageArchive } from "../services/package-archive.ts";
@@ -480,7 +486,6 @@ interface PackageRouteConfig {
     requiredFile: string | null;
     contentFileExt: string | null;
   };
-  validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
   /**
    * Which storage file this type's editor `content` is written to — a per-type
    * editor-wiring fact.
@@ -665,19 +670,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         "author",
       );
 
-      if (rcfg.validateContent) {
-        const validation = rcfg.validateContent(content);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "content",
-              code: "invalid_content",
-              title: "Invalid Content",
-              message,
-            })),
-          );
-        }
-      }
+      assertContentConforms(rcfg.cfg.type, content, "content");
 
       const packageId = validatedManifest.name;
 
@@ -803,19 +796,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     parsed.content = canonical.content;
     parsed.normalizedFiles = canonical.files;
 
-    if (rcfg.validateContent) {
-      const validation = rcfg.validateContent(parsed.content);
-      if (!validation.valid) {
-        throw validationFailed(
-          validation.errors.map((message) => ({
-            field: "content",
-            code: "invalid_content",
-            title: "Invalid Content",
-            message,
-          })),
-        );
-      }
-    }
+    assertContentConforms(rcfg.cfg.type, parsed.content, "content");
 
     let item;
     try {
@@ -1039,20 +1020,9 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("Content cannot be empty", "content");
     }
 
-    // Content validation
-    if (rcfg.validateContent && content) {
-      const validation = rcfg.validateContent(content);
-      if (!validation.valid) {
-        throw validationFailed(
-          validation.errors.map((message) => ({
-            field: "content",
-            code: "invalid_content",
-            title: "Invalid Content",
-            message,
-          })),
-        );
-      }
-    }
+    // The RESOLVED content: the body's when supplied, the stored draft's when
+    // carried forward.
+    if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
     // A manifest-only integration PUT has no authored `content`. When the
     // overloaded column contains the manifest fallback (rather than a real
@@ -1397,9 +1367,14 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
         (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
         detail.content[rcfg.storageFileName];
       if (fileData) {
-        content = new TextDecoder().decode(fileData);
+        // BOM-preserving: gated below AND written back as the draft.
+        content = decodeSkillMarkdown(fileData);
       }
     }
+
+    // A restore WRITES authored content. Before `updateOrgItem`, so a
+    // violation writes nothing.
+    if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
     const updated = await updateOrgItem(
       orgId,
@@ -1889,6 +1864,9 @@ export function createPackagesRouter() {
     const zipBytes = new Uint8Array(upload);
     try {
       const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      // `parsePackageZip` applies the lenient loader rule (it also reads
+      // already-published artifacts); an import is author input.
+      assertArchiveContentConforms(parsed.type, parsed.files, "file");
       return { parsed, artifact: upload };
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {

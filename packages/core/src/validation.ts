@@ -16,6 +16,7 @@ import { integrationManifestSchema, type IntegrationManifest } from "./integrati
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
 import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
+import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -637,19 +638,12 @@ export function validateManifest(
   };
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
 /**
  * Extract name and description from a SKILL.md file's YAML frontmatter.
+ *
+ * Parsed by `parseSkillFrontmatter` — two parsers would let this read a name the
+ * write-path gate rejects. This wrapper only adds warnings, and never throws.
+ *
  * @param content - The full text content of a SKILL.md file
  * @returns Extracted name, description, and any parsing warnings
  */
@@ -659,21 +653,15 @@ export function extractSkillMeta(content: string): {
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const fmMatch = content.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
-  if (!fmMatch) {
+  const { found, error, name, description } = parseSkillFrontmatter(content);
+  if (!found) {
     warnings.push("No YAML frontmatter detected (expected --- ... --- block)");
     return { name: "", description: "", warnings };
   }
-
-  const fm = fmMatch[1]!;
-  // Anchor to the start of a line (`^` + `m` flag) so a longer key that
-  // ends in the target token (e.g. `displayname:` / `x-description:`) does
-  // not shadow the real top-level `name:` / `description:` field.
-  const nameMatch = fm.match(/^name:[ \t]*(.+)/m);
-  const descMatch = fm.match(/^description:[ \t]*(.+)/m);
-
-  const name = nameMatch ? stripQuotes(nameMatch[1]!) : "";
-  const description = descMatch ? stripQuotes(descMatch[1]!) : "";
+  if (error) {
+    warnings.push(`Could not read YAML frontmatter: ${error}`);
+    return { name: "", description: "", warnings };
+  }
 
   if (!name) {
     warnings.push("Missing 'name' field in YAML frontmatter");

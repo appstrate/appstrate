@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { unzipArtifact, stripWrapperPrefix, type ParsedPackageZip } from "@appstrate/core/zip";
+import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";
 import { getPackageById } from "./package-items/crud.ts";
+import { assertContentConforms } from "./package-items/config.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 
 type SkillOnlyResult =
@@ -28,10 +30,14 @@ export async function tryParseSkillOnlyZip(
   const skillRaw = files["SKILL.md"];
   if (!skillRaw) return { ok: false, reason: "not_a_skill" };
 
-  const skillMd = new TextDecoder().decode(skillRaw);
-  const meta = extractSkillMeta(skillMd);
-  if (!meta.name) return { ok: false, reason: "not_a_skill" };
+  const skillMd = decodeSkillMarkdown(skillRaw);
 
+  // Carrying a SKILL.md answered the `not_a_skill` question, so a bad
+  // frontmatter is reported as itself. The only gate on this path: the manifest
+  // below is SYNTHESISED, so `parsePackageZip` never sees this archive.
+  assertContentConforms("skill", skillMd, "file");
+
+  const meta = extractSkillMeta(skillMd);
   const packageId = `@${orgSlug}/${meta.name}`;
   const existing = await getPackageById(packageId);
 

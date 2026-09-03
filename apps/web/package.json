@@ -11,6 +11,7 @@
     "test": "bun test --recursive src/"
   },
   "dependencies": {
+    "@appstrate/afps-shared": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/module-chat": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
