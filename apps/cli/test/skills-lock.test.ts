@@ -4,14 +4,14 @@
  * The cross-process lock `appstrate skills sync` holds for its whole body.
  *
  * Tested through the helper rather than the command: the production timings
- * are a 60-second wait and a 10-minute staleness window, and a suite that
- * exercised them for real would take eleven minutes to say what a handful of
- * millisecond-scale cases say here. The command wires the defaults; these
+ * are a 60-second wait, a 2-second heartbeat and a 15-second staleness
+ * window, and a suite that exercised them for real would take minutes to say
+ * what a handful of millisecond-scale cases say here. The command wires the defaults; these
  * cases pin the behaviour those defaults select.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getLockPath, SyncLockBusyError, withSyncLock } from "../src/lib/skills-sync/lock.ts";
@@ -107,6 +107,31 @@ describe("withSyncLock", () => {
     // is what makes this pass.
     expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
     expect(await exists(getLockPath())).toBe(false);
+  });
+
+  it("keeps the lock's mtime beating while the body runs", async () => {
+    await withSyncLock(
+      async () => {
+        const stale = new Date(Date.now() - 60_000);
+        await utimes(getLockPath(), stale, stale);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        // A holder that stopped beating would still read as `stale` here.
+        expect((await stat(getLockPath())).mtimeMs).toBeGreaterThan(stale.getTime() + 30_000);
+      },
+      { heartbeatMs: 5 },
+    );
+  });
+
+  it("reaps a lock whose owner pid is alive but whose heartbeat stopped", async () => {
+    await mkdir(join(dataHome, "appstrate", "skills-sync"), { recursive: true });
+    await mkdir(getLockPath());
+    // A reused pid, a zombie or a frozen holder all look like this: the pid
+    // answers, the beat does not.
+    await writeFile(join(getLockPath(), "owner"), String(process.pid));
+    const longAgo = new Date(Date.now() - 60_000);
+    await utimes(getLockPath(), longAgo, longAgo);
+
+    expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
   });
 
   it("reaps an ownerless lock old enough to prove its owner is gone", async () => {
