@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
+  out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
+  re-imported by `lib/boot.ts`, `services/input-parser.ts` and
+  `services/system-packages.ts`. `appstrate skills sync` needs the same pool
+  against the rate-limited package routes; a copy in the CLI would have been
+  the third in the repo, and the first two had already diverged on
+  abort-on-rejection.
+
+- **`appstrate skills sync` — the org's skills in Claude Code and Codex,
+  refreshed without a manual step.** Materializes every skill installed in the
+  profile's pinned space as an [Agent Skills](https://agentskills.io/specification)
+  directory, into `claude-plugin` (a complete Claude Code plugin under
+  `$XDG_DATA_HOME/appstrate/claude-plugin/`, the default), `codex`
+  (`~/.agents/skills/`) or `claude-user` (`~/.claude/skills/`). The auto-sync is
+  a Claude Code marketplace `command` source re-running the CLI once per
+  session — no server change, no hook, no daemon — so `--print-path` prints the
+  plugin directory as the only stdout line and the output is byte-deterministic.
+  Published `latest` by default (integrity-verified), `--source draft` for
+  authors. Exactly one thing is rewritten in `SKILL.md`, the frontmatter `name`,
+  so it matches the directory; an artifact published before the platform's
+  frontmatter gate is synced as authored and named once on stderr. An ownership
+  ledger keyed by target and `HOME` root makes the shared roots safe (nothing it
+  does not own is written or removed), a `mkdir` lock serializes concurrent
+  sessions, and per-skill failures never cost the plugin under `--print-path`.
+  On a fresh machine the plugin install still succeeds before the CLI is
+  connected: it gets a single `/appstrate:setup` skill naming the missing step
+  and a `SessionStart` hook that surfaces it at every session start, both
+  replaced by the organization's skills on the first connected sync.
+  Full behaviour: `apps/cli/README.md` → `appstrate skills`.
+
 - **Two release gates joined `bun run check`: `verify:release-version` and
   `verify:env-docs`.** Both close a hole that a green check had been reporting
   as fine.

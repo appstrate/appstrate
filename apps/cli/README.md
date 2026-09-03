@@ -47,6 +47,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                                            |
 | `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
 | `appstrate space`     | List, switch, or create spaces pinned on the active profile.                                                |
+| `appstrate skills`    | Sync the pinned space's skills to Claude Code and Codex as Agent Skills directories.                        |
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
 | `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
@@ -373,6 +374,105 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ---
 
+### `appstrate skills`
+
+Materialize the skills installed in the pinned space as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly.
+
+The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no hook, no daemon, no server-side change.
+
+```sh
+appstrate skills sync                                  # → the Claude Code plugin directory
+appstrate skills sync --target codex                   # → ~/.agents/skills/
+appstrate skills sync --target claude-user             # → ~/.claude/skills/
+appstrate skills sync --target claude-plugin --target codex
+appstrate skills sync --source draft                   # sync working copies instead of published versions
+appstrate skills sync --dry-run                        # report what would change, write nothing
+appstrate skills sync --print-path                     # the plugin path as the ONLY stdout line
+```
+
+**Subcommand and flags**
+
+| Flag / subcommand | Purpose                                                                                                                                                                                                                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `skills sync`     | The only subcommand. Reads the skills installed in the pinned space and writes one directory per skill into each requested target.                                                                                                                                                                     |
+| `--target <name>` | Repeatable. `claude-plugin` (default) → `$XDG_DATA_HOME/appstrate/claude-plugin/`; `codex` → `~/.agents/skills/`; `claude-user` → `~/.claude/skills/`.                                                                                                                                                 |
+| `--source <name>` | `published` (default) syncs each skill's `latest` published version, integrity-verified. `draft` syncs the working copy instead — for authors iterating on their own machine.                                                                                                                          |
+| `--print-path`    | Print the plugin directory as the **only** stdout line; every message goes to stderr. This is what a marketplace `command` source consumes. Requires `--target claude-plugin`, and refuses `--dry-run`.                                                                                                |
+| `--dry-run`       | Print the per-target plan and write nothing. One line per target with the counts (`+N` new, `~N` refreshed, `=N` unchanged, `-N` removed), then one line per affected slug: `+`, `~` or `-`. Cannot be combined with `--print-path`: a dry run produces no plugin, so there is no path worth printing. |
+
+**Registering it with Claude Code.** Add the marketplace, then install the plugin — the consent screen shows the exact command string Claude Code will re-run each session:
+
+```sh
+appstrate login
+claude plugin marketplace add appstrate/claude-plugins
+claude plugin install appstrate@appstrate
+```
+
+The recorded command string is:
+
+```
+if command -v appstrate >/dev/null 2>&1; then exec appstrate skills sync --target claude-plugin --target codex --print-path; else exec npx -y appstrate@latest skills sync --target claude-plugin --target codex --print-path; fi
+```
+
+It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update`. Skills then appear as `/appstrate:<skill>`.
+
+**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. This only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched.
+
+**What lands in a skill directory.** Every file of the published artifact except `manifest.json` and `RECORD` (Appstrate packaging, not skill content), with one rewrite in `SKILL.md`: the frontmatter `name` is pointed at the directory name when it differs, because the spec requires the two to match. Nothing else is touched — no description is invented, no key is reordered. The output is deterministic — no timestamps, no sync metadata — because a `mode: "copy"` plugin's version _is_ the hash of its contents.
+
+Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills YAML, but artifacts published before that rule existed are still synced exactly as authored. Each one is named once on stderr (`… does not pass the skill frontmatter rule …`): Claude Code and Codex may skip it, and the fix is to republish it from Appstrate.
+
+**Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and Appstrate ids are `@scope/name`, which is not a legal skill name. The directory is therefore the frontmatter `name` when it is already legal, falling back to the slugified package `name` segment. If two skills in the space claim the same slug, the second one — ordered by package id, so the choice is reproducible — becomes `<scope>-<name>`, then `<scope>-<name>-2`, `-3`, … until the name is free. Every rename is reported on stderr.
+
+**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors. The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
+
+| Condition                                                   | stderr                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Not logged in (or profile not configured)                   | `Profile "default" not configured. Run: appstrate login --profile default`                  |
+| Refresh token expired / session revoked                     | `Session for profile "default" is no longer valid … Run: appstrate login --profile default` |
+| No organization pinned                                      | `No organization pinned. Run: appstrate org switch`                                         |
+| No space pinned                                             | `No space pinned. Run: appstrate space switch`                                              |
+| `--print-path` without the plugin target                    | `--print-path prints the Claude Code plugin directory. Add: --target claude-plugin`         |
+| `--print-path` together with `--dry-run`                    | `--print-path cannot be combined with --dry-run: a dry run writes no plugin.`               |
+| The catalogue call, a target write or the state file failed | the underlying error                                                                        |
+
+**Per-skill failures are graded differently under `--print-path`.** A skill that was never published, whose bytes do not match the server's `X-Integrity`, or whose destination is not ours is reported on stderr and skipped; the rest of the sync completes.
+
+- Without `--print-path`, the command then exits 1 so a wrapper notices.
+- With `--print-path`, it exits **0** as long as the plugin tree itself was written (or was already up to date), and prints the path. A non-zero exit makes Claude Code discard the run, so failing the process over one unpublished skill would throw away a correct plugin. When the plugin tree could _not_ be produced, nothing is printed on stdout and the command exits 1.
+
+A skill whose refresh fails keeps the version already on disk and its state entry is preserved — a failed download never deletes a working skill. The same holds one step earlier: **deletion is decided against the catalogue, not against what resolved.** A skill the server still lists but whose version could not be read (a 500, a 429, an expired token mid-run) is kept exactly as it is, counted among the unchanged; only a skill that has genuinely left the catalogue is removed. Its directory name stays reserved for it too, so a transient error cannot hand `/appstrate:<slug>` to a different skill.
+
+**Deleting, and not overwriting.** `codex` and `claude-user` write into directories you also fill by hand. The sync only ever removes — or replaces — a directory its own state file records as managed for that target. A destination it does not own is left completely alone and reported:
+
+```
+Skipped @acme/pdf-tools on codex: /home/you/.agents/skills/pdf-tools exists and is not managed by appstrate — remove or rename it
+```
+
+There is no automatic rename: remove or rename the directory yourself and re-run. While a sync is in flight, staging happens under a dot-prefixed `.appstrate-staging/`, so neither Claude Code nor Codex can pick up a half-written skill.
+
+Ownership is recorded per target **together with the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten.
+
+#### Codex, and running without a Claude Code plugin
+
+The recorded marketplace command syncs both targets (`--target claude-plugin --target codex`), so if you use Claude Code, every session already refreshes `~/.agents/skills/` and Codex picks the skills up on its next start — Codex rescans that directory per session and has no hook of its own.
+
+Two cases need you to run the sync yourself: you do not use Claude Code at all, or your organization blocks command-sourced plugins (`disableCommandPluginSources`). Then schedule `appstrate skills sync --target codex` (add or swap in `--target claude-user` to feed `~/.claude/skills/`, which Claude Code picks up live).
+
+A cron entry every 15 minutes — cron's `PATH` is minimal, so give the absolute path:
+
+```cron
+*/15 * * * * /usr/local/bin/appstrate skills sync --target codex >/dev/null 2>&1
+```
+
+On macOS, prefer a `launchd` user agent running the same command every 900 seconds (`command -v appstrate` gives the absolute path).
+
+**The scheduler must reach your OS keyring.** The sync reads the profile's token from the keyring, and a keyring is bound to a session, not to a user id: a `launchd` **user agent** runs inside your logged-in session and can unlock the login keychain, while a system cron job (or anything under `sudo`) may not — the sync then fails with the "not logged in" remedy even though you are. That is why `launchd` is the recommended path on macOS. Remember that `HOME` differs per context too: a scheduler resolving a different `~/.agents/skills` than your shell does gets a state file that claims nothing, and every directory there is refused rather than overwritten.
+
+Per-skill toggles survive all of this. We never write `~/.codex/config.toml`, and directory names are stable across syncs, so a `[[skills.config]]` block disabling one of the synced skills keeps applying to the same skill after the next sync.
+
+---
+
 ### `appstrate openapi`
 
 Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes a few hundred endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
@@ -674,7 +774,15 @@ The fallback activates transparently when the keyring backend is missing (common
 $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 ├── config.toml                          # profiles, default profile pointer
 └── credentials.json                     # keyring fallback (only if keyring unavailable)
+
+$XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
+├── claude-plugin/                       # generated Claude Code plugin (`appstrate skills sync`)
+└── skills-sync/state.json               # which skill directory each target owns, and from which artifact
 ```
+
+`skills-sync/state.json` lives outside every target tree on purpose: the generated plugin's version is the hash of its contents, so a state blob inside it would make each sync look like a new plugin version. It is also the only record of which directories in the shared `~/.agents/skills/` and `~/.claude/skills/` belong to the sync.
+
+**Deleting it does not reset the sync — it locks it out of the shared targets.** The plugin directory is rebuilt from scratch (it is wholly ours), but every directory already sitting in `~/.agents/skills/` and `~/.claude/skills/` becomes unmanaged: the sync can no longer prove it wrote them, so it refuses to overwrite or delete them and reports each one. Removing those directories by hand is what un-sticks it. The file also carries a format version; a sync from a CLI whose materialization changed treats every entry as stale and re-materializes, without giving up ownership.
 
 Example `config.toml`:
 

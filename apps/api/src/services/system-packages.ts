@@ -12,7 +12,7 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 import { createVersionAndUpload } from "./package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
-import { mapWithConcurrency } from "../lib/map-with-concurrency.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 export type { SystemPackageEntry };
 

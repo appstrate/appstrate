@@ -59,6 +59,28 @@ export function getConfigDir(): string {
   return join(homedir(), ".config", "appstrate");
 }
 
+/**
+ * `HOME` first, because that is what Codex and Claude Code resolve and Bun's
+ * `os.homedir()` reads the passwd entry once. Shared with
+ * `lib/skills-sync/targets.ts` so the ownership ledger and the directories it
+ * claims cannot disagree about where home is.
+ */
+export function homeDir(): string {
+  const fromEnv = process.env.HOME;
+  return fromEnv && fromEnv.length > 0 ? fromEnv : homedir();
+}
+
+/**
+ * What the CLI materializes for other tools to read, as opposed to the user's
+ * configuration: separate from `getConfigDir` because wiping the generated
+ * plugin must never take `config.toml` with it.
+ */
+export function getDataDir(): string {
+  const xdg = process.env.XDG_DATA_HOME;
+  if (xdg && xdg.length > 0) return join(xdg, "appstrate");
+  return join(homeDir(), ".local", "share", "appstrate");
+}
+
 function getConfigPath(): string {
   return join(getConfigDir(), "config.toml");
 }

@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the bounded-concurrency mapper. It streams a run's input files
- * without an unbounded fan-out, and since the two pools were collapsed it is
- * also the boot-time fan-out for orphan cleanup and system-package sync.
- * Covers order preservation, the concurrency cap, and the
- * abort-on-first-rejection behaviour the workspace rollback relies on — the one
- * property the pool it replaced did NOT have.
+ * Order preservation, the concurrency cap, and abort-on-first-rejection — the
+ * property callers that roll back partial work rely on.
  */
 
 import { describe, it, expect } from "bun:test";
-import { mapWithConcurrency } from "../../src/lib/map-with-concurrency.ts";
+import { mapWithConcurrency } from "../src/map-with-concurrency.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 

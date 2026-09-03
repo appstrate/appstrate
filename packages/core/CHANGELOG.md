@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`./map-with-concurrency`** — the bounded worker pool, moved into core from
+  `apps/api/src/lib/map-with-concurrency.ts` unchanged. `mapWithConcurrency<T,
+R>(items, limit, fn)` maps over `items` with at most `limit` callbacks in
+  flight, preserves input order in the result, and on the first rejection lets
+  in-flight callbacks settle while starting no new ones before propagating —
+  the abort semantics a caller that rolls back partial work depends on. Moved
+  because the CLI's `appstrate skills sync` needs the same pool against the
+  rate-limited package routes, and a per-workspace copy is how the two pools
+  this one replaced came to disagree in the first place. Additive, minor.
+
 - **`./cache`** — one read-through cache primitive for the platform and its
   modules. `createCache<V>({ name, ttlMs, max })` (`CacheOptions`) returns a
   `Cache<V>`: `get(key, loader, { store? })` (`CacheGetOptions` — read-through
