@@ -389,7 +389,18 @@ export async function resolveTargetVersion(
   ) {
     throw new Error(`GitHub Releases API response missing tag_name.`);
   }
-  return normalizeVersion((parsed as { tag_name: string }).tag_name);
+  const tag = (parsed as { tag_name: string }).tag_name;
+  // Only a platform `v<semver>` release carries the CLI binaries. The npm
+  // workflows (`cli@`, `core@`, `afps-shared@`) publish their own GitHub
+  // Releases with `make_latest: false`; should one still come back here, name
+  // it instead of building `releases/download/vcli@…` and reporting a 404.
+  if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(tag)) {
+    throw new Error(
+      `GitHub's latest release is "${tag}", not a platform v* release. ` +
+        `Pin one with --release X.Y.Z, or mark the newest v* release as latest.`,
+    );
+  }
+  return normalizeVersion(tag);
 }
 
 interface PerformCurlUpdateOptions {
