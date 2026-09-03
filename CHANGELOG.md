@@ -345,6 +345,15 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **A killed `appstrate skills sync` no longer locks the next ten minutes of
+  sessions out.** Closing a Claude Code session seconds after opening it kills
+  the background sync it spawned, and the `mkdir` lock only expired by age —
+  every session in the following ten minutes reported `Another appstrate
+skills sync is running` and kept the stale plugin. The lock now records its
+  owner's pid and is reaped the moment that pid is gone; SIGTERM/SIGHUP release
+  it through the shutdown coordinator. Age remains the fallback for a lock
+  whose owner cannot be read.
+
 - **`appstrate self-update`, `bootstrap.sh` and `bootstrap-runner.sh` no longer
   break for the days between an npm release and the next platform tag.** The
   `cli@`, `core@` and `afps-shared@` publish workflows each create a GitHub
