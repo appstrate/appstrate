@@ -1808,10 +1808,7 @@ export function createPackagesRouter() {
       });
       throw internalError();
     }
-    // Non-blocking notices ride ALONGSIDE the resource, never inside it: the
-    // detail DTO is the same object `GET` serializes, and a fork-time notice is
-    // not resource state. Present only when something was skipped.
-    return c.json(result.warnings ? { ...detail, warnings: result.warnings } : detail, 201);
+    return c.json(detail, 201);
   });
 
   // --- Package import/download/publish routes ---

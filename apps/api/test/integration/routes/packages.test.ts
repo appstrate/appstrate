@@ -3099,10 +3099,7 @@ describe("Packages API", () => {
           display_name: "Plain Skill",
           description: "Nothing an agent-shaped normalisation could touch",
         },
-        // §3.3-conforming: a fork mints its published version only when the
-        // content would survive a publish, and this test asserts on that
-        // version's manifest.
-        "---\nname: plain-skill\ndescription: A plain skill.\n---\n# Plain Skill",
+        "# Plain Skill",
       );
 
       const res = await app.request(`/api/packages/${sourceId}/fork`, {

@@ -85,8 +85,7 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   The rule lives once, in `@appstrate/afps-shared`'s `checkSkillMarkdown`, and
   runs on every path that WRITES skill content: `POST /api/packages/skills`,
   `PUT /api/packages/skills/{scope}/{name}`, `POST .../versions`, `POST
-.../versions/{version}/restore`, `POST /api/packages/{scope}/{name}/fork`,
-  `POST /api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
+.../versions/{version}/restore`, `POST /api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
   `/import-bundle`, `/import-github`, and the MCP module's
   `validate_package_file` / `import_package_file`. The 400 is an ordinary
   problem+json whose first field error carries the machine-readable reason —
@@ -113,11 +112,9 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   stored skill draft whose `SKILL.md` does not conform must be completed before
   its next save or publish. **Restoring a legacy published version is refused**
   for the same reason: a restore writes a draft, and one that cannot be saved
-  or published is not a state the editor should be put back into. Forking such
-  a skill still SUCCEEDS — that is how a user takes over a legacy skill they do
-  not own in order to fix it — but the fork's published version is skipped and
-  the response carries a `warnings` entry, surfaced in the UI as a toast,
-  naming what to fix. The skill editor, the publish modal and the version-restore
+  or published is not a state the editor should be put back into. Forking is
+  NOT gated — it byte-copies an already-published artifact, so nothing new
+  enters the world. The skill editor, the publish modal and the version-restore
   confirmation all translate the server's reason codes, so the author sees the
   missing field rather than an English `detail` — or, as the restore dialog did
   before, nothing at all.

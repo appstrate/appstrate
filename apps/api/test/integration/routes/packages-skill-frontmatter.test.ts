@@ -332,49 +332,6 @@ describe("skill SKILL.md frontmatter gate (AFPS §3.3)", () => {
     });
   });
 
-  describe("POST /api/packages/{scope}/{name}/fork", () => {
-    /** Fork target org — a fork must be performed by an org that does NOT own it. */
-    let forker: TestContext;
-
-    beforeEach(async () => {
-      forker = await createTestContext({ orgSlug: "forkorg" });
-    });
-
-    it("forks a legacy skill as a draft, skips the version, and says what to fix", async () => {
-      expect((await createSkill(ctx, VALID_CONTENT)).status).toBe(201);
-      await publishLegacyVersion("2.0.0");
-
-      const res = await app.request(`/api/packages/${SKILL_ID}/fork`, {
-        method: "POST",
-        headers: authHeaders(forker, { "Content-Type": "application/json" }),
-        body: JSON.stringify({}),
-      });
-      // The fork SUCCEEDS: taking over a legacy skill is how a user repairs one
-      // they do not own.
-      expect(res.status).toBe(201);
-      const body = (await res.json()) as { id: string; warnings?: string[] };
-      expect(body.id).toBe("@forkorg/gate-skill");
-      expect(body.warnings?.join(" ")).toContain("description");
-
-      // …but no immutable version was minted from content publish would refuse.
-      expect(await versionsOf("@forkorg/gate-skill")).toEqual([]);
-    });
-
-    it("mints the version when the forked SKILL.md conforms", async () => {
-      expect((await createSkill(ctx, VALID_CONTENT)).status).toBe(201);
-
-      const res = await app.request(`/api/packages/${SKILL_ID}/fork`, {
-        method: "POST",
-        headers: authHeaders(forker, { "Content-Type": "application/json" }),
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(201);
-      const body = (await res.json()) as { id: string; warnings?: string[] };
-      expect(body.warnings).toBeUndefined();
-      expect(await versionsOf("@forkorg/gate-skill")).not.toEqual([]);
-    });
-  });
-
   describe("POST /api/packages/import", () => {
     async function importZip(files: Record<string, Uint8Array>, filename: string) {
       const formData = new FormData();

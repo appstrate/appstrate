@@ -1591,27 +1591,12 @@ export const packagesPaths = {
                 // runtime (issue #657). Fields vary by type, so the response is
                 // a `oneOf`. Fork provenance is resource state: `forked_from`
                 // is part of both detail DTOs.
-                allOf: [
-                  {
-                    oneOf: [
-                      { $ref: "#/components/schemas/AgentDetail" },
-                      { $ref: "#/components/schemas/OrgPackageItemDetail" },
-                    ],
-                  },
-                  {
-                    type: "object",
-                    properties: {
-                      warnings: {
-                        type: "array",
-                        items: { type: "string" },
-                        description:
-                          "Non-blocking notices about what the fork could not do. Present only when the draft was created but its published version was skipped — today, a skill whose SKILL.md does not satisfy AFPS §3.3. Fix the draft and publish.",
-                      },
-                    },
-                  },
+                oneOf: [
+                  { $ref: "#/components/schemas/AgentDetail" },
+                  { $ref: "#/components/schemas/OrgPackageItemDetail" },
                 ],
                 description:
-                  "The forked package resource — same shape as the new package's GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`) — plus an optional `warnings` array. The resource's `id` is the new package ID under org scope and `forked_from` carries the source package ID. No follow-up GET needed.",
+                  "The forked package resource — same shape as the new package's GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`). The resource's `id` is the new package ID under org scope and `forked_from` carries the source package ID. No follow-up GET needed.",
               },
             },
           },

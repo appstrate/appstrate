@@ -16605,10 +16605,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": (components["schemas"]["AgentDetail"] | components["schemas"]["OrgPackageItemDetail"]) & {
-                        /** @description Non-blocking notices about what the fork could not do. Present only when the draft was created but its published version was skipped — today, a skill whose SKILL.md does not satisfy AFPS §3.3. Fix the draft and publish. */
-                        warnings?: string[];
-                    };
+                    "application/json": components["schemas"]["AgentDetail"] | components["schemas"]["OrgPackageItemDetail"];
                 };
             };
             /** @description Already owned, name collision, unsupported type, or no published version. RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `name_collision`. */
