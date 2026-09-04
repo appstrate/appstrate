@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { Plus, Users, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -24,10 +24,14 @@ import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { useSpaces } from "../../hooks/use-spaces";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
-  spaceRoleAssignment,
   useSpaceRoleOptions,
   type SpaceRoleOption,
 } from "../../hooks/use-roles";
+import {
+  toSpaceAssignments,
+  validateSpaceAssignments,
+  type AssignmentDraft,
+} from "./invite-assignments";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
@@ -42,13 +46,6 @@ import {
 
 type OrgMember = components["schemas"]["OrgMember"];
 type SpaceAssignment = components["schemas"]["SpaceAssignment"];
-
-/** One row of the invite form's space section, before it becomes wire shape. */
-interface AssignmentDraft {
-  space_id: string;
-  /** Encoded role option — see `spaceRoleAssignment`. */
-  role: string;
-}
 
 interface InviteFormValues {
   email: string;
@@ -68,12 +65,6 @@ function spaceLabel(
     : `custom:${assignment.custom_role_id}`;
   const role = roleOptions.find((o) => o.value === value)?.label;
   return role ? `${name} — ${role}` : name;
-}
-
-function toSpaceAssignments(drafts: AssignmentDraft[]): SpaceAssignment[] {
-  return drafts
-    .filter((d) => d.space_id && d.role)
-    .map((d) => ({ space_id: d.space_id, ...spaceRoleAssignment(d.role) }));
 }
 
 /**
@@ -193,8 +184,9 @@ export function OrgSettingsMembersPage() {
     defaultValues: { email: "", role: "member", assignments: [] },
   });
   const inviteRole = useWatch({ control: inviteForm.control, name: "role" });
-  const inviteAssignments = useWatch({ control: inviteForm.control, name: "assignments" }) ?? [];
-  // `admin` runs every space already; the API refuses assignments for it.
+  // `admin` runs every space already; the API refuses assignments for it. The
+  // Controller stays MOUNTED either way so the field is never unregistered
+  // mid-form — only its UI is conditional.
   const showAssignments = inviteRole !== "admin";
 
   const {
@@ -262,11 +254,6 @@ export function OrgSettingsMembersPage() {
     const trimmed = data.email.trim();
     if (!trimmed || !orgId) return;
     const assignments = data.role === "admin" ? [] : toSpaceAssignments(data.assignments);
-    if (data.role === "guest" && assignments.length === 0) {
-      inviteForm.setError("assignments", { message: t("orgSettings.inviteSpacesRequired") });
-      return;
-    }
-    inviteForm.clearErrors("assignments");
     addMemberMutation.mutate({
       params: { path: { orgId } },
       body: { email: trimmed, role: data.role, space_assignments: assignments },
@@ -329,22 +316,36 @@ export function OrgSettingsMembersPage() {
             </Button>
           </div>
 
-          {showAssignments && (
-            <>
-              <SpaceAssignmentsField
-                value={inviteAssignments}
-                onChange={(next) => inviteForm.setValue("assignments", next)}
-                spaces={spaces ?? []}
-                roleOptions={roleOptions}
-                disabled={addMemberMutation.isPending}
-              />
-              {inviteForm.formState.errors.assignments && (
-                <p className="text-destructive text-sm">
-                  {inviteForm.formState.errors.assignments.message}
-                </p>
-              )}
-            </>
-          )}
+          <Controller
+            control={inviteForm.control}
+            name="assignments"
+            rules={{
+              validate: (value) =>
+                validateSpaceAssignments(
+                  inviteForm.getValues("role"),
+                  value,
+                  t("orgSettings.inviteSpacesRequired"),
+                ),
+            }}
+            render={({ field, fieldState }) =>
+              showAssignments ? (
+                <div className="space-y-2">
+                  <SpaceAssignmentsField
+                    value={field.value}
+                    onChange={field.onChange}
+                    spaces={spaces ?? []}
+                    roleOptions={roleOptions}
+                    disabled={addMemberMutation.isPending}
+                  />
+                  {fieldState.error && (
+                    <p className="text-destructive text-sm">{fieldState.error.message}</p>
+                  )}
+                </div>
+              ) : (
+                <></>
+              )
+            }
+          />
         </form>
       )}
 

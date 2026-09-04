@@ -2,7 +2,6 @@
 
 import { lazy, Suspense } from "react";
 import { Navigate } from "react-router-dom";
-import { usePermissions } from "../../../hooks/use-permissions";
 import { useAppConfig } from "../../../hooks/use-app-config";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState } from "../../../components/page-states";
@@ -14,11 +13,10 @@ const SpaceAuthTab = lazy(() =>
 );
 
 export function OrgSettingsSpaceAuthPage() {
-  const { can } = usePermissions();
   const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!can("spaces:write") || !spaceId || !features.oidc) {
+  if (!spaceId || !features.oidc) {
     return <Navigate to="/org-settings/space/general" replace />;
   }
 

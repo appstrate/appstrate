@@ -20,10 +20,9 @@ export function WebhooksPage() {
 
   const { data: webhooks, isLoading, error } = useWebhooks();
 
-  // The page lists both levels; either read opens it. Creating from here
-  // always pins `level: "space"` (see `useCreateWebhook`), so the button is
-  // the space grant — an org-level webhook is not creatable from this UI.
-  if (!can("webhooks:read") && !can("org-webhooks:read")) return null;
+  // Creating from here always pins `level: "space"` (see `useCreateWebhook`),
+  // so the button is the space grant — an org-level webhook is not creatable
+  // from this UI. The route gate owns the read half (either level opens it).
   const canCreate = can("webhooks:write");
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;

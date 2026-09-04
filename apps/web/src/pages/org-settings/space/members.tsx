@@ -58,10 +58,8 @@ function memberLabel(member: SpaceMemberObject): string {
 
 export function OrgSettingsSpaceMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
   const spaceId = useCurrentSpaceId();
 
-  if (!can("space-members:read")) return null;
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
   return <SpaceMembersTable spaceId={spaceId} />;
 }

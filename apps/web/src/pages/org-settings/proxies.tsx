@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Globe, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -50,7 +49,6 @@ export function OrgSettingsProxiesPage() {
   const testMutation = useTestProxy();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
-  if (!can("proxies:read")) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 

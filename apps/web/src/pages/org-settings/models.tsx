@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -471,8 +470,6 @@ export function OrgSettingsModelsPage() {
   const createPkMutation = useCreateModelProviderCredential();
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
-
-  if (!can("models:read")) return <Navigate to="/org-settings/general" replace />;
 
   return (
     <>

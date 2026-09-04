@@ -38,8 +38,7 @@ export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const { features } = useAppConfig();
-  const canReadRoles = can("roles:read");
-  const { data: roles, isLoading, error } = useRoles(canReadRoles);
+  const { data: roles, isLoading, error } = useRoles();
   const deleteRole = useDeleteRole();
 
   const [editing, setEditing] = useState<RoleObject | null>(null);
@@ -47,7 +46,6 @@ export function OrgSettingsRolesPage() {
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  if (!canReadRoles) return null;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 

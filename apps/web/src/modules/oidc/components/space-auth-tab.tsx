@@ -32,7 +32,6 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Spinner } from "@/components/spinner";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { Modal } from "@/components/modal";
-import { usePermissions } from "@/hooks/use-permissions";
 import {
   useSmtpConfig,
   useUpsertSmtpConfig,
@@ -48,8 +47,6 @@ import {
 
 export function SpaceAuthTab() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
-  if (!can("spaces:write")) return null;
 
   return (
     <div className="max-w-2xl space-y-10">

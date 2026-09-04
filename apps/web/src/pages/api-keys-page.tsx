@@ -33,7 +33,6 @@ export function ApiKeysPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
-  if (!can("api-keys:read")) return null;
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;

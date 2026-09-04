@@ -37,11 +37,9 @@ interface SettingsFormData {
 
 export function OrgSettingsSpaceGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
   const spaceId = useCurrentSpaceId();
   const { data: space, isLoading, error } = useSpace(spaceId ?? "");
 
-  if (!can("space-settings:write")) return null;
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;

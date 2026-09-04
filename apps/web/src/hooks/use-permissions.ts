@@ -47,7 +47,7 @@ export function roleI18nKey(role: OrgRole): string {
 export function usePermissions() {
   const { currentOrg } = useOrg();
   const spaceId = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
+  const { data: spaces, isLoading: spacesLoading } = useSpaces();
 
   const space = spaces?.find((s) => s.id === spaceId) ?? null;
   const orgPermissions = currentOrg?.permissions;
@@ -60,5 +60,13 @@ export function usePermissions() {
 
   const can = useCallback((permission: GateablePermission) => granted.has(permission), [granted]);
 
-  return { can, orgRole: currentOrg?.role ?? null };
+  // `can` answers `false` for a set that has not loaded yet, which reads the
+  // same as a denial. A gate that REFUSES on that answer (rather than merely
+  // hiding a button) has to wait, or a hard reload flashes "no access" before
+  // the two lists land. Ready = the org is known AND either a space is resolved
+  // or there is none this caller can enter.
+  const enterableSpaceExists = spaces?.some((s) => s.access === "member") ?? false;
+  const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
+
+  return { can, ready, orgRole: currentOrg?.role ?? null };
 }

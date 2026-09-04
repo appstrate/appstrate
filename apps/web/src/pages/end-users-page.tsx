@@ -121,7 +121,6 @@ function EndUsersPageContent() {
     );
   }, [endUsers, search]);
 
-  if (!can("end-users:read")) return null;
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 

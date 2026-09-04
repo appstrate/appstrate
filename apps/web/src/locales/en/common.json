@@ -103,5 +103,7 @@
   "claim.passwordHelp": "Minimum {{min}} characters.",
   "claim.submit": "Claim instance",
   "claim.submitting": "Creating account…",
-  "claim.docs": "Docs: examples/self-hosting/AUTH_MODES.md"
+  "claim.docs": "Docs: examples/self-hosting/AUTH_MODES.md",
+  "access.denied": "You do not have access to this page.",
+  "access.deniedHint": "Ask an organization administrator to grant you the necessary rights."
 }

@@ -22,8 +22,6 @@ export function OrgSettingsSpacesPage() {
   const navigate = useNavigate();
   const { switchSpace } = useSpaceSwitcher();
 
-  if (!can("spaces:read")) return null;
-
   const handleSpaceClick = (spaceId: string) => {
     switchSpace(spaceId);
     navigate("/org-settings/space/general");
@@ -65,6 +63,7 @@ export function OrgSettingsSpacesPage() {
                     })}
                   </span>
                 </div>
+                <Badge variant="secondary">{t(`spaces.visibility.${space.visibility}`)}</Badge>
                 {space.isDefault && <Badge variant="running">{t("spaces.default")}</Badge>}
                 {/* A `closed` space is listed so the caller knows it exists,
                     not so they can be dropped into it — pinning one 403s every

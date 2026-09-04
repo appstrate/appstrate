@@ -25,6 +25,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
+import { RequirePermission } from "./components/require-permission";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -793,17 +794,21 @@ export function App() {
                 <Route
                   path="/webhooks"
                   element={
-                    <Suspense fallback={<LoadingState />}>
-                      <WebhooksPage />
-                    </Suspense>
+                    <RequirePermission permission={["webhooks:read", "org-webhooks:read"]}>
+                      <Suspense fallback={<LoadingState />}>
+                        <WebhooksPage />
+                      </Suspense>
+                    </RequirePermission>
                   }
                 />
                 <Route
                   path="/webhooks/:id"
                   element={
-                    <Suspense fallback={<LoadingState />}>
-                      <WebhookDetailPage />
-                    </Suspense>
+                    <RequirePermission permission={["webhooks:read", "org-webhooks:read"]}>
+                      <Suspense fallback={<LoadingState />}>
+                        <WebhookDetailPage />
+                      </Suspense>
+                    </RequirePermission>
                   }
                 />
               </>
@@ -832,9 +837,11 @@ export function App() {
             <Route
               path="/end-users"
               element={
-                <LazyRoute>
-                  <EndUsersPage />
-                </LazyRoute>
+                <RequirePermission permission="end-users:read">
+                  <LazyRoute>
+                    <EndUsersPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -847,19 +854,110 @@ export function App() {
             >
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<OrgSettingsGeneralPage />} />
-              <Route path="members" element={<OrgSettingsMembersPage />} />
-              <Route path="roles" element={<OrgSettingsRolesPage />} />
-              <Route path="spaces" element={<OrgSettingsSpacesPage />} />
-              <Route path="models" element={<OrgSettingsModelsPage />} />
-              <Route path="proxies" element={<OrgSettingsProxiesPage />} />
-              <Route path="oauth" element={<OrgSettingsOAuthPage />} />
-              <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
-              <Route path="billing" element={<OrgSettingsBillingPage />} />
-              <Route path="space/general" element={<OrgSettingsSpaceGeneralPage />} />
-              <Route path="space/members" element={<OrgSettingsSpaceMembersPage />} />
-              <Route path="space/api-keys" element={<ApiKeysPage />} />
-              <Route path="space/auth" element={<OrgSettingsSpaceAuthPage />} />
-              <Route path="space/oauth" element={<OrgSettingsSpaceOauthPage />} />
+              <Route
+                path="members"
+                element={
+                  <RequirePermission permission="members:read">
+                    <OrgSettingsMembersPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="roles"
+                element={
+                  <RequirePermission permission="roles:read">
+                    <OrgSettingsRolesPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="spaces"
+                element={
+                  <RequirePermission permission="spaces:read">
+                    <OrgSettingsSpacesPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="models"
+                element={
+                  <RequirePermission permission="models:read">
+                    <OrgSettingsModelsPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="proxies"
+                element={
+                  <RequirePermission permission="proxies:read">
+                    <OrgSettingsProxiesPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="oauth"
+                element={
+                  <RequirePermission permission="oauth-clients:read">
+                    <OrgSettingsOAuthPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="cli-sessions"
+                element={
+                  <RequirePermission permission="cli-sessions:read">
+                    <OrgSettingsCliSessionsPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="billing"
+                element={
+                  <RequirePermission permission="billing:read">
+                    <OrgSettingsBillingPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="space/general"
+                element={
+                  <RequirePermission permission="space-settings:write">
+                    <OrgSettingsSpaceGeneralPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="space/members"
+                element={
+                  <RequirePermission permission="space-members:read">
+                    <OrgSettingsSpaceMembersPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="space/api-keys"
+                element={
+                  <RequirePermission permission="api-keys:read">
+                    <ApiKeysPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="space/auth"
+                element={
+                  <RequirePermission permission="spaces:write">
+                    <OrgSettingsSpaceAuthPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="space/oauth"
+                element={
+                  <RequirePermission permission="oauth-clients:read">
+                    <OrgSettingsSpaceOauthPage />
+                  </RequirePermission>
+                }
+              />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
