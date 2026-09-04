@@ -9,10 +9,15 @@
  * cannot administer. The route therefore drops the rows whose level the caller
  * cannot read.
  *
- * No org role holds that combination in Phase 1, so the caller is built from a
- * stub auth strategy with a hand-set `permissions` Set — the same technique
+ * The caller is built from a stub auth strategy with a hand-set `permissions`
+ * Set — the same technique
  * `apps/api/test/integration/middleware/module-auth-strategy.test.ts` uses.
  * Inventing a role instead would test the role table, not the route.
+ *
+ * That Set is the strategy's CEILING, not its grant (RBAC spec §4.2), so the
+ * principal behind it has to hold at least everything each test names: the stub
+ * therefore resolves an org `admin`, who holds both halves, and each test
+ * narrows to the one combination it is probing.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -20,9 +25,12 @@ import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
+  createTestUser,
+  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
+import { seedSpace, seedSpaceMember } from "../../../../../../test/helpers/seed.ts";
 import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
 import webhooksModule from "../../../index.ts";
 
@@ -46,7 +54,7 @@ const permsStrategy: AuthStrategy = {
       },
       orgId: currentCtx.orgId,
       orgSlug: currentCtx.org.slug,
-      orgRole: "member",
+      orgRole: "admin",
       authMethod: "webhook-perms-strategy",
       spaceId: currentCtx.defaultSpaceId,
       permissions: raw.split(","),
@@ -108,13 +116,17 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     return ((await res.json()) as { data: { id: string }[] }).data.map((w) => w.id);
   }
 
-  it("webhooks:read alone sees the space row and NOT the org row", async () => {
-    const ids = await listWith("webhooks:read");
-    expect(ids).toContain(spaceWebhookId);
-    expect(ids).not.toContain(orgWebhookId);
+  it("?all=true needs the ORG half — a space-only reader cannot enumerate every space", async () => {
+    // The filter below checks the LEVEL, not the space, so it could never stop
+    // a space admin of A from reading space B's rows through `all=true`. The
+    // cross-space view is the org half's, and nothing else.
+    const res = await app.request("/api/webhooks?all=true", {
+      headers: { "X-Test-Perms": "webhooks:read" },
+    });
+    expect(res.status).toBe(403);
   });
 
-  it("adding org-webhooks:read reveals the org row (control)", async () => {
+  it("adding org-webhooks:read reveals both rows (control)", async () => {
     // The discriminating half: the same request, the same rows, one extra
     // permission. Without it the assertion above could pass because the org
     // row was never created or never listed.
@@ -131,6 +143,32 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+  });
+
+  it("?spaceId= takes the permission from THAT space, not the caller's own", async () => {
+    // The stub strategy pins the default space, so this asks about a space the
+    // caller reaches only if their role there says so. `spaceViewer` is an org
+    // `member` with an explicit role in the default space and none in `other`.
+    const other = await seedSpace({ orgId: currentCtx!.orgId, visibility: "closed" });
+    const spaceReader = await createTestUser();
+    await addOrgMember(currentCtx!.orgId, spaceReader.id, "member");
+    await seedSpaceMember({
+      spaceId: currentCtx!.defaultSpaceId,
+      userId: spaceReader.id,
+      presetRole: "admin",
+    });
+
+    const ask = (ctx: TestContext, spaceId: string) =>
+      app.request(`/api/webhooks?spaceId=${spaceId}`, { headers: authHeaders(ctx) });
+
+    const reader: TestContext = { ...currentCtx!, user: spaceReader, cookie: spaceReader.cookie };
+    // Their own space: allowed.
+    expect((await ask(reader, currentCtx!.defaultSpaceId)).status).toBe(200);
+    // A space they hold no role in: refused, even though they hold
+    // `webhooks:read` somewhere.
+    expect((await ask(reader, other.id)).status).toBe(403);
+    // Control: the owner reads the same space fine.
+    expect((await ask(currentCtx!, other.id)).status).toBe(200);
   });
 
   it("no webhooks:read at all is a 403, not an empty page", async () => {

@@ -82,6 +82,8 @@ import {
 import {
   createSpaceSchema,
   updateSpaceSchema,
+  addSpaceMemberSchema,
+  updateSpaceMemberSchema,
   installPackageSchema,
   updatePackageSchema,
 } from "../routes/spaces.ts";
@@ -402,6 +404,19 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/spaces/{id}",
     jsonSchema: toJsonSchema(updateSpaceSchema),
     description: "Update space",
+  },
+
+  {
+    method: "POST",
+    path: "/api/spaces/{id}/members",
+    jsonSchema: toJsonSchema(addSpaceMemberSchema),
+    description: "Add a space member",
+  },
+  {
+    method: "PATCH",
+    path: "/api/spaces/{id}/members/{userId}",
+    jsonSchema: toJsonSchema(updateSpaceMemberSchema),
+    description: "Change a space member's role",
   },
 
   // ─── Space Packages ────────────────────────────────────────────────────

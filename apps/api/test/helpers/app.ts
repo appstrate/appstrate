@@ -126,7 +126,8 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Register module RBAC contributions BEFORE returning the app — mirrors
   // production wiring in `initSortedModules()`, which calls
   // `setModulePermissionsProvider` before init() runs so
-  // `resolvePermissions(role)` already sees module grants when modules are
+  // `orgPermissions(role)` / `presetPermissions(preset)` already see module
+  // grants when modules are
   // loaded. Without this, module-owned resources (e.g. `webhooks:*`,
   // `oauth-clients:*` after they were extracted out of the static core
   // catalog) are absent from the session's permission Set and every

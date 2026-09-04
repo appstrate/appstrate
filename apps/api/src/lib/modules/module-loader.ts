@@ -325,7 +325,8 @@ async function initSortedModules(
 ): Promise<void> {
   const sorted = topoSort(modules);
   // Compute the RBAC snapshot from module contributions and register it
-  // BEFORE init() runs, so any module that calls `resolvePermissions(...)`
+  // BEFORE init() runs, so any module that calls `orgPermissions(...)` /
+  // `presetPermissions(...)`
   // during init (e.g. seeding default API keys with module-owned scopes)
   // sees the merged view.
   const rbacSnapshot = collectModulePermissions(sorted);
@@ -400,7 +401,7 @@ export function collectModulePermissions(
     owner: new Set(),
     admin: new Set(),
     member: new Set(),
-    viewer: new Set(),
+    guest: new Set(),
   };
   const byPreset: Record<SpaceRolePreset, Set<string>> = {
     admin: new Set(),

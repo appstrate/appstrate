@@ -2,22 +2,43 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  resolvePermissions,
+  assertOrgRole,
+  effectivePermissions,
+  orgPermissions,
+  presetPermissions,
+  UnmigratedOrgRoleError,
   validateScopes,
-  resolveApiKeyPermissions,
   API_KEY_ALLOWED_SCOPES,
 } from "../../src/lib/permissions.ts";
+import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts";
 
-describe("resolvePermissions", () => {
+/**
+ * What `role` reaches in a plain `open` space with the default preset — the
+ * shape every request had before space membership existed, and the baseline
+ * these grant assertions are written against.
+ */
+function inDefaultSpace(role: Parameters<typeof orgPermissions>[0]): ReadonlySet<string> {
+  const ref = resolveSpaceRole(
+    role,
+    { id: "spc_test", visibility: "open", defaultRole: "operator" },
+    null,
+  );
+  return effectivePermissions({
+    orgPermissions: orgPermissions(role),
+    spacePermissions: spacePermissions(ref),
+  });
+}
+
+describe("effective permissions in an open space", () => {
   it("owner has all permissions", () => {
-    const perms = resolvePermissions("owner");
+    const perms = inDefaultSpace("owner");
     expect(perms.has("org:delete")).toBe(true);
     expect(perms.has("members:change-role")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
   });
 
   it("admin manages members and settings but never the org's identity", () => {
-    const perms = resolvePermissions("admin");
+    const perms = inDefaultSpace("admin");
     expect(perms.has("org:delete")).toBe(false);
     // Renaming/re-slugging is owner-only (RBAC spec §3.4). The matrix used to
     // grant it, but nothing read the matrix — `PUT /api/orgs/:orgId` was
@@ -30,7 +51,7 @@ describe("resolvePermissions", () => {
   });
 
   it("member can read + run agents + manage own connections", () => {
-    const perms = resolvePermissions("member");
+    const perms = inDefaultSpace("member");
     // Can read
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("org:read")).toBe(true);
@@ -67,38 +88,111 @@ describe("resolvePermissions", () => {
     expect(perms.has("webhooks:read")).toBe(false);
   });
 
-  it("viewer can only read", () => {
-    const perms = resolvePermissions("viewer");
-    // Can read everything visible
-    expect(perms.has("agents:read")).toBe(true);
+  it("guest reaches nothing in a space it was not added to", () => {
+    // The whole point of the role: an org identity with no implicit space
+    // access. In an OPEN space, where a member would hold the default preset,
+    // a guest holds no space-level string at all.
+    const perms = inDefaultSpace("guest");
     expect(perms.has("org:read")).toBe(true);
-    expect(perms.has("runs:read")).toBe(true);
-    // Module-owned read permissions included in viewer
-    expect(perms.has("schedules:read")).toBe(true);
-    expect(perms.has("models:read")).toBe(true);
-    // Cannot do anything else
-    expect(perms.has("agents:write")).toBe(false);
+    expect(perms.has("spaces:read")).toBe(true);
+    expect(perms.has("llm-proxy:call")).toBe(true);
+    // Not even the org directory — a guest is an outside collaborator.
+    expect(perms.has("members:read")).toBe(false);
+    // No space slice whatsoever.
+    expect(perms.has("agents:read")).toBe(false);
+    expect(perms.has("runs:read")).toBe(false);
+    expect(perms.has("chat:read")).toBe(false);
+  });
+
+  it("guest added to the space holds exactly the preset it was given", () => {
+    const ref = resolveSpaceRole(
+      "guest",
+      { id: "spc_test", visibility: "closed", defaultRole: "operator" },
+      { ref: { kind: "preset", preset: "viewer" } },
+    );
+    const perms = effectivePermissions({
+      orgPermissions: orgPermissions("guest"),
+      spacePermissions: spacePermissions(ref),
+    });
+    expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("agents:run")).toBe(false);
-    expect(perms.has("integrations:connect")).toBe(false);
     expect(perms.has("runs:cancel")).toBe(false);
-    expect(perms.has("org:update")).toBe(false);
-    expect(perms.has("org:delete")).toBe(false);
-    expect(perms.has("webhooks:read")).toBe(false);
   });
 
   it("returns a new Set each time (not shared reference)", () => {
-    const a = resolvePermissions("admin");
-    const b = resolvePermissions("admin");
+    const a = orgPermissions("admin");
+    const b = orgPermissions("admin");
     expect(a).not.toBe(b);
     expect(a).toEqual(b);
   });
 });
 
+describe("assertOrgRole", () => {
+  it("passes every current role through unchanged", () => {
+    for (const role of ["owner", "admin", "member", "guest"] as const) {
+      expect(assertOrgRole(role)).toBe(role);
+    }
+  });
+
+  it("refuses the retired value loudly, naming the migration script", () => {
+    // The discriminating half: a role the vocabulary still knows must NOT
+    // throw, so a test that only asserted the throw would also pass against a
+    // function that throws on everything.
+    expect(() => assertOrgRole("member")).not.toThrow();
+    expect(() => assertOrgRole("viewer")).toThrow(UnmigratedOrgRoleError);
+    expect(() => assertOrgRole("viewer")).toThrow(
+      /scripts\/migration\/0008-org-viewer-to-guest\.sql/,
+    );
+  });
+});
+
+describe("effectivePermissions", () => {
+  it("applies the credential ceiling to both halves", () => {
+    const effective = effectivePermissions({
+      orgPermissions: new Set(["org:read", "spaces:read"]),
+      spacePermissions: new Set(["agents:read", "agents:write"]),
+      scopeCeiling: new Set(["org:read", "agents:read"]),
+    });
+    expect([...effective].sort()).toEqual(["agents:read", "org:read"]);
+  });
+
+  it("leaves the union alone when there is no ceiling (cookie session)", () => {
+    const effective = effectivePermissions({
+      orgPermissions: new Set(["org:read"]),
+      spacePermissions: new Set(["agents:read"]),
+    });
+    expect([...effective].sort()).toEqual(["agents:read", "org:read"]);
+  });
+
+  it("is org-level only when no space has been resolved", () => {
+    const effective = effectivePermissions({ orgPermissions: orgPermissions("owner") });
+    expect(effective.has("org:delete")).toBe(true);
+    // An owner runs every space, but not through a route that has none.
+    expect(effective.has("agents:write")).toBe(false);
+  });
+});
+
+describe("presetPermissions", () => {
+  it("orders the four presets viewer ⊂ operator ⊂ builder ⊂ admin", () => {
+    const [viewer, operator, builder, admin] = (
+      ["viewer", "operator", "builder", "admin"] as const
+    ).map((p) => presetPermissions(p));
+    for (const [narrow, wide] of [
+      [viewer, operator],
+      [operator, builder],
+      [builder, admin],
+    ] as const) {
+      for (const perm of narrow!) expect(wide!.has(perm)).toBe(true);
+      expect(wide!.size).toBeGreaterThan(narrow!.size);
+    }
+  });
+});
+
 describe("validateScopes", () => {
-  it("filters scopes to creator role permissions + API key allowlist", () => {
+  it("filters scopes to the creator's effective set + API key allowlist", () => {
     const scopes = ["agents:read", "agents:write", "agents:run"];
     // Admin has all three
-    const adminResult = validateScopes(scopes, "admin");
+    const adminResult = validateScopes(scopes, inDefaultSpace("admin"));
     expect(adminResult).toContain("agents:read");
     expect(adminResult).toContain("agents:write");
     expect(adminResult).toContain("agents:run");
@@ -106,7 +200,7 @@ describe("validateScopes", () => {
 
   it("member cannot get agents:write scope", () => {
     const scopes = ["agents:read", "agents:write", "agents:run"];
-    const memberResult = validateScopes(scopes, "member");
+    const memberResult = validateScopes(scopes, inDefaultSpace("member"));
     expect(memberResult).toContain("agents:read");
     expect(memberResult).toContain("agents:run");
     expect(memberResult).not.toContain("agents:write");
@@ -116,14 +210,16 @@ describe("validateScopes", () => {
     // org/members are real permissions but session-only: no API key can ever
     // carry them, so asking for one is a caller error, not a narrowing.
     const scopes = ["org:read", "org:delete", "members:invite"];
-    expect(() => validateScopes(scopes, "owner")).toThrow(/org:read, org:delete, members:invite/);
+    expect(() => validateScopes(scopes, inDefaultSpace("owner"))).toThrow(
+      /org:read, org:delete, members:invite/,
+    );
   });
 
   it("throws on invalid/unknown scope strings, naming every offender", () => {
     const scopes = ["invalid:scope", "not-a-permission", ""];
     let thrown: unknown;
     try {
-      validateScopes(scopes, "owner");
+      validateScopes(scopes, inDefaultSpace("owner"));
     } catch (err) {
       thrown = err;
     }
@@ -133,28 +229,32 @@ describe("validateScopes", () => {
     expect((thrown as Error).message).toContain("not-a-permission");
   });
 
-  it("still narrows silently when the scope is real but above the creator role", () => {
+  it("still narrows silently when the scope is real but above the creator", () => {
     // A member cannot delegate what they do not hold — that is a rule, not a
     // typo, and the scopes-omitted default depends on it.
-    expect(validateScopes(["agents:read", "agents:write"], "member")).toEqual(["agents:read"]);
+    expect(validateScopes(["agents:read", "agents:write"], inDefaultSpace("member"))).toEqual([
+      "agents:read",
+    ]);
   });
 
   it("returns empty array for empty input", () => {
-    expect(validateScopes([], "admin")).toHaveLength(0);
+    expect(validateScopes([], inDefaultSpace("admin"))).toHaveLength(0);
   });
 });
 
-describe("resolveApiKeyPermissions", () => {
+describe("API-key permissions (scopes as the ceiling)", () => {
+  const withScopes = (scopes: string[], role: "admin" | "member") =>
+    effectivePermissions({
+      orgPermissions: inDefaultSpace(role),
+      scopeCeiling: new Set(scopes),
+    });
+
   it("empty scopes returns empty permissions", () => {
-    const perms = resolveApiKeyPermissions([], "admin");
-    expect(perms.size).toBe(0);
+    expect(withScopes([], "admin").size).toBe(0);
   });
 
-  it("scoped key returns intersection with current role", () => {
-    const perms = resolveApiKeyPermissions(
-      ["agents:read", "agents:write", "agents:delete"],
-      "admin",
-    );
+  it("scoped key returns intersection with the creator's live authority", () => {
+    const perms = withScopes(["agents:read", "agents:write", "agents:delete"], "admin");
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("agents:delete")).toBe(true);
@@ -164,11 +264,8 @@ describe("resolveApiKeyPermissions", () => {
 
   it("role downgrade reduces effective permissions", () => {
     // Key has admin-level scopes, but creator was downgraded to member
-    const perms = resolveApiKeyPermissions(
-      ["agents:read", "agents:write", "agents:delete"],
-      "member",
-    );
-    // Member has agents:read but not agents:write or agents:delete
+    const perms = withScopes(["agents:read", "agents:write", "agents:delete"], "member");
+    // A member in an open space holds the operator preset: read, not write.
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:delete")).toBe(false);

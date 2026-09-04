@@ -11,8 +11,20 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../helpers/app.ts";
 import { truncateAll } from "../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../helpers/auth.ts";
-import { seedAgent, seedRun, seedPackageVersion } from "../helpers/seed.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  authHeaders,
+  type TestContext,
+} from "../helpers/auth.ts";
+import {
+  seedAgent,
+  seedRun,
+  seedPackageVersion,
+  seedSpace,
+  seedSpaceMember,
+} from "../helpers/seed.ts";
 import { installPackage } from "../../src/services/space-packages.ts";
 
 const app = getTestApp();
@@ -25,6 +37,41 @@ describe("Multi-tenancy isolation", () => {
     await truncateAll();
     orgA = await createTestContext({ orgSlug: "org-a" });
     orgB = await createTestContext({ orgSlug: "org-b" });
+  });
+
+  // ─── Space membership does not cross the org boundary ────
+
+  describe("Space membership", () => {
+    it("a space role in org A grants nothing in a space of org B", async () => {
+      // Membership is per (space, user) and `space_members` carries NO org
+      // column, so the org tier is the FK's and the resolver's job. The
+      // discriminating shape is ONE user in BOTH orgs, holding a role in a
+      // space of A and none in a space of B: the same request, the same
+      // permission string, two orgs, two answers.
+      const crosser = await createTestUser();
+      await addOrgMember(orgA.orgId, crosser.id, "guest");
+      await addOrgMember(orgB.orgId, crosser.id, "guest");
+      await seedSpaceMember({
+        spaceId: orgA.defaultSpaceId,
+        userId: crosser.id,
+        presetRole: "admin",
+      });
+      const closedInB = await seedSpace({ orgId: orgB.orgId, visibility: "closed" });
+
+      const read = (ctx: TestContext, spaceId: string) =>
+        app.request("/api/agents", {
+          headers: authHeaders(
+            { ...ctx, user: crosser, cookie: crosser.cookie },
+            { "X-Space-Id": spaceId },
+          ),
+        });
+
+      // Control: the row does let them into org A's space.
+      expect((await read(orgA, orgA.defaultSpaceId)).status).toBe(200);
+      // …and buys them nothing in a space of org B, where they are a guest
+      // with no row of their own.
+      expect((await read(orgB, closedInB.id)).status).toBe(403);
+    });
   });
 
   // ─── Package / Agent isolation ───────────────────────────

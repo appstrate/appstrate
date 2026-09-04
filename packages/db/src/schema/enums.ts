@@ -19,9 +19,20 @@
 
 import { z } from "zod";
 import { pgEnum } from "drizzle-orm/pg-core";
+import { ORG_ROLES } from "@appstrate/core/permissions";
 import { runStatusValues } from "../run-status.ts";
 
-export const orgRoleValues = ["owner", "admin", "member", "viewer"] as const;
+/**
+ * The `org_role` pg enum IS `ORG_ROLES` from `@appstrate/core/permissions` —
+ * one tuple, so there is no mirror to keep in step and no parity assertion to
+ * write. `spaces.ts` already imports core in this same schema graph, so the
+ * import costs drizzle-kit nothing new.
+ *
+ * The DB type still carries the retired `viewer` value until migration 0057
+ * recreates it; nothing may write that value, and `assertOrgRole`
+ * (`apps/api/src/lib/permissions.ts`) refuses one that is read back.
+ */
+export const orgRoleValues = ORG_ROLES;
 export const orgRoleEnum = pgEnum("org_role", orgRoleValues);
 export type OrgRole = (typeof orgRoleValues)[number];
 

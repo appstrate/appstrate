@@ -22,7 +22,11 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { buildAppConfig } from "../../../src/lib/app-config.ts";
-import { resolvePermissions, getApiKeyAllowedScopes } from "../../../src/lib/permissions.ts";
+import {
+  orgPermissions,
+  presetPermissions,
+  getApiKeyAllowedScopes,
+} from "../../../src/lib/permissions.ts";
 import {
   getModuleEndUserAllowedScopes,
   setModulePermissionsProvider,
@@ -111,9 +115,15 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       "oauth-clients:delete",
     ];
 
-    it("role permission sets contain no module-owned scopes", () => {
-      for (const role of ["owner", "admin", "member", "viewer"] as const) {
-        const perms: ReadonlySet<string> = resolvePermissions(role);
+    it("role and preset permission sets contain no module-owned scopes", () => {
+      for (const role of ["owner", "admin", "member", "guest"] as const) {
+        const perms: ReadonlySet<string> = orgPermissions(role);
+        for (const scope of moduleOwnedScopes) {
+          expect(perms.has(scope)).toBe(false);
+        }
+      }
+      for (const preset of ["admin", "builder", "operator", "viewer"] as const) {
+        const perms: ReadonlySet<string> = presetPermissions(preset);
         for (const scope of moduleOwnedScopes) {
           expect(perms.has(scope)).toBe(false);
         }

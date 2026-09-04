@@ -11,8 +11,9 @@ import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/
 import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
-import { resolveApiKeyPermissions, resolvePermissions } from "../lib/permissions.ts";
-import { validateSpaceInOrg } from "../middleware/space-context.ts";
+import { effectivePermissions, orgPermissions, assertOrgRole } from "../lib/permissions.ts";
+import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
+import { validateSpaceInOrg, type SpaceContextRow } from "../middleware/space-context.ts";
 import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgRole } from "../types/index.ts";
@@ -87,14 +88,25 @@ interface SSEAuthResult {
 
 /**
  * These SSE routes are exempt from the auth pipeline (`skipAuth` matches
- * `/api/realtime/`), so the role's permission set is resolved here rather than
- * read from the context. It is the ROLE's set, not the API key's ceiling:
- * debug-log visibility follows the principal behind the stream, and narrowing
- * it to the key's scopes would hide debug frames from a `runs:read`-only key
- * that is allowed to see them today.
+ * `/api/realtime/`), so the principal's permission set is resolved here rather
+ * than read from the context. It is the PRINCIPAL's set in the streamed space,
+ * not the API key's ceiling: debug-log visibility follows the principal behind
+ * the stream, and narrowing it to the key's scopes would hide debug frames
+ * from a `runs:read`-only key that is allowed to see them today.
+ *
+ * `null` when the principal has no role in that space — a guest without a row,
+ * or a member of a closed/private space they were never added to. The caller
+ * turns that into a denied stream.
  */
-const canReadDebugLogsForRole = (role: OrgRole): boolean =>
-  resolvePermissions(role).has("runs:delete");
+async function resolveSpaceGrants(
+  role: OrgRole,
+  space: SpaceContextRow,
+  userId: string,
+): Promise<ReadonlySet<string> | null> {
+  const ref = resolveSpaceRole(role, space, await loadSpaceMember(space.id, userId));
+  if (!ref) return null;
+  return new Set<string>([...orgPermissions(role), ...spacePermissions(ref)]);
+}
 
 /**
  * Validate auth for SSE endpoints.
@@ -106,7 +118,7 @@ const canReadDebugLogsForRole = (role: OrgRole): boolean =>
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
  *
  * API keys go through the same canonical scope resolution as the HTTP
- * pipeline (`resolveApiKeyPermissions` — key scopes ∩ creator's live role)
+ * pipeline (key scopes ∩ the creator's live authority in the key's space)
  * and must carry `runs:read` to open any run stream; a valid key without
  * that grant is rejected with 403 instead of silently inheriting admin.
  */
@@ -122,22 +134,34 @@ async function validateSSEAuth(c: {
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
-    const permissions = resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole);
+    // The key's `spaceId` comes straight off the `api_keys` row, so this is
+    // the shape check for that path — an un-migrated `api_keys` table would
+    // otherwise open a stream on an `app_` id in silence. The row is then
+    // loaded because the space's visibility and default role are what decide
+    // the creator's membership.
+    assertSpaceId(keyInfo.spaceId);
+    const keySpace = await validateSpaceInOrg(keyInfo.spaceId, keyInfo.orgId);
+    if (!keySpace) return null;
+
+    // The creator's live authority in the key's space (RBAC spec §7.1): a
+    // creator who lost the space leaves the key with nothing to read here.
+    const grants = await resolveSpaceGrants(keyInfo.creatorRole, keySpace, keyInfo.userId);
+    if (!grants) {
+      throw forbidden("The key's creator is not a member of the key's space");
+    }
+    const permissions = effectivePermissions({
+      orgPermissions: grants,
+      scopeCeiling: new Set(keyInfo.scopes),
+    });
     if (!permissions.has("runs:read")) {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
-
-    // The key's `spaceId` comes straight off the `api_keys` row and never
-    // reaches `validateSpaceInOrg` (the key already proves org+space binding),
-    // so this is the shape check for that path — an un-migrated `api_keys`
-    // table would otherwise open a stream on an `app_` id in silence.
-    assertSpaceId(keyInfo.spaceId);
 
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
       role: keyInfo.creatorRole,
-      canReadDebugLogs: canReadDebugLogsForRole(keyInfo.creatorRole),
+      canReadDebugLogs: grants.has("runs:delete"),
       spaceId: keyInfo.spaceId,
     };
   }
@@ -170,11 +194,17 @@ async function validateSSEAuth(c: {
   const space = await validateSpaceInOrg(spaceId, orgId);
   if (!space) return null;
 
+  const role = assertOrgRole(rows[0].role);
+  // Same membership resolution the HTTP pipeline applies (`applySpacePermissions`):
+  // being in the org is not being in the space.
+  const grants = await resolveSpaceGrants(role, space, session.user.id);
+  if (!grants) return null;
+
   return {
     userId: session.user.id,
     orgId,
-    role: rows[0].role,
-    canReadDebugLogs: canReadDebugLogsForRole(rows[0].role),
+    role,
+    canReadDebugLogs: grants.has("runs:delete"),
     spaceId,
   };
 }

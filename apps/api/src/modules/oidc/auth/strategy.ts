@@ -33,7 +33,7 @@ import { db } from "@appstrate/db/client";
 import { user as authUsers, organizationMembers } from "@appstrate/db/schema";
 import type { AuthStrategy, AuthResolution } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
-import type { OrgRole } from "../../../types/index.ts";
+import { assertOrgRole } from "../../../lib/permissions.ts";
 import { logger } from "../../../lib/logger.ts";
 import { verifyEndUserAccessToken, type AccessTokenClaims } from "../services/enduser-token.ts";
 import { lookupEndUser } from "../services/enduser-mapping.ts";
@@ -231,7 +231,10 @@ async function resolveDashboardUser(claims: AccessTokenClaims): Promise<AuthReso
     });
     return null;
   }
-  const role = membership.role as OrgRole;
+  // The subject's LIVE membership row decides the token's ceiling, so a
+  // retired value here must fail loudly rather than silently mint a token with
+  // an unknown role behind it.
+  const role = assertOrgRole(membership.role);
   const permissions = [...scopesToPermissions(claims.scope, "dashboard_user", role)];
   return {
     user: {

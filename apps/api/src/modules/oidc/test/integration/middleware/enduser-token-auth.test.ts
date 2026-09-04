@@ -447,6 +447,43 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(res.status).toBe(200);
   });
 
+  it("a dashboard token with identity-only scopes reaches no space-level route", async () => {
+    // The token resolves an org role but asks for nothing beyond identity, so
+    // `scopesToPermissions` returns an EMPTY set. That empty set is the
+    // ceiling, and it has to be written as one: skipped, the space slice
+    // `requireSpaceContext` adds later would arrive unceilinged and hand an
+    // `openid`-only token the admin preset's full run of the space.
+    const { organizationMembers } = await import("@appstrate/db/schema");
+    await db.insert(organizationMembers).values({ userId: authUserId, orgId, role: "admin" });
+
+    const identityOnly = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      scope: "openid profile email",
+    });
+    const denied = await app.request("/api/agents", {
+      headers: { Authorization: `Bearer ${identityOnly}`, "X-Space-Id": spaceId },
+    });
+    expect(denied.status).toBe(403);
+
+    // Control: the same token, the same route, one requested scope.
+    const withScope = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      scope: "openid agents:read",
+    });
+    const allowed = await app.request("/api/agents", {
+      headers: { Authorization: `Bearer ${withScope}`, "X-Space-Id": spaceId },
+    });
+    expect(allowed.status).toBe(200);
+  });
+
   it("ignores a spoofed X-Org-Id header when the JWT pinned a different org", async () => {
     // Cross-org escalation guard. A user who is a member of orgs X and Y
     // holds a dashboard token scoped to org X (consent only granted there).

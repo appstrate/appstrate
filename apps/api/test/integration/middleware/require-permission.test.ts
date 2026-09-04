@@ -3,8 +3,9 @@
 /**
  * Integration tests for the RBAC permission system.
  *
- * Tests that requirePermission() middleware correctly enforces access
- * for all four roles: owner, admin, member, viewer.
+ * Tests that requirePermission() middleware correctly enforces access for
+ * owner, admin, member, and a read-only caller — which is now an org `guest`
+ * holding the `viewer` preset in the space, not an org role.
  * Uses real HTTP requests through the full middleware chain.
  */
 
@@ -18,7 +19,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpaceMember } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 
@@ -34,18 +35,34 @@ async function contextForRole(
   return { ...ownerCtx, user, cookie: user.cookie };
 }
 
+/**
+ * A read-only caller: an org `guest` (no implicit space access) with an
+ * explicit `viewer` row in the default space. This is what "viewer" means
+ * after the space-roles split — the two halves have to be seeded together,
+ * because the org half alone reaches no space at all.
+ */
+async function contextForSpaceViewer(ownerCtx: TestContext): Promise<TestContext> {
+  const ctx = await contextForRole(ownerCtx, "guest");
+  await seedSpaceMember({
+    spaceId: ownerCtx.defaultSpaceId,
+    userId: ctx.user.id,
+    presetRole: "viewer",
+  });
+  return ctx;
+}
+
 describe("RBAC — Permission enforcement", () => {
   let owner: TestContext;
   let admin: TestContext;
   let member: TestContext;
-  let viewer: TestContext;
+  let spaceViewer: TestContext;
 
   beforeEach(async () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "rbac-test" });
     admin = await contextForRole(owner, "admin");
     member = await contextForRole(owner, "member");
-    viewer = await contextForRole(owner, "viewer");
+    spaceViewer = await contextForSpaceViewer(owner);
   });
 
   // ─── Admin-only routes ─────────────────────────────────────
@@ -97,10 +114,10 @@ describe("RBAC — Permission enforcement", () => {
       expect(res.status).toBe(403);
     });
 
-    it("viewer gets 403 on create model", async () => {
+    it("space viewer gets 403 on create model", async () => {
       const res = await app.request("/api/models", {
         method: "POST",
-        headers: authHeaders(viewer, { "Content-Type": "application/json" }),
+        headers: authHeaders(spaceViewer, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
           apiShape: "openai",
@@ -130,9 +147,9 @@ describe("RBAC — Permission enforcement", () => {
       expect(res.status).toBe(403);
     });
 
-    it("viewer gets 403 on list api keys", async () => {
+    it("space viewer gets 403 on list api keys", async () => {
       const res = await app.request("/api/api-keys", {
-        headers: authHeaders(viewer),
+        headers: authHeaders(spaceViewer),
       });
       expect(res.status).toBe(403);
     });
@@ -181,7 +198,7 @@ describe("RBAC — Permission enforcement", () => {
       expect(body.detail as string).toContain("schedules:write");
     });
 
-    it("viewer gets 403 on schedule creation", async () => {
+    it("space viewer gets 403 on schedule creation", async () => {
       await seedPackage({ id: `@rbac-test/test-agent`, orgId: owner.orgId });
       await installPackage(
         { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
@@ -189,7 +206,7 @@ describe("RBAC — Permission enforcement", () => {
       );
       const res = await app.request(`/api/agents/@rbac-test/test-agent/schedules`, {
         method: "POST",
-        headers: authHeaders(viewer, { "Content-Type": "application/json" }),
+        headers: authHeaders(spaceViewer, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           cronExpression: "0 9 * * 1",
         }),
@@ -255,23 +272,23 @@ describe("RBAC — Permission enforcement", () => {
   // ─── Read routes accessible to all ─────────────────────────
 
   describe("read routes accessible to all roles", () => {
-    it("viewer can list agents", async () => {
+    it("space viewer can list agents", async () => {
       const res = await app.request("/api/agents", {
-        headers: authHeaders(viewer),
+        headers: authHeaders(spaceViewer),
       });
       expect(res.status).toBe(200);
     });
 
-    it("viewer can list models", async () => {
+    it("space viewer can list models", async () => {
       const res = await app.request("/api/models", {
-        headers: authHeaders(viewer),
+        headers: authHeaders(spaceViewer),
       });
       expect(res.status).toBe(200);
     });
 
-    it("viewer can list spaces", async () => {
+    it("space viewer can list spaces", async () => {
       const res = await app.request("/api/spaces", {
-        headers: authHeaders(viewer),
+        headers: authHeaders(spaceViewer),
       });
       expect(res.status).toBe(200);
     });

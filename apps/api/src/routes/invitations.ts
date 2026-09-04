@@ -16,6 +16,7 @@ import { addMember, getOrgById } from "../services/organizations.ts";
 import { recordAudit } from "../services/audit.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
+import { assertOrgRole } from "../lib/permissions.ts";
 
 const router = new Hono();
 
@@ -129,7 +130,16 @@ router.post("/:token/accept", async (c) => {
   const claimed = await db.transaction(async (tx) => {
     const won = await markInvitationAccepted(invitation.id, tx);
     if (!won) return false;
-    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
+    // Through `assertOrgRole` because this is where a stored invitation role
+    // becomes an `org_members.role`: a pending invitation still carrying the
+    // retired value must fail loudly naming the script, not create a member
+    // nobody can authenticate.
+    await addMember(
+      invitation.orgId,
+      session.user.id,
+      assertOrgRole(invitation.role) as AssignableOrgRole,
+      tx,
+    );
     return true;
   });
 

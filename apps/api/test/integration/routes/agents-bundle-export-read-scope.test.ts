@@ -239,11 +239,13 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // ever loses `skills:read` while keeping `agents:read`, this fails loudly
     // rather than silently 403ing the dashboard's export button.
     //
-    // EVERY role, not just the owner `ctx` was created with: `member` and
-    // `viewer` are the ones whose grant lists could plausibly be trimmed, and
-    // they are exactly the two an owner-only check never reaches. Each gets its
-    // own user — role is a property of the membership row, not of the session.
-    for (const role of ["owner", "admin", "member", "viewer"] as const) {
+    // EVERY role that reaches a space, not just the owner `ctx` was created
+    // with: `member` is the one whose grant list could plausibly be trimmed,
+    // and it is the one an owner-only check never reaches. A `guest` has no
+    // implicit space access at all, which is a different assertion (see the
+    // membership suite). Each gets its own user — role is a property of the
+    // membership row, not of the session.
+    for (const role of ["owner", "admin", "member"] as const) {
       const roleUser = await createTestUser();
       await addOrgMember(ctx.orgId, roleUser.id, role);
       const headers = authHeaders({ ...ctx, cookie: roleUser.cookie });

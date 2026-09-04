@@ -33,7 +33,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { looksLoopback } from "../lib/redirect-uri";
 
 /** Role allowlist for org-level auto-provisioning. `owner` deliberately excluded. */
-const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "viewer"];
+const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "guest"];
 
 /** Scopes that are always granted — cannot be unchecked in the UI. */
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);

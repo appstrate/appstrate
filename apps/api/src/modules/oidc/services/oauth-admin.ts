@@ -47,6 +47,7 @@ import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
+import { assertOrgRole } from "../../../lib/permissions.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
 // ─── SECURITY: Trust boundary ─────────────────────────────────────────────────
@@ -144,7 +145,7 @@ function assertValidRedirectUris(uris: readonly string[]): void {
  * misconfigured client is an unacceptable operational risk. Admins who
  * genuinely need a new owner must promote after the fact.
  */
-export const SIGNUP_ROLE_ALLOWED = ["admin", "member", "viewer"] as const;
+export const SIGNUP_ROLE_ALLOWED = ["admin", "member", "guest"] as const;
 export type SignupRole = (typeof SIGNUP_ROLE_ALLOWED)[number];
 
 export interface OAuthClientRecord {
@@ -195,7 +196,12 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     disabled: row.disabled ?? false,
     isFirstParty: row.skipConsent ?? false,
     allowSignup: row.allowSignup ?? false,
-    signupRole: row.signupRole as SignupRole,
+    // Through `assertOrgRole` because `signup_role` writes straight into
+    // `org_members.role`: a row still holding the retired `viewer` must fail
+    // loudly naming the script, not auto-provision an unreadable role. The
+    // narrowing to `SignupRole` is the DB CHECK's guarantee — `owner` is
+    // refused at the service, the schema and the constraint.
+    signupRole: assertOrgRole(row.signupRole) as SignupRole,
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };

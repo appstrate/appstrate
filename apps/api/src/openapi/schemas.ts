@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { orgRoleEnum } from "@appstrate/db/schema";
+import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "../lib/ids.ts";
 
@@ -1662,6 +1663,11 @@ export const schemas = {
       "name",
       "isDefault",
       "settings",
+      "visibility",
+      "default_role",
+      "access",
+      "role",
+      "permissions",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1682,12 +1688,99 @@ export const schemas = {
           },
         },
       },
+      visibility: {
+        type: "string",
+        enum: [...SPACE_VISIBILITIES],
+        description:
+          "Who reaches the space without an explicit membership row: `open` (every org member), `closed` (listed, not enterable), `private` (not listed).",
+      },
+      default_role: {
+        type: "string",
+        enum: [...SPACE_ROLE_PRESETS],
+        description: "Preset the implicit members of an `open` space hold",
+      },
+      access: {
+        type: "string",
+        enum: ["member", "none"],
+        description: "Whether the caller may enter this space",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+        description: "The caller's role in this space, or null when they have none",
+      },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description: "The caller's effective permission set in this space, ceiling applied",
+      },
       created_by: {
         type: ["string", "null"],
         description: "ID of the user who created the space",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+
+  SpaceMemberObject: {
+    type: "object",
+    required: ["object", "userId", "name", "email", "org_role", "source", "role", "created_at"],
+    properties: {
+      object: { type: "string", enum: ["space_member"] },
+      userId: { type: "string" },
+      name: { type: ["string", "null"] },
+      email: { type: ["string", "null"] },
+      org_role: { type: "string", enum: ORG_ROLES },
+      source: {
+        type: "string",
+        enum: ["explicit", "org_role", "open_space"],
+        description:
+          "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      created_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "When the explicit row was written; null for an implicit member",
+      },
+    },
+  },
+
+  SpaceMemberAssignment: {
+    type: "object",
+    required: ["object", "userId"],
+    properties: {
+      object: { type: "string", enum: ["space_member"] },
+      userId: { type: "string" },
+      preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      custom_role_id: { type: "string" },
+    },
+  },
+
+  SpaceMemberRemoval: {
+    type: "object",
+    required: ["access_after"],
+    properties: {
+      access_after: {
+        type: "string",
+        enum: ["implicit", "none"],
+        description:
+          "Whether the removed member keeps implicit access (open space) or loses the space entirely.",
+      },
     },
   },
   EndUserObject: {

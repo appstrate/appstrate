@@ -2602,7 +2602,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.
+         * @description Change a member's role. Owners can manage any non-owner; admins can manage guests and members.
          */
         put: operations["changeMemberRole"];
         post?: never;
@@ -3977,9 +3977,57 @@ export interface paths {
         head?: never;
         /**
          * Update a space
-         * @description Update space name or settings.
+         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Making the org's default space non-`open` is a 400.
          */
         patch: operations["updateSpace"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List space members
+         * @description Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member (`source: "open_space"`).
+         */
+        get: operations["listSpaceMembers"];
+        put?: never;
+        /**
+         * Add a space member
+         * @description Grant a user an explicit role in this space. The user must already be an org member (404 otherwise). Owners and admins are refused with 409 `redundant_space_role` — they already run every space.
+         */
+        post: operations["addSpaceMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a space member
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely.
+         */
+        delete: operations["removeSpaceMember"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a space member's role
+         * @description Change the role of an EXISTING explicit membership row (404 when there is none).
+         */
+        patch: operations["updateSpaceMember"];
         trace?: never;
     };
     "/api/spaces/{id}/smtp-config": {
@@ -5016,7 +5064,7 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "viewer";
+            signupRole: "admin" | "member" | "guest";
             createdAt: string | null;
             updatedAt: string | null;
         };
@@ -5035,7 +5083,7 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "viewer";
+            signupRole: "admin" | "member" | "guest";
             createdAt: string | null;
             updatedAt: string | null;
             clientSecret: string;
@@ -5070,7 +5118,7 @@ export interface components {
             id: string;
             email: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
             token: string;
             /** Format: date-time */
             expiresAt: string;
@@ -5082,7 +5130,7 @@ export interface components {
             displayName?: string;
             email?: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
             /** Format: date-time */
             joinedAt: string;
         };
@@ -5213,7 +5261,7 @@ export interface components {
             name: string;
             slug: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
             /**
              * Format: date-time
              * @description Creation timestamp
@@ -5542,6 +5590,46 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        SpaceMemberAssignment: {
+            /** @enum {string} */
+            object: "space_member";
+            userId: string;
+            /** @enum {string} */
+            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            custom_role_id?: string;
+        };
+        SpaceMemberObject: {
+            /** @enum {string} */
+            object: "space_member";
+            userId: string;
+            name: string | null;
+            email: string | null;
+            /** @enum {string} */
+            org_role: "owner" | "admin" | "member" | "guest";
+            /**
+             * @description How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.
+             * @enum {string}
+             */
+            source: "explicit" | "org_role" | "open_space";
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
+            /**
+             * Format: date-time
+             * @description When the explicit row was written; null for an implicit member
+             */
+            created_at: string | null;
+        };
+        SpaceMemberRemoval: {
+            /**
+             * @description Whether the removed member keeps implicit access (open space) or loses the space entirely.
+             * @enum {string}
+             */
+            access_after: "implicit" | "none";
+        };
         SpaceObject: {
             /** @description Space ID (spc_ prefix) */
             id: string;
@@ -5560,6 +5648,30 @@ export interface components {
                 /** @description Domains allowed for OAuth redirect callbacks */
                 allowedRedirectDomains?: string[];
             };
+            /**
+             * @description Who reaches the space without an explicit membership row: `open` (every org member), `closed` (listed, not enterable), `private` (not listed).
+             * @enum {string}
+             */
+            visibility: "open" | "closed" | "private";
+            /**
+             * @description Preset the implicit members of an `open` space hold
+             * @enum {string}
+             */
+            default_role: "admin" | "builder" | "operator" | "viewer";
+            /**
+             * @description Whether the caller may enter this space
+             * @enum {string}
+             */
+            access: "member" | "none";
+            /** @description The caller's role in this space, or null when they have none */
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
+            /** @description The caller's effective permission set in this space, ceiling applied */
+            permissions: string[];
             /** @description ID of the user who created the space */
             created_by: string | null;
             /** Format: date-time */
@@ -11864,7 +11976,7 @@ export interface operations {
                         org: {
                             id: string;
                             /** @enum {string} */
-                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            role: "owner" | "admin" | "member" | "guest" | "end_user";
                             /** @description Human-readable organization name. */
                             name?: string | null;
                             /** @description Organization slug. */
@@ -12096,7 +12208,7 @@ export interface operations {
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
                              */
-                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            role: "owner" | "admin" | "member" | "guest" | "end_user";
                             /** Format: date-time */
                             createdAt: string;
                         }[];
@@ -13499,7 +13611,7 @@ export interface operations {
                      * @description Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "viewer";
+                    signupRole?: "admin" | "member" | "guest";
                 } | {
                     /** @enum {string} */
                     level: "space";
@@ -13633,7 +13745,7 @@ export interface operations {
                      * @description Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "viewer";
+                    signupRole?: "admin" | "member" | "guest";
                 };
             };
         };
@@ -14127,7 +14239,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "viewer" | "member" | "admin";
+                    role: "guest" | "member" | "admin";
                 };
             };
         };
@@ -14203,7 +14315,7 @@ export interface operations {
                      * @default member
                      * @enum {string}
                      */
-                    role?: "viewer" | "member" | "admin";
+                    role?: "guest" | "member" | "admin";
                 };
             };
         };
@@ -14249,7 +14361,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "viewer" | "member" | "admin";
+                    role: "guest" | "member" | "admin";
                 };
             };
         };
@@ -18783,6 +18895,18 @@ export interface operations {
                      *           "settings": {
                      *             "allowedRedirectDomains": []
                      *           },
+                     *           "visibility": "open",
+                     *           "default_role": "operator",
+                     *           "access": "member",
+                     *           "role": {
+                     *             "kind": "preset",
+                     *             "key": "operator",
+                     *             "name": "operator"
+                     *           },
+                     *           "permissions": [
+                     *             "agents:read",
+                     *             "agents:run"
+                     *           ],
                      *           "created_by": null,
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -18798,6 +18922,14 @@ export interface operations {
                      *               "myapp.com"
                      *             ]
                      *           },
+                     *           "visibility": "closed",
+                     *           "default_role": "operator",
+                     *           "access": "none",
+                     *           "role": null,
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "spaces:read"
+                     *           ],
                      *           "created_by": "usr_k7x9m2p4q1",
                      *           "createdAt": "2026-01-15T10:30:00Z",
                      *           "updatedAt": "2026-01-15T10:30:00Z"
@@ -18864,6 +18996,18 @@ export interface operations {
                      *           "staging.myapp.com"
                      *         ]
                      *       },
+                     *       "visibility": "open",
+                     *       "default_role": "operator",
+                     *       "access": "member",
+                     *       "role": {
+                     *         "kind": "preset",
+                     *         "key": "admin",
+                     *         "name": "admin"
+                     *       },
+                     *       "permissions": [
+                     *         "agents:read",
+                     *         "agents:run"
+                     *       ],
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z"
@@ -18957,6 +19101,16 @@ export interface operations {
                         /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
                         allowedRedirectDomains?: string[];
                     };
+                    /**
+                     * @description Who reaches the space without an explicit membership row. The default space must stay `open`.
+                     * @enum {string}
+                     */
+                    visibility?: "open" | "closed" | "private";
+                    /**
+                     * @description Preset the implicit members of an `open` space hold
+                     * @enum {string}
+                     */
+                    default_role?: "admin" | "builder" | "operator" | "viewer";
                 };
             };
         };
@@ -18976,6 +19130,171 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listSpaceMembers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space member list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["SpaceMemberObject"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    userId: string;
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    custom_role_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Space member added */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberAssignment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner or admin — an explicit space role would grant nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    removeSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space member removed */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberRemoval"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    custom_role_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Space member role changed */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberAssignment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner or admin — an explicit space role would grant nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getSpaceSmtpConfig: {
@@ -20720,7 +21039,7 @@ export interface operations {
                         email: string;
                         org_name: string;
                         /** @enum {string} */
-                        role: "owner" | "admin" | "member" | "viewer";
+                        role: "owner" | "admin" | "member" | "guest";
                         inviter_name: string;
                         expiresAt: string;
                         is_new_user: boolean;

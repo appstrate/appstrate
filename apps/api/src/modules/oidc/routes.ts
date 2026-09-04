@@ -33,8 +33,7 @@ import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password
 import { user, spaces } from "@appstrate/db/schema";
 import { validateSpaceInOrg } from "../../middleware/space-context.ts";
 import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
-import { resolvePermissions } from "../../lib/permissions.ts";
-import type { OrgRole } from "../../types/index.ts";
+import { assertOrgRole, effectivePermissions, orgPermissions } from "../../lib/permissions.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
 import {
   createClient,
@@ -2540,7 +2539,7 @@ export function createOidcRouter() {
   //
   // Authorization is the standard module RBAC contract: `ensureOrgMembership`
   // resolves the caller's role from `org_members`, populates
-  // `c.var.permissions` via `resolvePermissions(role)`, and then
+  // `c.var.permissions` via `orgPermissions(role)`, and then
   // `requireModulePermission("cli-sessions", "read"|"delete")` enforces
   // membership in that Set — same fail-closed primitive as every other
   // module-owned route in the file. The `cli-sessions` resource is
@@ -2610,10 +2609,14 @@ function ensureOrgMembership() {
     const userId = c.get("user").id;
     const member = await getOrgMember(orgId, userId);
     if (!member) throw forbidden("Not a member of this organization");
-    const role = member.role as OrgRole;
+    const role = assertOrgRole(member.role);
+    const org = orgPermissions(role);
     c.set("orgId", orgId);
     c.set("orgRole", role);
-    c.set("permissions", resolvePermissions(role));
+    c.set("orgPermissions", org);
+    // `cli-sessions` is an ORG-level resource, so the org half is the whole
+    // answer here — these routes never enter a space.
+    c.set("permissions", effectivePermissions({ orgPermissions: org }));
     return next();
   };
 }

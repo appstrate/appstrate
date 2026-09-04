@@ -14,11 +14,16 @@
  * ## Two levels, one Set
  *
  * Every permission belongs to exactly one level (RBAC spec §3.4). An org role
- * grants org-level strings (`ORG_ROLE_PERMISSIONS`); a space role grants
- * space-level ones (`SPACE_PRESET_PERMISSIONS`). `resolvePermissions` unions
- * the two, so `c.get("permissions")` and every guard keep the exact shape they
- * had. Until Phase 2 gives spaces their own membership rows, the preset an
- * org role holds is fixed by `IMPLICIT_PRESET_BY_ORG_ROLE`.
+ * grants org-level strings ({@link orgPermissions}); a space role grants
+ * space-level ones ({@link spacePermissions}), and which space role a caller
+ * holds is answered per request by the resolver in `lib/space-role.ts` from a
+ * `space_members` row. {@link effectivePermissions} unions the two halves and
+ * applies the credential ceiling, so `c.get("permissions")` and every guard
+ * keep the exact shape they had.
+ *
+ * A route outside a space context therefore sees org-level strings only — a
+ * space-level guard can never pass on an org route, which is the property the
+ * split exists for.
  *
  * ## Core vs module resources
  *
@@ -29,8 +34,8 @@
  * merging on `ModuleResources` for compile-time narrowing).
  * Contributions are aggregated at boot by `collectModulePermissions()`
  * and merged into:
- *   - `resolvePermissions(role)` — org-level entries by role, space-level
- *     entries by preset
+ *   - `orgPermissions(role)` — org-level entries, by role
+ *   - `presetPermissions(preset)` — space-level entries, by space-role preset
  *   - `getApiKeyAllowedScopes()` — when `apiKeyGrantable: true`
  *   - `getModuleEndUserAllowedScopes()` — when `endUserGrantable: true`
  *
@@ -58,7 +63,9 @@ import {
   type SpaceLevelPermission,
   type SpaceRolePreset,
   ORG_LEVEL_PERMISSIONS,
+  ORG_ROLES,
   SPACE_LEVEL_PERMISSIONS,
+  SPACE_ROLE_PRESETS,
   getModuleRoleScopes,
   getModulePresetScopes,
   getModuleApiKeyScopes,
@@ -128,13 +135,20 @@ const MEMBER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevel
   "llm-proxy:call",
 ]);
 
-/** Viewer: read-only on the org surface. */
-const VIEWER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>([
+/**
+ * Guest: an org identity with no implicit reach into any space (RBAC spec
+ * §3.2). Same infrastructure reads as a member minus `members:read` — a guest
+ * is an outside collaborator and has no business enumerating the org
+ * directory.
+ */
+const GUEST_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>([
   "org:read",
-  "members:read",
   "spaces:read",
   "models:read",
   "proxies:read",
+  // A guest still runs completions in the spaces they were added to; the
+  // proxy is org-metered and not space-scoped, so the grant lives here.
+  "llm-proxy:call",
 ]);
 
 /** Org role → org-level permissions. Module org grants are layered on at resolve time. */
@@ -142,7 +156,7 @@ const ORG_ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<OrgLevelPermission>> = {
   owner: OWNER_ORG_PERMISSIONS,
   admin: ADMIN_ORG_PERMISSIONS,
   member: MEMBER_ORG_PERMISSIONS,
-  viewer: VIEWER_ORG_PERMISSIONS,
+  guest: GUEST_ORG_PERMISSIONS,
 };
 
 // ---------------------------------------------------------------------------
@@ -205,18 +219,6 @@ const SPACE_PRESET_PERMISSIONS: Record<SpaceRolePreset, ReadonlySet<SpaceLevelPe
   builder: BUILDER_PRESET_PERMISSIONS,
   operator: OPERATOR_PRESET_PERMISSIONS,
   viewer: VIEWER_PRESET_PERMISSIONS,
-};
-
-/**
- * Space preset an org role holds implicitly, until Phase 2 replaces this with
- * `space_members` rows and a per-space resolver. Owner/admin run every space;
- * a member uses what is built; a viewer looks.
- */
-const IMPLICIT_PRESET_BY_ORG_ROLE: Record<OrgRole, SpaceRolePreset> = {
-  owner: "admin",
-  admin: "admin",
-  member: "operator",
-  viewer: "viewer",
 };
 
 // ---------------------------------------------------------------------------
@@ -306,30 +308,108 @@ export function getApiKeyAllowedScopes(): ReadonlySet<string> {
 }
 
 /**
- * Resolve an org role to its full permission set: its org-level grants union
- * the space-level grants of the preset it implicitly holds, with module
- * contributions merged into each half.
+ * A persisted `org_role` value outside {@link ORG_ROLES}.
+ *
+ * The only value this can carry today is the retired `viewer`, which the DB
+ * type still accepts until migration 0057 recreates it. Mapping it to `guest`
+ * would silently change what those users reach, so the resolver refuses
+ * instead — a 500 for that one caller, naming the script that fixes it.
+ * `NO_TRANSITIONAL_CODE.md` §1: the retired form fails loudly, never falls back.
  */
-export function resolvePermissions(role: OrgRole): Set<Permission> {
-  const preset = IMPLICIT_PRESET_BY_ORG_ROLE[role];
+export class UnmigratedOrgRoleError extends Error {
+  readonly value: string;
+
+  constructor(value: string) {
+    super(
+      `org_members.role = '${value}' is retired; run scripts/migration/0008-org-viewer-to-guest.sql`,
+    );
+    this.name = "UnmigratedOrgRoleError";
+    this.value = value;
+  }
+}
+
+const ORG_ROLE_SET: ReadonlySet<string> = new Set<string>(ORG_ROLES);
+
+/**
+ * Narrow a persisted role string to {@link OrgRole}. The single place a DB
+ * `role` column becomes a role the policy layer trusts — `org_members.role`,
+ * `org_invitations.role`, an API key's creator role, an OIDC signup role.
+ *
+ * @throws UnmigratedOrgRoleError on a value the current vocabulary retired.
+ */
+export function assertOrgRole(value: string): OrgRole {
+  if (!ORG_ROLE_SET.has(value)) throw new UnmigratedOrgRoleError(value);
+  return value as OrgRole;
+}
+
+/**
+ * Org-level permissions of `role`: the static grants union the module
+ * contributions declared at `level: "org"`.
+ *
+ * This is the whole set a caller holds outside a space. The space half is
+ * resolved per request against a `space_members` row — see
+ * `lib/space-role.ts` and {@link effectivePermissions}.
+ */
+export function orgPermissions(role: OrgRole): Set<Permission> {
   return new Set<Permission>([
     ...ORG_ROLE_PERMISSIONS[role],
     ...(getModuleRoleScopes(role) as ReadonlySet<Permission>),
+  ]);
+}
+
+/**
+ * Space-level permissions of a preset: the static grants union the module
+ * contributions that named the preset.
+ */
+export function presetPermissions(preset: SpaceRolePreset): Set<Permission> {
+  return new Set<Permission>([
     ...SPACE_PRESET_PERMISSIONS[preset],
     ...(getModulePresetScopes(preset) as ReadonlySet<Permission>),
   ]);
 }
 
 /**
- * Role permissions, widened to `ReadonlySet<string>` for ergonomic membership
- * checks against un-narrowed input (API-key scopes, OIDC scope claims, etc.).
- * Use this instead of `resolvePermissions(role)` when the input is a raw
- * string the compiler hasn't narrowed yet — it spares call sites the
- * `has(scope as Permission)` cast without widening the type contract
- * downstream.
+ * Every space-level string the running platform understands: the core catalog
+ * plus whatever the loaded modules put in a preset.
+ *
+ * A module may declare a space-level resource with `presets: []` (legal —
+ * API-key-only access); such a string is reachable by no role and therefore by
+ * no custom role either, which is fail-closed and the right default. This is
+ * the vocabulary a custom `space_roles.permissions` array is filtered against
+ * at resolve time, so an unknown string never reaches `Set.has`.
  */
-export function roleScopes(role: OrgRole): ReadonlySet<string> {
-  return resolvePermissions(role);
+export function knownSpaceLevelPermissions(): ReadonlySet<string> {
+  const known = new Set<string>(SPACE_LEVEL_PERMISSIONS);
+  for (const preset of SPACE_ROLE_PRESETS) {
+    for (const perm of getModulePresetScopes(preset)) known.add(perm);
+  }
+  return known;
+}
+
+/**
+ * Effective permissions for one request: the caller's org-level set union its
+ * space-level set (empty on a route with no space context), intersected with
+ * the credential's ceiling.
+ *
+ * `scopeCeiling` is the API-key scope list or the OIDC scope claim; a cookie
+ * session has none, so the union stands as-is.
+ */
+export function effectivePermissions(input: {
+  orgPermissions: ReadonlySet<string>;
+  spacePermissions?: ReadonlySet<string>;
+  scopeCeiling?: ReadonlySet<string>;
+}): Set<Permission> {
+  const { orgPermissions: org, spacePermissions, scopeCeiling } = input;
+  const effective = new Set<Permission>();
+  for (const perm of org) {
+    if (!scopeCeiling || scopeCeiling.has(perm)) effective.add(perm as Permission);
+  }
+  if (spacePermissions) {
+    for (const perm of spacePermissions) {
+      if (!scopeCeiling || scopeCeiling.has(perm)) effective.add(perm as Permission);
+    }
+  }
+  return effective;
 }
 
 /**
@@ -339,51 +419,39 @@ export function roleScopes(role: OrgRole): ReadonlySet<string> {
  * The two rules are deliberately different in kind:
  *
  *  - A scope that is not API-key-grantable — a typo, a retired spelling, or a
- *    session-only permission such as `org:delete` — is a REFUSAL (400 naming
- *    the offending value). It is not a request the server can honour in any
- *    narrower form, and dropping it mints a key that silently lacks the
- *    access the caller asked for. `POST /api/api-keys {"scopes":["oops"]}`
- *    answering 201 with `scopes: []` is a key that 403s on everything.
- *  - A scope the creator's own role does not hold is FILTERED. "You cannot
+ *    session-only permission such as `org:delete` or `integrations:configure`
+ *    — is a REFUSAL (400 naming the offending value). It is not a request the
+ *    server can honour in any narrower form, and dropping it mints a key that
+ *    silently lacks the access the caller asked for. `POST /api/api-keys
+ *    {"scopes":["oops"]}` answering 201 with `scopes: []` is a key that 403s
+ *    on everything.
+ *  - A scope the creator does not itself hold is FILTERED. "You cannot
  *    delegate more than you have" is a rule, not a mistake, and the
  *    scopes-omitted default (`validateScopes([...getApiKeyAllowedScopes()])`)
- *    depends on it: it hands in the full allowlist precisely so the role
- *    narrows it.
+ *    depends on it: it hands in the full allowlist precisely so the creator's
+ *    own set narrows it.
  *
- * The type predicate re-narrows the filtered strings to `Permission` — the
- * runtime invariant is that survival in the filter proves membership in
- * both `allowed` (asserted above) and the creator's role set, both of which
- * are (logically) subsets of the `Permission` union.
+ * `creatorEffective` is the creator's effective set **in the key's space** —
+ * the request that mints a key is space-scoped, so it is exactly the
+ * `permissions` the pipeline already computed for that request (RBAC spec
+ * §7.1). A `builder` therefore cannot mint `api-keys:create`, because a
+ * builder does not hold it.
  *
  * @throws ApiError 400 `invalid_request` when a scope is not grantable to an
  *   API key.
  */
-export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
-  const creatorPerms = roleScopes(creatorRole);
+export function validateScopes(
+  scopes: string[],
+  creatorEffective: ReadonlySet<string>,
+): Permission[] {
   const allowed = getApiKeyAllowedScopes();
   const ungrantable = scopes.filter((s) => !allowed.has(s));
   if (ungrantable.length > 0) {
     throw invalidRequest(
       `Unknown or non-grantable API key scope(s): ${ungrantable.join(", ")}. ` +
-        `See GET /api/api-keys/available-scopes for the scopes this role can grant.`,
+        `See GET /api/api-keys/available-scopes for the scopes you can grant.`,
       "scopes",
     );
   }
-  return scopes.filter((s): s is Permission => creatorPerms.has(s));
-}
-
-/**
- * Compute effective permissions for an API key.
- * Returns the intersection of key scopes with the creator's current role permissions
- * (including module-contributed grants).
- */
-export function resolveApiKeyPermissions(scopes: string[], creatorRole: OrgRole): Set<Permission> {
-  const rolePerms = roleScopes(creatorRole);
-  const effective = new Set<Permission>();
-  for (const scope of scopes) {
-    if (rolePerms.has(scope)) {
-      effective.add(scope as Permission);
-    }
-  }
-  return effective;
+  return scopes.filter((s): s is Permission => creatorEffective.has(s));
 }

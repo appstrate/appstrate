@@ -172,13 +172,13 @@ describe("Invitations API", () => {
     it("is idempotent when the user is already a member (keeps their existing role)", async () => {
       const member = await createTestUser({ email: "idempotent@test.com" });
 
-      // Pre-add the user as viewer (simulates double-click / race), then invite
+      // Pre-add the user as guest (simulates double-click / race), then invite
       // them as admin. Accepting must NOT silently downgrade or upgrade an
       // existing membership — the safe default is to keep the current role and
       // simply consume the invitation. (Re-inviting an existing member at a new
       // role is intentionally a no-op on the role to avoid an owner being
-      // demoted by a stray viewer invite.)
-      await addOrgMember(ctx.orgId, member.id, "viewer");
+      // demoted by a stray guest invite.)
+      await addOrgMember(ctx.orgId, member.id, "guest");
 
       const inv = await seedInvitation({
         orgId: ctx.orgId,
@@ -207,7 +207,7 @@ describe("Invitations API", () => {
         organizationMembers,
         and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, member.id))!,
       );
-      expect(memberRow?.role).toBe("viewer");
+      expect(memberRow?.role).toBe("guest");
       const invRow = await getDbRow(orgInvitations, eq(orgInvitations.id, inv.id));
       expect(invRow?.status).toBe("accepted");
     });

@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The org role `viewer` is retired; `guest` replaces it (BREAKING).**
+  `ORG_ROLES` — and therefore the `OrgRole` union and the `org_role` pg enum
+  it mirrors — is now `["owner", "admin", "member", "guest"]`. Read-only
+  access to everything is a SPACE concern (preset `viewer`); an org role that
+  implicitly reads every space is exactly what space membership exists to
+  stop, so a `viewer` becomes a `guest` plus an explicit `viewer` row in each
+  space that existed at migration time. `ModulePermissionsSnapshot.byRole`
+  changes key accordingly (`viewer` → `guest`); a module whose
+  `permissionsContribution()` names `viewer` in `grantTo` must name `guest`
+  (no in-tree module did — `@appstrate/cloud` grants `billing:read` to
+  owner/admin/member and needs no change, but a guest holding it would be a
+  deliberate decision, not a rename). A persisted `viewer` is never mapped
+  to `guest` silently: the platform refuses it and names
+  `scripts/migration/0008-org-viewer-to-guest.sql`.
+
+- **New exports for space visibility.** `SPACE_VISIBILITIES`
+  (`["open", "closed", "private"]`) and the type `SpaceVisibility`, read by
+  the space-role resolver and by the `spaces.visibility` column.
+
+- **New: a module can enter a space.** `enterSpaceContext(c, spaceId?)` and its
+  platform-side registration hook `setSpaceContextApplier()`. A module that
+  gates a SPACE-level resource on a route family the platform does not
+  space-scope (`chat`, `webhooks`, `mcp`) must call `enterSpaceContext` before
+  its guard: org-level permissions carry no space-level string, so the guard is
+  otherwise unsatisfiable. Same registration pattern as
+  `setModulePermissionsProvider` / `setPermissionDenialHandler` — the platform
+  wires the implementation at boot; calling it unwired throws rather than
+  silently no-op-ing.
+
 - **RBAC vocabulary gains a level (BREAKING for module authors).** Every
   permission string now belongs to exactly one level, `org` or `space`
   (`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4): an org role grants

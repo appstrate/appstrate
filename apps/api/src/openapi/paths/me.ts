@@ -46,7 +46,7 @@ export const mePaths = {
                         slug: { type: "string" },
                         role: {
                           type: "string",
-                          enum: ["owner", "admin", "member", "viewer", "end_user"],
+                          enum: ["owner", "admin", "member", "guest", "end_user"],
                           description:
                             "Org role for member callers; `end_user` for OIDC end-user JWTs.",
                         },
@@ -401,7 +401,7 @@ export const mePaths = {
                       id: { type: "string" },
                       role: {
                         type: "string",
-                        enum: ["owner", "admin", "member", "viewer", "end_user"],
+                        enum: ["owner", "admin", "member", "guest", "end_user"],
                       },
                       name: {
                         type: ["string", "null"],

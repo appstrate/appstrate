@@ -260,7 +260,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Change member role",
       description:
-        "Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.",
+        "Change a member's role. Owners can manage any non-owner; admins can manage guests and members.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },

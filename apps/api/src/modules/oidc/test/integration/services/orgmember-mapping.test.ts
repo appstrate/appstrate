@@ -105,13 +105,13 @@ describe("resolveOrCreateOrgMembership", () => {
     expect(resolved.role).toBe("admin");
   });
 
-  it("honors signupRole=viewer", async () => {
+  it("honors signupRole=guest", async () => {
     const resolved = await resolveOrCreateOrgMembership(
       { id: newcomerUserId, email: "newcomer@example.com" },
       orgId,
-      { allowSignup: true, signupRole: "viewer" },
+      { allowSignup: true, signupRole: "guest" },
     );
-    expect(resolved.role).toBe("viewer");
+    expect(resolved.role).toBe("guest");
   });
 
   it("is idempotent on double-call (no extra row, no role change)", async () => {

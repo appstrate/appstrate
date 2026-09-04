@@ -154,12 +154,12 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const patchRes = await app.request(`/api/oauth/clients/${created.clientId}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ allowSignup: true, signupRole: "viewer" }),
+      body: JSON.stringify({ allowSignup: true, signupRole: "guest" }),
     });
     expect(patchRes.status).toBe(200);
     const updated = (await patchRes.json()) as { allowSignup: boolean; signupRole: string };
     expect(updated.allowSignup).toBe(true);
-    expect(updated.signupRole).toBe("viewer");
+    expect(updated.signupRole).toBe("guest");
   });
 
   it("POST defaults allowSignup=false on space-level create (secure-by-default)", async () => {

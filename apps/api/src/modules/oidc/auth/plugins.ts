@@ -522,7 +522,7 @@ async function buildOrgLevelClaims(
   // metadata drifted — better to reject a legitimate mint than silently
   // auto-join to a wrong role.
   const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
-  const policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } =
+  const policy: { allowSignup: boolean; signupRole: "admin" | "member" | "guest" } =
     loaded && loaded.level === "org" && loaded.orgId === orgId
       ? { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole }
       : { allowSignup: false, signupRole: "member" };

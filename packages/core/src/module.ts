@@ -221,7 +221,8 @@ export interface AppstrateModule {
    * core org roles grant their actions.
    *
    * Aggregated by the platform at boot and merged into:
-   *   1. `resolvePermissions(role)` — adds module entries to the per-role
+   *   1. `orgPermissions(role)` / `presetPermissions(preset)` — adds module
+   *      entries to the per-role / per-preset
    *      permission set written to `c.get("permissions")`.
    *   2. `API_KEY_ALLOWED_SCOPES` — module entries become grantable
    *      through API keys (filtered against creator's role at issuance).
@@ -404,7 +405,7 @@ export type ModulePermissionContribution = {
         level: "org";
         /**
          * Org roles that grant every listed action. The platform unions these
-         * into `resolvePermissions(role)`. Omit a role to leave it without
+         * into `orgPermissions(role)`. Omit a role to leave it without
          * access.
          *
          * Granular per-action grants (e.g. owner gets write, member gets read

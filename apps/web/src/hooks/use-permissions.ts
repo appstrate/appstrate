@@ -8,7 +8,7 @@ const ROLE_I18N_KEY: Record<OrgRole, string> = {
   owner: "orgSettings.roleOwner",
   admin: "orgSettings.roleAdmin",
   member: "orgSettings.roleMember",
-  viewer: "orgSettings.roleViewer",
+  guest: "orgSettings.roleGuest",
 };
 
 /** Get the i18n key for a role label. */

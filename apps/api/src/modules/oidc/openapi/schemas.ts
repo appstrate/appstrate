@@ -41,7 +41,7 @@ const oauthClientObject: Record<string, unknown> = {
     disabled: { type: "boolean" },
     isFirstParty: { type: "boolean" },
     allowSignup: { type: "boolean" },
-    signupRole: { type: "string", enum: ["admin", "member", "viewer"] },
+    signupRole: { type: "string", enum: ["admin", "member", "guest"] },
     createdAt: { type: ["string", "null"] },
     updatedAt: { type: ["string", "null"] },
   },

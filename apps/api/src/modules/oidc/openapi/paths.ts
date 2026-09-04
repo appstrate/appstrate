@@ -42,7 +42,7 @@ const orgLevelClientRequest = {
     },
     signupRole: {
       type: "string",
-      enum: ["admin", "member", "viewer"],
+      enum: ["admin", "member", "guest"],
       description:
         "Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.",
     },
@@ -116,7 +116,7 @@ const updateClientRequest = {
     },
     signupRole: {
       type: "string",
-      enum: ["admin", "member", "viewer"],
+      enum: ["admin", "member", "guest"],
       description:
         "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.",
     },

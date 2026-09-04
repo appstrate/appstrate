@@ -33,7 +33,11 @@ import {
 import type { WebhookInfo } from "@appstrate/shared-types";
 import { forbidden } from "../../lib/errors.ts";
 import { readJsonBody } from "../../lib/request-body.ts";
-import { makePermissionGuard, requireModulePermission } from "@appstrate/core/permissions";
+import {
+  enterSpaceContext,
+  makePermissionGuard,
+  requireModulePermission,
+} from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../middleware/space-context.ts";
@@ -128,6 +132,23 @@ export const rotateSecretSchema = z
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
+  // `webhooks` is a SPACE-level resource and `/api/webhooks` is deliberately
+  // NOT in `SPACE_SCOPED_PREFIXES` (this module validates an explicit
+  // `spaceId` field instead of taking `X-Space-Id`), so the router enters a
+  // space itself — org permissions carry no space-level string, so
+  // `webhooks:*` could otherwise never be satisfied (RBAC spec §4.3).
+  //
+  // This entry is the caller's pinned / header / default space, which is what
+  // the org-level half and the by-id existence probe need. A route addressing
+  // a DIFFERENT space (the `spaceId` body field, the `?spaceId=` filter, the
+  // row's own space) re-enters that one before its own guard.
+  const enterCallerSpace = async (c: Context<AppEnv>, next: () => Promise<void>) => {
+    await enterSpaceContext(c);
+    return next();
+  };
+  router.use("/api/webhooks", enterCallerSpace);
+  router.use("/api/webhooks/*", enterCallerSpace);
+
   // Issue #172 (extension) — webhooks are space-scoped (or org-level
   // and span every space). API keys must never reach a webhook outside their
   // bound space, so we narrow their scope to `SpaceScope`; sessions
@@ -145,11 +166,17 @@ export function createWebhooksRouter() {
   router.post("/api/webhooks", rateLimit(10), idempotency(), async (c) => {
     const orgId = c.get("orgId");
     const data = await readJsonBody(c, createWebhookSchema);
-    await assertWebhookPermission(c, data.level, "write");
 
+    // The space named by the BODY, not the caller's current one — the
+    // permission below is that space's. Shape and org-membership are proved
+    // first so a malformed id is a 400 naming the field, never a 403 about a
+    // space that does not exist.
     if (data.level === "space") {
       assertSpaceId(data.spaceId, "spaceId");
+      await assertSpaceBelongsToOrg(data.spaceId, orgId);
+      await enterSpaceContext(c, data.spaceId);
     }
+    await assertWebhookPermission(c, data.level, "write");
 
     // API keys cannot create org-level webhooks (would span foreign spaces)
     // and cannot create space-level webhooks targeting another space.
@@ -161,10 +188,6 @@ export function createWebhooksRouter() {
       if (data.spaceId !== c.get("spaceId")) {
         throw forbidden("API key scope does not include this space");
       }
-    }
-
-    if (data.level === "space") {
-      await assertSpaceBelongsToOrg(data.spaceId, orgId);
     }
 
     const result = await createWebhook(
@@ -205,19 +228,21 @@ export function createWebhooksRouter() {
     async (c) => {
       const scope = webhookScope(c);
 
-      // The listing spans BOTH levels — `?all=true` returns every row in the
-      // org and the default filter returns the org-level ones — so the single
-      // `webhooks:read` guard above is not sufficient on its own. Drop the rows
-      // whose level the caller cannot read (a `builder` holds `webhooks:read`
-      // but not `org-webhooks:read`) rather than answering 403 for a mixed
-      // page. Applied to both scopes: the API-key branch is already narrowed to
-      // one space by `listWebhooks`, but that is a property of the query, not a
-      // permission check, and this must not depend on it staying true.
-      // `permissions` is always set here — `makePermissionGuard` only calls
-      // next() when it read a Set.
-      const permissions = c.get("permissions") ?? new Set<string>();
-      const readable = (rows: WebhookInfo[]): WebhookInfo[] =>
-        rows.filter((w) => permissions.has(`${webhookResource(w.level)}:read`));
+      /**
+       * The listing spans BOTH levels — `?all=true` returns every row in the
+       * org and the default filter returns the org-level ones — so the guard
+       * above is not sufficient on its own. Drop the rows whose LEVEL the
+       * caller cannot read (a `builder` holds `webhooks:read` but not
+       * `org-webhooks:read`) rather than answering 403 for a mixed page.
+       *
+       * Read from the context at call time, never captured: entering a space
+       * below rewrites `permissions`, and a closure over the pre-entry Set
+       * would filter the page against the wrong space's authority.
+       */
+      const readable = (rows: WebhookInfo[]): WebhookInfo[] => {
+        const permissions = c.get("permissions") ?? new Set<string>();
+        return rows.filter((w) => permissions.has(`${webhookResource(w.level)}:read`));
+      };
 
       // SpaceScope callers (API keys) are fully narrowed inside listWebhooks —
       // it ignores `opts` and returns only webhooks pinned to the key's space.
@@ -230,6 +255,21 @@ export function createWebhooksRouter() {
       if (spaceId) {
         assertSpaceId(spaceId, "spaceId");
         await assertSpaceBelongsToOrg(spaceId, scope.orgId);
+        // The filter can name a DIFFERENT space from the one the router
+        // entered, so the permission that authorises this page is that
+        // space's — exactly as the by-id routes take it from the row's own
+        // space.
+        await enterSpaceContext(c, spaceId);
+        await assertWebhookPermission(c, "space", "read");
+      }
+      if (all) {
+        // `all=true` enumerates rows across EVERY space in the org, including
+        // spaces the caller holds no role in. A `webhooks:read` earned in one
+        // space cannot authorise that, and the `readable` filter cannot catch
+        // it either — the filter checks the LEVEL, not the space, so it would
+        // hand a space admin of A every space webhook of B. Only the org-level
+        // half authorises a cross-space view, and that is owner/admin's.
+        await assertWebhookPermission(c, "org", "read");
       }
       return c.json(listResponse(readable(await listWebhooks(scope, { spaceId, all }))));
     },
@@ -257,6 +297,12 @@ export function createWebhooksRouter() {
         throw forbidden("Insufficient permissions: webhooks:read required");
       }
       throw err;
+    }
+    // The row's own space decides the permission, and it need not be the one
+    // the caller entered above (an admin listing org-wide, a `?spaceId=` that
+    // named another). Enter it before the guard reads the set.
+    if (webhook.level === "space" && webhook.spaceId) {
+      await enterSpaceContext(c, webhook.spaceId);
     }
     await assertWebhookPermission(c, webhook.level, action);
     return webhook;

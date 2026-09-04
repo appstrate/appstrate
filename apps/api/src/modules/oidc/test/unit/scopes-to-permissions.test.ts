@@ -3,7 +3,7 @@
 import { describe, it, expect, spyOn, afterEach } from "bun:test";
 import { scopesToPermissions } from "../../auth/claims.ts";
 import { logger } from "../../../../lib/logger.ts";
-import { resolvePermissions } from "../../../../lib/permissions.ts";
+import { orgPermissions, presetPermissions } from "../../../../lib/permissions.ts";
 import { OIDC_ALLOWED_SCOPES } from "../../auth/scopes.ts";
 import {
   setModulePermissionsProvider,
@@ -55,8 +55,13 @@ describe("scopesToPermissions — end_user flow", () => {
     }
   });
 
-  it("every OIDC_ALLOWED_SCOPES entry is a real core permission", () => {
-    const memberPerms = resolvePermissions("member");
+  it("every OIDC_ALLOWED_SCOPES entry is a real core permission a member can reach", () => {
+    // The org half plus the preset an ordinary member holds in an open space.
+    // An entry outside both would be a scope no end-user could ever exercise.
+    const memberPerms = new Set<string>([
+      ...orgPermissions("member"),
+      ...presetPermissions("operator"),
+    ]);
     for (const scope of OIDC_ALLOWED_SCOPES) {
       expect(memberPerms.has(scope)).toBe(true);
     }
@@ -87,7 +92,7 @@ function installSnapshot(snapshot: Partial<ModulePermissionsSnapshot>): void {
       owner: new Set(),
       admin: new Set(),
       member: new Set(),
-      viewer: new Set(),
+      guest: new Set(),
       ...(snapshot.byRole ?? {}),
     },
     byPreset: {
@@ -196,7 +201,7 @@ describe("scopesToPermissions — dashboard flow", () => {
     expect(perms.has("agents:read")).toBe(true);
   });
 
-  it("member is filtered to the role's permission set — escalation blocked", () => {
+  it("member is filtered at the ORG level — escalation blocked", () => {
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const perms = scopesToPermissions(
@@ -205,8 +210,14 @@ describe("scopesToPermissions — dashboard flow", () => {
         "member",
       );
       expect(perms.has("agents:read")).toBe(true);
-      expect(perms.has("agents:delete")).toBe(false);
+      // Org-level and not the member's: dropped here, permanently.
       expect(perms.has("oauth-clients:write")).toBe(false);
+      // SPACE-level, and deliberately admitted: the mint does not know which
+      // space the token will be used in, and the subject may well be a
+      // `builder` in one of them. The narrowing happens per request, where
+      // `permissions = claim ∩ (org ∪ space)` (RBAC spec §7.2) — admitting it
+      // here grants nothing on its own.
+      expect(perms.has("agents:delete")).toBe(true);
     } finally {
       warnSpy.mockRestore();
     }

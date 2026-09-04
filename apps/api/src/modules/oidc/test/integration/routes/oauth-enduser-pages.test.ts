@@ -633,7 +633,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
   describe("Org-level signup policy", () => {
     async function registerOrgClient(
       c: TestContext,
-      overrides: { allowSignup?: boolean; signupRole?: "admin" | "member" | "viewer" } = {},
+      overrides: { allowSignup?: boolean; signupRole?: "admin" | "member" | "guest" } = {},
     ): Promise<{ clientId: string }> {
       // Gate org-level client creation behind dashboardSsoEnabled — tests
       // in this block focus on signup policy, not the SSO gate.

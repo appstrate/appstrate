@@ -106,7 +106,7 @@ tree, no `__drizzle_migrations_<id>` table.
 The platform ships RBAC as a typed contract that **both** core and modules contribute to. The role-to-permission matrix lives in `apps/api/src/lib/permissions.ts` — it composes:
 
 1. **Core resources** (`CoreResources` interface from `@appstrate/core/permissions`): the static platform catalog (`agents`, `runs`, `org`, `api-keys`, …). This set is fixed at core-release time and mapped to roles in `apps/api/src/lib/permissions.ts`.
-2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface ModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `resolvePermissions(role)`, and exposes them through the same RBAC machinery.
+2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface ModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `orgPermissions(role)` / `presetPermissions(preset)`, and exposes them through the same RBAC machinery.
 
 Built-in and external modules use the **exact same contribution pattern**. Built-ins do not extend `CoreResources` — that interface is reserved for the platform's own resource catalog. The only difference is where the module source lives (this directory vs. an npm package).
 
@@ -171,11 +171,39 @@ declare the same level.
 
 **At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity) and aggregates them into:
 
-- `resolvePermissions(role)` — module entries reach the roles that hold the listed org role or the listed space preset.
+- `orgPermissions(role)` / `presetPermissions(preset)` — module entries reach the org role or the space preset they listed.
 - `getApiKeyAllowedScopes()` — entries with `apiKeyGrantable: true` become grantable through API keys (filtered against the creator's role at issuance).
 - `getModuleEndUserAllowedScopes()` — entries with `endUserGrantable: true` are accepted on end-user OIDC JWTs (in addition to the built-in `OIDC_ALLOWED_SCOPES`). Defaults to `false` — admin / destructive surfaces stay closed to embedding apps.
 
 Disabling a module leaves **zero footprint**: the `declare module` augmentation widens types but contributes nothing at runtime (interface keys aren't iterated), and the runtime contribution is gone the moment `permissionsContribution()` stops being called. No dead scope strings in role sets, no dead entries in the API-key allowlist.
+
+### A space-level resource on a route the platform does not space-scope
+
+`SPACE_SCOPED_PREFIXES` (`apps/api/src/middleware/space-context.ts`) is
+**core-only by design** — a module never adds a row to it. So a module that
+gates a `level: "space"` resource on its own route family must enter a space
+itself, before its guard runs:
+
+```ts
+import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
+
+router.use("/api/tasks/*", async (c, next) => {
+  await enterSpaceContext(c); // pinned space → X-Space-Id → the org default
+  return next();
+});
+router.get("/api/tasks", requireModulePermission("tasks", "read"), handler);
+```
+
+Pass an explicit id (`enterSpaceContext(c, spaceId)`) when the route addresses a
+space of its own — the `webhooks` module does, from its `spaceId` body/query
+field, and again from the row's own space on its by-id routes.
+
+This is not optional: a caller outside a space holds **org-level strings only**,
+so a space-level guard on a route that never entered a space can never pass. It
+fails closed, which is the right default and the wrong behaviour. `chat`, `mcp`
+and `webhooks` are the three in-repo examples. A caller with no role in the
+resolved space is refused there (403 `not_a_space_member`, or 404 for a
+`private` space) — the same answer the core middleware gives.
 
 ### Middleware symmetry: one guard path
 

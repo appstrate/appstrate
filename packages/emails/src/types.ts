@@ -10,7 +10,7 @@ export type SupportedLocale = "fr" | "en";
  * The compile-time parity assertion below guarantees this literal stays
  * in sync with the canonical `OrgRole` from `@appstrate/core/permissions`.
  */
-export type OrgRole = "owner" | "admin" | "member" | "viewer";
+export type OrgRole = "owner" | "admin" | "member" | "guest";
 
 // Compile-time parity check — fails to compile if either side drifts.
 type _OrgRoleParity = [CoreOrgRole] extends [OrgRole]

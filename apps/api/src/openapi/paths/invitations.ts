@@ -23,7 +23,7 @@ export const invitationsPaths = {
                 properties: {
                   email: { type: "string" },
                   org_name: { type: "string" },
-                  role: { type: "string", enum: ["owner", "admin", "member", "viewer"] },
+                  role: { type: "string", enum: ["owner", "admin", "member", "guest"] },
                   inviter_name: { type: "string" },
                   expiresAt: { type: "string" },
                   is_new_user: { type: "boolean" },

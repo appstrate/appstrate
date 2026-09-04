@@ -111,7 +111,7 @@ async function loginCli(
 async function addMember(
   orgId: string,
   userId: string,
-  role: "owner" | "admin" | "member" | "viewer",
+  role: "owner" | "admin" | "member" | "guest",
 ): Promise<void> {
   await db.insert(organizationMembers).values({ orgId, userId, role });
 }

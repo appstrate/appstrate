@@ -13,6 +13,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
+import { spaces } from "./spaces.ts";
 import { user } from "./auth.ts";
 
 // Chat tables — owned by the core schema (modules own no tables), consumed by
@@ -38,6 +39,13 @@ export const chatSessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * Space the session belongs to (RBAC spec §5). Nullable in this release
+     * only: `scripts/migration/0008-org-viewer-to-guest.sql` backfills every
+     * row to the org's default space and `0057` makes the column NOT NULL.
+     * A NULL reaching the chat module is refused, never defaulted.
+     */
+    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
     title: text("title"),
     // Id of the in-flight resumable stream for this session, or null when no
     // turn is generating. Set when a `POST /api/chat` turn starts, cleared when
@@ -60,6 +68,7 @@ export const chatSessions = pgTable(
   },
   (table) => [
     index("idx_chat_sessions_org_user").on(table.orgId, table.userId),
+    index("idx_chat_sessions_space_user").on(table.spaceId, table.userId),
     // Referenced target of the composite tenant-integrity FK on
     // `llm_usage(chat_session_id, org_id)`: Postgres needs a unique index
     // covering exactly these columns for the FK to attach. Trivially valid —

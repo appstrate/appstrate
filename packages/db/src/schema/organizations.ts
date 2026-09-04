@@ -132,6 +132,16 @@ export const orgInvitations = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     role: orgRoleEnum("role").notNull(),
+    /**
+     * Space memberships applied when the invitation is accepted (RBAC spec
+     * §5). Wire-shaped (snake_case keys) because it is written straight from
+     * the validated invite body and read straight back onto it:
+     * `[{ space_id, preset_role } | { space_id, custom_role_id }]`.
+     */
+    spaceAssignments: jsonb("space_assignments")
+      .$type<ReadonlyArray<{ space_id: string; preset_role?: string; custom_role_id?: string }>>()
+      .notNull()
+      .default([]),
     status: invitationStatusEnum("status").notNull().default("pending"),
     invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

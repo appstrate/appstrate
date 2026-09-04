@@ -719,11 +719,11 @@ describe("module-loader", () => {
 
   describe("permissionsContribution (module RBAC)", () => {
     // The provider hook is module-loader → permissions, so we exercise the
-    // public observable: resolvePermissions() / getApiKeyAllowedScopes()
-    // returning the merged view after a module loads.
+    // public observable: orgPermissions() / presetPermissions() /
+    // getApiKeyAllowedScopes() returning the merged view after a module loads.
 
-    it("merges module grants into resolvePermissions(role)", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+    it("merges module org grants into orgPermissions(role)", async () => {
+      const { orgPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
           mockModule("tasks", {
@@ -739,19 +739,19 @@ describe("module-loader", () => {
         ],
         mockCtx(),
       );
-      const owner = resolvePermissions("owner");
-      const member = resolvePermissions("member");
-      const viewer = resolvePermissions("viewer");
+      const owner = orgPermissions("owner");
+      const member = orgPermissions("member");
+      const guest = orgPermissions("guest");
       expect(owner.has("tasks:read" as never)).toBe(true);
       expect(owner.has("tasks:write" as never)).toBe(true);
       expect(member.has("tasks:read" as never)).toBe(true);
-      expect(viewer.has("tasks:read" as never)).toBe(false);
+      expect(guest.has("tasks:read" as never)).toBe(false);
       // Core grants still present
-      expect(owner.has("agents:run" as never)).toBe(true);
+      expect(owner.has("org:delete" as never)).toBe(true);
     });
 
     it("resets the provider on resetModules() — next resolve sees no module grants", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      const { orgPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
           mockModule("tasks", {
@@ -762,9 +762,9 @@ describe("module-loader", () => {
         ],
         mockCtx(),
       );
-      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(true);
+      expect(orgPermissions("owner").has("tasks:read" as never)).toBe(true);
       resetModules();
-      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(false);
+      expect(orgPermissions("owner").has("tasks:read" as never)).toBe(false);
     });
 
     it("apiKeyGrantable=true adds entries to the API-key allowlist; false omits them", async () => {
@@ -971,7 +971,7 @@ describe("module-loader", () => {
     });
 
     it("supports per-action grants by listing the resource multiple times", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      const { orgPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
           mockModule("tasks", {
@@ -983,16 +983,16 @@ describe("module-loader", () => {
         ],
         mockCtx(),
       );
-      const owner = resolvePermissions("owner");
-      const member = resolvePermissions("member");
+      const owner = orgPermissions("owner");
+      const member = orgPermissions("member");
       expect(owner.has("tasks:write" as never)).toBe(true);
       expect(owner.has("tasks:read" as never)).toBe(true);
       expect(member.has("tasks:write" as never)).toBe(false);
       expect(member.has("tasks:read" as never)).toBe(true);
     });
 
-    it("space-level grants reach the org roles that hold the matching preset", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+    it("space-level grants reach the presets that named them", async () => {
+      const { presetPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
           mockModule("tasks", {
@@ -1014,12 +1014,13 @@ describe("module-loader", () => {
         ],
         mockCtx(),
       );
-      // owner/admin → preset admin, member → operator, viewer → viewer.
-      expect(resolvePermissions("owner").has("tasks:write" as never)).toBe(true);
-      expect(resolvePermissions("admin").has("tasks:write" as never)).toBe(true);
-      expect(resolvePermissions("member").has("tasks:write" as never)).toBe(false);
-      expect(resolvePermissions("member").has("tasks:read" as never)).toBe(true);
-      expect(resolvePermissions("viewer").has("tasks:read" as never)).toBe(true);
+      // Which org role holds which preset is now a per-space question; what
+      // the loader owns is the preset → permission mapping.
+      expect(presetPermissions("admin").has("tasks:write" as never)).toBe(true);
+      expect(presetPermissions("builder").has("tasks:write" as never)).toBe(true);
+      expect(presetPermissions("operator").has("tasks:write" as never)).toBe(false);
+      expect(presetPermissions("operator").has("tasks:read" as never)).toBe(true);
+      expect(presetPermissions("viewer").has("tasks:read" as never)).toBe(true);
     });
 
     it("rejects unknown preset in presets", async () => {
@@ -1050,12 +1051,13 @@ describe("module-loader", () => {
       );
     });
 
-    it("OSS baseline: no module loaded → resolvePermissions returns only core grants", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+    it("OSS baseline: no module loaded → only core grants", async () => {
+      const { orgPermissions, presetPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances([], mockCtx());
-      const owner = resolvePermissions("owner");
-      expect(owner.has("agents:run" as never)).toBe(true);
-      expect(owner.has("tasks:read" as never)).toBe(false);
+      expect(orgPermissions("owner").has("org:delete" as never)).toBe(true);
+      expect(orgPermissions("owner").has("tasks:read" as never)).toBe(false);
+      expect(presetPermissions("admin").has("agents:run" as never)).toBe(true);
+      expect(presetPermissions("admin").has("tasks:read" as never)).toBe(false);
     });
   });
 

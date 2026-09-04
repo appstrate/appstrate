@@ -93,9 +93,9 @@ describe("formatCallerContext", () => {
 
   it("falls back to email, then a generic label, when the name is missing", () => {
     expect(
-      formatCallerContext({ user: { email: "ada@acme.com" }, org: { role: "viewer" } }),
+      formatCallerContext({ user: { email: "ada@acme.com" }, org: { role: "guest" } }),
     ).toContain("assisting ada@acme.com");
-    expect(formatCallerContext({ org: { role: "viewer" } })).toContain("assisting the user");
+    expect(formatCallerContext({ org: { role: "guest" } })).toContain("assisting the user");
   });
 
   it("omits the role clause when the role is absent", () => {

@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { resolvePermissions } from "../lib/permissions.ts";
+import { assertOrgRole, effectivePermissions, orgPermissions } from "../lib/permissions.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -108,8 +108,14 @@ async function resolveOrgPathPermissions(c: Context<AppEnv>, next: Next) {
   if (!orgId) return next();
   const member = await getOrgMember(orgId, c.get("user").id);
   if (member) {
-    c.set("orgRole", member.role);
-    c.set("permissions", resolvePermissions(member.role));
+    const role = assertOrgRole(member.role);
+    const org = orgPermissions(role);
+    c.set("orgRole", role);
+    c.set("orgPermissions", org);
+    // `/api/orgs/*` is not space-scoped, so the org half is the whole answer —
+    // a space-level guard can never be satisfied here, which is the property
+    // the two-level split exists for.
+    c.set("permissions", effectivePermissions({ orgPermissions: org }));
   }
   return next();
 }

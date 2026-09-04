@@ -25,6 +25,7 @@ import {
   orgModels,
   orgInvitations,
   packageVersions,
+  spaceMembers,
 } from "@appstrate/db/schema";
 import { eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { mcpServerManifest } from "./integration-manifests.ts";
@@ -206,6 +207,26 @@ export async function seedSpace(overrides: SpaceInsert): Promise<InferSelectMode
     })
     .returning();
   return space!;
+}
+
+// ─── Space membership ─────────────────────────────────────
+
+/**
+ * Grant `userId` an explicit role in `spaceId`. Straight to the table, so a
+ * test can seed a shape the write route refuses (an owner's row, say) when
+ * that is exactly what it is asserting about.
+ */
+export async function seedSpaceMember(
+  overrides: Partial<InferInsertModel<typeof spaceMembers>> & {
+    spaceId: string;
+    userId: string;
+  },
+): Promise<InferSelectModel<typeof spaceMembers>> {
+  const [row] = await db
+    .insert(spaceMembers)
+    .values({ presetRole: "viewer", ...overrides })
+    .returning();
+  return row!;
 }
 
 // ─── End Users ────────────────────────────────────────────

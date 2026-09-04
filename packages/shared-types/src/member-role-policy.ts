@@ -2,7 +2,7 @@
 
 import type { OrgRole } from "@appstrate/core/permissions";
 
-export const ASSIGNABLE_ORG_ROLES = ["viewer", "member", "admin"] as const;
+export const ASSIGNABLE_ORG_ROLES = ["guest", "member", "admin"] as const;
 export type AssignableOrgRole = (typeof ASSIGNABLE_ORG_ROLES)[number];
 
 type MissingAssignableOrgRole = Exclude<Exclude<OrgRole, "owner">, AssignableOrgRole>;
@@ -19,7 +19,7 @@ interface MemberPolicyContext {
 function canManageMember({ actorRole, targetRole, isSelf }: MemberPolicyContext): boolean {
   if (isSelf || targetRole === "owner") return false;
   if (actorRole === "owner") return true;
-  return actorRole === "admin" && (targetRole === "viewer" || targetRole === "member");
+  return actorRole === "admin" && (targetRole === "guest" || targetRole === "member");
 }
 
 export function assignableRolesForMember(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { eq, asc, desc } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import { spaces, files, uploads, runs, organizations } from "@appstrate/db/schema";
@@ -11,12 +12,67 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
+import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
+import { loadSpaceMemberships, resolveSpaceRole, type SpaceRoleRef } from "../lib/space-role.ts";
+
+type SpaceRow = InferSelectModel<typeof spaces>;
 
 export const spaceSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
 });
 
 type SpaceSettings = z.infer<typeof spaceSettingsSchema>;
+
+/**
+ * Every space of `orgId` the caller reaches, with their role in each
+ * (RBAC spec §6.3). One query for the spaces and one for the caller's whole
+ * membership set — never one lookup per space.
+ *
+ * Owner/admin see all; a `member` additionally sees `closed` spaces they
+ * cannot enter (so they know to ask); a `guest` and a `private` space both
+ * need an explicit row. The filtering is the listing's, not the resolver's:
+ * `resolveSpaceRole` answers "what role", this answers "which spaces".
+ */
+export async function listSpacesForPrincipal(
+  orgId: string,
+  orgRole: OrgRole,
+  userId: string,
+): Promise<Array<{ space: SpaceRow; role: SpaceRoleRef | null }>> {
+  const [rows, memberships] = await Promise.all([
+    listSpaces(orgId),
+    loadSpaceMemberships(orgId, userId),
+  ]);
+  const out: Array<{ space: SpaceRow; role: SpaceRoleRef | null }> = [];
+  for (const space of rows) {
+    const role = resolveSpaceRole(orgRole, space, memberships.get(space.id) ?? null);
+    if (!isSpaceVisibleTo(orgRole, space, role)) continue;
+    out.push({ space, role });
+  }
+  return out;
+}
+
+/**
+ * May this caller know that this space exists? (RBAC spec §6.3.)
+ *
+ * ONE function, two call sites — the listing above and `GET /api/spaces/:id`.
+ * Split, they drift, and the drift is silent in exactly one direction: a
+ * by-id read that is more permissive than the listing hands out the spaces the
+ * listing was written to hide.
+ *
+ * A role of its own always makes a space visible. Without one, a single case
+ * remains: a `closed` space, to a `member`, so they know it exists and can ask
+ * for it. A `private` space is invisible, and a `guest` sees only what it was
+ * explicitly added to — "org users" and "space members" being two different
+ * things is the whole reason `guest` exists.
+ */
+export function isSpaceVisibleTo(
+  orgRole: OrgRole,
+  space: { visibility: SpaceVisibility },
+  role: SpaceRoleRef | null,
+): boolean {
+  if (role) return true;
+  return orgRole === "member" && space.visibility === "closed";
+}
 
 /** Create a new space for an organization. */
 export async function createSpace(
@@ -56,8 +112,13 @@ export async function createDefaultSpace(orgId: string, createdBy?: string) {
   return createSpace(orgId, { name: "Default", isDefault: true }, createdBy);
 }
 
-/** List all spaces for an organization, ordered by creation date (newest first). */
-export async function listSpaces(orgId: string) {
+/**
+ * All spaces of an organization, ordered by creation date (newest first).
+ * Deliberately NOT exported: every caller must go through
+ * {@link listSpacesForPrincipal}, which is the one that applies §6.3 filtering
+ * — a raw list handed to a route is a list nobody filtered.
+ */
+async function listSpaces(orgId: string) {
   return db
     .select()
     .from(spaces)
@@ -99,13 +160,30 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
 export async function updateSpace(
   orgId: string,
   spaceId: string,
-  params: { name?: string; settings?: SpaceSettings },
+  params: {
+    name?: string;
+    settings?: SpaceSettings;
+    visibility?: SpaceVisibility;
+    defaultRole?: SpaceRolePreset;
+  },
 ) {
+  // The DB check backs this, but a 400 naming the rule beats a 23514.
+  if (params.visibility !== undefined && params.visibility !== "open") {
+    const current = await getSpace(orgId, spaceId);
+    if (current.isDefault) {
+      throw invalidRequest(
+        "The default space must stay open — every org member lands there.",
+        "visibility",
+      );
+    }
+  }
   const [space] = await db
     .update(spaces)
     .set({
       ...(params.name !== undefined && { name: params.name }),
       ...(params.settings !== undefined && { settings: params.settings }),
+      ...(params.visibility !== undefined && { visibility: params.visibility }),
+      ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
       updatedAt: new Date(),
     })
     .where(scopedWhere(spaces, { orgId, extra: [eq(spaces.id, spaceId)] }))

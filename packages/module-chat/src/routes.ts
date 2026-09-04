@@ -30,7 +30,7 @@ import { z } from "zod";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
-import { requireModulePermission } from "@appstrate/core/permissions";
+import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
 import { notFound, parseBody } from "@appstrate/core/api-errors";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
@@ -118,6 +118,17 @@ async function loadMessages(sessionId: string): Promise<MessageRow[]> {
 
 export function createChatRouter(deps: ChatPlatformDeps) {
   const router = new Hono<ChatEnv>();
+
+  // `chat` is a SPACE-level resource and `/api/chat` is not one of the core
+  // space-scoped prefixes (that list is core-only by design), so this router
+  // enters the space itself — otherwise `chat:read` / `chat:write` could never
+  // be satisfied, since org permissions carry no space-level string
+  // (RBAC spec §4.3). The space is the caller's pinned one, then `X-Space-Id`,
+  // then the org default; a caller with no role in it is refused there.
+  router.use("/api/chat/*", async (c, next) => {
+    await enterSpaceContext(c);
+    return next();
+  });
 
   // Platform per-route limiter (POST /api/chat fans out into metered LLM
   // traffic). The platform always supplies it via deps — no unlimited fallback.

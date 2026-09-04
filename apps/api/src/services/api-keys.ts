@@ -13,6 +13,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 import type { OrgRole } from "../types/index.ts";
+import { assertOrgRole } from "../lib/permissions.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import type { SpaceScope, OrgScope } from "../lib/scope.ts";
 
@@ -119,7 +120,9 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     orgSlug: row.orgSlug,
     spaceId: row.spaceId,
     scopes: row.scopes,
-    creatorRole: row.creatorRole as OrgRole,
+    // The creator's live membership row. A retired value here fails loudly
+    // rather than silently downgrading every key the user minted.
+    creatorRole: assertOrgRole(row.creatorRole),
   };
 }
 

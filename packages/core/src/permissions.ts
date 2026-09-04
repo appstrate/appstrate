@@ -321,10 +321,19 @@ export type ModulePermission = {
 // exhaustive matrix typing make any mismatch a TypeScript error.
 // ---------------------------------------------------------------------------
 
-/** Const tuple of org roles. Drives `OrgRole` and the parity check in shared-types. */
-export const ORG_ROLES = ["owner", "admin", "member", "viewer"] as const;
+/**
+ * Const tuple of org roles. Drives `OrgRole` and the `org_role` pgEnum in
+ * `packages/db/src/schema/enums.ts`.
+ *
+ * `guest` replaced `viewer` in the RBAC space-roles release: read-only-
+ * everywhere is a space concern (preset `viewer`), and an org role that
+ * implicitly reads every space is exactly what space membership exists to
+ * stop. Rows still holding the retired value are refused loudly by
+ * `assertOrgRole` in `apps/api/src/lib/permissions.ts` — never mapped.
+ */
+export const ORG_ROLES = ["owner", "admin", "member", "guest"] as const;
 
-/** Org role string union — `"owner" | "admin" | "member" | "viewer"`. */
+/** Org role string union — `"owner" | "admin" | "member" | "guest"`. */
 export type OrgRole = (typeof ORG_ROLES)[number];
 
 /**
@@ -340,6 +349,20 @@ export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as 
 
 /** Space-role preset union — `"admin" | "builder" | "operator" | "viewer"`. */
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
+
+/**
+ * Space visibility (RBAC spec §3.1). `open` — every org `member` is an
+ * implicit member with the space's `default_role`; `closed` — listed but
+ * enterable only with an explicit `space_members` row; `private` — invisible
+ * without a row (404, not 403).
+ *
+ * Stored as `text` + CHECK rather than a pg enum, like `webhooks.level`:
+ * adding a value is a migration either way and text spares the enum rewrite.
+ */
+export const SPACE_VISIBILITIES = ["open", "closed", "private"] as const;
+
+/** Space visibility union — `"open" | "closed" | "private"`. */
+export type SpaceVisibility = (typeof SPACE_VISIBILITIES)[number];
 
 /** Zod validator for the per-org `settings` JSONB shape. */
 export const orgSettingsSchema = z.object({
@@ -389,7 +412,7 @@ const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
     owner: new Set(),
     admin: new Set(),
     member: new Set(),
-    viewer: new Set(),
+    guest: new Set(),
   },
   byPreset: {
     admin: new Set(),
@@ -548,6 +571,56 @@ export function requireCorePermission<R extends CoreResource>(
   action: CoreAction<R>,
 ): (c: HonoContextLike, next: HonoNextLike) => Promise<unknown> {
   return makePermissionGuard(`${resource as string}:${action as string}`);
+}
+
+// ---------------------------------------------------------------------------
+// Space context for module routes
+//
+// A module that gates a SPACE-level resource on a route family the platform
+// does not space-scope (`SPACE_SCOPED_PREFIXES` is core-only by design) has to
+// enter the space itself: org-level permissions can never carry a space-level
+// string, so its guard would otherwise be unsatisfiable — fail-closed, and the
+// wrong answer. `enterSpaceContext` is the seam it calls. The platform
+// registers the implementation at boot, exactly as it registers the module
+// permission provider and the denial handler above.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a space for the request and rewrite `permissions` to the caller's
+ * effective set in it. `spaceId` is optional: omitted, the platform resolves
+ * the pinned space, then `X-Space-Id`, then the org's default.
+ */
+type SpaceContextApplier = (c: HonoContextLike, spaceId?: string) => Promise<void>;
+
+let _spaceContextApplier: SpaceContextApplier | null = null;
+
+/**
+ * Register (or clear) the platform's space-context applier. Called once by
+ * apps/api; passing `null` restores the unregistered state.
+ */
+export function setSpaceContextApplier(applier: SpaceContextApplier | null): void {
+  _spaceContextApplier = applier;
+}
+
+/**
+ * Enter a space for this request, so a space-level `requireModulePermission`
+ * downstream reads the caller's set IN that space (RBAC spec §4.3).
+ *
+ * Throws whatever the platform's resolver throws — 403 `not_a_space_member`
+ * for an `open`/`closed` space the caller is not in, 404 for a `private` one.
+ *
+ * @throws Error when no platform registered an applier. Deliberately loud: a
+ *   silent no-op would leave every guarded route in the module 403-ing with no
+ *   indication that the seam was never wired.
+ */
+export async function enterSpaceContext(c: HonoContextLike, spaceId?: string): Promise<void> {
+  if (!_spaceContextApplier) {
+    throw new Error(
+      "enterSpaceContext: no space-context applier registered. The platform wires one at boot; " +
+        "a module cannot resolve a space on its own.",
+    );
+  }
+  await _spaceContextApplier(c, spaceId);
 }
 
 // ---------------------------------------------------------------------------

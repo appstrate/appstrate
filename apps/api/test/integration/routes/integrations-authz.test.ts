@@ -34,7 +34,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedApiKey, seedSpace } from "../../helpers/seed.ts";
-import { validateScopes } from "../../../src/lib/permissions.ts";
+import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections, spacePackages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -503,7 +503,8 @@ describe("integrations:configure is never grantable to an API key", () => {
   it("refuses an owner-minted key holding integrations:install on PUT /default", async () => {
     // `integrations:install` is the broadest install-tier scope a key can
     // carry, and only an owner/admin creator can pass it through
-    // `resolveApiKeyPermissions`. The governance mutation still 403s because
+    // the pipeline's scopes ∩ authority intersection. The governance mutation
+    // still 403s because
     // it now requires `integrations:configure`, which is absent from the
     // API-key allowlist and therefore unreachable for any key.
     const connId = await seedSharedConn();
@@ -538,17 +539,26 @@ describe("integrations:configure is never grantable to an API key", () => {
   });
 
   it("validateScopes refuses integrations:configure at mint time, for an owner", async () => {
-    expect(() => validateScopes(["integrations:configure"], "owner")).toThrow(
+    // An owner's effective set in a space is everything, so the refusal cannot
+    // be the creator ceiling narrowing — it is the allowlist.
+    const ownerEverything = new Set<string>([
+      ...orgPermissions("owner"),
+      ...presetPermissions("admin"),
+    ]);
+    expect(() => validateScopes(["integrations:configure"], ownerEverything)).toThrow(
       /non-grantable API key scope/,
     );
     // Same call with a grantable scope proves the throw is about the scope,
     // not about the helper refusing everything.
-    expect(validateScopes(["integrations:install"], "owner")).toEqual(["integrations:install"]);
+    expect(validateScopes(["integrations:install"], ownerEverything)).toEqual([
+      "integrations:install",
+    ]);
   });
 
   it("member-created api key requesting integrations:install is stripped to 403", async () => {
-    // `resolveApiKeyPermissions` intersects with member grants (which lack
-    // install), so the effective set never contains it.
+    // The pipeline intersects the key's scopes with the creator's effective
+    // set in the key's space (a member holds the `operator` preset, which
+    // lacks `install`), so the effective set never contains it.
     const connId = await seedSharedConn();
     const member = await createTestUser({ email: "member-key@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
