@@ -1,0 +1,325 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * `appstrate skills push <dir>` and `appstrate skills publish <skill>` — the
+ * write half of `skills sync`. `push` sends a local folder (SKILL.md and every
+ * annex file) to the skill's DRAFT through `POST /api/packages/import?draft=true`,
+ * so `skills sync --source draft` hands it back to the author's machine for a
+ * real test; `publish` then cuts the version everyone else syncs.
+ */
+
+import { readdir, readFile, stat } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
+import { extractSkillMeta } from "@appstrate/core/validation";
+import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
+import { zipArtifact } from "@appstrate/core/zip";
+import { apiFetch, apiFetchRaw, ApiError } from "../lib/api.ts";
+import { resolveActiveProfile, type Profile } from "../lib/config.ts";
+import { listOrgs } from "../lib/orgs.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { formatError } from "../lib/ui.ts";
+
+export interface SkillsPushOptions {
+  profile?: string;
+  /** Folder holding `SKILL.md`; annex files are taken recursively. */
+  dir: string;
+  /** `@scope/name` to push as. Default: the folder's `manifest.json`, else `@<org slug>/<frontmatter name>`. */
+  id?: string;
+  /** Overwrite a draft that has unpublished changes (`409 draft_overwrite`). */
+  force?: boolean;
+  /** Show what would be sent and send nothing. */
+  dryRun?: boolean;
+}
+
+export interface SkillsPublishOptions {
+  profile?: string;
+  /** `@scope/name`, or a bare name resolved under the organization's slug. */
+  skill: string;
+  /** Version to cut; default: the draft manifest's `version`. */
+  version?: string;
+}
+
+/** Never uploaded: tooling residue, not skill content. */
+const SKIPPED_ENTRIES = new Set([".git", ".DS_Store", "node_modules", ".venv", "__pycache__"]);
+
+const MANIFEST = "manifest.json";
+const SKILL_ENTRY = "SKILL.md";
+
+export async function skillsPushCommand(
+  opts: SkillsPushOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
+  const { profileName, profile } = await resolveActiveProfile(opts.profile);
+  if (!requireOrg(profileName, profile, io)) return;
+
+  const dir = resolve(opts.dir);
+  let files: Record<string, Uint8Array>;
+  try {
+    files = await readSkillFolder(dir);
+  } catch (err) {
+    io.stderr.write(`${formatError(err)}\n`);
+    io.exit(1);
+    return;
+  }
+
+  const skillMd = new TextDecoder().decode(files[SKILL_ENTRY]!);
+  const meta = extractSkillMeta(skillMd);
+  if (!meta.name) {
+    io.stderr.write(`${join(dir, SKILL_ENTRY)}: frontmatter has no \`name\`.\n`);
+    io.exit(1);
+    return;
+  }
+
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = await resolveManifest(profileName, profile, files, meta, skillMd, opts.id);
+  } catch (err) {
+    io.stderr.write(`${formatError(err)}\n`);
+    io.exit(1);
+    return;
+  }
+  files[MANIFEST] = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
+  const packageId = manifest.name as string;
+  const version = manifest.version as string;
+
+  const paths = Object.keys(files).sort();
+  if (opts.dryRun) {
+    io.stdout.write(`${packageId} draft ← ${dir} (would publish as ${version})\n`);
+    for (const path of paths) io.stdout.write(`  ${path}\n`);
+    return;
+  }
+
+  const archive = zipArtifact(files);
+  const form = new FormData();
+  form.append("file", new File([archive], `${meta.name}.afps`, { type: "application/zip" }));
+  const query = `?draft=true${opts.force ? "&force=true" : ""}`;
+
+  let res: Response;
+  try {
+    res = await apiFetchRaw(profileName, `/api/packages/import${query}`, {
+      method: "POST",
+      body: form,
+    });
+  } catch (err) {
+    io.stderr.write(`${formatError(err)}\n`);
+    io.exit(1);
+    return;
+  }
+  if (!res.ok) {
+    io.stderr.write(`${await describeFailure(res, packageId)}\n`);
+    io.exit(1);
+    return;
+  }
+
+  // An instance that predates `?draft=true` ignores the flag and publishes:
+  // say so, because the author believed nothing left their machine.
+  const outcome = (await res.json().catch(() => ({}))) as { draft?: unknown; version?: unknown };
+  if (outcome.draft !== true) {
+    const published = typeof outcome.version === "string" ? `@${outcome.version}` : "";
+    io.stderr.write(
+      `Warning: this instance does not support draft imports and PUBLISHED ${packageId}${published} instead. Upgrade the instance, or delete that version if it was not meant to ship.\n`,
+    );
+    io.exit(1);
+    return;
+  }
+
+  io.stdout.write(
+    `Pushed ${packageId} to its draft (${paths.length} files, would publish as ${version}).\n`,
+  );
+  io.stderr.write(
+    `Next: appstrate skills sync --source draft (test it here), then appstrate skills publish ${packageId}\n`,
+  );
+}
+
+export async function skillsPublishCommand(
+  opts: SkillsPublishOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
+  const { profileName, profile } = await resolveActiveProfile(opts.profile);
+  if (!requireOrg(profileName, profile, io)) return;
+
+  let packageId: string;
+  try {
+    packageId = opts.skill.startsWith("@")
+      ? opts.skill
+      : `@${await orgSlug(profileName, profile!)}/${opts.skill}`;
+    if (!parseScopedName(packageId)) throw new Error(`Not a package id: ${packageId}`);
+  } catch (err) {
+    io.stderr.write(`${formatError(err)}\n`);
+    io.exit(1);
+    return;
+  }
+
+  try {
+    const created = await apiFetch<{ version?: unknown }>(
+      profileName,
+      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions`,
+      { method: "POST", body: JSON.stringify(opts.version ? { version: opts.version } : {}) },
+    );
+    const version = typeof created.version === "string" ? created.version : "?";
+    io.stdout.write(`Published ${packageId}@${version}.\n`);
+    io.stderr.write(`Every machine syncing published skills picks it up on its next sync.\n`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      io.stderr.write(
+        `${formatError(err)}\nThat version is already published: pass --version <next>, or bump \`version\` and push again.\n`,
+      );
+    } else {
+      io.stderr.write(`${formatError(err)}\n`);
+    }
+    io.exit(1);
+  }
+}
+
+function requireOrg(profileName: string, profile: Profile | undefined, io: CommandIO): boolean {
+  if (!profile) {
+    io.stderr.write(
+      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
+    );
+    io.exit(1);
+    return false;
+  }
+  if (!profile.orgId) {
+    io.stderr.write("No organization pinned. Run: appstrate org switch\n");
+    io.exit(1);
+    return false;
+  }
+  return true;
+}
+
+/** Every file under `dir`, keyed by its forward-slash path; `SKILL.md` required. */
+export async function readSkillFolder(dir: string): Promise<Record<string, Uint8Array>> {
+  let info: Awaited<ReturnType<typeof stat>>;
+  try {
+    info = await stat(dir);
+  } catch {
+    throw new Error(`${dir}: no such directory.`);
+  }
+  if (!info.isDirectory()) throw new Error(`${dir}: not a directory.`);
+
+  const files: Record<string, Uint8Array> = {};
+  const walk = async (current: string): Promise<void> => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      if (SKIPPED_ENTRIES.has(entry.name)) continue;
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (entry.isFile()) {
+        files[relative(dir, full).split("\\").join("/")] = new Uint8Array(await readFile(full));
+      }
+    }
+  };
+  await walk(dir);
+
+  if (!files[SKILL_ENTRY]) {
+    throw new Error(`${dir}: no ${SKILL_ENTRY} at the top level — a skill folder starts with one.`);
+  }
+  return files;
+}
+
+/**
+ * The manifest the archive carries. A `manifest.json` in the folder is the
+ * author's and passes through, `--id` aside. Otherwise one is synthesized so
+ * the server takes the ordinary AFPS path — its skill-only fallback compares
+ * `SKILL.md` alone and would answer `skill_unchanged` to a push that only
+ * touched annex files.
+ */
+async function resolveManifest(
+  profileName: string,
+  profile: Profile | undefined,
+  files: Record<string, Uint8Array>,
+  meta: { name: string; description: string },
+  skillMd: string,
+  explicitId: string | undefined,
+): Promise<Record<string, unknown>> {
+  if (explicitId && !parseScopedName(explicitId)) {
+    throw new Error(`--id must be @scope/name, got "${explicitId}".`);
+  }
+  const authored = files[MANIFEST];
+  if (authored) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(authored));
+    } catch {
+      throw new Error(`${MANIFEST} is not valid JSON.`);
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`${MANIFEST} must be a JSON object.`);
+    }
+    const manifest = { ...(parsed as Record<string, unknown>) };
+    if (explicitId) manifest.name = explicitId;
+    if (typeof manifest.name !== "string" || !parseScopedName(manifest.name)) {
+      throw new Error(`${MANIFEST}: \`name\` must be @scope/name.`);
+    }
+    if (typeof manifest.version !== "string") {
+      throw new Error(`${MANIFEST}: \`version\` is required.`);
+    }
+    return manifest;
+  }
+
+  const packageId = explicitId ?? `@${await orgSlug(profileName, profile!)}/${meta.name}`;
+  const version = frontmatterVersion(skillMd) ?? (await nextVersion(profileName, packageId));
+  return {
+    name: packageId,
+    version,
+    type: "skill",
+    schema_version: "0.1",
+    display_name: meta.name,
+    ...(meta.description ? { description: meta.description } : {}),
+  };
+}
+
+async function orgSlug(profileName: string, profile: Profile): Promise<string> {
+  const org = (await listOrgs(profileName)).find((o) => o.id === profile.orgId);
+  if (!org) {
+    throw new Error(
+      `Organization ${profile.orgId} is not one this profile belongs to. Run: appstrate org switch`,
+    );
+  }
+  return org.slug;
+}
+
+/** `version:` in the frontmatter, when the author pins it there. */
+export function frontmatterVersion(skillMd: string): string | undefined {
+  const block = skillMd.match(/^---[^\S\n]*\n([\s\S]*?)\n---/)?.[1];
+  const line = block?.match(/^version:[ \t]*["']?([0-9]+\.[0-9]+\.[0-9]+[^"'\s]*)["']?[ \t]*$/m);
+  return line?.[1];
+}
+
+/** Patch bump over the latest published version; `1.0.0` for a new skill. */
+async function nextVersion(profileName: string, packageId: string): Promise<string> {
+  try {
+    const latest = await apiFetch<{ version?: unknown }>(
+      profileName,
+      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+    );
+    if (typeof latest.version === "string") return bumpPatch(latest.version);
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 404)) throw err;
+  }
+  return "1.0.0";
+}
+
+export function bumpPatch(version: string): string {
+  const m = version.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return "1.0.0";
+  return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
+}
+
+async function describeFailure(res: Response, packageId: string): Promise<string> {
+  let body: { code?: unknown; detail?: unknown; message?: unknown } = {};
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    // Not JSON: the status line is all there is.
+  }
+  const detail = [body.detail, body.message].find((v): v is string => typeof v === "string");
+  const head = `Push of ${packageId} failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`;
+  switch (body.code) {
+    case "draft_overwrite":
+      return `${head}\nThe draft has changes made elsewhere (chat or API). Re-run with --force to replace them.`;
+    case "name_collision":
+      return `${head}\nPick another id with --id @scope/name.`;
+    default:
+      return head;
+  }
+}

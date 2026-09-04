@@ -281,7 +281,9 @@ export async function apiFetchRaw(
     // header would otherwise slip past a bare `headers["Content-Type"]`
     // lookup and we'd add a SECOND, conflicting content-type entry.
     const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === "content-type");
-    if (!hasContentType && init.body) {
+    // A FormData body carries its own multipart boundary; a JSON default would
+    // corrupt it.
+    if (!hasContentType && init.body && !(init.body instanceof FormData)) {
       headers["Content-Type"] = "application/json";
     }
     // A caller that names a space explicitly (`skills sync --space`) wins over

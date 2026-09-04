@@ -192,7 +192,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite. With ?draft=true the upload becomes the package's draft (content and files alike) and no version is created; publish it later with the versions endpoint.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -202,6 +202,14 @@ export const packagesPaths = {
           required: false,
           description:
             "Skip draft overwrite protection. Set to true to overwrite a package with unpublished changes.",
+          schema: { type: "boolean" },
+        },
+        {
+          name: "draft",
+          in: "query",
+          required: false,
+          description:
+            "Write the upload as the package's draft — SKILL.md, manifest and every other file — without creating a version. The draft overwrite protection still applies. The response carries `draft: true` and no `version`.",
           schema: { type: "boolean" },
         },
       ],
@@ -241,7 +249,17 @@ export const packagesPaths = {
                   version: {
                     type: "string",
                     description:
-                      "Imported manifest version (semver). Omitted when the manifest carries no version field.",
+                      "Imported manifest version (semver). Omitted when the manifest carries no version field, and always omitted for a draft import.",
+                  },
+                  draft: {
+                    type: "boolean",
+                    description:
+                      "Present and true when the import wrote the draft only (?draft=true).",
+                  },
+                  draftVersion: {
+                    type: "string",
+                    description:
+                      "Draft import only: the version the draft manifest declares, i.e. what a later publish would create.",
                   },
                   warnings: {
                     type: "array",
@@ -327,7 +345,17 @@ export const packagesPaths = {
                   version: {
                     type: "string",
                     description:
-                      "Imported manifest version (semver). Omitted when the manifest carries no version field.",
+                      "Imported manifest version (semver). Omitted when the manifest carries no version field, and always omitted for a draft import.",
+                  },
+                  draft: {
+                    type: "boolean",
+                    description:
+                      "Present and true when the import wrote the draft only (?draft=true).",
+                  },
+                  draftVersion: {
+                    type: "string",
+                    description:
+                      "Draft import only: the version the draft manifest declares, i.e. what a later publish would create.",
                   },
                   warnings: {
                     type: "array",

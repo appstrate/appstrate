@@ -53,6 +53,12 @@ export async function postInstallPackage(params: {
   zipBuffer: Buffer;
   /** Override version instead of auto-detecting from manifest or auto-bumping. */
   version?: string;
+  /**
+   * Store the files as the package's DRAFT base and stop there: no version is
+   * cut. This is what `POST /import?draft=true` does — the author's working
+   * copy, annex files included, without publishing anything.
+   */
+  draftOnly?: boolean;
 }): Promise<void> {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
@@ -60,12 +66,13 @@ export async function postInstallPackage(params: {
 
   const declaredVersion = manifest.version as string | undefined;
 
-  // Determine version: explicit override > manifest version > error
+  // Determine version: explicit override > manifest version > error. A draft
+  // has no version to cut, so the field is left to the publish gate.
   const rawVersion = params.version ?? declaredVersion;
-  if (!rawVersion || !isValidVersion(rawVersion)) {
+  if (!params.draftOnly && (!rawVersion || !isValidVersion(rawVersion))) {
     throw new Error(`Package ${packageId}: missing or invalid version in manifest`);
   }
-  const version: string = rawVersion;
+  const version: string = rawVersion ?? "";
 
   if (packageType === "skill") {
     const cfg = CONFIG_BY_TYPE[packageType];
@@ -94,6 +101,8 @@ export async function postInstallPackage(params: {
     // integration whose `source.kind: "local"` references it.
     await uploadPackageFiles("mcp-servers", orgId, packageId, files);
   }
+
+  if (params.draftOnly) return;
 
   // No try/catch: a genuine version-creation failure MUST propagate so the
   // caller (e.g. bundle import) aborts rather than committing a `packages`

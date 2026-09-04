@@ -51,6 +51,7 @@ import {
   spaceCreateCommand,
 } from "./commands/space.ts";
 import { skillsSyncCommand } from "./commands/skills.ts";
+import { skillsPublishCommand, skillsPushCommand } from "./commands/skills-push.ts";
 import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
@@ -571,6 +572,39 @@ skillsGroup
       });
     },
   );
+
+skillsGroup
+  .command("push <dir>")
+  .description(
+    "Send a local skill folder (SKILL.md and every annex file) to the skill's DRAFT on Appstrate, without publishing. Test it with `skills sync --source draft`, then `skills publish`.",
+  )
+  .option(
+    "--id <packageId>",
+    "Push as this @scope/name. Default: the folder's manifest.json, else @<org slug>/<frontmatter name>.",
+  )
+  .option("--force", "Replace a draft that has unpublished changes made elsewhere.")
+  .option("--dry-run", "List what would be sent and send nothing.")
+  .action(async (dir: string, opts: { id?: string; force?: boolean; dryRun?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await skillsPushCommand({
+      profile: globalOpts.profile,
+      dir,
+      id: opts.id,
+      force: opts.force,
+      dryRun: opts.dryRun,
+    });
+  });
+
+skillsGroup
+  .command("publish <skill>")
+  .description(
+    "Cut an immutable version from a skill's draft. <skill> is @scope/name, or a bare name under the organization's slug.",
+  )
+  .option("--version <semver>", "Version to create. Default: the draft manifest's `version`.")
+  .action(async (skill: string, opts: { version?: string }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await skillsPublishCommand({ profile: globalOpts.profile, skill, version: opts.version });
+  });
 
 // ─── `appstrate models …` — discover model presets on the instance ────
 

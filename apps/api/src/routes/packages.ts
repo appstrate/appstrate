@@ -1908,12 +1908,20 @@ export function createPackagesRouter() {
    * comparison below is made against, so the two cannot disagree about which
    * bytes this version is.
    */
+  /**
+   * `draftOnly` — `POST /import?draft=true`: the upload becomes the package's
+   * draft (DB columns AND stored files, so annex files such as `scripts/` land
+   * too) and no version is cut. It is the write half of `skills sync --source
+   * draft`: an author's local folder reaches the draft, the draft reaches the
+   * author's machine, and publishing stays a separate, deliberate step.
+   */
   async function handleImport(
     c: Context<AppEnv>,
     parsed: ReturnType<typeof parsePackageZip>,
     artifact: Buffer,
     force: boolean,
     source: "zip" | "github",
+    draftOnly = false,
   ) {
     const user = c.get("user");
     const orgId = c.get("orgId");
@@ -1935,8 +1943,8 @@ export function createPackagesRouter() {
     //
     // An import is a FINAL artifact, not an editing step — `postInstallPackage`
     // below cuts a version from it — so the declared-but-empty gate applies
-    // here too.
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
+    // here too. A draft import is an editing step, and gets the draft policy.
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, !draftOnly);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
@@ -1979,9 +1987,10 @@ export function createPackagesRouter() {
         }
       }
 
-      // Integrity mismatch detection — same version, different content
+      // Integrity mismatch detection — same version, different content. A
+      // draft import cuts no version, so there is nothing to mismatch.
       const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
-      if (!force && importedVersion) {
+      if (!force && !draftOnly && importedVersion) {
         const existingVer = await getVersionForDownload(packageId, importedVersion);
         if (existingVer) {
           const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
@@ -2030,6 +2039,7 @@ export function createPackagesRouter() {
         content,
         files,
         zipBuffer: artifact,
+        draftOnly,
       });
     } catch (err) {
       const message = getErrorMessage(err);
@@ -2064,7 +2074,7 @@ export function createPackagesRouter() {
     // Force import: replace existing version content if integrity differs
     const importedVersionForReplace = (manifest as Record<string, unknown>).version as
       string | undefined;
-    if (existing && force && importedVersionForReplace) {
+    if (existing && force && !draftOnly && importedVersionForReplace) {
       const existingVer = await getVersionForDownload(packageId, importedVersionForReplace);
       if (existingVer) {
         const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
@@ -2079,7 +2089,7 @@ export function createPackagesRouter() {
       }
     }
 
-    logger.info("Package imported", { packageId, type: packageType, orgId });
+    logger.info("Package imported", { packageId, type: packageType, orgId, draft: draftOnly });
     const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
     await recordAuditFromContext(c, {
       action: existing ? "package.updated" : "package.created",
@@ -2087,9 +2097,10 @@ export function createPackagesRouter() {
       resourceId: packageId,
       after: {
         type: packageType,
-        version: importedVersion ?? null,
+        version: draftOnly ? null : (importedVersion ?? null),
         via: `import:${source}`,
         force,
+        draft: draftOnly,
       },
     });
     // Surface engine-subset limitations for integration manifests as
@@ -2112,7 +2123,12 @@ export function createPackagesRouter() {
       {
         packageId,
         type: packageType,
-        version: importedVersion,
+        // A draft import publishes nothing: the version is what the manifest
+        // WOULD publish as, reported under its own key so nobody reads it as
+        // a version that exists.
+        ...(draftOnly
+          ? { draft: true, draftVersion: importedVersion }
+          : { version: importedVersion }),
         ...(installWarnings.length > 0 ? { warnings: installWarnings } : {}),
       },
       201,
@@ -2192,7 +2208,14 @@ export function createPackagesRouter() {
 
     const { parsed, artifact } = await parseZipWithSkillFallback(upload, c.get("orgSlug"));
 
-    return handleImport(c, parsed, artifact, c.req.query("force") === "true", "zip");
+    return handleImport(
+      c,
+      parsed,
+      artifact,
+      c.req.query("force") === "true",
+      "zip",
+      c.req.query("draft") === "true",
+    );
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL

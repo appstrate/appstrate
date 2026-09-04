@@ -456,6 +456,27 @@ There is no automatic rename: remove or rename the directory yourself and re-run
 
 Ownership is recorded per target **together with the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten.
 
+#### Writing a skill locally: `push`, then `publish`
+
+The sync is one-way, and the directories it writes are overwritten on the next refresh — never edit them. The working copy is the skill's **draft** on Appstrate, and two subcommands close the loop from a local folder:
+
+```sh
+appstrate skills push ./my-skill                 # folder → the skill's draft, annex files included; publishes nothing
+appstrate skills sync --source draft --target claude-user   # the draft → this machine, for a real test
+appstrate skills publish my-skill                # draft → an immutable version, what every other machine syncs
+```
+
+| Subcommand / flag            | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skills push <dir>`          | Zips the folder (every file under it except `.git`, `node_modules`, `.DS_Store` and the like) and sends it to `POST /api/packages/import?draft=true`. A `manifest.json` in the folder is used as authored; otherwise one is synthesized from the `SKILL.md` frontmatter as `@<org slug>/<name>`, versioned by the frontmatter `version:` if present, else a patch bump over the latest published version, else `1.0.0`. |
+| `push --id @scope/name`      | Push under this package id instead.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `push --force`               | The server refuses to replace a draft that carries unpublished changes made elsewhere (`409 draft_overwrite`); this overrides it.                                                                                                                                                                                                                                                                                       |
+| `push --dry-run`             | List the entries and the id/version that would be sent; send nothing.                                                                                                                                                                                                                                                                                                                                                   |
+| `skills publish <skill>`     | `POST …/versions`: cuts a version from the draft. `<skill>` is `@scope/name` or a bare name under the organization's slug.                                                                                                                                                                                                                                                                                              |
+| `publish --version <semver>` | Override the draft manifest's version.                                                                                                                                                                                                                                                                                                                                                                                  |
+
+The draft import needs an instance that accepts `?draft=true` on `POST /api/packages/import`; an older instance ignores the flag and publishes a version straight away.
+
 #### Codex, and running without a Claude Code plugin
 
 The recorded marketplace command syncs both targets (`--target claude-plugin --target codex`), so if you use Claude Code, every session already refreshes `~/.agents/skills/` and Codex picks the skills up on its next start — Codex rescans that directory per session and has no hook of its own.

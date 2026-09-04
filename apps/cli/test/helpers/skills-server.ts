@@ -15,7 +15,7 @@
  */
 
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { zipArtifact } from "@appstrate/core/zip";
+import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
 
 const encoder = new TextEncoder();
 
@@ -73,6 +73,29 @@ export interface SkillFixture {
 export interface SkillServerOptions {
   /** Rows served by `/api/spaces`, for `--space <name>` resolution. */
   spaces?: { id: string; name: string; isDefault?: boolean }[];
+  /** Rows served by `/api/orgs`, for `push` / `publish` slug resolution. */
+  orgs?: { id: string; slug: string; name?: string }[];
+  /** `POST /import?draft=true` answers `409 draft_overwrite` unless `force=true`. */
+  draftDirty?: boolean;
+  /** `POST …/versions` answers `409 version_exists`. */
+  versionExists?: boolean;
+  /** Behave like an instance that predates `?draft=true`: always publish. */
+  ignoresDraft?: boolean;
+}
+
+/** What one `POST /api/packages/import` carried. */
+export interface RecordedImport {
+  query: Record<string, string>;
+  filename: string;
+  /** Archive entries, path → text. */
+  files: Record<string, string>;
+  manifest: Record<string, unknown> | null;
+}
+
+/** What one `POST …/versions` carried. */
+export interface RecordedPublish {
+  packageId: string;
+  body: Record<string, unknown>;
 }
 
 export interface SkillServer {
@@ -86,6 +109,10 @@ export interface SkillServer {
   contentReads(): number;
   /** Highest number of requests the stub held open at once. */
   peakInFlight(): number;
+  /** Every `POST /api/packages/import` received, in order. */
+  imports(): RecordedImport[];
+  /** Every `POST …/versions` received, in order. */
+  publishes(): RecordedPublish[];
 }
 
 interface Prepared {
@@ -141,6 +168,8 @@ export function createSkillServer(
   let contentReads = 0;
   let inFlight = 0;
   let peakInFlight = 0;
+  const imports: RecordedImport[] = [];
+  const publishes: RecordedPublish[] = [];
 
   const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     inFlight += 1;
@@ -168,6 +197,63 @@ export function createSkillServer(
       const p = prepared.find((p) => p.scope === scope && p.name === name);
       return p && visible(p, space) ? p : undefined;
     };
+
+    if (path === "/api/orgs") {
+      return json({
+        object: "list",
+        data: (options.orgs ?? []).map((o) => ({
+          id: o.id,
+          slug: o.slug,
+          name: o.name ?? o.slug,
+          role: "owner",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })),
+      });
+    }
+
+    if (path === "/api/packages/import" && init?.method === "POST") {
+      const form = init.body as FormData;
+      const file = form.get("file") as File;
+      const entries = unzipArtifact(new Uint8Array(await file.arrayBuffer()));
+      const decoder = new TextDecoder();
+      const files: Record<string, string> = {};
+      for (const [entryPath, bytes] of Object.entries(entries))
+        files[entryPath] = decoder.decode(bytes);
+      const manifest = files["manifest.json"]
+        ? (JSON.parse(files["manifest.json"]) as Record<string, unknown>)
+        : null;
+      const query = Object.fromEntries(url.searchParams.entries());
+      imports.push({ query, filename: file.name, files, manifest });
+      if (options.draftDirty && query.force !== "true") {
+        return json(
+          {
+            code: "draft_overwrite",
+            detail: "This package has unpublished changes that will be overwritten by the import.",
+          },
+          409,
+        );
+      }
+      const version = manifest?.version;
+      return json(
+        query.draft === "true" && !options.ignoresDraft
+          ? { packageId: manifest?.name, type: "skill", draft: true, draftVersion: version }
+          : { packageId: manifest?.name, type: "skill", version },
+        201,
+      );
+    }
+
+    const publish = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)\/versions$/);
+    if (publish && init?.method === "POST") {
+      const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      const packageId = `${publish[1]}/${publish[2]}`;
+      publishes.push({ packageId, body });
+      if (options.versionExists) {
+        return json({ code: "version_exists", detail: "Version 1.2.0 already exists." }, 409);
+      }
+      const found = prepared.find((p) => p.fixture.id === packageId);
+      const version = (body.version as string | undefined) ?? found?.version ?? "1.0.0";
+      return json({ id: packageId, version, integrity: "sha256-x" }, 201);
+    }
 
     if (path === "/api/spaces") {
       return json({
@@ -315,6 +401,8 @@ export function createSkillServer(
     indexReads: () => indexReads,
     contentReads: () => contentReads,
     peakInFlight: () => peakInFlight,
+    imports: () => imports,
+    publishes: () => publishes,
   };
 }
 
