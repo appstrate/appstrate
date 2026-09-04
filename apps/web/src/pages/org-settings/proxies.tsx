@@ -36,7 +36,7 @@ import { DefaultCell } from "../../components/default-cell";
 
 export function OrgSettingsProxiesPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
 
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
   const [editProxy, setEditProxy] = useState<OrgProxyInfo | null>(null);
@@ -50,7 +50,7 @@ export function OrgSettingsProxiesPage() {
   const testMutation = useTestProxy();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
-  if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
+  if (!can("proxies:read")) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
@@ -64,12 +64,18 @@ export function OrgSettingsProxiesPage() {
   };
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
+  // `POST /api/proxies/:id/test` is a read; creating, editing and setting the
+  // default are `proxies:write`; removing one is `proxies:delete`.
+  const canWrite = can("proxies:write");
+  const canDelete = can("proxies:delete");
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-end gap-2">
-        <Button onClick={onCreate}>{t("proxies.add")}</Button>
-      </div>
+      {canWrite && (
+        <div className="mb-4 flex items-center justify-end gap-2">
+          <Button onClick={onCreate}>{t("proxies.add")}</Button>
+        </div>
+      )}
 
       {proxies && proxies.length > 0 ? (
         <div className="overflow-hidden rounded-md border">
@@ -113,6 +119,7 @@ export function OrgSettingsProxiesPage() {
                         defaultLabel={t("proxies.default")}
                         setLabel={t("proxies.setDefault")}
                         onSetDefault={() => onSetDefault(p)}
+                        canSetDefault={canWrite}
                         testId={`set-default-proxy-${p.id}`}
                       />
                     </TableCell>
@@ -136,24 +143,28 @@ export function OrgSettingsProxiesPage() {
                         </Button>
                         {!isBuiltIn && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onEdit(p)}
-                              aria-label={t("proxies.edit")}
-                            >
-                              <Pencil size={14} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onDelete(p)}
-                              aria-label={t("proxies.delete")}
-                            >
-                              <Trash2 size={14} className="text-destructive" />
-                            </Button>
+                            {canWrite && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onEdit(p)}
+                                aria-label={t("proxies.edit")}
+                              >
+                                <Pencil size={14} />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onDelete(p)}
+                                aria-label={t("proxies.delete")}
+                              >
+                                <Trash2 size={14} className="text-destructive" />
+                              </Button>
+                            )}
                           </>
                         )}
                       </div>
@@ -166,7 +177,7 @@ export function OrgSettingsProxiesPage() {
         </div>
       ) : (
         <EmptyState message={t("proxies.empty")} icon={Globe} compact>
-          <Button onClick={onCreate}>{t("proxies.add")}</Button>
+          {canWrite && <Button onClick={onCreate}>{t("proxies.add")}</Button>}
         </EmptyState>
       )}
 

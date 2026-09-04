@@ -9,6 +9,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
 import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
+import { usePermissions } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
@@ -84,7 +85,12 @@ function LibraryMatrix({
   type: string;
 }) {
   const { t } = useTranslation();
+  const { can } = usePermissions();
   const toggle = useTogglePackageInstall();
+  // Installing into a space is `POST /api/spaces/:spaceId/packages`, guarded
+  // by the ORG-level `spaces:write` — the same string whichever column is
+  // clicked, which is what makes a single gate correct on a cross-space grid.
+  const canInstall = can("spaces:write");
   // Agents/skills treat a "system" package as globally available (locked on,
   // can't toggle). Integrations are different: they must be activated per
   // space even when system-sourced, so their system rows stay toggleable.
@@ -96,6 +102,7 @@ function LibraryMatrix({
 
   const handleToggle = (pkg: LibraryPackageItem, spaceId: string, installed: boolean) => {
     if (lockSystem && pkg.source === "system") return;
+    if (!canInstall) return;
     toggle.mutate(
       { spaceId, packageId: pkg.id, installed },
       {
@@ -147,7 +154,7 @@ function LibraryMatrix({
             </TableCell>
             {spaces.map((space) => {
               const installed = pkg.installed_in.includes(space.id);
-              const locked = lockSystem && pkg.source === "system";
+              const locked = (lockSystem && pkg.source === "system") || !canInstall;
               return (
                 <TableCell key={space.id} className="text-center">
                   <Checkbox

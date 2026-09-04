@@ -14,11 +14,11 @@ const OAuthClientsTab = lazy(() =>
 );
 
 export function OrgSettingsSpaceOauthPage() {
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!isAdmin || !spaceId || !features.oidc) {
+  if (!can("oauth-clients:read") || !spaceId || !features.oidc) {
     return <Navigate to="/org-settings/space/general" replace />;
   }
 

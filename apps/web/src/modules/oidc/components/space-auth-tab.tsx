@@ -48,8 +48,8 @@ import {
 
 export function SpaceAuthTab() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
-  if (!isAdmin) return null;
+  const { can } = usePermissions();
+  if (!can("spaces:write")) return null;
 
   return (
     <div className="max-w-2xl space-y-10">

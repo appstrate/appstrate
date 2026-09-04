@@ -19,6 +19,7 @@ import {
   useRotateWebhookSecret,
 } from "../hooks/use-webhooks";
 import type { WebhookEvent, WebhookInfo } from "../hooks/use-webhooks";
+import { usePermissions } from "@/hooks/use-permissions";
 
 /**
  * Settings tab for a webhook detail page.
@@ -26,7 +27,14 @@ import type { WebhookEvent, WebhookInfo } from "../hooks/use-webhooks";
  */
 export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const navigate = useNavigate();
+  // `webhooks` (space) and `org-webhooks` (org) are two resources; which one
+  // guards this row comes from the ROW, exactly as the server resolves it
+  // (`loadWebhookForAction`). Save, test and rotate are all `write`.
+  const resource = webhook.level === "org" ? "org-webhooks" : "webhooks";
+  const canWrite = can(`${resource}:write`);
+  const canDelete = can(`${resource}:delete`);
   const updateMutation = useUpdateWebhook();
   const deleteMutation = useDeleteWebhook();
   const testMutation = useTestWebhook();
@@ -121,22 +129,26 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       </div>
 
       {/* Save */}
-      <Button onClick={handleSave} disabled={updateMutation.isPending}>
-        {updateMutation.isPending ? <Spinner /> : t("settings:webhooks.saveSettings")}
-      </Button>
+      {canWrite && (
+        <Button onClick={handleSave} disabled={updateMutation.isPending}>
+          {updateMutation.isPending ? <Spinner /> : t("settings:webhooks.saveSettings")}
+        </Button>
+      )}
 
       {/* Secret section */}
       <div className="border-border space-y-2 border-t pt-4">
         <Label>{t("settings:webhooks.secret")}</Label>
         <div className="bg-muted rounded px-3 py-2 font-mono text-sm">whsec_****...</div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setRotateOpen(true)}
-          disabled={rotateMutation.isPending}
-        >
-          {t("settings:webhooks.rotateSecret")}
-        </Button>
+        {canWrite && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRotateOpen(true)}
+            disabled={rotateMutation.isPending}
+          >
+            {t("settings:webhooks.rotateSecret")}
+          </Button>
+        )}
       </div>
 
       {/* Rotate confirmation modal */}
@@ -168,27 +180,36 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
         />
       )}
 
-      {/* Test */}
-      <div className="border-border border-t pt-4">
-        <Button variant="outline" size="sm" onClick={handleTest} disabled={testMutation.isPending}>
-          {testMutation.isPending ? <Spinner /> : t("settings:webhooks.sendTest")}
-        </Button>
-      </div>
+      {/* Test — `POST /api/webhooks/:id/test` is guarded by `write`, not `read`. */}
+      {canWrite && (
+        <div className="border-border border-t pt-4">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleTest}
+            disabled={testMutation.isPending}
+          >
+            {testMutation.isPending ? <Spinner /> : t("settings:webhooks.sendTest")}
+          </Button>
+        </div>
+      )}
 
       {/* Danger zone */}
-      <div className="border-border space-y-3 border-t pt-4">
-        <h3 className="text-destructive text-sm font-semibold">
-          {t("settings:webhooks.dangerZone")}
-        </h3>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setDeleteConfirmOpen(true)}
-          disabled={deleteMutation.isPending}
-        >
-          {deleteMutation.isPending ? <Spinner /> : t("settings:webhooks.deleteBtn")}
-        </Button>
-      </div>
+      {canDelete && (
+        <div className="border-border space-y-3 border-t pt-4">
+          <h3 className="text-destructive text-sm font-semibold">
+            {t("settings:webhooks.dangerZone")}
+          </h3>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteConfirmOpen(true)}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? <Spinner /> : t("settings:webhooks.deleteBtn")}
+          </Button>
+        </div>
+      )}
 
       {/* Delete confirmation */}
       <Modal

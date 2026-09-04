@@ -141,6 +141,9 @@ const OrgSettingsCliSessionsPage = lazy(() =>
     default: m.OrgSettingsCliSessionsPage,
   })),
 );
+const OrgSettingsRolesPage = lazy(() =>
+  import("./pages/org-settings/roles").then((m) => ({ default: m.OrgSettingsRolesPage })),
+);
 const OrgSettingsSpacesPage = lazy(() =>
   import("./pages/org-settings/spaces").then((m) => ({
     default: m.OrgSettingsSpacesPage,
@@ -149,6 +152,11 @@ const OrgSettingsSpacesPage = lazy(() =>
 const OrgSettingsSpaceGeneralPage = lazy(() =>
   import("./pages/org-settings/space/general").then((m) => ({
     default: m.OrgSettingsSpaceGeneralPage,
+  })),
+);
+const OrgSettingsSpaceMembersPage = lazy(() =>
+  import("./pages/org-settings/space/members").then((m) => ({
+    default: m.OrgSettingsSpaceMembersPage,
   })),
 );
 const OrgSettingsSpaceAuthPage = lazy(() =>
@@ -840,6 +848,7 @@ export function App() {
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<OrgSettingsGeneralPage />} />
               <Route path="members" element={<OrgSettingsMembersPage />} />
+              <Route path="roles" element={<OrgSettingsRolesPage />} />
               <Route path="spaces" element={<OrgSettingsSpacesPage />} />
               <Route path="models" element={<OrgSettingsModelsPage />} />
               <Route path="proxies" element={<OrgSettingsProxiesPage />} />
@@ -847,6 +856,7 @@ export function App() {
               <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
               <Route path="billing" element={<OrgSettingsBillingPage />} />
               <Route path="space/general" element={<OrgSettingsSpaceGeneralPage />} />
+              <Route path="space/members" element={<OrgSettingsSpaceMembersPage />} />
               <Route path="space/api-keys" element={<ApiKeysPage />} />
               <Route path="space/auth" element={<OrgSettingsSpaceAuthPage />} />
               <Route path="space/oauth" element={<OrgSettingsSpaceOauthPage />} />

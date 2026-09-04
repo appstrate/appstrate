@@ -28,7 +28,7 @@ export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const { currentOrg } = useOrg();
-  const { isOwner, isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
   const { data: orgSettings } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
@@ -110,7 +110,7 @@ export function OrgSettingsGeneralPage() {
               </>
             )}
           </div>
-          {isAdmin && !editingName && (
+          {can("org:update") && !editingName && (
             <Button
               variant="outline"
               onClick={() => {
@@ -175,7 +175,7 @@ export function OrgSettingsGeneralPage() {
         </>
       )}
 
-      {isAdmin && features.oidc && (
+      {can("org:settings") && features.oidc && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("orgSettings.advancedSection")}
@@ -237,7 +237,7 @@ export function OrgSettingsGeneralPage() {
         />
       </div>
 
-      {isOwner && (
+      {can("org:delete") && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("orgSettings.dangerZone")}

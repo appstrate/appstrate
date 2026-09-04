@@ -15,12 +15,16 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const [createOpen, setCreateOpen] = useState(false);
 
   const { data: webhooks, isLoading, error } = useWebhooks();
 
-  if (!isAdmin) return null;
+  // The page lists both levels; either read opens it. Creating from here
+  // always pins `level: "space"` (see `useCreateWebhook`), so the button is
+  // the space grant — an org-level webhook is not creatable from this UI.
+  if (!can("webhooks:read") && !can("org-webhooks:read")) return null;
+  const canCreate = can("webhooks:write");
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
@@ -34,13 +38,21 @@ export function WebhooksPage() {
           { label: t("settings:webhooks.pageTitle") },
         ]}
         actions={
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
+          canCreate ? (
+            <Button onClick={() => setCreateOpen(true)}>
+              {t("settings:webhooks.createTitle")}
+            </Button>
+          ) : undefined
         }
       />
 
       {!webhooks || webhooks.length === 0 ? (
         <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
+          {canCreate && (
+            <Button onClick={() => setCreateOpen(true)}>
+              {t("settings:webhooks.createTitle")}
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <div className="space-y-2">

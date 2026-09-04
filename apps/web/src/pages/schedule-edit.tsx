@@ -15,7 +15,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
 
@@ -24,7 +24,7 @@ export function ScheduleEditPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  if (!isAdmin) return null;
+  if (!can("schedules:write")) return null;
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
   // The agent detail is a SEPARATE query from the schedule: mounting the form

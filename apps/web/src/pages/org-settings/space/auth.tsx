@@ -14,11 +14,11 @@ const SpaceAuthTab = lazy(() =>
 );
 
 export function OrgSettingsSpaceAuthPage() {
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!isAdmin || !spaceId || !features.oidc) {
+  if (!can("spaces:write") || !spaceId || !features.oidc) {
     return <Navigate to="/org-settings/space/general" replace />;
   }
 

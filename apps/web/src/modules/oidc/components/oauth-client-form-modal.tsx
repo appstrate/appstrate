@@ -65,7 +65,7 @@ function OAuthClientFormBody({
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const isEditing = !!client;
 
   const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
@@ -187,7 +187,7 @@ function OAuthClientFormBody({
             redirectUris: cleaned,
             postLogoutRedirectUris: cleanedPostLogout,
             scopes: Array.from(selectedScopes),
-            ...(isAdmin ? { isFirstParty } : {}),
+            ...(can("oauth-clients:write") ? { isFirstParty } : {}),
             // Unified `allowSignup` (all levels). `signupRole` is org-only.
             allowSignup,
             ...(isOrgLevel ? { signupRole } : {}),
@@ -340,7 +340,7 @@ function OAuthClientFormBody({
           </div>
         </div>
 
-        {isAdmin && (
+        {can("oauth-clients:write") && (
           <div className="space-y-2">
             <label className="flex items-start gap-2 text-sm">
               <input

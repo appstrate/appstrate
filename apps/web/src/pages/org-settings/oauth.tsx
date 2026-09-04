@@ -14,11 +14,11 @@ const OAuthClientsTab = lazy(() =>
 );
 
 export function OrgSettingsOAuthPage() {
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
   const { data: orgSettings, isLoading } = useOrgSettings();
 
-  if (!isAdmin || !features.oidc) {
+  if (!can("oauth-clients:read") || !features.oidc) {
     return <Navigate to="/org-settings/general" replace />;
   }
 

@@ -16,13 +16,13 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 export function OrgSettingsSpacesPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { data: spaces, isLoading, error } = useSpaces();
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
   const { switchSpace } = useSpaceSwitcher();
 
-  if (!isAdmin) return null;
+  if (!can("spaces:read")) return null;
 
   const handleSpaceClick = (spaceId: string) => {
     switchSpace(spaceId);
@@ -32,17 +32,21 @@ export function OrgSettingsSpacesPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
+  const canCreate = can("spaces:write");
+
   return (
     <>
-      <div className="mb-4 flex justify-end">
-        <Button data-testid="create-space-button" onClick={() => setCreateOpen(true)}>
-          {t("spaces.create")}
-        </Button>
-      </div>
+      {canCreate && (
+        <div className="mb-4 flex justify-end">
+          <Button data-testid="create-space-button" onClick={() => setCreateOpen(true)}>
+            {t("spaces.create")}
+          </Button>
+        </div>
+      )}
 
       {!spaces || spaces.length === 0 ? (
         <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
-          <Button onClick={() => setCreateOpen(true)}>{t("spaces.create")}</Button>
+          {canCreate && <Button onClick={() => setCreateOpen(true)}>{t("spaces.create")}</Button>}
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">
@@ -62,11 +66,19 @@ export function OrgSettingsSpacesPage() {
                   </span>
                 </div>
                 {space.isDefault && <Badge variant="running">{t("spaces.default")}</Badge>}
+                {/* A `closed` space is listed so the caller knows it exists,
+                    not so they can be dropped into it — pinning one 403s every
+                    space-scoped request. Same rule as the org switcher. */}
                 <Button
                   variant="ghost"
                   size="icon"
+                  disabled={space.access !== "member"}
                   onClick={() => handleSpaceClick(space.id)}
-                  title={t("nav.spaceSettings", { ns: "common" })}
+                  title={
+                    space.access === "member"
+                      ? t("nav.spaceSettings", { ns: "common" })
+                      : t("spaces.requestAccess")
+                  }
                 >
                   <Settings size={16} />
                 </Button>

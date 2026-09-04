@@ -42,7 +42,7 @@ export function NavOrg() {
   const location = useLocation();
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
@@ -82,12 +82,19 @@ export function NavOrg() {
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
   ];
 
+  // Webhooks are two resources at two levels (`webhooks` = space,
+  // `org-webhooks` = org); the page lists both, so either read opens it.
+  const canReadWebhooks = can("webhooks:read") || can("org-webhooks:read");
   const adminItems: NavItem[] = [
-    ...(isAdmin && features.webhooks
+    ...(features.webhooks && canReadWebhooks
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
-    ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
-    ...(isAdmin ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }] : []),
+    ...(can("end-users:read")
+      ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }]
+      : []),
+    ...(can("org:read")
+      ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }]
+      : []),
   ];
 
   const renderItems = (items: NavItem[]) =>
