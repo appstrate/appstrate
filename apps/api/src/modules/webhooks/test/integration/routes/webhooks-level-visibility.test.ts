@@ -2,12 +2,12 @@
 
 /**
  * `GET /api/webhooks` spans both scoping levels — `?all=true` returns every
- * row in the org, and the default filter returns the org-level ones — while a
- * single `webhooks:read` guard sits in front of it. That guard alone is not
- * sufficient: a principal holding the space half without the org half
- * (`builder`, once Phase 2 assigns presets) would read org-level webhooks it
- * cannot administer. The route therefore drops the rows whose level the caller
- * cannot read.
+ * row in the org, and the default filter returns the org-level ones — behind
+ * `requireAnyWebhookRead()`, which admits a caller holding EITHER
+ * `webhooks:read` or `org-webhooks:read`. Admission alone is not sufficient: a
+ * principal holding the space half without the org half (a `builder`) would
+ * otherwise read org-level webhooks it cannot administer. The route therefore
+ * drops the rows whose level the caller cannot read.
  *
  * The caller is built from a stub auth strategy with a hand-set `permissions`
  * Set — the same technique

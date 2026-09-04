@@ -7,7 +7,6 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations } from "@appstrate/db/schema";
 import { invalidRequest, forbidden } from "../lib/errors.ts";
-import { assertOrgRole } from "../lib/permissions.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
 /**
@@ -66,7 +65,7 @@ export function requireOrgContext() {
     }
 
     c.set("orgId", orgId);
-    c.set("orgRole", assertOrgRole(rows[0].role));
+    c.set("orgRole", rows[0].role);
     c.set("orgSlug", rows[0].slug);
     c.set("orgName", rows[0].name);
     c.set("orgSettings", (rows[0].orgSettings ?? {}) as OrgSettings);

@@ -1,47 +1,33 @@
--- Space membership becomes a data model (RBAC spec §5). Everything here is
--- ADDITIVE: a new enum value, two new tables, four new columns. No column is
--- dropped, no constraint is tightened, no row is touched.
+-- Space membership becomes a data model (RBAC spec §5): a new enum value, two
+-- new tables, four new columns, and two writes that precondition a constraint
+-- promoted in this same file (sections F and G).
 --
--- WHAT THIS RELEASE DOES NOT DO, AND WHY:
---
---   * `org_role` keeps its `viewer` value. `ALTER TYPE … DROP VALUE` does not
---     exist in Postgres; retiring a value means recreating the type, which is
---     `0057` in the NEXT release, guarded on `scripts/migration/0008` having
---     run. Until then the type accepts a value the application refuses —
---     `assertOrgRole` (`apps/api/src/lib/permissions.ts`) throws
---     `UnmigratedOrgRoleError` naming that script rather than mapping the row
---     to `guest`, which would silently change what those users reach.
---     `meta/0056_snapshot.json` deliberately does NOT list `viewer`: the
---     snapshot tracks the CODE's enum (`packages/db/src/schema`), which is what
---     drizzle-kit diffs against, so listing the value there would make every
---     later `db:generate` emit an unguarded drop of it. The DB keeps `viewer`
---     until the hand-written N+1 migration removes it — the same
---     schema-ahead-of-data shape `docs/NO_TRANSITIONAL_CODE.md` §2 describes.
---   * `chat_sessions.space_id` is NULLABLE. `0008` backfills it; `0057`
---     promotes it. A NULL is refused by the chat module, never defaulted.
---   * `oauth_clients_signup_role_check` is WIDENED, not replaced: `guest` is
---     added beside `viewer` so a database that has not run `0008` still holds
---     its rows. `0057` narrows it.
---
--- ROLLBACK POSTURE: safe. The previous application version reads none of these
--- columns and writes none of these tables, so redeploying it after this ran
--- leaves the additions inert. That is the whole reason the retirement half is
--- a separate release.
+-- `org_role` keeps its `viewer` value: `ALTER TYPE … DROP VALUE` does not
+-- exist, so the value is removed by a later migration that recreates the type
+-- once `scripts/migration/0008` has moved the rows. `meta/0056_snapshot.json`
+-- deliberately does NOT list `viewer` — the snapshot tracks the CODE's enum
+-- (`packages/db/src/schema`), which is what drizzle-kit diffs against, so
+-- listing the value there would make every later `db:generate` emit an
+-- unguarded drop of it.
 --
 -- ORDER: `ALTER TYPE … ADD VALUE` first. Postgres ≥12 allows it inside a
 -- transaction block (drizzle wraps the pending batch in one) provided the new
--- value is not USED as that enum in the same transaction. Section H below DOES
+-- value is not USED as that enum in the same transaction. Section G below does
 -- write the literal `'guest'`, and it is still safe: `oauth_clients.signup_role`
--- is a `text` column (`packages/db/src/schema/oidc.ts`), so the literal in its
--- CHECK is text and never resolves against `org_role`. No statement here
--- compares, casts or stores a value AS `org_role`, and there is no DML at all.
+-- is a `text` column (`packages/db/src/schema/oidc.ts`), so both the literal in
+-- its CHECK and the one its `UPDATE` stores are text and never resolve against
+-- `org_role`. No statement here compares, casts or stores a value AS `org_role`.
+--
+-- ROLLBACK: one-way from here. The previous build inserts `chat_sessions`
+-- without `space_id`, which section F makes NOT NULL, so redeploying it after
+-- this ran breaks every new conversation until the roll-forward.
 --
 -- FENCES, set once for the whole file, same instrument as 0039/0047/0055.
 -- `lock_timeout` bounds acquisition, `statement_timeout` bounds execution;
--- neither bounds the hold, which lasts until drizzle commits the batch. Every
--- statement below is catalog-only or a create-on-empty-table, so the work is
--- instant and the exposure is acquisition. On expiry the statement errors, the
--- batch aborts, boot fails its health gate — a failed deploy, not a silent skip.
+-- neither bounds the hold, which lasts until drizzle commits the batch. The two
+-- writes scan one small table each; every other statement is catalog-only or a
+-- create-on-empty-table. On expiry the statement errors, the batch aborts, boot
+-- fails its health gate — a failed deploy, not a silent skip.
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint
 SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 
@@ -104,7 +90,7 @@ END $$;--> statement-breakpoint
 -- seeded row would need an N×orgs rewrite. This table holds only the CUSTOM
 -- bundles, and `key` may therefore never collide with a preset name.
 --
--- The table is created here rather than with the Phase 4 CRUD routes because
+-- The table is created here rather than beside the `/api/roles` routes because
 -- `space_members.custom_role_id` references it and the resolver reads it from
 -- this release on.
 CREATE TABLE IF NOT EXISTS "space_roles" (
@@ -166,8 +152,18 @@ ALTER TABLE "org_invitations" ADD COLUMN IF NOT EXISTS "space_assignments" jsonb
 
 -- ═══ F. Chat sessions become space-scoped ════════════════════════════════════
 --
--- NULLABLE here, backfilled by `scripts/migration/0008`, NOT NULL in `0057`.
+-- Existing sessions are folded onto their org's default space — or, for an org
+-- whose default-space provisioning failed and was never healed, its oldest
+-- space — and that write is the precondition of the `SET NOT NULL` that follows
+-- it (§2, `0051`). An org with sessions and no space at all cannot be folded
+-- and fails the `SET NOT NULL` by name; the runbook's replica rehearsal (RBAC
+-- spec §11) is where that is found. This section gets its own statement budget:
+-- it is the one write here whose table grows with usage.
+SET LOCAL statement_timeout = '300s';--> statement-breakpoint
 ALTER TABLE "chat_sessions" ADD COLUMN IF NOT EXISTS "space_id" text;--> statement-breakpoint
+UPDATE chat_sessions c SET space_id = (SELECT s.id FROM spaces s WHERE s.org_id = c.org_id ORDER BY s.is_default DESC, s.created_at ASC LIMIT 1) WHERE c.space_id IS NULL;--> statement-breakpoint
+ALTER TABLE "chat_sessions" ALTER COLUMN "space_id" SET NOT NULL;--> statement-breakpoint
+SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -184,21 +180,11 @@ CREATE INDEX IF NOT EXISTS "idx_chat_sessions_space_user" ON "chat_sessions" USI
 -- ═══ G. The OIDC auto-provision role allowlist admits `guest` ════════════════
 --
 -- `oauth_clients.signup_role` writes straight into `org_members.role`, so it
--- shares the org-role vocabulary. Widened rather than replaced: a database that
--- has not yet run `scripts/migration/0008` still holds `viewer` rows, and a
--- narrowing CHECK would fail its own validation scan and abort the batch.
--- `0057` narrows it, after the script has run.
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'oauth_clients_signup_role_check'
-      AND conrelid = 'public.oauth_clients'::regclass
-      AND contype = 'c'
-  ) THEN
-    ALTER TABLE "oauth_clients" DROP CONSTRAINT "oauth_clients_signup_role_check";
-  END IF;
-  ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_signup_role_check" CHECK (signup_role IN ('admin', 'member', 'guest', 'viewer'));
-END $$;--> statement-breakpoint
+-- shares the org-role vocabulary. The rewrite is the precondition of the
+-- narrowed CHECK below, which Postgres validates against every existing row as
+-- it adds it.
+UPDATE oauth_clients SET signup_role = 'guest' WHERE signup_role = 'viewer';--> statement-breakpoint
+ALTER TABLE "oauth_clients" DROP CONSTRAINT IF EXISTS "oauth_clients_signup_role_check";--> statement-breakpoint
+ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_signup_role_check" CHECK (signup_role IN ('admin', 'member', 'guest'));--> statement-breakpoint
 SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
 SET LOCAL lock_timeout = DEFAULT;

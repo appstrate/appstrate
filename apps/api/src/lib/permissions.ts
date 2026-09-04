@@ -63,13 +63,11 @@ import {
   type SpaceLevelPermission,
   type SpaceRolePreset,
   ORG_LEVEL_PERMISSIONS,
-  ORG_ROLES,
   SPACE_LEVEL_PERMISSIONS,
   SPACE_ROLE_PRESETS,
   getModuleRoleScopes,
   getModulePresetScopes,
   getModuleApiKeyScopes,
-  getModuleEndUserAllowedScopes,
 } from "@appstrate/core/permissions";
 
 // ---------------------------------------------------------------------------
@@ -313,41 +311,6 @@ export function getApiKeyAllowedScopes(): ReadonlySet<string> {
 }
 
 /**
- * A persisted `org_role` value outside {@link ORG_ROLES}.
- *
- * The only value this can carry today is the retired `viewer`, which the DB
- * type still accepts until migration 0057 recreates it. Mapping it to `guest`
- * would silently change what those users reach, so the resolver refuses
- * instead — a 500 for that one caller, naming the script that fixes it.
- * `NO_TRANSITIONAL_CODE.md` §1: the retired form fails loudly, never falls back.
- */
-export class UnmigratedOrgRoleError extends Error {
-  readonly value: string;
-
-  constructor(value: string) {
-    super(
-      `org_members.role = '${value}' is retired; run scripts/migration/0008-org-viewer-to-guest.sql`,
-    );
-    this.name = "UnmigratedOrgRoleError";
-    this.value = value;
-  }
-}
-
-const ORG_ROLE_SET: ReadonlySet<string> = new Set<string>(ORG_ROLES);
-
-/**
- * Narrow a persisted role string to {@link OrgRole}. The single place a DB
- * `role` column becomes a role the policy layer trusts — `org_members.role`,
- * `org_invitations.role`, an API key's creator role, an OIDC signup role.
- *
- * @throws UnmigratedOrgRoleError on a value the current vocabulary retired.
- */
-export function assertOrgRole(value: string): OrgRole {
-  if (!ORG_ROLE_SET.has(value)) throw new UnmigratedOrgRoleError(value);
-  return value as OrgRole;
-}
-
-/**
  * Org-level permissions of `role`: the static grants union the module
  * contributions declared at `level: "org"`.
  *
@@ -397,16 +360,6 @@ export interface SpacePermissionEntry {
   action: string;
   /** Can be carried by an API key (`getApiKeyAllowedScopes`). */
   api_key_grantable: boolean;
-  /**
-   * Declared `endUserGrantable` by a loaded module.
-   *
-   * Core resources are absent from this set by construction: the built-in
-   * end-user allowlist is the OIDC module's own vocabulary
-   * (`modules/oidc/auth/scopes.ts`), deliberately kept out of core, and this
-   * file must answer with `MODULES=none` too. So the flag says "a module opted
-   * this string in", not "no end-user token can ever hold it".
-   */
-  end_user_grantable: boolean;
 }
 
 /** Space-level permissions grouped under their resource, both sorted. */
@@ -424,7 +377,6 @@ export interface SpaceVocabularyGroup {
  */
 export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
   const apiKeyAllowed = getApiKeyAllowedScopes();
-  const endUserAllowed = getModuleEndUserAllowedScopes();
   const byResource = new Map<string, SpacePermissionEntry[]>();
   for (const permission of [...knownSpaceLevelPermissions()].sort()) {
     const colon = permission.indexOf(":");
@@ -434,7 +386,6 @@ export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
       permission,
       action: permission.slice(colon + 1),
       api_key_grantable: apiKeyAllowed.has(permission),
-      end_user_grantable: endUserAllowed.has(permission),
     });
     byResource.set(resource, entries);
   }

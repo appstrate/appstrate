@@ -18728,7 +18728,7 @@
         "operationId": "listRoleVocabulary",
         "tags": ["Roles"],
         "summary": "List the permissions a custom role may hold",
-        "description": "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `end_user_grantable` reports the strings a loaded module opted in for end-user OIDC tokens.",
+        "description": "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -24876,7 +24876,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["permission", "action", "api_key_grantable", "end_user_grantable"],
+              "required": ["permission", "action", "api_key_grantable"],
               "properties": {
                 "permission": {
                   "type": "string"
@@ -24887,10 +24887,6 @@
                 "api_key_grantable": {
                   "type": "boolean",
                   "description": "Can also be carried by an API key."
-                },
-                "end_user_grantable": {
-                  "type": "boolean",
-                  "description": "A loaded module opted this string in for end-user OIDC tokens."
                 }
               }
             }

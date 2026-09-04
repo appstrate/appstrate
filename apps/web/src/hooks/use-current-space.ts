@@ -17,18 +17,14 @@ export function useCurrentSpaceId(): string | null {
 
 /**
  * Space-scoped PINNED query-key prefixes — invalidated on space switch.
- * Only the run/schedule/package domains that keep flat legacy keys
- * (`["runs", …]`, etc.) need listing here. Typed-client domains (api-keys,
- * end-users, integrations, notifications, …) embed `X-Space-Id` in their
- * `[method, path, init]` key via `useOrgScope`, so switching spaces yields a new
- * key and refetches automatically — they must NOT be listed (their `queryKey[0]`
- * is the method string, never these prefixes).
+ * Only the run/schedule/package domains, whose keys are flat AND carry no space
+ * (`["runs", …]`, etc.), need listing here. A key that already carries the space
+ * — every typed-client domain, which embeds `X-Space-Id` in its
+ * `[method, path, init]` key via `useOrgScope`, and the chat module's
+ * `["chat", "sessions", spaceId]` — yields a new key on switch and refetches by
+ * itself, so it must NOT be listed.
  */
 const SPACE_SCOPED_KEYS = new Set([
-  // Chat sessions are space-scoped rows (`chat_sessions.space_id`), and the
-  // chat UI's keys are flat (`["chat", "sessions"]`, `["chat", "session", id]`)
-  // rather than typed-client tuples, so they need listing here.
-  "chat",
   "packages",
   "agents",
   "agent-persistence",

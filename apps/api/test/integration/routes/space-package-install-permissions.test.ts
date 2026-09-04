@@ -3,15 +3,10 @@
 /**
  * RBAC on the space-package WRITE surface — install, configure, uninstall.
  *
- * These three carried `spaces:write`, which is ORG-level: the catalog verb
- * that creates and deletes spaces, held by owner and admin only. The effect
- * was backwards in both directions — a space admin could not install into the
- * space they run, while anyone who could create a space could install into
- * every space in the org.
- *
- * The permission is now the SPACE-level string for the package type, so each
- * case below is a pair: the same caller, the same package, two spaces that
- * differ only by the role they hold there.
+ * The permission is the SPACE-level string for the package type, never the
+ * org-level `spaces:write` (the catalog verb that creates and deletes spaces),
+ * so each case below is a pair: the same caller, the same package, two spaces
+ * that differ only by the role they hold there.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -126,9 +121,9 @@ describe("space package install/config/uninstall — permission is per package t
   });
 
   it("answers a caller with no install authority identically, present or absent", async () => {
-    // The enumeration oracle this closes: the gate used to run only when the
-    // package resolved, so a caller with no authority got 403 for a package the
-    // org has and 404 for one it does not — a membership probe on the catalog.
+    // The gate runs before the catalog lookup so a caller with no authority
+    // gets the same answer whether or not the package exists (no enumeration
+    // oracle).
     const viewer = await createTestUser();
     await addOrgMember(owner.orgId, viewer.id, "member");
     await seedSpaceMember({ spaceId: runs.id, userId: viewer.id, presetRole: "viewer" });

@@ -20,6 +20,7 @@ import {
 } from "../hooks/use-webhooks";
 import type { WebhookEvent, WebhookInfo } from "../hooks/use-webhooks";
 import { usePermissions } from "@/hooks/use-permissions";
+import { webhookResource } from "@/lib/webhook-permissions";
 
 /**
  * Settings tab for a webhook detail page.
@@ -29,10 +30,8 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const navigate = useNavigate();
-  // `webhooks` (space) and `org-webhooks` (org) are two resources; which one
-  // guards this row comes from the ROW, exactly as the server resolves it
-  // (`loadWebhookForAction`). Save, test and rotate are all `write`.
-  const resource = webhook.level === "org" ? "org-webhooks" : "webhooks";
+  // Save, test and rotate are all `write`.
+  const resource = webhookResource(webhook.level);
   const canWrite = can(`${resource}:write`);
   const canDelete = can(`${resource}:delete`);
   const updateMutation = useUpdateWebhook();

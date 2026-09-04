@@ -7678,7 +7678,7 @@
         },
         "oauth_clients_signup_role_check": {
           "name": "oauth_clients_signup_role_check",
-          "value": "signup_role IN ('admin', 'member', 'guest', 'viewer')"
+          "value": "signup_role IN ('admin', 'member', 'guest')"
         }
       },
       "isRLSEnabled": false
@@ -8086,7 +8086,7 @@
           "name": "space_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "title": {
           "name": "title",

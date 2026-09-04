@@ -315,8 +315,7 @@ export type ModulePermission = {
  * `guest` replaced `viewer` in the RBAC space-roles release: read-only-
  * everywhere is a space concern (preset `viewer`), and an org role that
  * implicitly reads every space is exactly what space membership exists to
- * stop. Rows still holding the retired value are refused loudly by
- * `assertOrgRole` in `apps/api/src/lib/permissions.ts` — never mapped.
+ * stop.
  */
 export const ORG_ROLES = ["owner", "admin", "member", "guest"] as const;
 

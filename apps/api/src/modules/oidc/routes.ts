@@ -45,10 +45,10 @@ import {
   rotateClientSecret,
   updateClient,
   OAuthAdminValidationError,
-  SIGNUP_ROLE_ALLOWED,
   type OAuthClientRecord,
 } from "./services/oauth-admin.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import {
   OrgSignupClosedError,
   resolveOrCreateOrgMembership,
@@ -148,7 +148,7 @@ const createOrgClientSchema = z
     referencedOrgId: z.string().min(1),
     isFirstParty: z.boolean().optional(),
     allowSignup: z.boolean().optional(),
-    signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
+    signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
   })
   .strict();
 
@@ -167,7 +167,7 @@ const createSpaceClientSchema = z
     allowSignup: z.boolean().optional(),
     // Passed through to the service so we can reject it with a clear 400
     // (signupRole is only meaningful on org-level clients).
-    signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
+    signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
   })
   .strict();
 
@@ -218,7 +218,7 @@ export const updateOAuthClientSchema = z
     disabled: z.boolean().optional(),
     isFirstParty: z.boolean().optional(),
     allowSignup: z.boolean().optional(),
-    signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
+    signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
   })
   .strict();
 

@@ -18,7 +18,6 @@ import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
-import { assertOrgRole } from "../permissions.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { getClientIp } from "../client-ip.ts";
 import { listLlmUsage, getSettledFrontierId } from "../../services/state/runs.ts";
@@ -180,11 +179,8 @@ export function buildModuleInitContext(): ModuleInitContext {
  * mail, and an admin is an operational role. A module that wants a wider
  * audience names the users itself and resolves them through
  * {@link getOrgMembers}.
- *
- * Exported for the unit test — the injected context is the only production
- * caller, and its branch is unreachable through `buildModuleInitContext`.
  */
-export async function getOrgOwnerEmails(orgId: string): Promise<string[]> {
+async function getOrgOwnerEmails(orgId: string): Promise<string[]> {
   const owners = await db
     .select({ email: user.email })
     .from(organizationMembers)
@@ -198,14 +194,8 @@ export async function getOrgOwnerEmails(orgId: string): Promise<string[]> {
  * Resolve `userIds` to members of `orgId`. An id that is not a member is
  * absent from the result — the caller asked which of its stored ids still hold
  * membership, and "no longer a member" is an answer, not an error.
- *
- * The role goes through `assertOrgRole`, so a row still carrying a retired
- * value fails loudly here exactly as it does on every other read of that
- * column.
- *
- * Exported for the unit test, same reason as above.
  */
-export async function getOrgMembers(
+async function getOrgMembers(
   orgId: string,
   userIds: readonly string[],
 ): Promise<ModuleOrgMember[]> {
@@ -223,7 +213,7 @@ export async function getOrgMembers(
   return rows.map((row) => ({
     userId: row.userId,
     email: row.email,
-    role: assertOrgRole(row.role),
+    role: row.role,
   }));
 }
 

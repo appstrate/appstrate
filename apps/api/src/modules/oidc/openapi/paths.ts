@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+
 const clientListResponse = {
   type: "object",
   required: ["object", "data", "hasMore"],
@@ -42,7 +44,7 @@ const orgLevelClientRequest = {
     },
     signupRole: {
       type: "string",
-      enum: ["admin", "member", "guest"],
+      enum: [...ASSIGNABLE_ORG_ROLES],
       description:
         "Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.",
     },
@@ -116,7 +118,7 @@ const updateClientRequest = {
     },
     signupRole: {
       type: "string",
-      enum: ["admin", "member", "guest"],
+      enum: [...ASSIGNABLE_ORG_ROLES],
       description:
         "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.",
     },

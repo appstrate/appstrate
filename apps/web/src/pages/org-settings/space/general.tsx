@@ -18,7 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "../../../hooks/use-roles";
+import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import type { SpaceRolePreset } from "../../../hooks/use-roles";
 import type { components } from "../../../api/client";
 import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
@@ -28,8 +29,6 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 type SpaceObject = components["schemas"]["SpaceObject"];
 type SpaceVisibility = SpaceObject["visibility"];
-
-const VISIBILITIES: readonly SpaceVisibility[] = ["open", "closed", "private"];
 
 interface SettingsFormData {
   name: string;
@@ -148,7 +147,7 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
             disabled={space.isDefault}
             aria-label={t("spaces.visibilityLabel")}
           >
-            {VISIBILITIES.map((value) => (
+            {SPACE_VISIBILITIES.map((value) => (
               <div key={value} className="flex items-start gap-2">
                 <RadioGroupItem value={value} id={`space-visibility-${value}`} className="mt-1" />
                 <Label htmlFor={`space-visibility-${value}`} className="flex flex-col items-start">

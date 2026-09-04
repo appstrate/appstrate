@@ -25,15 +25,8 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
+import { PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
 import { usePermissions } from "../../hooks/use-permissions";
-
-/** Package family → the permission resource its routes guard on. */
-const PACKAGE_RESOURCE: Record<PackageType, string> = {
-  agent: "agents",
-  skill: "skills",
-  "mcp-server": "mcp-servers",
-  integration: "integrations",
-};
 
 interface PackageActionsDropdownProps {
   packageId: string;
@@ -112,8 +105,9 @@ export function PackageActionsDropdown({
   const isAgent = type === "agent";
   // Each package family is its own permission resource, so every gate below
   // asks for the string the matching route checks.
-  const resource = PACKAGE_RESOURCE[type];
-  const isMutable = can(`${resource}:write`) && !isBuiltIn && !isHistoricalVersion && isOwned;
+  const resource = PACKAGE_PERMISSIONS[type].resource;
+  const canWrite = can(`${resource}:write`);
+  const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
   const canDelete = can(`${resource}:delete`);
   // Deactivating / uninstalling an integration is the same route pair as
   // `integrations:uninstall`; the props say whether the action EXISTS here.
@@ -187,7 +181,7 @@ export function PackageActionsDropdown({
         )}
 
         {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
-        {can(`${resource}:write`) && !isOwned && onFork && (
+        {canWrite && !isOwned && onFork && (
           <DropdownMenuItem onSelect={onFork}>
             <GitFork size={14} />
             {t("fork.button")}

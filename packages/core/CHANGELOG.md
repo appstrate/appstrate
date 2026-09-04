@@ -26,12 +26,6 @@ userIds)` resolves a module's own stored user ids to
   when it wanted a named audience. First consumer: `@appstrate/cloud`'s billing
   managers and billing contact.
 
-- **`permissionLevel()` is not exported.** It was added under this same
-  `[Unreleased]` section and never shipped in a release, and nothing reads it —
-  the level of a core resource is read from `CORE_RESOURCE_LEVELS`, and a
-  module's own level is declared in `permissionsContribution()`. Removed before
-  it became a surface anyone could depend on.
-
 - **New subpath `@appstrate/core/principal-permissions` — org-level grants per
   principal.** A module may now grant org-level permissions to ONE user in ONE
   org instead of to a role, through the new optional `principalPermissions`
@@ -72,9 +66,8 @@ userId?)` after writing the table its resolver reads —
   `permissionsContribution()` names `viewer` in `grantTo` must name `guest`
   (no in-tree module did — `@appstrate/cloud` grants `billing:read` to
   owner/admin/member and needs no change, but a guest holding it would be a
-  deliberate decision, not a rename). A persisted `viewer` is never mapped
-  to `guest` silently: the platform refuses it and names
-  `scripts/migration/0008-org-viewer-to-guest.sql`.
+  deliberate decision, not a rename). Existing `viewer` rows are moved by
+  `scripts/migration/0008-org-viewer-to-guest.sql` (release notes).
 
 - **New exports for space visibility.** `SPACE_VISIBILITIES`
   (`["open", "closed", "private"]`) and the type `SpaceVisibility`, read by

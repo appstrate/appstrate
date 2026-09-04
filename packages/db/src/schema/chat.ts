@@ -39,13 +39,10 @@ export const chatSessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /**
-     * Space the session belongs to (RBAC spec §5). Nullable in this release
-     * only: `scripts/migration/0008-org-viewer-to-guest.sql` backfills every
-     * row to the org's default space and `0057` makes the column NOT NULL.
-     * A NULL reaching the chat module is refused, never defaulted.
-     */
-    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
+    /** Space the session belongs to (RBAC spec §5): sessions are space-scoped. */
+    spaceId: text("space_id")
+      .notNull()
+      .references(() => spaces.id, { onDelete: "cascade" }),
     title: text("title"),
     // Id of the in-flight resumable stream for this session, or null when no
     // turn is generating. Set when a `POST /api/chat` turn starts, cleared when

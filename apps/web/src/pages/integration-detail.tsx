@@ -602,15 +602,14 @@ function AuthHeader({ status }: { status: IntegrationAuthStatus }) {
 function ConnectAuthBlock({
   packageId,
   status,
-  canConfigure,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
-  canConfigure: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { user } = useAuth();
   const { can } = usePermissions();
+  const canConfigure = can("integrations:configure");
   const isOAuth = status.type === "oauth2";
   // Connectable when a client is usable: org-registered, shared system client,
   // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
@@ -1617,7 +1616,6 @@ export function IntegrationDetailPage() {
                 key={authStatus.auth_key}
                 packageId={packageId}
                 status={authStatus}
-                canConfigure={canConfigure}
               />
             ))
           )}

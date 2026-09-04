@@ -36,7 +36,6 @@ import {
   upsertSpaceMember,
 } from "../services/space-members.ts";
 import {
-  assertOrgRole,
   effectivePermissions,
   orgPermissions as orgPermissionsFor,
   type Action,
@@ -535,7 +534,7 @@ export function createSpacesRouter() {
     // concurrently; the org role is what usually answers.
     const member = await getOrgMember(orgId, userId);
     const after = member
-      ? resolveSpaceRole(assertOrgRole(member.role), space, await loadSpaceMember(space.id, userId))
+      ? resolveSpaceRole(member.role, space, await loadSpaceMember(space.id, userId))
       : null;
     return c.json({ access_after: after ? "implicit" : "none" });
   });

@@ -17,7 +17,7 @@
 import type { Context, Next } from "hono";
 import { forbidden } from "../lib/errors.ts";
 import { apiKeyOrgScopeGuard } from "./guards.ts";
-import { assertOrgRole, effectivePermissions, orgPermissions } from "../lib/permissions.ts";
+import { effectivePermissions, orgPermissions } from "../lib/permissions.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -49,7 +49,7 @@ async function orgPathContext(c: Context<AppEnv>, next: Next) {
   const member = await getOrgMember(orgId, c.get("user").id);
   if (!member) return next();
 
-  const role = assertOrgRole(member.role);
+  const role = member.role;
   // The two halves the pipeline unions for a session caller.
   const org = new Set<string>([...orgPermissions(role), ...(await principalGrants(c, orgId))]);
   c.set("orgId", orgId);

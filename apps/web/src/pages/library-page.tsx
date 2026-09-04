@@ -5,11 +5,13 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Package } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
 import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
-import { usePermissions, type GateablePermission } from "../hooks/use-permissions";
+import { usePermissions } from "../hooks/use-permissions";
+import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
@@ -26,7 +28,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 const TABS = ["agents", "skills", "integrations"] as const;
 type Tab = (typeof TABS)[number];
 
-const TYPE_MAP: Record<Tab, "agent" | "skill" | "integration"> = {
+const TYPE_MAP: Record<Tab, PackageType> = {
   agents: "agent",
   skills: "skill",
   integrations: "integration",
@@ -36,19 +38,6 @@ const DETAIL_PATH_MAP: Record<string, string> = {
   agent: "/agents",
   skill: "/skills",
   integration: "/integrations",
-};
-
-/**
- * Permission that opens the install checkbox, per package type — the same
- * table the API enforces (`SPACE_PACKAGE_PERMISSION`, `routes/spaces.ts`).
- * `agents:configure` rather than `agents:write`: installing configures which
- * space runs an agent, it does not author one.
- */
-const INSTALL_PERMISSION_BY_TYPE: Record<string, GateablePermission> = {
-  agent: "agents:configure",
-  skill: "skills:write",
-  "mcp-server": "mcp-servers:write",
-  integration: "integrations:install",
 };
 
 export function LibraryPage() {
@@ -95,7 +84,7 @@ function LibraryMatrix({
 }: {
   packages: LibraryPackageItem[];
   spaces: LibrarySpace[];
-  type: string;
+  type: PackageType;
 }) {
   const { t } = useTranslation();
   const { can } = usePermissions();
@@ -105,12 +94,7 @@ function LibraryMatrix({
   // which is the org-level catalog verb and would hide the checkboxes from
   // every space admin. One gate per tab is still correct on this cross-space
   // grid: a tab shows one type, and `can` reads the current space's set.
-  //
-  // An unmapped type renders no checkbox, matching the API's own fail-closed
-  // answer for a type with no install scope. A default here would offer a
-  // control whose request the server refuses.
-  const installPermission = INSTALL_PERMISSION_BY_TYPE[type];
-  const canInstall = installPermission !== undefined && can(installPermission);
+  const canInstall = can(PACKAGE_PERMISSIONS[type].install);
   // Agents/skills treat a "system" package as globally available (locked on,
   // can't toggle). Integrations are different: they must be activated per
   // space even when system-sourced, so their system rows stay toggleable.

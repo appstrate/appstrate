@@ -1839,17 +1839,13 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["permission", "action", "api_key_grantable", "end_user_grantable"],
+          required: ["permission", "action", "api_key_grantable"],
           properties: {
             permission: { type: "string" },
             action: { type: "string" },
             api_key_grantable: {
               type: "boolean",
               description: "Can also be carried by an API key.",
-            },
-            end_user_grantable: {
-              type: "boolean",
-              description: "A loaded module opted this string in for end-user OIDC tokens.",
             },
           },
         },

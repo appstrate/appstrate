@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { sql } from "drizzle-orm";
 import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
@@ -229,13 +228,6 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
   // Surface orgs whose stored API-version pin this build cannot serve.
   await warnOnUnserveableApiVersionPins().catch((err) => {
     logger.warn("Could not check organization API version pins", {
-      error: getErrorMessage(err),
-    });
-  });
-
-  // Surface members still holding the retired org role, once, with a count.
-  await warnOnUnmigratedOrgRoles().catch((err) => {
-    logger.warn("Could not check for unmigrated org roles", {
       error: getErrorMessage(err),
     });
   });
@@ -702,33 +694,6 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
       currentVersion: CURRENT_API_VERSION,
       orgs: offenders.map((o) => ({ orgId: o.id, pinnedVersion: o.apiVersion })),
     },
-  );
-}
-
-/**
- * One warning per boot naming how many members still hold the retired org role
- * `viewer`.
- *
- * Deliberately a warning and not a boot failure: those users are already
- * locked out (`assertOrgRole` throws for each of their requests), and refusing
- * to start would take the whole instance down for everyone else — including
- * the operator who needs the running platform to read this line and run the
- * script. The per-request failure is the enforcement; this is the notice.
- *
- * Reads the column raw, because the Drizzle enum type no longer admits the
- * value it is looking for.
- */
-async function warnOnUnmigratedOrgRoles(): Promise<void> {
-  const rows = toRows<{ count: number | string }>(
-    await db.execute(sql`SELECT count(*)::int AS count FROM org_members WHERE role = 'viewer'`),
-  );
-  const count = Number(rows[0]?.count ?? 0);
-  if (count === 0) return;
-
-  logger.warn(
-    `${count} organization member(s) still hold the retired role 'viewer'. Every request they ` +
-      `make answers 500 until scripts/migration/0008-org-viewer-to-guest.sql has been run.`,
-    { unmigratedOrgRoles: count, script: "scripts/migration/0008-org-viewer-to-guest.sql" },
   );
 }
 

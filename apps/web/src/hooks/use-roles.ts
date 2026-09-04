@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { $api, type components } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
@@ -10,8 +11,6 @@ import { usePermissions } from "./use-permissions";
 export type RoleObject = components["schemas"]["RoleObject"];
 /** Preset key a space membership may carry (`SpaceAssignment.preset_role`). */
 export type SpaceRolePreset = NonNullable<components["schemas"]["SpaceAssignment"]["preset_role"]>;
-
-export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as const;
 
 /** Presets + the org's own bundles, in the order the API returns them. */
 export function useRoles(enabled = true) {
@@ -34,8 +33,13 @@ export function useRoleVocabulary(enabled = true) {
   );
 }
 
-/** Three caches move with a role edit: the roles, the spaces' `permissions`, and the member lists' role names. */
-function useInvalidateRoles() {
+/**
+ * Three caches move with a role or space-membership write: the roles, the
+ * spaces' `permissions` (which also carry the caller's own effective set, so a
+ * member editing their own row sees it change), and the member lists' role
+ * names.
+ */
+export function useInvalidateRoles() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/roles"] });
@@ -65,8 +69,12 @@ export interface SpaceRoleOption {
   label: string;
 }
 
-function spaceRoleValue(role: RoleObject): string {
-  return role.kind === "preset" ? `preset:${role.key}` : `custom:${role.id}`;
+/** Fold the wire's `preset_role` / `custom_role_id` pair into that one string. */
+export function spaceRoleValue(role: {
+  preset_role?: string | null;
+  custom_role_id?: string | null;
+}): string {
+  return role.preset_role ? `preset:${role.preset_role}` : `custom:${role.custom_role_id}`;
 }
 
 /**
@@ -90,7 +98,7 @@ export function spaceRoleDescription(role: RoleObject, t: (key: string) => strin
 }
 
 /** Never the head of the list — that is `admin`. */
-export const DEFAULT_SPACE_ROLE_VALUE = "preset:operator";
+export const DEFAULT_SPACE_ROLE_VALUE = spaceRoleValue({ preset_role: "operator" });
 
 /** Turn a select value back into the request body's role half. */
 export function spaceRoleAssignment(value: string): {
@@ -108,9 +116,9 @@ export function memberRoleValue(
   roles: RoleObject[] | undefined,
 ): string | undefined {
   if (!role) return undefined;
-  if (role.kind === "preset") return `preset:${role.key}`;
+  if (role.kind === "preset") return spaceRoleValue({ preset_role: role.key });
   const match = roles?.find((r) => r.kind === "custom" && r.key === role.key);
-  return match?.id ? `custom:${match.id}` : undefined;
+  return match?.id ? spaceRoleValue({ custom_role_id: match.id }) : undefined;
 }
 
 /**
@@ -132,12 +140,15 @@ export function useSpaceRoleOptions(): {
   const options = useMemo<SpaceRoleOption[]>(() => {
     if (roles) {
       return roles.map((r) => ({
-        value: spaceRoleValue(r),
+        value: spaceRoleValue({
+          preset_role: r.kind === "preset" ? r.key : null,
+          custom_role_id: r.id,
+        }),
         label: spaceRoleLabel(r, t) ?? r.key,
       }));
     }
     return SPACE_ROLE_PRESETS.map((preset) => ({
-      value: `preset:${preset}`,
+      value: spaceRoleValue({ preset_role: preset }),
       label: t(`settings:roles.preset.${preset}`),
     }));
   }, [roles, t]);

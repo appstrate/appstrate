@@ -13,7 +13,11 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, addOrgMember } from "../../helpers/auth.ts";
-import { getOrgMembers, getOrgOwnerEmails } from "../../../src/lib/modules/registry.ts";
+import { buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
+
+// Read exactly as a module reads them: off the injected context, not by
+// importing the query functions the platform keeps to itself.
+const { getOrgOwnerEmails, getOrgMembers } = buildModuleInitContext();
 
 describe("module init-context org queries", () => {
   let orgId: string;

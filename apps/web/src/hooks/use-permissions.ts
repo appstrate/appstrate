@@ -10,11 +10,10 @@ import type { CorePermission } from "@appstrate/core/permissions";
 /**
  * A permission string `can()` accepts.
  *
- * Core's catalog is spelled out so a typo in `agents:wrte` is a compile error
- * and editors autocomplete the vocabulary; the open `string` arm keeps the
- * module-contributed strings (`webhooks:read`, `oauth-clients:write`,
- * `chat:write`, `billing:read`, …) callable — they are declared in each
- * module's own package, which the SPA does not import.
+ * Core's catalog is spelled out so editors autocomplete the vocabulary; the
+ * open `string` arm keeps the module-contributed strings (`webhooks:read`,
+ * `oauth-clients:write`, `chat:write`, `billing:read`, …) callable — they are
+ * declared in each module's own package, which the SPA does not import.
  */
 export type GateablePermission = CorePermission | (string & {});
 

@@ -24,10 +24,12 @@ import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { useSpaces } from "../../hooks/use-spaces";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
+  spaceRoleValue,
   useSpaceRoleOptions,
   type SpaceRoleOption,
 } from "../../hooks/use-roles";
 import {
+  assignmentsFor,
   toSpaceAssignments,
   validateSpaceAssignments,
   type AssignmentDraft,
@@ -60,10 +62,7 @@ function spaceLabel(
   roleOptions: SpaceRoleOption[],
 ): string {
   const name = spaces?.find((s) => s.id === assignment.space_id)?.name ?? assignment.space_id;
-  const value = assignment.preset_role
-    ? `preset:${assignment.preset_role}`
-    : `custom:${assignment.custom_role_id}`;
-  const role = roleOptions.find((o) => o.value === value)?.label;
+  const role = roleOptions.find((o) => o.value === spaceRoleValue(assignment))?.label;
   return role ? `${name} — ${role}` : name;
 }
 
@@ -253,7 +252,7 @@ export function OrgSettingsMembersPage() {
   const handleInvite = (data: InviteFormValues) => {
     const trimmed = data.email.trim();
     if (!trimmed || !orgId) return;
-    const assignments = data.role === "admin" ? [] : toSpaceAssignments(data.assignments);
+    const assignments = assignmentsFor(data.role, toSpaceAssignments(data.assignments));
     addMemberMutation.mutate({
       params: { path: { orgId } },
       body: { email: trimmed, role: data.role, space_assignments: assignments },
@@ -323,7 +322,7 @@ export function OrgSettingsMembersPage() {
               validate: (value) =>
                 validateSpaceAssignments(
                   inviteForm.getValues("role"),
-                  value,
+                  toSpaceAssignments(value),
                   t("orgSettings.inviteSpacesRequired"),
                 ),
             }}
@@ -449,21 +448,21 @@ export function OrgSettingsMembersPage() {
                       value={inv.role}
                       onValueChange={(v) => {
                         const nextRole = v as AssignableOrgRole;
-                        // Same rule as the invite form: a guest has no
-                        // implicit access, so the API refuses the change
-                        // without at least one assignment (400).
-                        if (nextRole === "guest" && inv.space_assignments.length === 0) {
-                          toast.error(t("orgSettings.inviteSpacesRequired"));
+                        // Same two rules as the invite form, over the list the
+                        // invitation already carries.
+                        const next = assignmentsFor(nextRole, inv.space_assignments);
+                        const verdict = validateSpaceAssignments(
+                          nextRole,
+                          next,
+                          t("orgSettings.inviteSpacesRequired"),
+                        );
+                        if (verdict !== true) {
+                          toast.error(verdict);
                           return;
                         }
                         changeInvitationRoleMutation.mutate({
                           params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
-                          body: {
-                            role: nextRole,
-                            // `admin` may hold none; every other role keeps what
-                            // the invitation already carries.
-                            space_assignments: nextRole === "admin" ? [] : inv.space_assignments,
-                          },
+                          body: { role: nextRole, space_assignments: next },
                         });
                       }}
                       disabled={changeInvitationRoleMutation.isPending}

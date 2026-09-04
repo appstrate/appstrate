@@ -153,7 +153,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "List the permissions a custom role may hold",
       description:
-        "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `end_user_grantable` reports the strings a loaded module opted in for end-user OIDC tokens.",
+        "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {

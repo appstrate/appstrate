@@ -27,7 +27,6 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
 import { deleteSpaceMembershipsInOrg } from "./space-members.ts";
-import { assertOrgRole } from "../lib/permissions.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -126,10 +125,7 @@ export async function getUserOrganizations(
 
   return rows.map((row) => ({
     ...toOrgResult(row.org),
-    // Through `assertOrgRole`: this is the read path behind `GET /api/orgs`
-    // and `/api/me`, so a row still holding the retired value must fail loudly
-    // naming the script rather than reaching the SPA as an unknown role.
-    role: assertOrgRole(row.role),
+    role: row.role,
   }));
 }
 
@@ -290,9 +286,7 @@ export async function getOrgMembers(orgId: string) {
 
 /**
  * The one reader of `org_members` for a `(org, user)` pair. Every caller that
- * needs a role goes through it and narrows with `assertOrgRole` — an inline
- * `select` of the same row is how one call site keeps accepting a value the
- * others refuse.
+ * needs a role goes through it.
  *
  * `tx` is not a convenience: an invitation accept inserts the membership row
  * and the space rows in one transaction, so the read that follows must see its

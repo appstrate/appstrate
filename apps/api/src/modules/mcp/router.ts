@@ -217,10 +217,6 @@ async function resolveMcpSpaceRow(c: Context<AppEnv>, orgId: string): Promise<Sp
   return active;
 }
 
-function toSpaceScope(orgId: string, space: SpaceContextRow): SpaceScope {
-  return { orgId, spaceId: space.id };
-}
-
 /**
  * Injection seam for the audit sink. Production uses `recordAuditFromContext`;
  * the integration suite substitutes a sink whose insert it controls, to prove
@@ -379,7 +375,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // Set by the space-entry middleware above, which runs on this exact path
     // and cannot have been skipped: the org guard just proved `orgId` is set,
     // and that is the middleware's only early return.
-    const scope = toSpaceScope(org, c.get("space")!);
+    const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
 
     // Audit + telemetry sink. The tool layer emits plain data; here we decide
     // what to do with it: structured telemetry for every tool call, and a

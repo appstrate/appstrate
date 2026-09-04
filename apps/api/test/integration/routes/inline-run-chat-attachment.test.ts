@@ -103,7 +103,12 @@ describe("inline run launched from the chat with an attached file", () => {
   /** Attach a file to a chat session the way a composer upload does. */
   async function attachToChat(): Promise<{ uri: string; fileId: string }> {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const uploadId = await stageUpload("brief.txt", "the attached brief");
     const resolved = await resolveChatAttachment({
       orgId: ctx.orgId,

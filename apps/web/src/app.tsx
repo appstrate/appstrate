@@ -31,6 +31,7 @@ import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
+import { WEBHOOK_READ_PERMISSIONS } from "./lib/webhook-permissions";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
@@ -794,7 +795,7 @@ export function App() {
                 <Route
                   path="/webhooks"
                   element={
-                    <RequirePermission permission={["webhooks:read", "org-webhooks:read"]}>
+                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
                       <Suspense fallback={<LoadingState />}>
                         <WebhooksPage />
                       </Suspense>
@@ -804,7 +805,7 @@ export function App() {
                 <Route
                   path="/webhooks/:id"
                   element={
-                    <RequirePermission permission={["webhooks:read", "org-webhooks:read"]}>
+                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
                       <Suspense fallback={<LoadingState />}>
                         <WebhookDetailPage />
                       </Suspense>
@@ -853,7 +854,14 @@ export function App() {
               }
             >
               <Route index element={<Navigate to="general" replace />} />
-              <Route path="general" element={<OrgSettingsGeneralPage />} />
+              <Route
+                path="general"
+                element={
+                  <RequirePermission permission="org:read">
+                    <OrgSettingsGeneralPage />
+                  </RequirePermission>
+                }
+              />
               <Route
                 path="members"
                 element={

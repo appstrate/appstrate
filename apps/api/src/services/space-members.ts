@@ -24,7 +24,6 @@ import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { getOrgMember } from "./organizations.ts";
-import { assertOrgRole } from "../lib/permissions.ts";
 import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
 
 /** Accepts either the base client or an open transaction handle. */
@@ -83,7 +82,7 @@ export async function listSpaceMembers(
   for (const row of orgRows) {
     const found = explicit.get(row.userId);
     if (!found && !includeImplicit) continue;
-    const orgRole = assertOrgRole(row.role);
+    const orgRole = row.role;
     const effective = resolveSpaceRole(
       orgRole,
       { id: space.id, ...spaceAccess(space) },
@@ -298,7 +297,7 @@ export async function deleteSpaceMembershipsInOrg(
 
 async function orgRoleOf(tx: DbOrTx, orgId: string, userId: string): Promise<OrgRole | null> {
   const row = await getOrgMember(orgId, userId, tx);
-  return row ? assertOrgRole(row.role) : null;
+  return row ? row.role : null;
 }
 
 /** The FK alone would accept another org's bundle, so the org is checked here. */

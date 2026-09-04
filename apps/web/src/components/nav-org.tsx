@@ -25,6 +25,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { useChatUnreadCount } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "../lib/scoping-headers";
+import { WEBHOOK_READ_PERMISSIONS } from "../lib/webhook-permissions";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -82,9 +83,7 @@ export function NavOrg() {
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
   ];
 
-  // Webhooks are two resources at two levels (`webhooks` = space,
-  // `org-webhooks` = org); the page lists both, so either read opens it.
-  const canReadWebhooks = can("webhooks:read") || can("org-webhooks:read");
+  const canReadWebhooks = WEBHOOK_READ_PERMISSIONS.some((p) => can(p));
   const adminItems: NavItem[] = [
     ...(features.webhooks && canReadWebhooks
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]

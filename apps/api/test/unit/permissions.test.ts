@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { OrgRole } from "@appstrate/core/permissions";
 import { describe, it, expect } from "bun:test";
 import {
-  assertOrgRole,
   effectivePermissions,
   orgPermissions,
   presetPermissions,
-  UnmigratedOrgRoleError,
   validateScopes,
   API_KEY_ALLOWED_SCOPES,
 } from "../../src/lib/permissions.ts";
@@ -132,22 +131,12 @@ describe("effective permissions in an open space", () => {
   });
 });
 
-describe("assertOrgRole", () => {
-  it("passes every current role through unchanged", () => {
-    for (const role of ["owner", "admin", "member", "guest"] as const) {
-      expect(assertOrgRole(role)).toBe(role);
-    }
-  });
-
-  it("refuses the retired value loudly, naming the migration script", () => {
-    // The discriminating half: a role the vocabulary still knows must NOT
-    // throw, so a test that only asserted the throw would also pass against a
-    // function that throws on everything.
-    expect(() => assertOrgRole("member")).not.toThrow();
-    expect(() => assertOrgRole("viewer")).toThrow(UnmigratedOrgRoleError);
-    expect(() => assertOrgRole("viewer")).toThrow(
-      /scripts\/migration\/0008-org-viewer-to-guest\.sql/,
-    );
+describe("orgPermissions", () => {
+  it("refuses a role outside the vocabulary rather than defaulting it", () => {
+    // A persisted value the code does not know must fail, not resolve to an
+    // empty (or any) set — silently under- or over-granting is the one thing
+    // this table may never do.
+    expect(() => orgPermissions("nope" as OrgRole)).toThrow();
   });
 });
 

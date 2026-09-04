@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Space membership — the invariants of RBAC spec §12.1 that Phase 2 owns.
+ * Space membership — the invariants of RBAC spec §5.
  *
  * Every case is written so it fails in the wrong world and passes in the right
  * one: each "denied" assertion is paired with the permitted twin that differs
@@ -439,28 +439,6 @@ describe("space membership", () => {
       // `user`, and removing an org membership deletes neither. Left behind,
       // they would silently restore the role on re-invite.
       expect(await spaceMemberCount(leaving.user.id)).toBe(0);
-    });
-  });
-
-  describe("a retired org role is refused, never mapped", () => {
-    it("500s the caller and names the migration script", async () => {
-      const stale = await member("member");
-      // Raw SQL: the TS enum no longer admits the value, which is the point.
-      await db.execute(
-        sql`UPDATE org_members SET role = 'viewer' WHERE user_id = ${stale.user.id}`,
-      );
-
-      const res = await app.request("/api/agents", { headers: authHeaders(stale) });
-      expect(res.status).toBe(500);
-
-      // Control: the same caller, the same request, one supported role.
-      await db.execute(sql`UPDATE org_members SET role = 'guest' WHERE user_id = ${stale.user.id}`);
-      await seedSpaceMember({
-        spaceId: owner.defaultSpaceId,
-        userId: stale.user.id,
-        presetRole: "viewer",
-      });
-      expect((await app.request("/api/agents", { headers: authHeaders(stale) })).status).toBe(200);
     });
   });
 });

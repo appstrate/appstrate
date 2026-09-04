@@ -79,6 +79,7 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
     await db.insert(chatSessions).values({
       id: "chs_attr_1",
       orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
 

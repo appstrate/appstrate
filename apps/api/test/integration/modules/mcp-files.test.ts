@@ -228,7 +228,12 @@ describe("mcp list_files", () => {
     const memberB = await createTestUser({ email: "mcpchat@docs.test" });
     await addOrgMember(ctx.orgId, memberB.id, "member");
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: memberB.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: memberB.id,
+    });
     const up = await stageUpload(
       scope,
       memberB.id,

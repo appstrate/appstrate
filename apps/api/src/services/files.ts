@@ -1348,30 +1348,6 @@ async function runContainerFilter(scope: SpaceScope, runId: string): Promise<SQL
 }
 
 /**
- * A `chat_sessions` row still carrying `space_id IS NULL` — written before chat
- * became space-scoped, backfill not run.
- *
- * The core-side twin of module-chat's `UnmigratedChatSessionError`
- * (`packages/module-chat/src/persistence.ts`), and duplicated on purpose:
- * `module-chat` is optional (`MODULES`), so a static import here would pull a
- * disabled module's code into platform boot. Keep the two in step — same
- * message, same `sessionId` — and delete both in the release that retires the
- * nullable column (RBAC spec §11, release N+1).
- */
-class UnmigratedChatSessionError extends Error {
-  readonly sessionId: string;
-
-  constructor(sessionId: string) {
-    super(
-      `chat_sessions.space_id IS NULL for session '${sessionId}'; ` +
-        `run scripts/migration/0008-org-viewer-to-guest.sql`,
-    );
-    this.name = "UnmigratedChatSessionError";
-    this.sessionId = sessionId;
-  }
-}
-
-/**
  * Files that make up one conversation's context: direct chat attachments,
  * outputs produced by its runs, and files consumed by those runs. The
  * session ownership check is load-bearing because chat sessions are private
@@ -1384,29 +1360,23 @@ async function chatContextFileFilter(
 ): Promise<SQL> {
   if (actor.type !== "user") return sql`false`;
 
-  // Ownership is proved by the query; the SPACE is checked after it, so an
-  // un-backfilled row fails loudly instead of filtering itself out. Folding
-  // `space_id = :space` into the WHERE is what made a NULL row resolve zero
-  // files in silence — indistinguishable from an empty conversation.
+  // Sessions are space-scoped rows (RBAC spec §5), so the space is part of
+  // ownership: the same user in another space must not resolve this
+  // conversation's files. Someone else's session resolves nothing rather than
+  // erroring, so this can never become a probe for which session ids exist.
   const [session] = await db
-    .select({ id: chatSessions.id, spaceId: chatSessions.spaceId })
+    .select({ id: chatSessions.id })
     .from(chatSessions)
     .where(
       and(
         eq(chatSessions.id, chatSessionId),
         eq(chatSessions.orgId, scope.orgId),
+        eq(chatSessions.spaceId, scope.spaceId),
         eq(chatSessions.userId, actor.id),
       ),
     )
     .limit(1);
-  // Someone else's session is still `false`, never a throw: the refusal below
-  // must not become a probe for which session ids exist.
   if (!session) return sql`false`;
-  if (session.spaceId === null) throw new UnmigratedChatSessionError(session.id);
-  // Sessions are space-scoped rows (RBAC spec §5), so the space is part of
-  // ownership: the same user in another space must not resolve this
-  // conversation's files.
-  if (session.spaceId !== scope.spaceId) return sql`false`;
 
   return or(
     eq(files.chatSessionId, chatSessionId),

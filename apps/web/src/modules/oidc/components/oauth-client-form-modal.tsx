@@ -27,13 +27,10 @@ import {
   useUpdateOAuthClient,
   useOAuthScopes,
   type OAuthClient,
-  type SignupRole,
 } from "../hooks/use-oauth-clients";
+import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { looksLoopback } from "../lib/redirect-uri";
-
-/** Role allowlist for org-level auto-provisioning. `owner` deliberately excluded. */
-const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "guest"];
 
 /** Scopes that are always granted — cannot be unchecked in the UI. */
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
@@ -91,7 +88,7 @@ function OAuthClientFormBody({
   // brand-new clients start with the flag off. On org-level clients the
   // `signupRole` controls the role assigned to the auto-joined user.
   const [allowSignup, setAllowSignup] = useState(client?.allowSignup ?? false);
-  const [signupRole, setSignupRole] = useState<SignupRole>(client?.signupRole ?? "member");
+  const [signupRole, setSignupRole] = useState<AssignableOrgRole>(client?.signupRole ?? "member");
   const [createdSecret, setCreatedSecret] = useState<{
     clientId: string;
     clientSecret: string;
@@ -383,11 +380,11 @@ function OAuthClientFormBody({
                 <select
                   id="oauth-client-signup-role"
                   value={signupRole}
-                  onChange={(e) => setSignupRole(e.target.value as SignupRole)}
+                  onChange={(e) => setSignupRole(e.target.value as AssignableOrgRole)}
                   disabled={!allowSignup}
                   className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {SIGNUP_ROLE_OPTIONS.map((role) => (
+                  {ASSIGNABLE_ORG_ROLES.map((role) => (
                     <option key={role} value={role}>
                       {t(`settings:oauthClients.signupRoleOption.${role}`)}
                     </option>

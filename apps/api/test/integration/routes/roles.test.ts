@@ -154,7 +154,6 @@ describe("custom space roles", () => {
             permission: string;
             action: string;
             api_key_grantable: boolean;
-            end_user_grantable: boolean;
           }[];
         }[];
       };

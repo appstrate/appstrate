@@ -47,7 +47,7 @@ import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
-import { assertOrgRole } from "../../../lib/permissions.ts";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
 // ─── SECURITY: Trust boundary ─────────────────────────────────────────────────
@@ -139,15 +139,6 @@ function assertValidRedirectUris(uris: readonly string[]): void {
   }
 }
 
-/**
- * Role allowlist for org-level auto-provisioning. `owner` is intentionally
- * excluded at the service, DB, and UI layers: self-promotion to owner via a
- * misconfigured client is an unacceptable operational risk. Admins who
- * genuinely need a new owner must promote after the fact.
- */
-export const SIGNUP_ROLE_ALLOWED = ["admin", "member", "guest"] as const;
-export type SignupRole = (typeof SIGNUP_ROLE_ALLOWED)[number];
-
 export interface OAuthClientRecord {
   id: string;
   clientId: string;
@@ -170,7 +161,7 @@ export interface OAuthClientRecord {
    */
   allowSignup: boolean;
   /** Org-level: role assigned on auto-join. `owner` forbidden. Defaults to `"member"`. */
-  signupRole: SignupRole;
+  signupRole: AssignableOrgRole;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -196,12 +187,7 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     disabled: row.disabled ?? false,
     isFirstParty: row.skipConsent ?? false,
     allowSignup: row.allowSignup ?? false,
-    // Through `assertOrgRole` because `signup_role` writes straight into
-    // `org_members.role`: a row still holding the retired `viewer` must fail
-    // loudly naming the script, not auto-provision an unreadable role. The
-    // narrowing to `SignupRole` is the DB CHECK's guarantee — `owner` is
-    // refused at the service, the schema and the constraint.
-    signupRole: assertOrgRole(row.signupRole) as SignupRole,
+    signupRole: row.signupRole,
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
@@ -309,7 +295,7 @@ interface CreateOrgClientInput {
   /** Defaults to `false` at org level. */
   allowSignup?: boolean;
   /** Defaults to `"member"`. `owner` forbidden. */
-  signupRole?: SignupRole;
+  signupRole?: AssignableOrgRole;
 }
 
 interface CreateSpaceClientInput {
@@ -375,7 +361,8 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   // semantic). Defaults to `false` (secure-by-default); `ensureInstanceClient()`
   // opts in at boot to keep the fresh-install signup page open.
   const allowSignup = input.allowSignup ?? false;
-  const signupRole: SignupRole = input.level === "org" ? (input.signupRole ?? "member") : "member";
+  const signupRole: AssignableOrgRole =
+    input.level === "org" ? (input.signupRole ?? "member") : "member";
 
   const inserted = await db
     .insert(oauthClient)
@@ -511,7 +498,7 @@ interface UpdateClientInput {
   /** Honored on every level (unified semantic). */
   allowSignup?: boolean;
   /** Honored only on org-level clients; rejected on instance/space. `owner` forbidden. */
-  signupRole?: SignupRole;
+  signupRole?: AssignableOrgRole;
 }
 
 export async function updateClient(

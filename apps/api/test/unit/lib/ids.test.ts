@@ -15,15 +15,11 @@
  * regex, not decoration.
  */
 
+import { z } from "zod";
+import { spaceRoleAssignmentShape } from "../../../src/lib/space-role-assignment.ts";
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "@appstrate/core/api-errors";
-import {
-  SPACE_ID_RE,
-  SPACE_ROLE_ID_RE,
-  assertSpaceId,
-  assertSpaceRoleId,
-  prefixedId,
-} from "../../../src/lib/ids.ts";
+import { SPACE_ID_RE, assertSpaceId, assertSpaceRoleId, prefixedId } from "../../../src/lib/ids.ts";
 
 /** Run `assertSpaceId` and return the `ApiError` it threw. Fails if it did not throw. */
 function captureThrow(id: string, param?: string): ApiError {
@@ -132,12 +128,11 @@ describe("assertSpaceId", () => {
   });
 });
 
-describe("SPACE_ROLE_ID_RE / assertSpaceRoleId", () => {
-  it("matches exactly what prefixedId('srl') mints", () => {
+describe("assertSpaceRoleId", () => {
+  it("accepts exactly what prefixedId('srl') mints", () => {
     for (let i = 0; i < 20; i++) {
-      expect(SPACE_ROLE_ID_RE.test(prefixedId("srl"))).toBe(true);
+      expect(() => assertSpaceRoleId(prefixedId("srl"))).not.toThrow();
     }
-    expect(() => assertSpaceRoleId(prefixedId("srl"))).not.toThrow();
   });
 
   const rejected = [
@@ -152,7 +147,6 @@ describe("SPACE_ROLE_ID_RE / assertSpaceRoleId", () => {
 
   for (const id of rejected) {
     it(`rejects '${id}'`, () => {
-      expect(SPACE_ROLE_ID_RE.test(id)).toBe(false);
       let thrown: unknown;
       try {
         assertSpaceRoleId(id, "custom_role_id");
@@ -166,4 +160,14 @@ describe("SPACE_ROLE_ID_RE / assertSpaceRoleId", () => {
       expect(err.message).toContain("Malformed space role id");
     });
   }
+});
+
+describe("spaceRoleAssignmentShape.custom_role_id", () => {
+  const schema = z.object(spaceRoleAssignmentShape);
+  it("refuses a malformed id and accepts a canonical one", () => {
+    expect(schema.safeParse({ custom_role_id: "srl_nope" }).success).toBe(false);
+    expect(
+      schema.safeParse({ custom_role_id: "srl_0f6c4c4e-1b2a-4c3d-8e9f-0a1b2c3d4e5f" }).success,
+    ).toBe(true);
+  });
 });

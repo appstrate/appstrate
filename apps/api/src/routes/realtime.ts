@@ -11,7 +11,7 @@ import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { effectivePermissions, orgPermissions, assertOrgRole } from "../lib/permissions.ts";
+import { effectivePermissions, orgPermissions } from "../lib/permissions.ts";
 import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { validateSpaceInOrg, type SpaceContextRow } from "../middleware/space-context.ts";
 import { assertSpaceId } from "../lib/ids.ts";
@@ -75,7 +75,6 @@ function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | 
 interface SSEAuthResult {
   userId: string;
   orgId: string;
-  role: OrgRole;
   /**
    * Whether the subscriber sees debug-level `run_log` events
    * (services/realtime.ts) — the only thing this flag gates. Read from
@@ -136,8 +135,8 @@ async function validateSSEAuth(c: {
     if (!keyInfo) return null;
 
     // The key's `spaceId` comes straight off the `api_keys` row, so this is
-    // the shape check for that path — an un-migrated `api_keys` table would
-    // otherwise open a stream on an `app_` id in silence. The row is then
+    // the shape check for that path: `assertSpaceId` refuses anything that is
+    // not a canonical `spc_` id before it reaches the stream. The row is then
     // loaded because the space's visibility and default role are what decide
     // the creator's membership.
     assertSpaceId(keyInfo.spaceId);
@@ -161,7 +160,6 @@ async function validateSSEAuth(c: {
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
-      role: keyInfo.creatorRole,
       // From the CEILINGED set, not from `grants`: a key whose scopes stop at
       // `runs:read` must not stream verbose logs just because its creator could.
       canReadDebugLogs: permissions.has("runs:delete"),
@@ -176,8 +174,6 @@ async function validateSSEAuth(c: {
   const orgId = c.req.query("orgId");
   if (!orgId) return null;
 
-  // Verify org membership — through the one reader, so this path narrows the
-  // stored value with the same `assertOrgRole` every other caller uses.
   const member = await getOrgMember(orgId, session.user.id);
   if (!member) return null;
 
@@ -188,7 +184,7 @@ async function validateSSEAuth(c: {
   const space = await validateSpaceInOrg(spaceId, orgId);
   if (!space) return null;
 
-  const role = assertOrgRole(member.role);
+  const role = member.role;
   // Same membership resolution the HTTP pipeline applies (`applySpacePermissions`):
   // being in the org is not being in the space.
   const grants = await resolveSpaceGrants(role, space, session.user.id);
@@ -203,7 +199,6 @@ async function validateSSEAuth(c: {
   return {
     userId: session.user.id,
     orgId,
-    role,
     canReadDebugLogs: grants.has("runs:delete"),
     spaceId,
   };

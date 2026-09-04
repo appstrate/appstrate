@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Chat sessions are space-scoped (RBAC spec §5, Phase 5).
+ * Chat sessions are space-scoped (RBAC spec §5).
  *
  * `(org_id, space_id, user_id)` is the ownership triple every read filters on,
- * so the same user in another space sees another conversation list. A row still
- * carrying `space_id IS NULL` — written before the column existed and never
- * backfilled — is refused BY NAME rather than filtered out: a silent filter
- * would empty someone's sidebar and blame nothing.
+ * so the same user in another space sees another conversation list.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
 import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import {
@@ -23,7 +18,6 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import { internalDispatchHeader } from "../../../apps/api/src/lib/internal-dispatch.ts";
 import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
-import { assertMigratedSession, UnmigratedChatSessionError } from "../src/persistence.ts";
 
 const app = getTestApp();
 
@@ -110,40 +104,6 @@ describe("chat sessions are space-scoped", () => {
       ).status,
     ).toBe(204);
     expect((await fromA(`/api/chat/sessions/${inA}`, { method: "DELETE" })).status).toBe(204);
-  });
-
-  describe("an unmigrated row (space_id IS NULL)", () => {
-    it("names the migration script rather than being mapped or hidden", () => {
-      expect(() => assertMigratedSession({ id: "chs_x", spaceId: null })).toThrow(
-        UnmigratedChatSessionError,
-      );
-      expect(() => assertMigratedSession({ id: "chs_x", spaceId: null })).toThrow(
-        /scripts\/migration\/0008-org-viewer-to-guest\.sql/,
-      );
-      // The control: a migrated row narrows to its space.
-      expect(assertMigratedSession({ id: "chs_x", spaceId: "spc_1" })).toBe("spc_1");
-    });
-
-    it("makes the listing fail loudly instead of coming back short", async () => {
-      const id = await createSession(ctx.defaultSpaceId);
-      await db.execute(sql`UPDATE chat_sessions SET space_id = NULL WHERE id = ${id}`);
-
-      expect((await listSessions(ctx.defaultSpaceId)).status).toBe(500);
-      expect(
-        (await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) })).status,
-      ).toBe(500);
-
-      // The control: the SAME row with its space restored answers 200 and is
-      // listed — so the 500 above is the NULL, not the fixture.
-      await db.execute(
-        sql`UPDATE chat_sessions SET space_id = ${ctx.defaultSpaceId} WHERE id = ${id}`,
-      );
-      const listed = await listSessions(ctx.defaultSpaceId);
-      expect(listed.status).toBe(200);
-      expect(((await listed.json()) as { data: { id: string }[] }).data.map((s) => s.id)).toEqual([
-        id,
-      ]);
-    });
   });
 });
 

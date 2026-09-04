@@ -27,7 +27,7 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
@@ -36,7 +36,6 @@ import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
-import { assertMigratedSession } from "./persistence.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
@@ -104,14 +103,10 @@ async function findOwnedSession(
         eq(chatSessions.id, id),
         eq(chatSessions.orgId, scope.orgId),
         eq(chatSessions.userId, scope.userId),
-        // An unmigrated row is deliberately MATCHED here rather than filtered
-        // out, so `assertMigratedSession` can refuse it by name — a filter
-        // would answer "not found" and hide a backfill that never ran.
-        or(eq(chatSessions.spaceId, scope.spaceId), isNull(chatSessions.spaceId)),
+        eq(chatSessions.spaceId, scope.spaceId),
       ),
     )
     .limit(1);
-  if (session) assertMigratedSession(session);
   return session;
 }
 
@@ -169,12 +164,11 @@ export function createChatRouter(deps: ChatPlatformDeps) {
         and(
           eq(chatSessions.orgId, scope.orgId),
           eq(chatSessions.userId, scope.userId),
-          or(eq(chatSessions.spaceId, scope.spaceId), isNull(chatSessions.spaceId)),
+          eq(chatSessions.spaceId, scope.spaceId),
         ),
       )
       .orderBy(desc(chatSessions.updatedAt))
       .limit(SESSIONS_PAGE_SIZE + 1);
-    for (const row of rows) assertMigratedSession(row);
     const hasMore = rows.length > SESSIONS_PAGE_SIZE;
     const page = hasMore ? rows.slice(0, SESSIONS_PAGE_SIZE) : rows;
     return c.json({ object: "list", data: page.map(toSessionDto), hasMore });

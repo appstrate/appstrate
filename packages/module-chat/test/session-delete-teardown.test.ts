@@ -69,9 +69,9 @@ async function stageUpload(
 }
 
 /** A chat session row owned by `userId`. */
-async function createSession(orgId: string, userId: string): Promise<string> {
+async function createSession(orgId: string, spaceId: string, userId: string): Promise<string> {
   const id = `chs_${crypto.randomUUID()}`;
-  await db.insert(chatSessions).values({ id, orgId, userId, title: null });
+  await db.insert(chatSessions).values({ id, orgId, spaceId, userId, title: null });
   return id;
 }
 
@@ -96,7 +96,7 @@ describe("chat session delete — file teardown", () => {
   });
 
   it("removes the session's files and enqueues their storage-deletion jobs atomically", async () => {
-    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     const bytes = new TextEncoder().encode("session attachment payload");
     const uploadId = await stageUpload(scope, ctx.user.id, "att.txt", bytes);
     const file = await createFileFromUpload(scope, actor, uploadId, {
@@ -134,7 +134,7 @@ describe("chat session delete — file teardown", () => {
   });
 
   it("rolls the teardown back when the session-row delete fails (atomic)", async () => {
-    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     const bytes = new TextEncoder().encode("must survive a rollback");
     const uploadId = await stageUpload(scope, ctx.user.id, "att.txt", bytes);
     const file = await createFileFromUpload(scope, actor, uploadId, {

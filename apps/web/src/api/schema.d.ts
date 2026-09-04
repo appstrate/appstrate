@@ -3605,7 +3605,7 @@ export interface paths {
         };
         /**
          * List the permissions a custom role may hold
-         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `end_user_grantable` reports the strings a loaded module opted in for end-user OIDC tokens.
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`.
          */
         get: operations["listRoleVocabulary"];
         put?: never;
@@ -5132,7 +5132,7 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "guest";
+            signupRole: "guest" | "member" | "admin";
             createdAt: string | null;
             updatedAt: string | null;
         };
@@ -5151,7 +5151,7 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "guest";
+            signupRole: "guest" | "member" | "admin";
             createdAt: string | null;
             updatedAt: string | null;
             clientSecret: string;
@@ -5454,8 +5454,6 @@ export interface components {
                 action: string;
                 /** @description Can also be carried by an API key. */
                 api_key_grantable: boolean;
-                /** @description A loaded module opted this string in for end-user OIDC tokens. */
-                end_user_grantable: boolean;
             }[];
         };
         Run: {
@@ -13743,7 +13741,7 @@ export interface operations {
                      * @description Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "guest";
+                    signupRole?: "guest" | "member" | "admin";
                 } | {
                     /** @enum {string} */
                     level: "space";
@@ -13877,7 +13875,7 @@ export interface operations {
                      * @description Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "guest";
+                    signupRole?: "guest" | "member" | "admin";
                 };
             };
         };

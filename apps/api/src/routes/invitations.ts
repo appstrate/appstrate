@@ -17,7 +17,7 @@ import { applyInvitationSpaceAssignments } from "../services/space-members.ts";
 import { recordAudit } from "../services/audit.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
-import { assertOrgRole, listedOrgPermissions } from "../lib/permissions.ts";
+import { listedOrgPermissions } from "../lib/permissions.ts";
 
 const router = new Hono();
 
@@ -132,16 +132,7 @@ router.post("/:token/accept", async (c) => {
   const claimed = await db.transaction(async (tx) => {
     const won = await markInvitationAccepted(invitation.id, tx);
     if (!won) return null;
-    // Through `assertOrgRole` because this is where a stored invitation role
-    // becomes an `org_members.role`: a pending invitation still carrying the
-    // retired value must fail loudly naming the script, not create a member
-    // nobody can authenticate.
-    await addMember(
-      invitation.orgId,
-      session.user.id,
-      assertOrgRole(invitation.role) as AssignableOrgRole,
-      tx,
-    );
+    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
     // Same transaction as the claim: an invitation that granted spaces must
     // never be spent while leaving the invitee out of them.
     return applyInvitationSpaceAssignments(tx, {
@@ -198,7 +189,7 @@ router.post("/:token/accept", async (c) => {
     name: org.name,
     slug: org.slug,
     role: invitation.role,
-    permissions: listedOrgPermissions(assertOrgRole(invitation.role)),
+    permissions: listedOrgPermissions(invitation.role),
     createdAt: org.createdAt,
   });
 });

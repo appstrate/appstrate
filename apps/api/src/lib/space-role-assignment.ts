@@ -15,6 +15,7 @@ import { z } from "zod";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceRoleAssignment } from "../services/space-members.ts";
+import { isSpaceRoleId } from "./ids.ts";
 
 /**
  * Zod's `.refine()` returns a wrapper that cannot be `.extend()`ed, so the
@@ -23,7 +24,12 @@ import type { SpaceRoleAssignment } from "../services/space-members.ts";
  */
 export const spaceRoleAssignmentShape = {
   preset_role: z.enum(SPACE_ROLE_PRESETS).optional(),
-  custom_role_id: z.string().min(1).optional(),
+  custom_role_id: z
+    .string()
+    .refine(isSpaceRoleId, {
+      message: "Malformed space role id. Expected `srl_` followed by a canonical UUID.",
+    })
+    .optional(),
 };
 
 /** Apply the xor rule to a schema that already carries the shape above. */

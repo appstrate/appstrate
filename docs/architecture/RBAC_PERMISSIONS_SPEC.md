@@ -9,7 +9,7 @@ A space is the **unit of access**, not just the unit of scoping. "Who can see th
 
 Effective permissions for a request = permissions of the caller's org role ∪ permissions of the caller's role in the current space, intersected with the credential's ceiling (API-key scopes, OIDC scopes). Every guard stays what it is today: `Set.has("resource:action")`.
 
-> **Status.** Phases **1** through **6** of §12 are implemented: the level split and the preset table, `guest`, `space_members` / `space_roles` / visibility, the resolver and the three pipeline keys, `requireSpaceContext`'s membership step and the `enterSpaceContext` seam, the filtered `GET /api/spaces` with per-space `permissions`, `/api/spaces/:id/members`, API keys resolving their creator's membership, invitations carrying `space_assignments`, `permissions` on the org listing, the `/api/roles` CRUD + vocabulary route behind `features.custom_roles`, the SPA (`can()`, space switcher, space-members and roles pages, org members with `guest` + assignments), space-scoped `chat_sessions`, and the `principalPermissions` module member (§4.2) with its boot validation, cached union and `invalidatePrincipalPermissions`. Phase 6's **cloud half** — billing managers, billing contact, Stripe email, `getOrgAdminEmails` removed from the contract — ships in a separate PR against `@appstrate/cloud`, so no module declares the member yet and the surface is inert in OSS. Phase **7** is release N+1 (§11). Everything below is written as the target state; where the two differ, the code is the authority for what ships today.
+> **Status.** The model below is implemented: the level split and the preset table, `guest`, `space_members` / `space_roles` / visibility, the resolver and the three pipeline keys, `requireSpaceContext`'s membership step and the `enterSpaceContext` seam, the filtered `GET /api/spaces` with per-space `permissions`, `/api/spaces/:id/members`, API keys resolving their creator's membership, invitations carrying `space_assignments`, `permissions` on the org listing, the `/api/roles` CRUD + vocabulary route behind `features.custom_roles`, the SPA (`can()`, space switcher, space-members and roles pages, org members with `guest` + assignments), space-scoped `chat_sessions`, and the `principalPermissions` module member (§4.2) with its boot validation, cached union and `invalidatePrincipalPermissions`. The **cloud half** — billing managers, billing contact, Stripe email, `getOrgAdminEmails` removed from the contract — ships in a separate PR against `@appstrate/cloud`, so no module declares the member yet and the surface is inert in OSS. The one remaining follow-up is in §12. Where this document and the code differ, the code is the authority.
 
 Related: `SPACES.md` (space resolution on the wire), `SECURITY.md` §Layer 5 (permission guards), `docs/NO_TRANSITIONAL_CODE.md` (migration doctrine), `/docs/architecture/OSS_EE_SPEC.md` (custom roles are an EE surface).
 
@@ -31,33 +31,9 @@ Considered and rejected: §13.
 
 ---
 
-## 2. Current state _(current)_
+## 2. Why authorization is hand-rolled
 
-> Snapshot of the codebase **before** any phase landed, kept as written: it is what the design argues against, and rewriting it would erase the baseline the rest of the document reasons from. Read §12 for what is implemented now.
-
-Better Auth provides identity only — sessions, magic link, social, the OIDC provider (`packages/db/src/auth.ts:615`; one base plugin, `magicLink`, at `:424`). The organization, admin and apiKey plugins are not used; `createAccessControl` has zero occurrences. Everything below is hand-rolled and stays hand-rolled (§13.1).
-
-**Vocabulary.** 18 core resources → 60 `resource:action` strings, `CoreResources` at `packages/core/src/permissions.ts:63`. Modules add resources through declaration merging on `ModuleResources` (`:160`) and `permissionsContribution()` (`packages/core/src/module.ts:352`): `oauth-clients`, `cli-sessions` (oidc), `mcp` (mcp), `webhooks` (webhooks), `chat` (module-chat), `billing` (cloud).
-
-**Policy.** A static matrix of four org roles (`ORG_ROLES`, `packages/core/src/permissions.ts:192`; pg enum `org_role`, `packages/db/src/schema/enums.ts:25`) to permission sets: `OWNER_PERMISSIONS` `apps/api/src/lib/permissions.ts:81`, `ADMIN = owner − org:delete` `:153`, `MEMBER` `:158`, `VIEWER` `:199`. API-key scopes use the same strings, narrowed by `API_KEY_ALLOWED_SCOPES` (`:238`, 48 entries + module opt-ins).
-
-**Enforcement.** One guard, `makePermissionGuard` (`packages/core/src/permissions.ts:449`): reads `c.get("permissions")`, fails closed, audits once, 403. Three typed façades (`requirePermission`, `requireCorePermission`, `requireModulePermission`). The set is written once per request by the auth pipeline: session → `resolvePermissions(orgRole)` (`apps/api/src/lib/auth-pipeline.ts:353`); API key → `scopes ∩ creator's live role set` (`:179`); module strategies → whatever the strategy computed (`:140`).
-
-**Spaces are a partition, not an access unit.** No `space_members` table, no per-space role. `requireSpaceContext` (`apps/api/src/middleware/space-context.ts:145`) validates that the header/pinned space belongs to the org and nothing else. Any org member reaches any space.
-
-**Leaks outside RBAC** — role-name checks the vocabulary was supposed to replace:
-
-| Site                                                                                  | What it does                                                                              |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `apps/api/src/routes/organizations.ts:95` `requireOrgRole`                            | `/api/orgs/*` admin routes; `org:*` and `members:*` are declared but guarded nowhere      |
-| `apps/api/src/routes/integrations.ts:1273` `assertOrgAdmin` (5 call sites)            | Refuses API keys on OAuth-client / org-default mutations even with `integrations:install` |
-| `apps/api/src/routes/integrations.ts:316`, `:1218`; `agents.ts:326`; `realtime.ts:88` | `role === "owner" \|\| role === "admin"`                                                  |
-
-**SPA.** `usePermissions()` exposes `isOwner/isAdmin/isMember` from `currentOrg.role` (`apps/web/src/hooks/use-permissions.ts:25`); ~40 gates across pages; never a permission string.
-
-**Straddlers.** `chat_sessions` has no `space_id` (`packages/db/src/schema/chat.ts:24`). `webhooks.space_id` is nullable with a `level` discriminator (`packages/db/src/schema/webhooks.ts:31`). `packages` is org-scoped; reachability is the `space_packages` row (`SPACES.md` §Model). `integration_oauth_clients` and `integration_org_defaults` carry a `space_id`.
-
-**Billing (cloud).** `billing:read` to all roles, `billing:manage` to owner/admin (`cloud/src/index.ts:142`). No billing contact: emails fan out to every owner+admin (`cloud/src/emails/send.ts:52`, `apps/api/src/lib/modules/registry.ts:174`); the Stripe customer is created without an email (`cloud/src/stripe/checkout.ts:28`).
+Better Auth provides identity only — sessions, magic link, social, the OIDC provider (`packages/db/src/auth.ts`). Its organization, admin and apiKey plugins are not used and `createAccessControl` has zero occurrences: every rule below is this codebase's own, for the reasons in §13.1.
 
 ---
 
@@ -221,7 +197,7 @@ The `/api/orgs/:orgId*` family is exempt from `requireOrgContext` (the org is in
 
 ### 4.3 Guards
 
-Unchanged: `makePermissionGuard(required)` and its three façades. Audit on denial, once. No `requireAdmin()`, no `requireOwner()`, and after Phase 1 no `requireOrgRole()` either — the only allowed shape is `requirePermission(resource, action)`, and the four leak sites in §2 are rewritten to it. The `who-manages-whom` policy runs **inside** the handler after the guard, as it does today.
+`makePermissionGuard(required)` and its three façades. Audit on denial, once. There is no `requireAdmin()`, no `requireOwner()` and no `requireOrgRole()`: the only shape is `requirePermission(resource, action)`. The `who-manages-whom` policy runs **inside** the handler after the guard.
 
 Modules keep gating their own routes with `requireModulePermission`. A module that mounts a space-level resource on a route family outside `SPACE_SCOPED_PREFIXES` must resolve the space itself (webhooks already does, from an explicit `spaceId` field) and call the same exported `applySpacePermissions(c, space)` helper so that `permissions` carries the space slice — otherwise its guard can never pass for a non-admin, which is fail-closed and therefore the right default.
 
@@ -231,7 +207,7 @@ Modules keep gating their own routes with `requireModulePermission`. A module th
 
 ```sql
 -- enums.ts
-org_role: owner | admin | member | guest              -- viewer removed (Phase 6)
+org_role: owner | admin | member | guest
 
 -- spaces
 ALTER TABLE spaces
@@ -243,7 +219,7 @@ ALTER TABLE spaces
 
 -- custom role definitions (org-scoped)
 CREATE TABLE space_roles (
-  id          text PRIMARY KEY,                       -- srl_ + uuid, SPACE_ROLE_ID_RE guard like spc_
+  id          text PRIMARY KEY,                       -- srl_ + uuid, shape-guarded like spc_
   org_id      uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   key         text NOT NULL,                          -- slug, unique per org, never a preset name
   name        text NOT NULL,
@@ -279,8 +255,7 @@ ALTER TABLE org_invitations
   -- validated by zod at invite time; a guest invitation with an empty list is a 400.
 
 -- chat sessions become space-scoped
-ALTER TABLE chat_sessions ADD COLUMN space_id text REFERENCES spaces(id) ON DELETE CASCADE;
-  -- nullable in release N (backfilled by scripts/migration/), NOT NULL in release N+1 (§11)
+ALTER TABLE chat_sessions ADD COLUMN space_id text NOT NULL REFERENCES spaces(id) ON DELETE CASCADE;
 CREATE INDEX idx_chat_sessions_space_user ON chat_sessions(space_id, user_id);
 ```
 
@@ -357,13 +332,13 @@ Every new route in `apps/api/src/openapi/paths/`, 403 documented on every guarde
 
 ### 7.1 API keys
 
-Today: `permissions = scopes ∩ creator's live org role set` (`resolveApiKeyPermissions`, `apps/api/src/lib/permissions.ts:380`). Tomorrow, the same sentence with "effective set in the key's space" for "org role set":
+`permissions = scopes ∩ the creator's effective set in the key's space`.
 
 - Mint: `validateScopes(scopes, creatorEffective)` where `creatorEffective` is the creator's effective set in the key's space. Non-grantable → 400; beyond the creator → filtered. Unchanged in kind.
-- Request: the pipeline pins `spaceId` from the key row; `requireSpaceContext` resolves the **creator's** membership in that space and applies the ceiling `scopes`. A creator who lost the space (removed, demoted to guest without a row) leaves the key with `scopes ∩ orgPermissions` — nearly nothing, and it 403s where it used to work. That is the live-ceiling semantics today's design already chose; no revocation sweep.
+- Request: the pipeline pins `spaceId` from the key row; `requireSpaceContext` resolves the **creator's** membership in that space and applies the ceiling `scopes`. A creator who lost the space (removed, demoted to guest without a row) leaves the key with `scopes ∩ orgPermissions` — nearly nothing, and the key 403s in that space. That is the live-ceiling semantics this design chose; no revocation sweep.
 - `api-keys:*` is a space-level permission held by preset `admin`. A `builder` cannot mint keys.
-- `integrations:configure` is never API-key-grantable. This is the replacement for `assertOrgAdmin` (§2): the property "a key cannot do this even if its creator can" is expressed in the vocabulary, not in a role check.
-- Org-administration routes keep refusing API keys outright (`organizations.ts:96`) — expressed as `org:*` / `members:*` / `roles:*` being non-grantable, so the explicit `authMethod === "api_key"` branch can go.
+- `integrations:configure` is never API-key-grantable: the property "a key cannot do this even if its creator can" is expressed in the vocabulary, not in a role check.
+- Org-administration routes refuse API keys outright, expressed as `org:*` / `members:*` / `roles:*` being non-grantable rather than as an `authMethod === "api_key"` branch.
 
 ### 7.2 OIDC tokens (oidc module)
 
@@ -385,9 +360,9 @@ const { can, orgRole, spaceRole } = usePermissions();
 can("agents:write"); // current space's `permissions` ∪ current org's `permissions`
 ```
 
-`isOwner`, `isAdmin`, `isMember` are deleted in the same PR and every gate in §2 becomes a `can(...)` on the permission the server actually checks for that action. The org-settings layout hides a tab when the caller holds none of the tab's permissions; the space switcher lists only `access: "member"` spaces (`closed` ones appear disabled with a "request access" hint, `private` ones do not appear); `RunAgentButton` renders on `agents:run`.
+There are no `isOwner` / `isAdmin` / `isMember` helpers: every gate is a `can(...)` on the permission the server actually checks for that action. The org-settings layout hides a tab when the caller holds none of the tab's permissions; the space switcher lists only `access: "member"` spaces (`closed` ones appear disabled with a "request access" hint, `private` ones do not appear); `RunAgentButton` renders on `agents:run`.
 
-New pages: **Org settings → Roles** (presets read-only, custom CRUD when `features.custom_roles`, a permission picker driven by `GET /api/roles/vocabulary`); **Space settings → Members** (§6.4, with the implicit/explicit source column); **Org settings → Members** gains `guest` and the per-invite space assignment.
+Pages: **Org settings → Roles** (presets read-only, custom CRUD when `features.custom_roles`, a permission picker driven by `GET /api/roles/vocabulary`); **Space settings → Members** (§6.4, with the implicit/explicit source column); **Org settings → Members** gains `guest` and the per-invite space assignment.
 
 The SPA's role strings are display only. `packages/shared-types/src/member-role-policy.ts` keeps the assignable-role logic for the org tab. `ASSIGNABLE_ORG_ROLES = ["guest", "member", "admin"]`.
 
@@ -435,23 +410,23 @@ Cloud's `permissionsContribution` entries gain `level: "org"` (§3.5). Cloud pin
 
 ## 11. Migration
 
-Doctrine: `NO_TRANSITIONAL_CODE.md`. Catalog changes are drizzle migrations; row rewrites are `scripts/migration/`; the code accepts one form only and refuses the retired one loudly, naming the script.
+Doctrine: `NO_TRANSITIONAL_CODE.md`. Catalog changes are drizzle migrations; row rewrites are `scripts/migration/`.
 
-**Release N** — everything additive, plus the refusal:
+**Schema — `packages/db/drizzle/0056_space_roles.sql`:** `ALTER TYPE org_role ADD VALUE 'guest'`; `space_roles`, `space_members`; `spaces.visibility`/`default_role` + checks; `org_invitations.space_assignments`; `chat_sessions.space_id`. Two writes ride along, each licensed by a constraint the same file promotes on the same table (§2 of the doctrine):
 
-- `packages/db/drizzle/0056_space_roles.sql`: `ALTER TYPE org_role ADD VALUE 'guest'`; `space_roles`, `space_members`; `spaces.visibility/default_role` + check; `org_invitations.space_assignments`; `chat_sessions.space_id` **nullable**.
-- `scripts/migration/0008-org-viewer-to-guest.sql`, one transaction:
-  1. `INSERT INTO space_members (space_id, user_id, preset_role) SELECT s.id, m.user_id, 'viewer' FROM org_members m JOIN spaces s ON s.org_id = m.org_id WHERE m.role = 'viewer'`
-  2. `UPDATE org_members SET role = 'guest' WHERE role = 'viewer'`
-  3. `UPDATE org_invitations SET role = 'guest' WHERE role = 'viewer' AND status = 'pending'` — a pending viewer invite lands as a guest with no space; the inviter re-adds them (there is no faithful mapping, and the audit log names the inviter)
-  4. `UPDATE chat_sessions c SET space_id = s.id FROM spaces s WHERE s.org_id = c.org_id AND s.is_default AND c.space_id IS NULL`
-  5. Verification query that **discriminates**: counts of `org_members.role = 'viewer'` and `chat_sessions.space_id IS NULL` must both be 0 **and** the inserted `space_members` count must equal the pre-update viewer×space product — printed before and after.
-- Code in release N: `ORG_ROLES = ["owner", "admin", "member", "guest"]`. A `viewer` row reaching `assertOrgRole` (`apps/api/src/lib/permissions.ts`) throws `UnmigratedOrgRoleError("org_members.role = 'viewer' is retired; run scripts/migration/0008")` — a 500 for that user, logged once per boot with the count, never a fallback to `guest`. A `chat_sessions` row with `space_id IS NULL` is refused the same way by module-chat.
+- `chat_sessions.space_id` is backfilled to the org's default space, then `SET NOT NULL`.
+- `oauth_clients.signup_role = 'viewer'` is rewritten to `'guest'`, then `oauth_clients_signup_role_check` is re-added narrowed to `admin | member | guest`.
 
-**Release N+1** — the catalog forgets:
+**Rows — `scripts/migration/0008-org-viewer-to-guest.sql`**, one transaction:
 
-- `0057_drop_org_viewer.sql`: guard first — `DO $$ BEGIN IF EXISTS (SELECT 1 FROM org_members WHERE role = 'viewer') THEN RAISE EXCEPTION 'run scripts/migration/0008 before 0057'; END IF; END $$;` — then recreate `org_role` without `viewer`, `ALTER TABLE chat_sessions ALTER COLUMN space_id SET NOT NULL`.
-- `UnmigratedOrgRoleError` and the chat NULL refusal are deleted in this release (they cannot fire once the column forbids the value).
+1. `INSERT INTO space_members (space_id, user_id, preset_role) SELECT s.id, m.user_id, 'viewer' FROM org_members m JOIN spaces s ON s.org_id = m.org_id WHERE m.role = 'viewer'`
+2. `UPDATE org_members SET role = 'guest' WHERE role = 'viewer'`
+3. `UPDATE org_invitations SET role = 'guest' WHERE role = 'viewer' AND status = 'pending'` — a pending viewer invite lands as a guest with no space; the inviter re-adds them (there is no faithful mapping, and the audit log names the inviter)
+4. Verification that **discriminates**: the counts of `org_members.role = 'viewer'` and of pending `viewer` invitations must both be 0 **and** every pre-flip (user, space) pair must be covered by a `space_members` row — printed before and after, and raised on rather than returned.
+
+Between `0056` and `0008` a member whose row still reads `viewer` has no permission set and its requests fail; run both in one maintenance window.
+
+The `org_role` type keeps `viewer` because `ALTER TYPE … DROP VALUE` does not exist — see §12.
 
 The drizzle snapshot is rebuilt by hand and checked against the pre-conflict one (`drizzle-migration-index-collision`).
 
@@ -459,48 +434,21 @@ The drizzle snapshot is rebuilt by hand and checked against the pre-conflict one
 
 `0056` and `0008` are **two files that are one deploy**, in this order:
 
-1. **Rehearse on a replica.** Restore a `pg_dump` copy, apply `0056`, run `0008`, and read the counts it prints at step 0 and step 5. `0008` ships with its rows UNMEASURED; the rehearsal is what produces the numbers, and it is also what tells you how long the two steps take against real volume.
+1. **Rehearse on a replica.** Restore a `pg_dump` copy, apply `0056`, run `0008`, and read the counts it prints. Before applying, `SELECT DISTINCT c.org_id FROM chat_sessions c WHERE NOT EXISTS (SELECT 1 FROM spaces s WHERE s.org_id = c.org_id)` must return no row: an org with sessions and no space cannot be folded and fails `0056`'s `SET NOT NULL`. `0008` ships with its rows UNMEASURED; the rehearsal is what produces the numbers, and it is also what tells you how long the two steps take against real volume.
 2. **Stop the application**, then apply the schema half alone. `0056` runs at boot with the rest of the pending drizzle migrations — count what is actually pending from the journal, not from the last merged PR.
 3. **Run `scripts/migration/0008-org-viewer-to-guest.sql` immediately after**, before bringing the new version `up`. One transaction, idempotent, fenced; it aborts rather than committing a half-rewrite.
-4. **Verify.** `0008` raises rather than returns: zero `org_members.role = 'viewer'`, zero pending `viewer` invitations, zero `oauth_clients.signup_role = 'viewer'`, zero `chat_sessions.space_id IS NULL`, and every former (user, space) pair covered by a `space_members` row. A commit means all five held.
-5. **Bring the application `up`.**
-
-**Viewers are locked out between step 2 and step 3.** That window is deliberate: the code refuses a `viewer` row loudly (`UnmigratedOrgRoleError`) instead of mapping it to `guest` behind the operator's back, so the gap is visible rather than silently wrong. Keep it short — do not deploy the application in between.
+4. **Verify.** `0008` raises rather than returns: zero `org_members.role = 'viewer'`, zero pending `viewer` invitations, and every former (user, space) pair covered by a `space_members` row. A commit means all three held.
+5. **Bring the application `up`.** Rollback is one-way from `0056` on: the previous build inserts `chat_sessions` without `space_id`, which is now NOT NULL.
 
 The two file headers are the authority on what each step touches and what it deliberately leaves alone. Read them there, not here.
 
 ---
 
-## 12. Delivery
+## 12. Follow-ups
 
-Each phase is one PR (or one PR pair backend/SPA), green on `bun run check`, with the tests in §12.1.
+One item remains:
 
-| Phase                        | Content                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Schema                  |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| **1 — Vocabulary**           | `CORE_RESOURCE_LEVELS`; `org:settings`, `integrations:configure`, `roles:*`, `space-settings:*`, `space-members:*` added to the catalog and the presets file; module contract `level`/`presets` + all five modules; `org:*`/`members:*` enforced by guards; `requireOrgRole`, `assertOrgAdmin` and the four `role ===` sites deleted; `webhooks` split into `webhooks` + `org-webhooks`. Presets exist in code but nothing assigns them yet — `resolvePermissions(orgRole)` maps owner/admin → org ∪ preset `admin`, member → org ∪ preset `operator`, viewer → org ∪ preset `viewer`. For every string that existed before this phase the result equals today's matrix, with one deliberate exception: viewer gains `chat:read` (module-chat grants `chat` to owner/admin/member today, and a read-only preset that cannot read chat is a preset with a hole). | none                    |
-| **2 — Membership (backend)** | 0056; `guest`; `space_members`; visibility; resolver; pipeline keys; `requireSpaceContext` membership; `GET /api/spaces` filter + `permissions`; `GET /api/orgs` `permissions`; `/api/spaces/:id/members`; invitations `space_assignments`; API-key creator resolution; script 0008; `UnmigratedOrgRoleError`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 0056 + 0008             |
-| **3 — Membership (SPA)**     | `can()`; delete the tiers; every gate rewritten; space switcher; space members page; org members page with `guest` + assignments.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |                         |
-| **4 — Custom roles**         | `space_roles` CRUD + vocabulary route + `features.custom_roles` gate; Roles page. Cloud declares the flag.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | (table already in 0056) |
-| **5 — Chat & modules**       | `chat_sessions.space_id` read/written by module-chat, `X-Space-Id` required on `/api/chat/*`; oidc dashboard-token ceiling; mcp default-space membership.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |                         |
-| **6 — Cloud**                | `principalPermissions` hook in core; billing managers; billing contact; Stripe email; `getOrgAdminEmails` removed from the contract. Core major bump → cloud bump.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | cloud migration         |
-| **7 — Release N+1**          | 0057; delete the two refusals.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 0057                    |
-
-Phase 1 ships alone and changes no behaviour: it is the blind-reviewable cleanup that makes the rest a data-model change rather than a rewrite.
-
-### 12.1 Tests (bun:test, `apps/api/test/`)
-
-Invariants, each one a test that fails in the wrong case and passes in the right one (`verification-must-discriminate`):
-
-- Every `CoreResource` has a level; every preset ⊆ `SPACE_LEVEL_PERMISSIONS`; every org role set ⊆ `ORG_LEVEL_PERMISSIONS`; presets are pairwise ordered `viewer ⊂ operator ⊂ builder ⊂ admin`.
-- Phase 1 golden test: for each of the four current roles, `resolvePermissions(role)` restricted to the pre-phase-1 vocabulary equals a snapshot of today's matrix (plus `chat:read` for viewer); the snapshot is deleted with the `viewer` role in phase 2.
-- A `member` in an `open` space holds the default preset; the same member in a `closed` space without a row gets 403; in a `private` space, 404; a `guest` gets 403/404 everywhere without a row; an explicit `viewer` row in an open space with `default_role = builder` yields `viewer` (explicit beats implicit).
-- Owner/admin rows in `space_members` are refused (409) and deleted on promotion.
-- An API key minted by a `builder` cannot carry `api-keys:create`; a key whose creator was removed from the space 403s on `agents:read` in that space; `integrations:configure` is refused at mint (400) for every creator.
-- `GET /api/spaces` shape per caller (§6.3), including that a private space id from another member's listing 404s on `GET /api/spaces/:id`.
-- Custom role: permissions validated (400 names the string); org-level string refused; delete while assigned is 409 with the count; write routes 403 without the flag — asserted with the flag off and on in the same file.
-- `org-isolation` and `space-isolation` suites extended with membership (a member of org A's space cannot read org B's, still).
-- Script 0008 against a seeded DB: counts before/after per §11, including a pending viewer invitation.
-- Cloud: billing manager without admin reaches `POST /api/billing/portal`; recipients list for each contact/CC/manager combination; Stripe customer created with the contact email.
+- `0057_drop_org_viewer.sql` recreates `org_role` without `viewer`, which `ALTER TYPE … DROP VALUE` cannot do. It guards first — `DO $$ BEGIN IF EXISTS (SELECT 1 FROM org_members WHERE role = 'viewer') THEN RAISE EXCEPTION 'run scripts/migration/0008-org-viewer-to-guest.sql first'; END IF; END $$;` — so a database whose rows have not moved fails the deploy instead of losing them.
 
 ---
 
