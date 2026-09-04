@@ -6,12 +6,8 @@ import { z } from "zod";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import {
-  assertOrgRole,
-  effectivePermissions,
-  listedOrgPermissions,
-  orgPermissions,
-} from "../lib/permissions.ts";
+import { assertOrgRole, effectivePermissions, orgPermissions } from "../lib/permissions.ts";
+import { listedOrgPermissionsForCaller, principalGrants } from "../lib/principal-permissions.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -149,7 +145,10 @@ async function resolveOrgPathPermissions(c: Context<AppEnv>, next: Next) {
   const member = await getOrgMember(orgId, c.get("user").id);
   if (member) {
     const role = assertOrgRole(member.role);
-    const org = orgPermissions(role);
+    // Same two halves the pipeline unions for a session caller (role grants ∪
+    // module per-principal grants), because this middleware IS the pipeline's
+    // permission step for the path-org family.
+    const org = new Set<string>([...orgPermissions(role), ...(await principalGrants(c, orgId))]);
     c.set("orgRole", role);
     c.set("orgPermissions", org);
     // `/api/orgs/*` is not space-scoped, so the org half is the whole answer —
@@ -186,20 +185,21 @@ router.get("/", async (c) => {
   // creator belongs to.
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
-  const ceiling = c.get("scopeCeiling");
 
   return c.json(
     listResponse(
-      orgs.map((o) => ({
-        id: o.id,
-        name: o.name,
-        slug: o.slug,
-        role: o.role,
-        // The caller's org-level reach in THAT org, ceiling-applied (RBAC spec
-        // §6.5) — the SPA reads it instead of re-deriving anything from `role`.
-        permissions: listedOrgPermissions(o.role, ceiling),
-        createdAt: o.createdAt,
-      })),
+      await Promise.all(
+        orgs.map(async (o) => ({
+          id: o.id,
+          name: o.name,
+          slug: o.slug,
+          role: o.role,
+          // The caller's org-level reach in THAT org, ceiling-applied (RBAC spec
+          // §6.5) — the SPA reads it instead of re-deriving anything from `role`.
+          permissions: await listedOrgPermissionsForCaller(c, o.id, o.role),
+          createdAt: o.createdAt,
+        })),
+      ),
     ),
   );
 });

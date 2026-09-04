@@ -19,13 +19,20 @@ import { isValidRange, matchVersion } from "@appstrate/core/semver";
 import { getEnv } from "@appstrate/env";
 import {
   CORE_RESOURCE_NAMES,
+  ORG_LEVEL_PERMISSIONS,
   ORG_ROLES,
   SPACE_ROLE_PRESETS,
+  getModuleEndUserAllowedScopes,
   setModulePermissionsProvider,
   type OrgRole,
   type SpaceRolePreset,
   type ModulePermissionsSnapshot,
 } from "@appstrate/core/permissions";
+import {
+  setPrincipalPermissionsProviders,
+  type RegisteredPrincipalPermissions,
+} from "@appstrate/core/principal-permissions";
+import { getApiKeyAllowedScopes } from "../permissions.ts";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
@@ -331,6 +338,10 @@ async function initSortedModules(
   // sees the merged view.
   const rbacSnapshot = collectModulePermissions(sorted);
   setModulePermissionsProvider(() => rbacSnapshot);
+  // Per-principal grants are validated against the merged vocabulary above, so
+  // this must follow the snapshot registration — a module may name its OWN
+  // org-level contribution in `mayGrant`.
+  setPrincipalPermissionsProviders(collectPrincipalPermissions(sorted));
   // Audit trace: `endUserGrantable` permissions are reachable through
   // end-user OAuth/OIDC tokens issued by embedding apps — a much broader
   // blast radius than session or API-key scopes. Surface the full list at
@@ -433,6 +444,88 @@ export function collectModulePermissions(
   }
 
   return { byRole, byPreset, apiKeyAllowed, endUserAllowed };
+}
+
+/**
+ * Aggregate `principalPermissions` from every loaded module, validating each
+ * declared `mayGrant` entry before the platform will ever grant it (RBAC spec
+ * §4.2). Two rules, both fail-fast and both naming the module and the string:
+ *
+ *   - the string is a known ORG-level permission — core catalog, or a
+ *     `level: "org"` contribution of some loaded module. A space-level string
+ *     is granted per space and this surface has no space, so it could only
+ *     ever be dead weight in the org set.
+ *   - the string is NOT `apiKeyGrantable` / `endUserGrantable`. The surface is
+ *     evaluated for session-shaped callers only, so a delegated credential's
+ *     ceiling can never carry the grant; declaring one would advertise access
+ *     no key can obtain.
+ *
+ * Reads the merged allowlists (`getApiKeyAllowedScopes`,
+ * `getModuleEndUserAllowedScopes`), so it must run AFTER the module RBAC
+ * snapshot is registered.
+ */
+export function collectPrincipalPermissions(
+  modules: readonly AppstrateModule[],
+): RegisteredPrincipalPermissions[] {
+  const orgLevel = knownOrgLevelPermissions(modules);
+  const apiKeyGrantable = getApiKeyAllowedScopes();
+  const endUserGrantable = getModuleEndUserAllowedScopes();
+  const registered: RegisteredPrincipalPermissions[] = [];
+
+  for (const mod of modules) {
+    const declaration = mod.principalPermissions;
+    if (!declaration) continue;
+    const moduleId = mod.manifest.id;
+    if (!Array.isArray(declaration.mayGrant) || declaration.mayGrant.length === 0) {
+      throw new Error(
+        `Module "${moduleId}" declared principalPermissions with an empty mayGrant list. ` +
+          `A resolver that may grant nothing can only ever be dropped at runtime.`,
+      );
+    }
+    for (const permission of declaration.mayGrant) {
+      if (!orgLevel.has(permission)) {
+        throw new Error(
+          `Module "${moduleId}" declared principalPermissions.mayGrant ` +
+            `${JSON.stringify(permission)}, which is not a known org-level permission. ` +
+            `Per-principal grants are org-level only — a space-level string is granted by a ` +
+            `space role, through permissionsContribution().`,
+        );
+      }
+      if (apiKeyGrantable.has(permission) || endUserGrantable.has(permission)) {
+        throw new Error(
+          `Module "${moduleId}" declared principalPermissions.mayGrant ` +
+            `${JSON.stringify(permission)}, which is grantable to an API key or an end-user ` +
+            `token. Per-principal grants are session-only: no delegated credential's ceiling ` +
+            `can carry them, so the declaration would promise access no key can obtain.`,
+        );
+      }
+    }
+    registered.push({
+      moduleId,
+      mayGrant: declaration.mayGrant,
+      resolve: (ctx) => declaration.resolve(ctx),
+    });
+  }
+  return registered;
+}
+
+/**
+ * Every org-level permission string the running platform understands: the core
+ * catalog plus each loaded module's `level: "org"` entries. Walks the
+ * contributions rather than reading the role snapshot, because a module may
+ * legally declare an org-level resource with `grantTo: []` — reachable by no
+ * role, and therefore absent from the snapshot, yet still a real string a
+ * per-principal grant may name.
+ */
+function knownOrgLevelPermissions(modules: readonly AppstrateModule[]): ReadonlySet<string> {
+  const known = new Set<string>(ORG_LEVEL_PERMISSIONS);
+  for (const mod of modules) {
+    for (const entry of mod.permissionsContribution?.() ?? []) {
+      if (entry.level !== "org") continue;
+      for (const action of entry.actions) known.add(`${entry.resource}:${action}`);
+    }
+  }
+  return known;
 }
 
 function validateContribution(
@@ -881,6 +974,7 @@ function clearAllState(): void {
   _authStrategiesCache = null;
   _initialized = false;
   setModulePermissionsProvider(null);
+  setPrincipalPermissionsProviders(null);
   // Drop module-contributed execution backends so a reload (tests) does not
   // trip the duplicate-id guard. Core backends are re-registered inside.
   _resetOrchestratorRegistryForTesting();

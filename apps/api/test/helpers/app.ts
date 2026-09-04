@@ -36,8 +36,12 @@ import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { seedTestModelProviders } from "./model-providers.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
-import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
+import {
+  collectModulePermissions,
+  collectPrincipalPermissions,
+} from "../../src/lib/modules/module-loader.ts";
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
+import { setPrincipalPermissionsProviders } from "@appstrate/core/principal-permissions";
 import { getAppConfig, initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
@@ -163,6 +167,9 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // contributions array — so re-registering per call is acceptable.
   const rbacSnapshot = collectModulePermissions(extraModules);
   setModulePermissionsProvider(() => rbacSnapshot);
+  // Same order as `initSortedModules()`: `mayGrant` is validated against the
+  // merged vocabulary the line above just registered.
+  setPrincipalPermissionsProviders(collectPrincipalPermissions(extraModules));
 
   if (!explicit && cachedApp) return cachedApp;
 

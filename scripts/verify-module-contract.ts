@@ -217,6 +217,16 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
       "Execution backends beyond core docker/process plug into the orchestrator registry — " +
       "firecracker is the reference (and only) contributor; core stays free of KVM/Linux code.",
   },
+  principalPermissions: {
+    kind: "seam",
+    owners: ["cloud"],
+    justification:
+      "Org-level grants attached to a PRINCIPAL rather than a role (RBAC spec §4.2/§10). " +
+      "Cloud's billing managers cannot be an `org_role` value — core is Apache-2.0 and carries " +
+      "zero billing vocabulary — and the grant is per-user, so `permissionsContribution` " +
+      "(role-keyed) cannot express it. Single-owner today; SSO group mapping is the second " +
+      "consumer and promotes it to `extension`.",
+  },
   emailOverrides: {
     kind: "seam",
     owners: ["cloud"],

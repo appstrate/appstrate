@@ -493,6 +493,13 @@ bearer scoped to `runs:read` cannot inherit `org:delete` from the subject behind
 it — and a route outside a space context sees org-level strings only, which is
 why a space-level guard can never be satisfied on an org route.
 
+A module may add org-level strings to `orgPermissions` for ONE named principal
+rather than for a role (`principalPermissions`, RBAC spec §4.2 — cloud's billing
+managers): each module declares up front what it may ever grant, anything else
+its resolver returns is dropped, the strings may never be API-key- or
+end-user-grantable, and the surface is evaluated for session-shaped callers
+only, so no delegated credential can carry such a grant.
+
 `applySpacePermissions(c, space)` (`middleware/space-context.ts`) is the single
 place the space slice is added: it loads the caller's `space_members` row, runs
 the resolver, and refuses with 403 `not_a_space_member` (or 404 for a `private`

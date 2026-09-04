@@ -177,6 +177,67 @@ declare the same level.
 
 Disabling a module leaves **zero footprint**: the `declare module` augmentation widens types but contributes nothing at runtime (interface keys aren't iterated), and the runtime contribution is gone the moment `permissionsContribution()` stops being called. No dead scope strings in role sets, no dead entries in the API-key allowlist.
 
+### `permissionsContribution` vs `principalPermissions`
+
+Two contribution members, one question: **is the population that holds this
+permission a ROLE, or a LIST the module maintains?**
+
+|               | `permissionsContribution()`                           | `principalPermissions`            |
+| ------------- | ----------------------------------------------------- | --------------------------------- |
+| Grants to     | an org role (`grantTo`) or a space preset (`presets`) | one `(orgId, userId)`             |
+| Level         | org or space                                          | **org only**                      |
+| Vocabulary    | declares NEW resources                                | reuses strings that already exist |
+| Evaluated for | every caller                                          | session-shaped callers only       |
+| Cost          | a boot-time table                                     | one cached lookup per principal   |
+
+`permissionsContribution` is the common case and the two compose: a module
+declares its resource and its role grants there, then hands **extra copies of
+those same strings** to named principals here. There is no third case — a
+per-principal grant never invents vocabulary.
+
+```ts
+const billingModule: AppstrateModule = {
+  manifest: { id: "billing", name: "Billing", version: "1.0.0" },
+  permissionsContribution: () => [
+    { resource: "billing", actions: ["read"], level: "org", grantTo: ["owner", "admin", "member"] },
+    { resource: "billing", actions: ["manage"], level: "org", grantTo: ["owner", "admin"] },
+  ],
+  // …and these people hold both without being admins.
+  principalPermissions: {
+    mayGrant: ["billing:read", "billing:manage"],
+    resolve: async ({ orgId, userId }) =>
+      (await isBillingManager(orgId, userId)) ? ["billing:read", "billing:manage"] : [],
+  },
+  // ...
+};
+```
+
+Reach for `principalPermissions` when the answer is a row in the module's own
+table — billing managers, an SSO group mapping — and the alternative would be
+inventing an org role for them. That alternative is what the surface exists to
+avoid: an org role is platform vocabulary, and `billing` is not.
+
+**Two boot rules, both fail-fast and both naming the module and the string.**
+Every `mayGrant` entry must be a known ORG-level permission (the core catalog,
+or a `level: "org"` contribution of some loaded module) — a space-level string
+is granted per space and this surface has no space. And no entry may be
+`apiKeyGrantable` / `endUserGrantable`: the surface is evaluated for
+session-shaped callers only, so a delegated credential's ceiling can never
+carry the grant and declaring one would advertise access no key can obtain.
+
+**At runtime**: the resolver is called once per principal per cache miss, its
+answer is filtered to `mayGrant` (an undeclared string is dropped and logged,
+never granted), and a throwing resolver contributes nothing rather than failing
+the request — a module's outage must not lock a caller out of the permissions
+their own role gives them.
+
+**Invalidation is yours.** Results are cached per `(orgId, userId)` with a 10s
+TTL. The platform cannot know when your table changed, so call
+`invalidatePrincipalPermissions(orgId, userId?)` from
+`@appstrate/core/principal-permissions` after every write the resolver reads —
+omit `userId` to drop the whole org. The TTL is only the backstop for a lost
+bus broadcast, not the invalidation mechanism.
+
 ### A space-level resource on a route the platform does not space-scope
 
 `SPACE_SCOPED_PREFIXES` (`apps/api/src/middleware/space-context.ts`) is

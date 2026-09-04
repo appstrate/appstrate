@@ -471,15 +471,27 @@ export function effectivePermissions(input: {
 
 /**
  * The org-level effective set an org LISTING exposes per item (RBAC spec
- * §6.5): what the caller's org role grants at org level, narrowed by the
- * credential's ceiling — an API key's scopes, an OIDC scope claim. Sorted, so
- * the wire order is stable across requests.
+ * §6.5): what the caller's org role grants at org level, plus any per-principal
+ * grants a module made them in THAT org, narrowed by the credential's ceiling —
+ * an API key's scopes, an OIDC scope claim. Sorted, so the wire order is stable
+ * across requests.
+ *
+ * `principal` comes from `lib/principal-permissions.ts` and is empty for every
+ * caller that is not session-shaped. It is a parameter rather than a lookup
+ * here because it is per-org and asynchronous, and this function is called once
+ * per row of a listing.
  *
  * There is no space half here on purpose: a listing item is an org, and the
  * space slice is answered per space by `GET /api/spaces`.
  */
-export function listedOrgPermissions(role: OrgRole, scopeCeiling?: ReadonlySet<string>): string[] {
-  return [...effectivePermissions({ orgPermissions: orgPermissions(role), scopeCeiling })].sort();
+export function listedOrgPermissions(
+  role: OrgRole,
+  scopeCeiling?: ReadonlySet<string>,
+  principal?: ReadonlySet<string>,
+): string[] {
+  const org = new Set<string>(orgPermissions(role));
+  if (principal) for (const permission of principal) org.add(permission);
+  return [...effectivePermissions({ orgPermissions: org, scopeCeiling })].sort();
 }
 
 /**

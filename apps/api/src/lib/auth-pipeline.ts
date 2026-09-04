@@ -32,6 +32,7 @@ import { clearStaleAuthCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { effectivePermissions, orgPermissions } from "./permissions.ts";
+import { principalGrants } from "./principal-permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
@@ -375,24 +376,36 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (authMethod !== "session" && !c.get("deferOrgResolution")) return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
-      c.set("permissions", applyOrgPermissions(c, orgRole, c.get("scopeCeiling")));
+      // The only branch that resolves per-principal grants: this middleware
+      // runs for session auth and for `deferOrgResolution` strategies, which
+      // is exactly the eligible population (see `lib/principal-permissions.ts`).
+      const granted = await principalGrants(c, c.get("orgId"));
+      c.set("permissions", applyOrgPermissions(c, orgRole, c.get("scopeCeiling"), granted));
     }
     return next();
   });
 }
 
 /**
- * Write `orgPermissions` and return the org-level effective set for `role`.
- * One helper because all three auth branches owe the same two writes, and a
- * branch that set only `permissions` would leave `requireSpaceContext` with
- * nothing to union the space slice onto.
+ * Write `orgPermissions` and return the org-level effective set for `role`,
+ * plus whatever a module granted this principal directly. One helper because
+ * all three auth branches owe the same two writes, and a branch that set only
+ * `permissions` would leave `requireSpaceContext` with nothing to union the
+ * space slice onto — which is also why the principal grants go into
+ * `orgPermissions` rather than into the returned set: the space step re-derives
+ * `permissions` from that key.
  */
 function applyOrgPermissions(
   c: Context<AppEnv>,
   role: OrgRole,
   scopeCeiling: ReadonlySet<string> | undefined,
+  principal?: ReadonlySet<string>,
 ): Set<string> {
-  const org = orgPermissions(role);
+  const fromRole = orgPermissions(role);
+  // Allocate a second Set only when a module actually granted something —
+  // with no such module the OSS path keeps the exact shape it had.
+  const org: Set<string> =
+    principal && principal.size > 0 ? new Set<string>([...fromRole, ...principal]) : fromRole;
   c.set("orgPermissions", org);
   return effectivePermissions({ orgPermissions: org, scopeCeiling });
 }

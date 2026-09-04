@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **New subpath `@appstrate/core/principal-permissions` — org-level grants per
+  principal.** A module may now grant org-level permissions to ONE user in ONE
+  org instead of to a role, through the new optional `principalPermissions`
+  member on `AppstrateModule` (type `ModulePrincipalPermissions`: a `mayGrant`
+  allowlist plus a `resolve({ orgId, userId })`). The platform validates
+  `mayGrant` at boot — every entry must be a known org-level permission and
+  must not be API-key- or end-user-grantable — evaluates the resolver for
+  session-shaped callers only, filters each answer to that module's `mayGrant`
+  (an undeclared string is dropped and logged), and isolates a throwing
+  resolver. First consumer: `@appstrate/cloud`'s billing managers.
+  New exports on the subpath: `resolvePrincipalPermissions`,
+  `invalidatePrincipalPermissions`, `setPrincipalPermissionsProviders`, and the
+  types `ModulePrincipalPermissions`, `PrincipalPermissionContext`,
+  `RegisteredPrincipalPermissions`. Results are cached per `(orgId, userId)`
+  with a 10s TTL and dropped across replicas by the cache bus, so a module that
+  declares the surface MUST call `invalidatePrincipalPermissions(orgId,
+userId?)` after writing the table its resolver reads —
+  `setPrincipalPermissionsProviders` is the platform's own boot wiring and a
+  module never calls it. No behaviour change for a platform where no module
+  declares the member: the resolver short-circuits without touching the cache.
+
 - **`ApiError` can carry RFC 9457 extension members.** New optional
   `extensions` on the constructor options, merged into the problem body by
   `toProblemDetail()` — only into keys the standard fields do not own, so an

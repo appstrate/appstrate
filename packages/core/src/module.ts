@@ -15,6 +15,7 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { ModuleResource, ModuleResources, OrgRole, SpaceRolePreset } from "./permissions.ts";
+import type { ModulePrincipalPermissions } from "./principal-permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
@@ -267,6 +268,58 @@ export interface AppstrateModule {
    * zero-footprint invariant.
    */
   permissionsContribution?(): ModulePermissionContribution[];
+
+  /**
+   * RBAC contribution, the other half: org-level permissions granted to a
+   * specific PRINCIPAL (one user in one org) rather than to a role.
+   *
+   * Use it when the population that holds a permission is a list of people the
+   * module maintains, not a role: cloud's billing managers (RBAC spec §10), an
+   * SSO group mapping. Use {@link permissionsContribution} instead when the
+   * grant follows from the caller's org role or space role — that is the
+   * common case and this one never replaces it. The two compose: a module
+   * declares its resource and its role grants with `permissionsContribution`,
+   * then hands extra copies of those same strings to named principals here.
+   *
+   * Not a member of `ModuleHooks`, because it is neither dispatch mode the
+   * hooks map offers: every module that declares it is consulted (unlike
+   * first-match) and the answers are UNIONED rather than merely broadcast. A
+   * throwing resolver is isolated — logged, contributing nothing — so one
+   * module's outage cannot lock a caller out of permissions another module,
+   * or their own role, grants them.
+   *
+   * ```ts
+   * principalPermissions: {
+   *   mayGrant: ["billing:read", "billing:manage"],
+   *   resolve: async ({ orgId, userId }) => (await isBillingManager(orgId, userId)
+   *     ? ["billing:read", "billing:manage"]
+   *     : []),
+   * },
+   * ```
+   *
+   * Constraints enforced at boot (fail-fast), each naming the module and the
+   * offending string:
+   *   - every `mayGrant` entry is a known ORG-level permission — a core
+   *     org-level string, or one this module (or another loaded one)
+   *     contributed at `level: "org"`. A space-level string is refused: it is
+   *     granted per space, and this surface has no space.
+   *   - no `mayGrant` entry is `apiKeyGrantable` / `endUserGrantable`. Those
+   *     ceilings belong to delegated credentials, which this surface is never
+   *     evaluated for, so declaring one would promise a grant that can never
+   *     be honoured.
+   *
+   * At runtime the resolver is called once per session request per principal,
+   * on a cache miss, and its answer is filtered to `mayGrant` — an undeclared
+   * string is dropped and logged, never granted. Cache invalidation is the
+   * module's own job: call `invalidatePrincipalPermissions(orgId, userId?)`
+   * from `@appstrate/core/principal-permissions` after writing the table the
+   * resolver reads.
+   *
+   * No-op on platforms that don't load this module — the OSS zero-footprint
+   * invariant holds, and with no module declaring it the platform never even
+   * reads the cache.
+   */
+  principalPermissions?: ModulePrincipalPermissions;
 
   /**
    * Model providers contributed by this module.
