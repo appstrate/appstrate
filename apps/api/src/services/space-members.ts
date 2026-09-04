@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Explicit space membership (RBAC spec §6.4).
+ * Explicit space membership (RBAC spec §6.4). Two rules shape every function:
  *
- * Two rules shape every function here:
- *
- *  - **Owners and admins are never rows.** Their reach is implied by the org
- *    role, so an explicit row would be a second source of truth that the
- *    resolver ignores anyway. Writing one is a 409; promoting a user to
- *    admin/owner deletes the ones they had.
+ *  - **Owners and admins are never rows** — their reach is implied by the org
+ *    role, so a row would be a second source of truth the resolver ignores.
  *  - **A space member is an org member first.** `space_members.user_id` has no
- *    org column, so the org tier is enforced here, in the service, the same way
- *    `assertSpaceInScope` enforces it for `integration_connections`.
+ *    org column, so the org tier is enforced here, in the service.
  */
 
 import { and, eq, inArray } from "drizzle-orm";
@@ -28,8 +23,9 @@ import type { OrgRole, SpaceAssignment, SpaceRolePreset } from "@appstrate/core/
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
+import { getOrgMember } from "./organizations.ts";
 import { assertOrgRole } from "../lib/permissions.ts";
-import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
+import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -41,14 +37,18 @@ export type SpaceMemberWire = SpaceMember;
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
 /**
- * Everyone who actually reaches `spaceId`, not just everyone who was added:
- * the page has to show a member who is implicitly in an open space, or the
- * admin who is there by org role, otherwise "who has access" reads as a much
- * shorter list than it is.
+ * Who reaches `spaceId`, not just who was added — otherwise "who has access"
+ * reads as a much shorter list than it is.
+ *
+ * `includeImplicit` is the disclosure boundary: an implicit row names an org
+ * member this space granted nothing to, so it is the ORG DIRECTORY seen through
+ * a space and is gated on `members:read` by the route. Explicit rows are the
+ * space's own data and always list.
  */
 export async function listSpaceMembers(
   orgId: string,
   space: { id: string; visibility: string; defaultRole: SpaceRolePreset },
+  includeImplicit: boolean,
 ): Promise<SpaceMemberWire[]> {
   const [orgRows, explicitRows] = await Promise.all([
     db
@@ -70,6 +70,7 @@ export async function listSpaceMembers(
         customRoleId: spaceMembers.customRoleId,
         customKey: spaceRoles.key,
         customName: spaceRoles.name,
+        customPermissions: spaceRoles.permissions,
         createdAt: spaceMembers.createdAt,
       })
       .from(spaceMembers)
@@ -80,27 +81,13 @@ export async function listSpaceMembers(
   const explicit = new Map(explicitRows.map((r) => [r.userId, r]));
   const out: SpaceMemberWire[] = [];
   for (const row of orgRows) {
-    const orgRole = assertOrgRole(row.role);
     const found = explicit.get(row.userId);
-    const ref: SpaceRoleRef | null = found
-      ? found.presetRole
-        ? { kind: "preset", preset: found.presetRole }
-        : {
-            kind: "custom",
-            role: {
-              id: found.customRoleId!,
-              key: found.customKey!,
-              name: found.customName!,
-              // The list shows who holds what, never what it grants — the
-              // permission array is the roles surface (Phase 4).
-              permissions: [],
-            },
-          }
-      : null;
+    if (!found && !includeImplicit) continue;
+    const orgRole = assertOrgRole(row.role);
     const effective = resolveSpaceRole(
       orgRole,
       { id: space.id, ...spaceAccess(space) },
-      ref && { ref },
+      found ? { ref: toRef(found) } : null,
     );
     if (!effective) continue;
     out.push({
@@ -164,25 +151,40 @@ export async function upsertSpaceMember(params: {
     return;
   }
 
+  await writeSpaceMemberRow(tx, { spaceId, userId, addedBy, values });
+}
+
+/** Columns the two nullable role references occupy — exactly one is set. */
+interface RoleColumns {
+  presetRole: SpaceRolePreset | null;
+  customRoleId: string | null;
+}
+
+/**
+ * The write, with every precondition already proved by the caller — org
+ * membership, not owner/admin, custom role in the org. {@link upsertSpaceMember}
+ * proves them per call, {@link applyInvitationSpaceAssignments} once per batch.
+ */
+async function writeSpaceMemberRow(
+  tx: DbOrTx,
+  row: { spaceId: string; userId: string; addedBy: string | null; values: RoleColumns },
+): Promise<void> {
   await tx
     .insert(spaceMembers)
-    .values({ spaceId, userId, addedBy, ...values })
+    .values({ spaceId: row.spaceId, userId: row.userId, addedBy: row.addedBy, ...row.values })
     .onConflictDoUpdate({
       target: [spaceMembers.spaceId, spaceMembers.userId],
-      set: values,
+      set: row.values,
     });
 }
 
 /**
- * Apply the assignments an invitation carried, inside the accept transaction.
+ * Apply an invitation's assignments inside the accept transaction, returning
+ * those actually written for the audit payload.
  *
- * An assignment naming a space or a custom role that was deleted between the
- * invite and the accept is SKIPPED, not fatal: the invitee's right to join the
- * org does not depend on a space still existing, and refusing the accept would
- * strand them outside the org with a token already spent. The warn line is the
- * record that a granted role was not applied.
- *
- * Returns the assignments actually written, for the audit payload.
+ * A space or custom role deleted between invite and accept is SKIPPED, not
+ * fatal: refusing would strand the invitee outside the org with a token already
+ * spent. The warn line is the record that a granted role was not applied.
  */
 export async function applyInvitationSpaceAssignments(
   tx: DbOrTx,
@@ -196,8 +198,8 @@ export async function applyInvitationSpaceAssignments(
   const { orgId, userId, addedBy, assignments } = params;
   if (assignments.length === 0) return [];
 
-  // Idempotent accepts keep the membership row that was already there, so the
-  // invitation's role is not necessarily the role the user ends up with.
+  // An idempotent accept keeps the existing membership row, so the invitation's
+  // role is not necessarily the role the user ends up with.
   const orgRole = await orgRoleOf(tx, orgId, userId);
   if (orgRole === "owner" || orgRole === "admin") {
     logger.warn("Invitation space assignments skipped for an org admin", {
@@ -247,15 +249,15 @@ export async function applyInvitationSpaceAssignments(
       });
       continue;
     }
-    await upsertSpaceMember({
-      orgId,
+    // Preconditions already proved once for the whole batch above. Re-proving
+    // per assignment would be a third round-trip for an answer in hand.
+    await writeSpaceMemberRow(tx, {
       spaceId: assignment.space_id,
       userId,
-      assignment: assignment.preset_role
-        ? { preset_role: assignment.preset_role }
-        : { custom_role_id: assignment.custom_role_id! },
       addedBy,
-      tx,
+      values: assignment.preset_role
+        ? { presetRole: assignment.preset_role, customRoleId: null }
+        : { presetRole: null, customRoleId: assignment.custom_role_id! },
     });
     applied.push(assignment);
   }
@@ -272,11 +274,9 @@ export async function removeSpaceMember(spaceId: string, userId: string): Promis
 }
 
 /**
- * Drop every explicit row a user holds in one org's spaces.
- *
- * Called when a member is promoted to admin or owner, in the same transaction
- * as the role change: the rows would be dead weight the resolver never reads,
- * and a later demotion must not silently restore a role nobody re-granted.
+ * Called on promotion to admin/owner, in the same transaction as the role
+ * change: the rows become dead weight, and a later demotion must not silently
+ * restore a role nobody re-granted.
  */
 export async function deleteSpaceMembershipsInOrg(
   tx: Pick<typeof db, "select" | "delete">,
@@ -297,24 +297,16 @@ export async function deleteSpaceMembershipsInOrg(
 }
 
 async function orgRoleOf(tx: DbOrTx, orgId: string, userId: string): Promise<OrgRole | null> {
-  const [row] = await tx
-    .select({ role: organizationMembers.role })
-    .from(organizationMembers)
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
-    .limit(1);
+  const row = await getOrgMember(orgId, userId, tx);
   return row ? assertOrgRole(row.role) : null;
 }
 
-/**
- * The two nullable columns, with the custom role proved to belong to `orgId` —
- * without that check a space admin could point at another org's bundle, which
- * the FK alone would happily accept.
- */
+/** The FK alone would accept another org's bundle, so the org is checked here. */
 async function assignmentColumns(
   tx: DbOrTx,
   orgId: string,
   assignment: SpaceRoleAssignment,
-): Promise<{ presetRole: SpaceRolePreset | null; customRoleId: string | null }> {
+): Promise<RoleColumns> {
   if ("preset_role" in assignment) {
     return { presetRole: assignment.preset_role, customRoleId: null };
   }

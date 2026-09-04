@@ -21,7 +21,14 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedSpace, seedApiKey } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedRun,
+  seedSpace,
+  seedApiKey,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
 import { initRealtime, activeSubscriberCount } from "../../../src/services/realtime.ts";
 import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
@@ -217,6 +224,60 @@ describe("realtime SSE routes (integration)", () => {
         headers: { Cookie: ctx.cookie },
       });
       expect(res.status).toBe(401);
+    });
+
+    it("a cookie caller whose space role lacks runs:read is refused", async () => {
+      // The floor the API-key branch has always had, now on both branches: a
+      // custom space role can reach the space and still hold nothing that
+      // reads runs. Before this, reaching the space was the whole check and
+      // the stream opened.
+      const closed = await seedSpace({
+        orgId: ctx.orgId,
+        name: "SSE NoRunsRead",
+        visibility: "closed",
+      });
+      const roleWithoutRuns = await seedSpaceRole({
+        orgId: ctx.orgId,
+        key: "sse-no-runs-read",
+        permissions: ["agents:read"],
+      });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      await seedSpaceMember({
+        spaceId: closed.id,
+        userId: member.id,
+        presetRole: null,
+        customRoleId: roleWithoutRuns.id,
+      });
+      const scopedRun = await seedRun({
+        packageId: agentPkg.id,
+        orgId: ctx.orgId,
+        spaceId: closed.id,
+      });
+
+      const denied = await app.request(
+        `/api/realtime/runs/${scopedRun.id}?orgId=${ctx.orgId}&spaceId=${closed.id}`,
+        { headers: { Cookie: member.cookie, Accept: "text/event-stream" } },
+      );
+      expect(denied.status).toBe(403);
+
+      // Control: the same caller, same space, with a role that DOES carry
+      // `runs:read` — so the 403 is about the permission, not the membership.
+      const roleWithRuns = await seedSpaceRole({
+        orgId: ctx.orgId,
+        key: "sse-with-runs-read",
+        permissions: ["agents:read", "runs:read"],
+      });
+      await db.execute(
+        sql`UPDATE space_members SET custom_role_id = ${roleWithRuns.id}
+             WHERE space_id = ${closed.id} AND user_id = ${member.id}`,
+      );
+      const allowed = await app.request(
+        `/api/realtime/runs/${scopedRun.id}?orgId=${ctx.orgId}&spaceId=${closed.id}`,
+        { headers: { Cookie: member.cookie, Accept: "text/event-stream" } },
+      );
+      expect(allowed.status).toBe(200);
+      await allowed.body?.cancel();
     });
 
     it("space-scoped SSE — events from other spaces are filtered out", async () => {

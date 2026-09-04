@@ -447,6 +447,29 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(res.status).toBe(200);
   });
 
+  it("a dashboard token without the scope is refused on an org-PATH route", async () => {
+    // `/api/orgs/:orgId/*` skips `requireOrgContext`, so `orgPathContext`
+    // stands in for the pipeline's permission step. It derives for this caller
+    // (`deferOrgResolution`-shaped: an org role, no membership of its own) but
+    // applies `scopeCeiling`, so a token that asked for `openid` only holds
+    // nothing — the same answer it gets on a header-scoped route.
+    const { organizationMembers } = await import("@appstrate/db/schema");
+    await db.insert(organizationMembers).values({ userId: authUserId, orgId, role: "admin" });
+
+    const identityOnly = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      scope: "openid profile email",
+    });
+    const denied = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+      headers: { Authorization: `Bearer ${identityOnly}` },
+    });
+    expect(denied.status).toBe(403);
+  });
+
   it("a dashboard token with identity-only scopes reaches no space-level route", async () => {
     // The token resolves an org role but asks for nothing beyond identity, so
     // `scopesToPermissions` returns an EMPTY set. That empty set is the

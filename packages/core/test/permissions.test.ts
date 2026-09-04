@@ -5,7 +5,6 @@ import {
   requireModulePermission,
   requireCorePermission,
   setPermissionDenialHandler,
-  permissionLevel,
   CORE_RESOURCE_ACTIONS,
   CORE_RESOURCE_LEVELS,
   CORE_RESOURCE_NAMES,
@@ -258,22 +257,6 @@ describe("permission levels", () => {
       expect([inOrg, inSpace].filter(Boolean).length).toBe(1);
     }
     expect(ORG_LEVEL_PERMISSIONS.size + SPACE_LEVEL_PERMISSIONS.size).toBe(everyPermission.length);
-  });
-
-  it("permissionLevel agrees with the two sets and is undefined off-catalog", () => {
-    for (const permission of everyPermission) {
-      const expected = ORG_LEVEL_PERMISSIONS.has(permission as never) ? "org" : "space";
-      expect(permissionLevel(permission)).toBe(expected);
-    }
-    // Module-contributed resources declare their level in their contribution,
-    // not here — the core table must not claim to know them.
-    expect(permissionLevel("chat:read")).toBeUndefined();
-    // A bare resource name is not a permission. `"orgs"` must not be read as
-    // `"org"` by chopping the last character, and `"org"` on its own is not a
-    // permission either.
-    expect(permissionLevel("orgs")).toBeUndefined();
-    expect(permissionLevel("org")).toBeUndefined();
-    expect(permissionLevel("nonsense")).toBeUndefined();
   });
 
   it("api-keys is space-level and llm-proxy is org-level", () => {

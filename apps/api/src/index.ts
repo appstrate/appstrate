@@ -44,6 +44,7 @@ import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
 import orgsRouter from "./routes/organizations.ts";
+import { ORG_PATH_MIDDLEWARE } from "./middleware/org-path-context.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -328,6 +329,13 @@ const userAgentsRouter = createUserAgentsRouter();
 const agentsRouter = createAgentsRouter();
 const runsRouter = createRunsRouter();
 const schedulesRouter = createSchedulesRouter();
+
+// Org context for the `/api/orgs/:orgId*` family, where the org comes from the
+// PATH. Mounted here — before the orgs router AND before every module router
+// below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
+// `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+app.use("/api/orgs/:orgId", ...ORG_PATH_MIDDLEWARE);
+app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);

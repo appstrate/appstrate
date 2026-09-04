@@ -264,19 +264,6 @@ export const SPACE_LEVEL_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
   corePermissionsAtLevel("space");
 
 /**
- * Level of a `resource:action` string, or `undefined` when the string is not
- * a core permission. Module-contributed resources declare their own level in
- * `permissionsContribution()`; this helper answers for the core catalog only.
- */
-export function permissionLevel(permission: string): PermissionLevel | undefined {
-  const colon = permission.indexOf(":");
-  // A bare resource name is not a permission. Without this the `slice` would
-  // chop the last character and `"orgs"` would resolve as `"org"`.
-  if (colon === -1) return undefined;
-  return CORE_RESOURCE_LEVELS[permission.slice(0, colon) as CoreResource];
-}
-
-/**
  * Empty extensible interface that modules augment via TypeScript
  * declaration merging. Each key is a resource name, each value is the
  * union of allowed actions.

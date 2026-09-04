@@ -24,6 +24,7 @@ import {
   getModuleAuthStrategies,
   getModuleContributions,
   getModuleModelProviders,
+  collectModulePermissions,
 } from "../../../src/lib/modules/module-loader.ts";
 import type {
   AppstrateModule,
@@ -79,7 +80,8 @@ function mockCtx(): ModuleInitContext {
     redisUrl: null,
     appUrl: "http://localhost:3000",
     getSendMail: async () => () => {},
-    getOrgAdminEmails: async () => [],
+    getOrgOwnerEmails: async () => [],
+    getOrgMembers: async () => [],
     getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };
@@ -410,6 +412,49 @@ describe("module-loader", () => {
 
     it("returns null for an unresolvable specifier (unknown, never a crash)", async () => {
       expect(await _coreRangeFromPackageJson("@appstrate/module-does-not-exist")).toBeNull();
+    });
+  });
+
+  describe("space-preset grants are upward-closed", () => {
+    /** One module contributing `shared:read` at space level to `presets`. */
+    function contributor(presets: readonly ("admin" | "builder" | "operator" | "viewer")[]) {
+      return mockModule("preset-order", {
+        permissionsContribution: () => [
+          { resource: "shared", actions: ["read"], level: "space", presets },
+        ],
+      });
+    }
+
+    it("accepts a closed list and rejects the same list with a stronger preset missing", () => {
+      // Closed: naming `operator` also names everything above it.
+      expect(() =>
+        collectModulePermissions([contributor(["admin", "builder", "operator"])]),
+      ).not.toThrow();
+
+      // The SAME weakest preset, with `builder` dropped — a space admin would
+      // hold less than an operator for this one resource.
+      expect(() => collectModulePermissions([contributor(["admin", "operator"])])).toThrow(
+        /preset-order/,
+      );
+      expect(() => collectModulePermissions([contributor(["admin", "operator"])])).toThrow(
+        /"builder"/,
+      );
+    });
+
+    it("names every missing preset, and lets an empty list through", () => {
+      expect(() => collectModulePermissions([contributor(["viewer"])])).toThrow(
+        /"admin", "builder", "operator"/,
+      );
+      // Declaring the resource without granting it stays legal — an
+      // API-key-only or principal-granted resource looks exactly like this.
+      expect(() => collectModulePermissions([contributor([])])).not.toThrow();
+    });
+
+    it("still grants what a closed list declares", () => {
+      const snapshot = collectModulePermissions([contributor(["admin", "builder"])]);
+      expect(snapshot.byPreset.admin.has("shared:read")).toBe(true);
+      expect(snapshot.byPreset.builder.has("shared:read")).toBe(true);
+      expect(snapshot.byPreset.operator.has("shared:read")).toBe(false);
     });
   });
 

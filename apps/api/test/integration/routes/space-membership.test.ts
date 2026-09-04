@@ -295,6 +295,48 @@ describe("space membership", () => {
       expect(sourceOf(explicitGuest.user.id)).toBe("explicit");
     });
 
+    it("a space admin without members:read sees the explicit rows only", async () => {
+      // The implicit half of this list is the ORG DIRECTORY seen through a
+      // space — every org member who reaches it by role or by the open-space
+      // default. A guest running one space may manage what that space granted;
+      // enumerating the organization is `members:read`, which a guest has not
+      // got.
+      const spaceAdmin = await member("guest");
+      const implicitMember = await member("member");
+      const explicitPeer = await member("member");
+      await seedSpaceMember({
+        spaceId: owner.defaultSpaceId,
+        userId: spaceAdmin.user.id,
+        presetRole: "admin",
+      });
+      await seedSpaceMember({
+        spaceId: owner.defaultSpaceId,
+        userId: explicitPeer.user.id,
+        presetRole: "operator",
+      });
+
+      const res = await app.request(`/api/spaces/${owner.defaultSpaceId}/members`, {
+        headers: authHeaders(spaceAdmin),
+      });
+      expect(res.status).toBe(200);
+      const rows = ((await res.json()) as { data: Array<{ userId: string; source: string }> }).data;
+      const ids = rows.map((r) => r.userId);
+      expect(rows.every((r) => r.source === "explicit")).toBe(true);
+      expect(ids).toContain(spaceAdmin.user.id);
+      expect(ids).toContain(explicitPeer.user.id);
+      // The two that are only there implicitly are absent.
+      expect(ids).not.toContain(implicitMember.user.id);
+      expect(ids).not.toContain(owner.user.id);
+
+      // Control: the owner holds `members:read`, so the same request returns
+      // the implicit rows too — the filter is the permission, not the space.
+      const asOwner = await app.request(`/api/spaces/${owner.defaultSpaceId}/members`, {
+        headers: authHeaders(owner),
+      });
+      const ownerRows = ((await asOwner.json()) as { data: Array<{ userId: string }> }).data;
+      expect(ownerRows.map((r) => r.userId)).toContain(implicitMember.user.id);
+    });
+
     it("refuses an owner/admin row with 409 and accepts a member's", async () => {
       const admin = await member("admin");
       const plain = await member("member");

@@ -9,7 +9,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
 import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
-import { usePermissions } from "../hooks/use-permissions";
+import { usePermissions, type GateablePermission } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
@@ -36,6 +36,19 @@ const DETAIL_PATH_MAP: Record<string, string> = {
   agent: "/agents",
   skill: "/skills",
   integration: "/integrations",
+};
+
+/**
+ * Permission that opens the install checkbox, per package type — the same
+ * table the API enforces (`SPACE_PACKAGE_PERMISSION`, `routes/spaces.ts`).
+ * `agents:configure` rather than `agents:write`: installing configures which
+ * space runs an agent, it does not author one.
+ */
+const INSTALL_PERMISSION_BY_TYPE: Record<string, GateablePermission> = {
+  agent: "agents:configure",
+  skill: "skills:write",
+  "mcp-server": "mcp-servers:write",
+  integration: "integrations:install",
 };
 
 export function LibraryPage() {
@@ -88,9 +101,11 @@ function LibraryMatrix({
   const { can } = usePermissions();
   const toggle = useTogglePackageInstall();
   // Installing into a space is `POST /api/spaces/:spaceId/packages`, guarded
-  // by the ORG-level `spaces:write` — the same string whichever column is
-  // clicked, which is what makes a single gate correct on a cross-space grid.
-  const canInstall = can("spaces:write");
+  // by the SPACE-level string for the package TYPE — not by `spaces:write`,
+  // which is the org-level catalog verb and would hide the checkboxes from
+  // every space admin. One gate per tab is still correct on this cross-space
+  // grid: a tab shows one type, and `can` reads the current space's set.
+  const canInstall = can(INSTALL_PERMISSION_BY_TYPE[type] ?? "agents:configure");
   // Agents/skills treat a "system" package as globally available (locked on,
   // can't toggle). Integrations are different: they must be activated per
   // space even when system-sourced, so their system rows stay toggleable.

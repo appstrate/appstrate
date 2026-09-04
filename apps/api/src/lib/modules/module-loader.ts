@@ -399,8 +399,11 @@ const MODULE_RBAC_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
  *   - empty `actions` (would contribute nothing)
  *   - one `level` per resource across all of a module's entries
  *   - `grantTo` / `presets` name a known org role / space preset
- *   - an empty `grantTo`/`presets` is legal (declares the resource without
- *     granting it, useful when API-key-only access is intended) — warn-logged
+ *   - `presets` is upward-closed in the preset order (see
+ *     {@link assertPresetsUpwardClosed})
+ *   - an empty `grantTo`/`presets` is legal and silent: it declares the
+ *     resource without granting it, which is what an API-key-only or
+ *     principal-granted resource looks like
  *
  * Returns the snapshot in `ModulePermissionsSnapshot` shape — Sets keyed
  * by org role and by space preset, plus the API-key allowlist union.
@@ -608,7 +611,46 @@ function validateContribution(
       resource,
       "space-role preset",
     );
+    assertPresetsUpwardClosed(entry.presets, moduleId, resource);
   }
+}
+
+/**
+ * The four presets are nested — `viewer ⊂ operator ⊂ builder ⊂ admin` — and
+ * core's own preset table honours that. A module's `presets` list must too:
+ * naming `builder` without `admin` means a space admin holds LESS than a
+ * builder for that one resource, which no caller can reason about and which
+ * silently contradicts the ordering test every core preset is held to.
+ *
+ * Boot error, not a warning: the wrong answer here is a permission a space
+ * admin is refused, and it would only ever be found by someone hitting the
+ * 403.
+ */
+const PRESETS_STRONGEST_FIRST: readonly SpaceRolePreset[] = [
+  "admin",
+  "builder",
+  "operator",
+  "viewer",
+];
+
+function assertPresetsUpwardClosed(
+  presets: readonly SpaceRolePreset[],
+  moduleId: string,
+  resource: string,
+): void {
+  const declared = new Set<SpaceRolePreset>(presets);
+  const weakest = PRESETS_STRONGEST_FIRST.findLast((preset) => declared.has(preset));
+  if (weakest === undefined) return;
+  const missing = PRESETS_STRONGEST_FIRST.slice(0, PRESETS_STRONGEST_FIRST.indexOf(weakest)).filter(
+    (preset) => !declared.has(preset),
+  );
+  if (missing.length === 0) return;
+  throw new Error(
+    `Module "${moduleId}" declared resource ${JSON.stringify(resource)} for preset ` +
+      `${JSON.stringify(weakest)} but not ${missing.map((p) => JSON.stringify(p)).join(", ")}. ` +
+      `Presets are nested (viewer \u2282 operator \u2282 builder \u2282 admin), so granting a weaker ` +
+      `preset requires granting every stronger one.`,
+  );
 }
 
 function assertGrantList(

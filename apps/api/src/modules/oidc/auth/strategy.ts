@@ -174,10 +174,17 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
   //
   // We KEEP `deferOrgResolution: true`: the org is only a candidate at this
   // point. Org-context still re-verifies membership and derives the current
-  // role/permissions (orgRole is left undefined here, permissions deferred —
-  // same as before). A token with NO per-org audience (header-path instance
+  // role/permissions. A token with NO per-org audience (header-path instance
   // tokens, the dashboard SPA / CLI) leaves `orgId` undefined, preserving the
   // original "defer entirely to X-Org-Id" behavior.
+  //
+  // `permissions: []` with NO `orgRole` is the session-equivalent shape, not a
+  // scope claim: this token IS the user (the CLI's device-flow login), so it
+  // gets the user's full authority in whichever org they select, and the
+  // pipeline deliberately writes no `scopeCeiling` for it
+  // (`lib/auth-pipeline.ts`, the strategy branch). A narrower token must
+  // resolve an `orgRole` and pass its scope list, the way
+  // `resolveDashboardUser` below does — that is what produces a real ceiling.
   const boundOrgId = extractOrgIdFromAudiences(claims.audiences ?? []);
   return {
     user: {

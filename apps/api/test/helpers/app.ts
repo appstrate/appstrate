@@ -75,6 +75,7 @@ import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
+import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
@@ -267,6 +268,13 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   const agentsRouter = createAgentsRouter();
   const runsRouter = createRunsRouter();
   const schedulesRouter = createSchedulesRouter();
+
+  // Org context for the `/api/orgs/:orgId*` family, where the org comes from the
+  // PATH. Mounted here — before the orgs router AND before every module router
+  // below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
+  // `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+  app.use("/api/orgs/:orgId", ...ORG_PATH_MIDDLEWARE);
+  app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);

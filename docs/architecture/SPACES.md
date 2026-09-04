@@ -110,21 +110,23 @@ Two consequences the routes enforce explicitly:
 
 Mounted at `/api/spaces` (`apps/api/src/index.ts`). The catalog verbs are gated by the **org-level** `spaces` resource — `spaces:read` (list) / `spaces:write` (create) / `spaces:delete`; editing ONE space is `space-settings:write` and its membership is `space-members:*`, both **space-level** and both held by preset `admin` only. Owners and admins hold the org half outright; members and guests hold `spaces:read` (`apps/api/src/lib/permissions.ts`).
 
-| Method               | Path                                                  | Permission                  | Notes                                                                       |
-| -------------------- | ----------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------- |
-| `GET`                | `/api/spaces`                                         | `spaces:read`               | Filtered per caller (below). Default first, then oldest-first               |
-| `POST`               | `/api/spaces`                                         | `spaces:write`              | 403 for API keys. The creator gets no row — they are an admin already       |
-| `GET`                | `/api/spaces/{id}`                                    | `spaces:read`               | Visible exactly when the listing shows it; hidden is a 404                  |
-| `PATCH`              | `/api/spaces/{id}`                                    | `space-settings:write`      | `name`, `settings`, `visibility`, `default_role`                            |
-| `DELETE`             | `/api/spaces/{id}`                                    | `spaces:delete`             | 400 on the default space                                                    |
-| `GET`                | `/api/spaces/{id}/members`                            | `space-members:read`        | Explicit rows AND implicit members, with a `source` discriminator           |
-| `POST`               | `/api/spaces/{id}/members`                            | `space-members:invite`      | `{ userId, preset_role }` or `{ userId, custom_role_id }`; 409 for an admin |
-| `PATCH`              | `/api/spaces/{id}/members/{userId}`                   | `space-members:change-role` | Same either/or body; 404 when there is no explicit row                      |
-| `DELETE`             | `/api/spaces/{id}/members/{userId}`                   | `space-members:remove`      | Answers `access_after: "implicit" \| "none"`                                |
-| `GET`/`POST`         | `/api/spaces/{id}/packages`                           | `spaces:read` / `:write`    |                                                                             |
-| `GET`/`PUT`/`DELETE` | `/api/spaces/{id}/packages/{scope}/{name}`            | `spaces:read` / `:write`    | model, proxy, generation config, version pin                                |
-| `DELETE`             | `/api/spaces/{id}/packages/{scope}/{name}`            | `spaces:write`              |                                                                             |
-| `GET`                | `/api/spaces/{id}/packages/{scope}/{name}/run-config` | `agents:read`               | Resolved per-space config + overrides + pin, in one call                    |
+| Method   | Path                                                  | Permission                  | Notes                                                                              |
+| -------- | ----------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------- |
+| `GET`    | `/api/spaces`                                         | `spaces:read`               | Filtered per caller (below). Default first, then oldest-first                      |
+| `POST`   | `/api/spaces`                                         | `spaces:write`              | 403 for API keys. The creator gets no row — they are an admin already              |
+| `GET`    | `/api/spaces/{id}`                                    | `spaces:read`               | Visible exactly when the listing shows it; hidden is a 404                         |
+| `PATCH`  | `/api/spaces/{id}`                                    | `space-settings:write`      | `name`, `settings`, `visibility`, `default_role`                                   |
+| `DELETE` | `/api/spaces/{id}`                                    | `spaces:delete`             | 400 on the default space                                                           |
+| `GET`    | `/api/spaces/{id}/members`                            | `space-members:read`        | Explicit rows AND implicit members, with a `source` discriminator                  |
+| `POST`   | `/api/spaces/{id}/members`                            | `space-members:invite`      | `{ userId, preset_role }` or `{ userId, custom_role_id }`; 409 for an admin        |
+| `PATCH`  | `/api/spaces/{id}/members/{userId}`                   | `space-members:change-role` | Same either/or body; 404 when there is no explicit row                             |
+| `DELETE` | `/api/spaces/{id}/members/{userId}`                   | `space-members:remove`      | Answers `access_after: "implicit" \| "none"`                                       |
+| `GET`    | `/api/spaces/{id}/packages`                           | `spaces:read`               | listing is package-type agnostic                                                   |
+| `POST`   | `/api/spaces/{id}/packages`                           | per package TYPE            | `agents:configure` / `skills:write` / `mcp-servers:write` / `integrations:install` |
+| `GET`    | `/api/spaces/{id}/packages/{scope}/{name}`            | `spaces:read`               |                                                                                    |
+| `PUT`    | `/api/spaces/{id}/packages/{scope}/{name}`            | per package TYPE            | model, proxy, generation config, version pin — same strings as `POST`              |
+| `DELETE` | `/api/spaces/{id}/packages/{scope}/{name}`            | per package TYPE            | `integrations:uninstall` for integrations, otherwise the `POST` string             |
+| `GET`    | `/api/spaces/{id}/packages/{scope}/{name}/run-config` | `agents:read`               | Resolved per-space config + overrides + pin, in one call                           |
 
 **The listing is filtered, and every item carries the caller's standing.** An owner or admin sees every space; a member sees the `open` ones plus any `closed`/`private` one they hold a row in (a `closed` space is listed with `access: "none"` — visible, not enterable); a guest sees only the spaces they hold a row in; an API key sees its own space. Each item adds `visibility`, `default_role`, `access` (`"member" | "none"`), `role` (`{ kind, key, name }` or `null`) and `permissions` — the caller's effective set in that space, ceiling already applied — so a client decides what to render without re-deriving anything from a role name. Setting `visibility` to anything but `open` on the default space is a 400, and the DB check backs it.
 

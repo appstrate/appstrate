@@ -1286,6 +1286,13 @@ export interface RunConnectionMissingParams {
 // Init context — platform services injected into modules
 // ---------------------------------------------------------------------------
 
+/** One organization member, as `getOrgMembers` resolves it. */
+export interface ModuleOrgMember {
+  userId: string;
+  email: string;
+  role: OrgRole;
+}
+
 export interface ModuleInitContext {
   /** Redis connection string, or null when Redis is absent. */
   redisUrl: string | null;
@@ -1293,8 +1300,24 @@ export interface ModuleInitContext {
   appUrl: string;
   /** Lazy email sender (breaks circular deps at module load time). */
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
-  /** Query helper: get org admin emails. */
-  getOrgAdminEmails: (orgId: string) => Promise<string[]>;
+  /**
+   * Query helper: emails of the org's OWNERS.
+   *
+   * The live fallback for an unset billing contact — owners are the identity
+   * an organization cannot exist without, so this is the one recipient list
+   * that is always non-empty. It is deliberately not "admins too": an admin is
+   * an operational role, and billing mail is not an operational notification.
+   */
+  getOrgOwnerEmails: (orgId: string) => Promise<string[]>;
+  /**
+   * Query helper: resolve `userIds` to org members.
+   *
+   * A id that is not a member of `orgId` is ABSENT from the result rather than
+   * an error — a module storing user ids of its own (billing managers, say)
+   * must be able to ask "which of these are still members" in one round trip,
+   * and a removed member is the ordinary answer, not an exception.
+   */
+  getOrgMembers: (orgId: string, userIds: readonly string[]) => Promise<ModuleOrgMember[]>;
   /**
    * Query helper: resolve an organization's display name, or null when the
    * org no longer exists.

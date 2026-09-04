@@ -24,7 +24,6 @@ export function useRoles(enabled = true) {
   );
 }
 
-/** The space-level permission strings a custom role may hold, by resource. */
 export function useRoleVocabulary(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
@@ -35,11 +34,7 @@ export function useRoleVocabulary(enabled = true) {
   );
 }
 
-/**
- * A role edit changes what its holders can do, so three caches move with it:
- * the role list, the space list (which carries each caller's effective
- * `permissions`) and every space's member list (which renders the role name).
- */
+/** Three caches move with a role edit: the roles, the spaces' `permissions`, and the member lists' role names. */
 function useInvalidateRoles() {
   const qc = useQueryClient();
   return () => {
@@ -64,33 +59,22 @@ export function useDeleteRole() {
   return $api.useMutation("delete", "/api/roles/{id}", { onSuccess: invalidate });
 }
 
-/**
- * One entry of a "which role in this space" picker.
- *
- * `value` encodes the two shapes the API accepts (`preset_role` vs
- * `custom_role_id`) into a single select value, because a `<Select>` carries
- * one string and the two are mutually exclusive on the wire.
- */
+/** `value` folds the wire's `preset_role` / `custom_role_id` into the one string a `<Select>` carries. */
 export interface SpaceRoleOption {
   value: string;
   label: string;
 }
 
-/** The select value for a role row. */
 function spaceRoleValue(role: RoleObject): string {
   return role.kind === "preset" ? `preset:${role.key}` : `custom:${role.id}`;
 }
 
 /**
- * The role's display name.
+ * A preset is a platform constant with no org-authored name, so its slug is
+ * translated; a custom bundle renders the name its author typed.
  *
- * A preset arrives from the API as its raw slug (`operator`) — it is a platform
- * constant with no org-authored name, so it is translated here. A custom bundle
- * carries the name its author typed and is rendered verbatim.
- *
- * `t` is passed in rather than pulled from a hook so the same rule applies in
- * render paths that already own a `t` on another namespace (the org switcher);
- * the key is namespace-qualified for exactly that reason.
+ * `t` is a parameter, not a hook call, so render paths that already hold a `t`
+ * on another namespace reuse this — hence the namespace-qualified key.
  */
 export function spaceRoleLabel(
   role: { kind: "preset" | "custom"; key: string; name: string } | null | undefined,
@@ -105,7 +89,7 @@ export function spaceRoleDescription(role: RoleObject, t: (key: string) => strin
   return role.kind === "preset" ? t(`settings:roles.presetDesc.${role.key}`) : role.description;
 }
 
-/** The preset every "pick a role" control starts on. Never the head of the list — that is `admin`. */
+/** Never the head of the list — that is `admin`. */
 export const DEFAULT_SPACE_ROLE_VALUE = "preset:operator";
 
 /** Turn a select value back into the request body's role half. */
@@ -118,11 +102,7 @@ export function spaceRoleAssignment(value: string): {
   return kind === "preset" ? { preset_role: key as SpaceRolePreset } : { custom_role_id: key };
 }
 
-/**
- * The select value matching a membership's current role. A custom role is
- * reported by `key` on a membership but addressed by `id` in a write, so it is
- * resolved through the role list.
- */
+/** A custom role is reported by `key` but addressed by `id` in a write, hence the lookup. */
 export function memberRoleValue(
   role: { kind: "preset" | "custom"; key: string } | null,
   roles: RoleObject[] | undefined,
@@ -134,13 +114,11 @@ export function memberRoleValue(
 }
 
 /**
- * Assignable space roles for a picker.
- *
- * Without `roles:read` the org's own bundles are unreachable, so the picker
- * falls back to the four platform presets — they are constants, not rows. That
- * fallback can only ADD a role, never rename one, which is why a member whose
- * current role is a custom bundle must not be edited through it (`rolesKnown`
- * says whether the list is authoritative; see `space/members.tsx`).
+ * Without `roles:read` the org's bundles are unreachable and the picker falls
+ * back to the four presets, which are constants rather than rows. That fallback
+ * can ADD a role but never rename one, so a member currently holding a custom
+ * bundle must not be edited through it — `rolesKnown` says whether the list is
+ * authoritative.
  */
 export function useSpaceRoleOptions(): {
   options: SpaceRoleOption[];

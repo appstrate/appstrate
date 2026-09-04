@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `ModuleInitContext.getOrgAdminEmails` is REMOVED**, replaced by
+  two narrower queries. `getOrgOwnerEmails(orgId)` returns the emails of the
+  org's OWNERS only — the live fallback recipient for an unset billing contact,
+  and deliberately not owner-or-admin, since admin is an operational role and
+  billing mail is not an operational notification. `getOrgMembers(orgId,
+userIds)` resolves a module's own stored user ids to
+  `ModuleOrgMember[]` (`{ userId, email, role }`, also a new export), omitting
+  any id that is no longer a member of `orgId` rather than throwing — "which of
+  these still hold membership" is the question a module with its own principal
+  list actually asks. A module calling `getOrgAdminEmails` fails to compile;
+  the replacement is `getOrgOwnerEmails` when the answer wanted was "who is
+  responsible for this org", and an explicit id list through `getOrgMembers`
+  when it wanted a named audience. First consumer: `@appstrate/cloud`'s billing
+  managers and billing contact.
+
+- **`permissionLevel()` is not exported.** It was added under this same
+  `[Unreleased]` section and never shipped in a release, and nothing reads it —
+  the level of a core resource is read from `CORE_RESOURCE_LEVELS`, and a
+  module's own level is declared in `permissionsContribution()`. Removed before
+  it became a surface anyone could depend on.
+
 - **New subpath `@appstrate/core/principal-permissions` — org-level grants per
   principal.** A module may now grant org-level permissions to ONE user in ONE
   org instead of to a role, through the new optional `principalPermissions`
@@ -85,7 +106,7 @@ userId?)` after writing the table its resolver reads —
   there is no default and no compatibility reading of a bare `grantTo`), and
   `ModulePermissionsSnapshot` (new required `byPreset` member). New exports:
   `CORE_RESOURCE_ACTIONS`, `CORE_RESOURCE_LEVELS`, `ORG_LEVEL_PERMISSIONS`,
-  `SPACE_LEVEL_PERMISSIONS`, `SPACE_ROLE_PRESETS`, `permissionLevel()`,
+  `SPACE_LEVEL_PERMISSIONS`, `SPACE_ROLE_PRESETS`,
   `getModulePresetScopes()`, and the types `PermissionLevel`,
   `OrgLevelPermission`, `SpaceLevelPermission`, `SpaceRolePreset`. Every
   module contributing permissions must add `level` to each entry and swap

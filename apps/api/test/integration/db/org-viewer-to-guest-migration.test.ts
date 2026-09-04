@@ -100,6 +100,9 @@ async function seed(): Promise<void> {
     INSERT INTO chat_sessions (id, org_id, user_id) VALUES
       ('chs_0008_a', '${ORG}', '${VIEWER_A}'),
       ('chs_0008_b', '${ORG}', '${MEMBER}');
+    INSERT INTO oauth_clients (id, client_id, redirect_uris, level, signup_role) VALUES
+      ('oac_0008_viewer', 'cli_0008_viewer', ARRAY['https://example.test/cb'], 'instance', 'viewer'),
+      ('oac_0008_member', 'cli_0008_member', ARRAY['https://example.test/cb'], 'instance', 'member');
   `);
 }
 
@@ -116,6 +119,9 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
   it("moves every half, and the counts discriminate", async () => {
     // Before: the state the script exists for.
     expect(await count(`SELECT count(*)::int AS n FROM org_members WHERE role = 'viewer'`)).toBe(2);
+    expect(
+      await count(`SELECT count(*)::int AS n FROM oauth_clients WHERE signup_role = 'viewer'`),
+    ).toBe(1);
     expect(await count(`SELECT count(*)::int AS n FROM space_members`)).toBe(0);
     expect(await count(`SELECT count(*)::int AS n FROM chat_sessions WHERE space_id IS NULL`)).toBe(
       2,
@@ -159,6 +165,25 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     expect(
       await count(
         `SELECT count(*)::int AS n FROM org_invitations WHERE id = 'inv_0008_member' AND role = 'member'`,
+      ),
+    ).toBe(1);
+
+    // 3b. An OIDC client auto-provisioning `viewer` writes that value straight
+    //     into `org_members.role`, so leaving it behind would re-mint the
+    //     retired role on the next SSO signup. Without a seeded row the
+    //     script's own `v_signup = 0` check passes vacuously.
+    expect(
+      await count(`SELECT count(*)::int AS n FROM oauth_clients WHERE signup_role = 'viewer'`),
+    ).toBe(0);
+    expect(
+      await count(
+        `SELECT count(*)::int AS n FROM oauth_clients WHERE id = 'oac_0008_viewer' AND signup_role = 'guest'`,
+      ),
+    ).toBe(1);
+    // Untouched: only `viewer` is rewritten.
+    expect(
+      await count(
+        `SELECT count(*)::int AS n FROM oauth_clients WHERE id = 'oac_0008_member' AND signup_role = 'member'`,
       ),
     ).toBe(1);
 

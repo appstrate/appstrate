@@ -11,6 +11,10 @@
 --     `assertOrgRole` (`apps/api/src/lib/permissions.ts`) throws
 --     `UnmigratedOrgRoleError` naming that script rather than mapping the row
 --     to `guest`, which would silently change what those users reach.
+--     `meta/0056_snapshot.json` therefore lists `viewer` BESIDE `guest` on
+--     purpose: the snapshot describes the catalog this file leaves behind, and
+--     a snapshot that omitted the value would make the next generated
+--     migration try to recreate the type. `0057` removes it from both.
 --   * `chat_sessions.space_id` is NULLABLE. `0008` backfills it; `0057`
 --     promotes it. A NULL is refused by the chat module, never defaulted.
 --   * `oauth_clients_signup_role_check` is WIDENED, not replaced: `guest` is
@@ -22,10 +26,13 @@
 -- leaves the additions inert. That is the whole reason the retirement half is
 -- a separate release.
 --
--- ORDER: `ALTER TYPE … ADD VALUE` first and used by nothing in this file.
--- Postgres ≥12 allows it inside a transaction block (drizzle wraps the pending
--- batch in one) provided the new value is not USED in the same transaction —
--- no statement below mentions `guest`, and there is no DML here at all.
+-- ORDER: `ALTER TYPE … ADD VALUE` first. Postgres ≥12 allows it inside a
+-- transaction block (drizzle wraps the pending batch in one) provided the new
+-- value is not USED as that enum in the same transaction. Section H below DOES
+-- write the literal `'guest'`, and it is still safe: `oauth_clients.signup_role`
+-- is a `text` column (`packages/db/src/schema/oidc.ts`), so the literal in its
+-- CHECK is text and never resolves against `org_role`. No statement here
+-- compares, casts or stores a value AS `org_role`, and there is no DML at all.
 --
 -- FENCES, set once for the whole file, same instrument as 0039/0047/0055.
 -- `lock_timeout` bounds acquisition, `statement_timeout` bounds execution;

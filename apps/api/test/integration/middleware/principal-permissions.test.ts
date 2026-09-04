@@ -29,6 +29,8 @@ import type { AppstrateModule } from "@appstrate/core/module";
 const answers = new Map<string, string[]>();
 /** Flipped by the isolation test — the resolver throws for every principal. */
 let resolverThrows = false;
+/** Every principal the resolver was asked about, in order. Reset per test. */
+const resolverCalls: string[] = [];
 
 const principalModule: AppstrateModule = {
   manifest: { id: "stub-principal-grants", name: "Stub Principal Grants", version: "1.0.0" },
@@ -39,6 +41,7 @@ const principalModule: AppstrateModule = {
     // through `/api/orgs/:orgId`, so the two resolution paths are both covered.
     mayGrant: ["model-provider-credentials:read", "org:settings"],
     async resolve({ orgId, userId }) {
+      resolverCalls.push(`${orgId}:${userId}`);
       if (resolverThrows) throw new Error("stub resolver is down");
       return answers.get(`${orgId}:${userId}`) ?? [];
     },
@@ -187,7 +190,13 @@ describe("per-principal org permissions", () => {
     expect(fresh.status).toBe(403);
   });
 
-  it("never grants it to an API key even when the creator holds it", async () => {
+  it("never grants it to an API key, and never even asks the module", async () => {
+    // A 403 alone cannot fail here: `model-provider-credentials:read` is not
+    // in the API-key allowlist, so the key is refused whatever the resolver
+    // says and the assertion would pass with the eligibility rule deleted.
+    // The discriminating fact is that the resolver is NOT CONSULTED for a key
+    // — that is the rule `lib/principal-permissions.ts` implements, and the
+    // call counter is the only thing that sees it.
     await seedSpaceMember({
       spaceId: ctx.defaultSpaceId,
       userId: granted.id,
@@ -201,9 +210,23 @@ describe("per-principal org permissions", () => {
     expect(minted.status).toBe(201);
     const { key } = (await minted.json()) as { key: string };
 
+    resolverCalls.length = 0;
     const res = await app.request("/api/model-provider-credentials", {
       headers: { Authorization: `Bearer ${key}` },
     });
     expect(res.status).toBe(403);
+    expect(resolverCalls).toEqual([]);
+
+    // Positive control on the counter itself: the SAME principal, as a
+    // session, does reach the resolver — so the empty list above is the
+    // eligibility rule and not a spy that never fires. The invalidation is
+    // required: the mint request above was a session, so its answer is still
+    // in the 10s cache and the control would read as "never called".
+    invalidatePrincipalPermissions(ctx.orgId, granted.id);
+    resolverCalls.length = 0;
+    await app.request("/api/model-provider-credentials", {
+      headers: headersFor(ctx, granted.cookie),
+    });
+    expect(resolverCalls).toContain(`${ctx.orgId}:${granted.id}`);
   });
 });

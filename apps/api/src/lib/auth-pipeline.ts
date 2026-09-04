@@ -159,6 +159,17 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           c.set("scopeCeiling", ceiling);
           c.set("permissions", new Set(ceiling));
         }
+        // The remaining shape — no org role AND an empty list — writes NO
+        // ceiling, deliberately. It is the "I have not resolved an org yet"
+        // answer, and only a `deferOrgResolution` strategy can give it: the
+        // OIDC instance token (`modules/oidc/auth/strategy.ts`,
+        // `resolveInstanceUser`), which is the CLI acting as the full user and
+        // picks its org through `X-Org-Id` exactly as a cookie session does.
+        // Writing an empty ceiling here would be a different decision — it
+        // would leave that caller with zero permissions in every org — so a
+        // strategy that means "nothing" must resolve an `orgRole` and pass an
+        // empty list, which the branch above already turns into a real,
+        // empty ceiling.
         c.set("authMethod", resolution.authMethod);
         if (resolution.spaceId !== undefined) {
           c.set("spaceId", resolution.spaceId);

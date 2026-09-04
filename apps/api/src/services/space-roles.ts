@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Space roles — the four shipped presets plus the org's own bundles
- * (RBAC spec §3.3, §6.2).
+ * The four shipped presets plus the org's own bundles (RBAC spec §3.3, §6.2).
  *
- * Presets are constants, not rows, and are projected onto the same wire shape
- * as a bundle so one listing answers "what can I assign here". Their `id` is
- * `null`, which is what makes them un-addressable by the write routes.
- *
- * A permission the validator does not know is a REFUSAL, never a silent drop —
- * same posture as `validateScopes`: a role created with a typo would 403 on the
- * thing its author asked for and say nothing about why.
+ * Presets are constants projected onto the bundle wire shape, so one listing
+ * answers "what can I assign here"; their `null` id is what makes them
+ * un-addressable by the write routes.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -86,9 +81,9 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
 }
 
 /**
- * Refuse an empty array, or one naming a string the platform does not know.
- * The FIRST unknown is named: the array is authored in a picker driven by
- * `GET /api/roles/vocabulary`, so one offender is enough to locate the mistake.
+ * An unknown permission is a REFUSAL, never a silent drop: a role created with
+ * a typo would 403 on the thing its author asked for and say nothing about why.
+ * Naming the first offender is enough — the array is authored in a picker.
  */
 function assertKnownPermissions(permissions: string[]): void {
   if (permissions.length === 0) {
@@ -105,10 +100,7 @@ function assertKnownPermissions(permissions: string[]): void {
   }
 }
 
-/**
- * The DB CHECK backs this, but a constraint violation is a 500 with a Postgres
- * string in it — the refusal has to name the reserved keys readably.
- */
+/** The DB CHECK backs this; a constraint violation would be a 500 naming nothing readable. */
 function assertNotPresetKey(key: string): void {
   if (!PRESET_KEYS.has(key)) return;
   throw invalidRequest(
@@ -122,11 +114,7 @@ function keyTaken(key: string): never {
   throw conflict("role_key_taken", `A role with key '${key}' already exists in this organization`);
 }
 
-/**
- * Custom bundles are unique per org on `key`. This read answers the common case
- * with the key in the message; the `(org_id, key)` unique index is what makes it
- * true, and {@link asKeyConflict} catches the race the read cannot.
- */
+/** The `(org_id, key)` index is the truth; this read just gives a readable 409, and {@link asKeyConflict} catches the race. */
 async function assertKeyFree(orgId: string, key: string, exceptId?: string): Promise<void> {
   const [taken] = await db
     .select({ id: spaceRoles.id })
@@ -137,11 +125,7 @@ async function assertKeyFree(orgId: string, key: string, exceptId?: string): Pro
   keyTaken(key);
 }
 
-/**
- * Turn the unique-index violation two concurrent writers can produce into the
- * same 409 the check-then-write path gives. Without it the loser of the race
- * gets a 500 carrying a Postgres constraint name.
- */
+/** The loser of a write race gets the same 409, not a 500 carrying a constraint name. */
 function asKeyConflict(err: unknown, key: string | undefined): never {
   if (key !== undefined && isUniqueViolation(err)) keyTaken(key);
   throw err;
@@ -173,10 +157,7 @@ export async function createSpaceRole(params: {
   return toWire(row!);
 }
 
-/**
- * `key` is patchable like the rest: a role is addressed by its `srl_` id
- * everywhere, so renaming the key moves no reference.
- */
+/** `key` is patchable: a role is addressed by `srl_` id everywhere, so a rename moves no reference. */
 export async function updateSpaceRole(params: {
   orgId: string;
   id: string;
@@ -206,14 +187,12 @@ export async function updateSpaceRole(params: {
 }
 
 /**
- * Delete a bundle nobody holds. Two things hold one: an explicit `space_members`
- * row, and a PENDING invitation whose `space_assignments` name it — the second
- * has no FK (the assignments are JSONB), so deleting under it would strand the
- * invitee with an assignment that silently never applies on accept.
+ * Two things hold a bundle: a `space_members` row, and a PENDING invitation
+ * whose JSONB `space_assignments` name it. The second has no FK, so deleting
+ * under it would strand the invitee with an assignment that never applies.
  *
- * Both counts are read HERE rather than left to the `ON DELETE RESTRICT` FK,
- * whose error text is a constraint name — a 500 naming neither the role nor how
- * many people would have lost access.
+ * Counted here rather than left to `ON DELETE RESTRICT`, whose error names
+ * neither the role nor how many people would lose access.
  */
 export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
   const [row] = await db

@@ -288,8 +288,18 @@ export async function getOrgMembers(orgId: string) {
   }));
 }
 
-export async function getOrgMember(orgId: string, userId: string) {
-  const [row] = await db
+/**
+ * The one reader of `org_members` for a `(org, user)` pair. Every caller that
+ * needs a role goes through it and narrows with `assertOrgRole` — an inline
+ * `select` of the same row is how one call site keeps accepting a value the
+ * others refuse.
+ *
+ * `tx` is not a convenience: an invitation accept inserts the membership row
+ * and the space rows in one transaction, so the read that follows must see its
+ * own write.
+ */
+export async function getOrgMember(orgId: string, userId: string, tx: DbOrTx = db) {
+  const [row] = await tx
     .select()
     .from(organizationMembers)
     .where(

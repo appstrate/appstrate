@@ -5,12 +5,12 @@ import { streamSSE } from "hono/streaming";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
-import { organizationMembers, runs } from "@appstrate/db/schema";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { runs } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/realtime.ts";
 import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
+import { getOrgMember } from "../services/organizations.ts";
 import { effectivePermissions, orgPermissions, assertOrgRole } from "../lib/permissions.ts";
 import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { validateSpaceInOrg, type SpaceContextRow } from "../middleware/space-context.ts";
@@ -117,10 +117,11 @@ async function resolveSpaceGrants(
  *
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
  *
- * API keys go through the same canonical scope resolution as the HTTP
- * pipeline (key scopes ∩ the creator's live authority in the key's space)
- * and must carry `runs:read` to open any run stream; a valid key without
- * that grant is rejected with 403 instead of silently inheriting admin.
+ * Both branches go through the same canonical resolution as the HTTP pipeline
+ * (for a key: scopes ∩ the creator's live authority in the key's space; for a
+ * session: the org ∪ space union) and both must carry `runs:read` to open any
+ * run stream. A caller that reached the space without that permission is
+ * rejected with 403 instead of silently inheriting admin.
  */
 async function validateSSEAuth(c: {
   req: {
@@ -173,19 +174,10 @@ async function validateSSEAuth(c: {
   const orgId = c.req.query("orgId");
   if (!orgId) return null;
 
-  // Verify org membership
-  const rows = await db
-    .select({ role: organizationMembers.role })
-    .from(organizationMembers)
-    .where(
-      scopedWhere(organizationMembers, {
-        orgId,
-        extra: [eq(organizationMembers.userId, session.user.id)],
-      }),
-    )
-    .limit(1);
-
-  if (!rows[0]) return null;
+  // Verify org membership — through the one reader, so this path narrows the
+  // stored value with the same `assertOrgRole` every other caller uses.
+  const member = await getOrgMember(orgId, session.user.id);
+  if (!member) return null;
 
   const spaceId = c.req.query("spaceId");
   if (!spaceId) return null;
@@ -194,11 +186,17 @@ async function validateSSEAuth(c: {
   const space = await validateSpaceInOrg(spaceId, orgId);
   if (!space) return null;
 
-  const role = assertOrgRole(rows[0].role);
+  const role = assertOrgRole(member.role);
   // Same membership resolution the HTTP pipeline applies (`applySpacePermissions`):
   // being in the org is not being in the space.
   const grants = await resolveSpaceGrants(role, space, session.user.id);
   if (!grants) return null;
+  // Same floor as the API-key branch above. A cookie session carries no scope
+  // ceiling, so its effective set IS `grants` — a custom space role without
+  // `runs:read` must not open a run stream just because it reached the space.
+  if (!grants.has("runs:read")) {
+    throw forbidden("Caller does not have the 'runs:read' permission in this space");
+  }
 
   return {
     userId: session.user.id,

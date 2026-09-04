@@ -5,9 +5,6 @@ import type { Context, Next } from "hono";
 import { z } from "zod";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import type { SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
-import { and, eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { organizationMembers } from "@appstrate/db/schema";
 import {
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
@@ -28,16 +25,17 @@ import {
   deleteSpace,
   spaceSettingsSchema,
 } from "../services/spaces.ts";
+import { getOrgMember } from "../services/organizations.ts";
 import {
   listSpaceMembers,
   removeSpaceMember,
   upsertSpaceMember,
-  type SpaceRoleAssignment,
 } from "../services/space-members.ts";
 import {
   assertOrgRole,
   effectivePermissions,
   orgPermissions as orgPermissionsFor,
+  type Resource,
 } from "../lib/permissions.ts";
 import {
   loadSpaceMember,
@@ -54,9 +52,15 @@ import {
   getInstalledPackage,
   updateInstalledPackage,
   getResolvedRunConfig,
+  getCatalogPackageType,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
+import {
+  exactlyOneRole,
+  spaceRoleAssignmentShape,
+  toAssignment,
+} from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -102,15 +106,6 @@ function spaceWireForCaller(
 }
 
 /** Narrow a validated member body to the service's assignment shape. */
-function toAssignment(data: {
-  preset_role?: SpaceRolePreset;
-  custom_role_id?: string;
-}): SpaceRoleAssignment {
-  return data.preset_role !== undefined
-    ? { preset_role: data.preset_role }
-    : { custom_role_id: data.custom_role_id! };
-}
-
 /**
  * Project a Drizzle space row onto the wire shape. The DB columns are
  * `created_by` / `default_role`; the Drizzle TS fields are `createdBy` /
@@ -147,27 +142,12 @@ export const updateSpaceSchema = z
   })
   .strict();
 
-/** `{ user_id, preset_role }` or `{ user_id, custom_role_id }` — never both. */
-export const addSpaceMemberSchema = z
-  .object({
-    userId: z.string().min(1),
-    preset_role: z.enum(SPACE_ROLE_PRESETS).optional(),
-    custom_role_id: z.string().min(1).optional(),
-  })
-  .strict()
-  .refine((v) => (v.preset_role === undefined) !== (v.custom_role_id === undefined), {
-    message: "exactly one of preset_role or custom_role_id is required",
-  });
+/** `{ userId, preset_role }` or `{ userId, custom_role_id }` — never both. */
+export const addSpaceMemberSchema = exactlyOneRole(
+  z.object({ userId: z.string().min(1), ...spaceRoleAssignmentShape }),
+);
 
-export const updateSpaceMemberSchema = z
-  .object({
-    preset_role: z.enum(SPACE_ROLE_PRESETS).optional(),
-    custom_role_id: z.string().min(1).optional(),
-  })
-  .strict()
-  .refine((v) => (v.preset_role === undefined) !== (v.custom_role_id === undefined), {
-    message: "exactly one of preset_role or custom_role_id is required",
-  });
+export const updateSpaceMemberSchema = exactlyOneRole(z.object({ ...spaceRoleAssignmentShape }));
 
 // Neither body carries the agent's stored input values: `PUT
 // /api/agents/{scope}/{name}/input-settings` is their single write path,
@@ -207,6 +187,69 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
     c.set("space", space);
     return next();
   };
+}
+
+// ─── Space packages: the permission is per PACKAGE TYPE ────────────────
+//
+// `spaces:write` is ORG-level — the catalog verb that creates and deletes
+// spaces. Gating install/config/uninstall on it meant a space admin could not
+// install an agent into the space they run, while anyone who could create a
+// space could install into every space in the org. The permission that fits is
+// the space-level string for the type being installed, which is also what the
+// per-type package routes already use (`routes/packages.ts` → `ROUTE_CONFIGS`).
+//
+// `agents:configure` rather than `agents:write`: installing does not author the
+// agent, it configures which space runs it — the same distinction the catalog
+// already draws between writing an agent and configuring one.
+type SpacePackageOp = "install" | "configure" | "uninstall";
+
+const SPACE_PACKAGE_PERMISSION: Record<
+  PackageType,
+  Record<SpacePackageOp, readonly [Resource, string]>
+> = {
+  agent: {
+    install: ["agents", "configure"],
+    configure: ["agents", "configure"],
+    uninstall: ["agents", "configure"],
+  },
+  skill: {
+    install: ["skills", "write"],
+    configure: ["skills", "write"],
+    uninstall: ["skills", "write"],
+  },
+  "mcp-server": {
+    install: ["mcp-servers", "write"],
+    configure: ["mcp-servers", "write"],
+    uninstall: ["mcp-servers", "write"],
+  },
+  integration: {
+    install: ["integrations", "install"],
+    configure: ["integrations", "install"],
+    uninstall: ["integrations", "uninstall"],
+  },
+};
+
+/**
+ * Enforce the per-type permission from INSIDE the handler.
+ *
+ * Route-level middleware cannot: the resource depends on the package row, and
+ * the row is only read once the handler runs. Reusing `requirePermission`
+ * (rather than an inline `permissions.has`) keeps the denial audit hook, the
+ * 403 shape and the fail-closed semantics identical to every other call site —
+ * the same move `requirePackageReadPermission` makes in `routes/packages.ts`.
+ *
+ * An unmapped type fails CLOSED.
+ */
+async function assertSpacePackagePermission(
+  c: Context<AppEnv>,
+  type: string,
+  op: SpacePackageOp,
+): Promise<void> {
+  const entry = SPACE_PACKAGE_PERMISSION[type as PackageType]?.[op];
+  if (!entry) {
+    throw forbidden(`Insufficient permissions: no ${op} scope is defined for type '${type}'`);
+  }
+  await requirePermission(entry[0], entry[1] as never)(c, async () => {});
 }
 
 export function createSpacesRouter() {
@@ -366,10 +409,15 @@ export function createSpacesRouter() {
   router.use("/:id/members", requireSpaceFromParam("id"));
   router.use("/:id/members/*", requireSpaceFromParam("id"));
 
-  // GET /api/spaces/:id/members — who actually has access, not who was added
+  // GET /api/spaces/:id/members — who actually has access, not who was added.
+  // `space-members:read` opens the list; the IMPLICIT half of it is the org
+  // directory seen through a space, so it needs `members:read` on top (RBAC
+  // spec §6.4). A guest holding preset `admin` here manages the roles this
+  // space granted and enumerates nothing else.
   router.get("/:id/members", requirePermission("space-members", "read"), async (c) => {
     const space = c.get("space")!;
-    return c.json(listResponse(await listSpaceMembers(c.get("orgId"), space)));
+    const includeImplicit = c.get("permissions")?.has("members:read") ?? false;
+    return c.json(listResponse(await listSpaceMembers(c.get("orgId"), space, includeImplicit)));
   });
 
   // POST /api/spaces/:id/members — grant an explicit role
@@ -445,11 +493,7 @@ export function createSpacesRouter() {
     // What is left after the row is gone — one PK lookup, one membership row.
     // The row was just deleted, so this can only find one an admin re-added
     // concurrently; the org role is what usually answers.
-    const [member] = await db
-      .select({ role: organizationMembers.role })
-      .from(organizationMembers)
-      .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
-      .limit(1);
+    const member = await getOrgMember(orgId, userId);
     const after = member
       ? resolveSpaceRole(assertOrgRole(member.role), space, await loadSpaceMember(space.id, userId))
       : null;
@@ -478,11 +522,15 @@ export function createSpacesRouter() {
   });
 
   // POST /api/spaces/:spaceId/packages — install a package
-  router.post("/:spaceId/packages", requirePermission("spaces", "write"), async (c) => {
+  router.post("/:spaceId/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("spaceId")!;
 
     const data = await readJsonBody(c, installPackageSchema);
+
+    const type = await getCatalogPackageType(orgId, data.packageId);
+    if (!type) throw notFound(`Package '${data.packageId}' not found in organization catalog`);
+    await assertSpacePackagePermission(c, type, "install");
 
     await installPackage({ orgId, spaceId: spaceId }, data.packageId);
     const row = await getInstalledPackage({ orgId, spaceId: spaceId }, data.packageId);
@@ -511,81 +559,79 @@ export function createSpacesRouter() {
   );
 
   // PUT /api/spaces/:spaceId/packages/:packageId — update config
-  router.put(
-    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
-    requirePermission("spaces", "write"),
-    async (c) => {
-      const spaceId = c.req.param("spaceId")!;
-      const orgId = c.get("orgId");
-      const scope = { orgId, spaceId: spaceId };
-      const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      const data = await readJsonBody(c, updatePackageSchema);
+  router.put(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const spaceId = c.req.param("spaceId")!;
+    const orgId = c.get("orgId");
+    const scope = { orgId, spaceId: spaceId };
+    const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+    const data = await readJsonBody(c, updatePackageSchema);
 
-      const installed = await getInstalledPackage(scope, packageId);
-      let generationConfig = data.generationConfig;
-      if (installed && (data.modelId !== undefined || generationConfig !== undefined)) {
-        const effectiveModelId = data.modelId !== undefined ? data.modelId : installed.modelId;
-        const explicitModel =
-          data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
-        const selectedModel =
-          explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId));
+    const installed = await getInstalledPackage(scope, packageId);
+    // `requireInstalled` below turns a missing row into the 404; the type is
+    // read from the same row so the permission matches what is being changed.
+    if (installed) await assertSpacePackagePermission(c, installed.package_type, "configure");
+    let generationConfig = data.generationConfig;
+    if (installed && (data.modelId !== undefined || generationConfig !== undefined)) {
+      const effectiveModelId = data.modelId !== undefined ? data.modelId : installed.modelId;
+      const explicitModel =
+        data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
+      const selectedModel =
+        explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId));
 
-        if (generationConfig && Object.keys(generationConfig).length > 0) {
-          generationConfig = validateGenerationOverride(
-            generationConfig,
-            selectedModel,
-            "generationConfig",
-          );
-        } else if (
-          generationConfig === undefined &&
-          data.modelId !== undefined &&
-          installed.generationConfig
-        ) {
-          // Reconcile only when `modelId` is part of THIS patch: re-clamping
-          // stored settings is a response to the selected model possibly
-          // having changed, and a patch that never mentions `modelId` cannot
-          // change it. Without the conjunct a `{ enabled: false }` patch would
-          // silently rewrite `generation_config` on a request that never named
-          // it.
-          generationConfig = reconcileModelGenerationSettings(
-            installed.generationConfig,
-            selectedModel?.generation,
-          );
-        }
+      if (generationConfig && Object.keys(generationConfig).length > 0) {
+        generationConfig = validateGenerationOverride(
+          generationConfig,
+          selectedModel,
+          "generationConfig",
+        );
+      } else if (
+        generationConfig === undefined &&
+        data.modelId !== undefined &&
+        installed.generationConfig
+      ) {
+        // Reconcile only when `modelId` is part of THIS patch: re-clamping
+        // stored settings is a response to the selected model possibly
+        // having changed, and a patch that never mentions `modelId` cannot
+        // change it. Without the conjunct a `{ enabled: false }` patch would
+        // silently rewrite `generation_config` on a request that never named
+        // it.
+        generationConfig = reconcileModelGenerationSettings(
+          installed.generationConfig,
+          selectedModel?.generation,
+        );
       }
+    }
 
-      const { version_id, generationConfig: _generationConfig, ...rest } = data;
-      void _generationConfig;
-      // `requireInstalled` — this route updates an EXISTING association; a
-      // packageId that is not installed (or not visible to the org) is a 404,
-      // never an implicit install via upsert.
-      await updateInstalledPackage(
-        scope,
-        packageId,
-        {
-          ...rest,
-          ...(generationConfig !== undefined ? { generationConfig } : {}),
-          versionId: version_id,
-        },
-        { requireInstalled: true },
-      );
-      const updated = await getInstalledPackage(scope, packageId);
-      return c.json({ object: "space_package", ...updated });
-    },
-  );
+    const { version_id, generationConfig: _generationConfig, ...rest } = data;
+    void _generationConfig;
+    // `requireInstalled` — this route updates an EXISTING association; a
+    // packageId that is not installed (or not visible to the org) is a 404,
+    // never an implicit install via upsert.
+    await updateInstalledPackage(
+      scope,
+      packageId,
+      {
+        ...rest,
+        ...(generationConfig !== undefined ? { generationConfig } : {}),
+        versionId: version_id,
+      },
+      { requireInstalled: true },
+    );
+    const updated = await getInstalledPackage(scope, packageId);
+    return c.json({ object: "space_package", ...updated });
+  });
 
   // DELETE /api/spaces/:spaceId/packages/:packageId — uninstall
-  router.delete(
-    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
-    requirePermission("spaces", "write"),
-    async (c) => {
-      const spaceId = c.req.param("spaceId")!;
-      const orgId = c.get("orgId");
-      const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      await uninstallPackage({ orgId, spaceId: spaceId }, packageId);
-      return c.body(null, 204);
-    },
-  );
+  router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const spaceId = c.req.param("spaceId")!;
+    const orgId = c.get("orgId");
+    const scope = { orgId, spaceId: spaceId };
+    const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+    const installed = await getInstalledPackage(scope, packageId);
+    if (installed) await assertSpacePackagePermission(c, installed.package_type, "uninstall");
+    await uninstallPackage(scope, packageId);
+    return c.body(null, 204);
+  });
 
   // GET /api/spaces/:spaceId/packages/:scope/:name/run-config —
   // single source of truth for the per-space config, model/proxy override,

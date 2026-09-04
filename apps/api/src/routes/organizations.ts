@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
-import type { Context, Next } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv, OrgRole } from "../types/index.ts";
-import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { assertOrgRole, effectivePermissions, orgPermissions } from "../lib/permissions.ts";
-import { listedOrgPermissionsForCaller, principalGrants } from "../lib/principal-permissions.ts";
+import { exactlyOneRole, spaceRoleAssignmentShape } from "../lib/space-role-assignment.ts";
+import { listedOrgPermissionsForCaller } from "../lib/principal-permissions.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -27,7 +26,6 @@ import {
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
-import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
@@ -78,16 +76,9 @@ export const updateOrgSchema = z
  * `/api/spaces/:id/members` bodies — the two write paths differ only in when
  * the row lands.
  */
-const spaceAssignmentSchema = z
-  .object({
-    space_id: z.string().min(1),
-    preset_role: z.enum(SPACE_ROLE_PRESETS).optional(),
-    custom_role_id: z.string().min(1).optional(),
-  })
-  .strict()
-  .refine((v) => (v.preset_role === undefined) !== (v.custom_role_id === undefined), {
-    message: "exactly one of preset_role or custom_role_id is required",
-  });
+const spaceAssignmentSchema = exactlyOneRole(
+  z.object({ space_id: z.string().min(1), ...spaceRoleAssignmentShape }),
+);
 
 export const addMemberSchema = z
   .object({
@@ -118,51 +109,10 @@ export const updateInvitationSchema = z
   .strict();
 
 /**
- * Write `permissions` for the organization named in the PATH.
- *
- * `/api/orgs/*` is exempt from `requireOrgContext` (`skipOrgContext` in
- * `lib/auth-pipeline.ts`) — the org comes from the path, not `X-Org-Id` —
- * so the pipeline's permission-resolution step never ran for a session
- * caller here and `requirePermission` below would have nothing to read.
- * Resolving from the path org's membership row is what lets these routes
- * be guarded like every other route in the codebase.
- *
- * The predicate mirrors the pipeline's own (`lib/auth-pipeline.ts`, the
- * permission-resolution middleware) exactly: derive from the membership row
- * for session auth and for strategies that set `deferOrgResolution`; every
- * other auth method already wrote a CEILING-LIMITED set (API-key scopes ∩
- * creator role, an OIDC/MCP token's scope claim) and keeps it. Overwriting
- * that with the membership row's full role set is a privilege escalation —
- * a bearer scoped to `runs:read` would inherit `org:delete` from the subject
- * behind it. `org:*` and `members:*` are not grantable to any of those
- * credentials, so the guards below refuse them; `apiKeyOrgScopeGuard` already
- * pins the path org to an API key's own.
- */
-async function resolveOrgPathPermissions(c: Context<AppEnv>, next: Next) {
-  if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) return next();
-  const orgId = c.req.param("orgId");
-  if (!orgId) return next();
-  const member = await getOrgMember(orgId, c.get("user").id);
-  if (member) {
-    const role = assertOrgRole(member.role);
-    // Same two halves the pipeline unions for a session caller (role grants ∪
-    // module per-principal grants), because this middleware IS the pipeline's
-    // permission step for the path-org family.
-    const org = new Set<string>([...orgPermissions(role), ...(await principalGrants(c, orgId))]);
-    c.set("orgRole", role);
-    c.set("orgPermissions", org);
-    // `/api/orgs/*` is not space-scoped, so the org half is the whole answer —
-    // a space-level guard can never be satisfied here, which is the property
-    // the two-level split exists for.
-    c.set("permissions", effectivePermissions({ orgPermissions: org }));
-  }
-  return next();
-}
-
-/**
- * Org role of the caller in the path org, as resolved above. The route's
- * permission guard has already proved the membership row exists; the throw is
- * the fail-closed backstop, not an expected branch.
+ * Org role of the caller in the path org, as resolved by `orgPathContext`
+ * (`middleware/org-path-context.ts`). The route's permission guard has already
+ * proved the membership row exists; the throw is the fail-closed backstop, not
+ * an expected branch.
  */
 function actingOrgRole(c: Context<AppEnv>): OrgRole {
   const role = c.get("orgRole");
@@ -172,10 +122,9 @@ function actingOrgRole(c: Context<AppEnv>): OrgRole {
 
 const router = new Hono<AppEnv>();
 
-router.use("/:orgId", apiKeyOrgScopeGuard);
-router.use("/:orgId/*", apiKeyOrgScopeGuard);
-router.use("/:orgId", resolveOrgPathPermissions);
-router.use("/:orgId/*", resolveOrgPathPermissions);
+// No org-path middleware here: `orgPathContext` is mounted once at the app
+// root for the whole `/api/orgs/:orgId*` family (including the module routers
+// that mount under it), and it carries the API-key cross-org pin too.
 
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
@@ -331,11 +280,11 @@ router.get("/:orgId", async (c) => {
 
   // Membership, not RBAC: every org role reads its own org, and an API key
   // must keep working here. `orgRole` is the membership row both paths
-  // already loaded — `resolveOrgPathPermissions` above for a session (it sets
-  // the key only when the row exists), the auth pipeline for a key, whose
-  // `validateApiKey` inner-joins the creator's live membership and whose org
-  // is pinned to the path by `apiKeyOrgScopeGuard`. Re-querying would be a
-  // second identical round-trip per request.
+  // already loaded — `orgPathContext` for a session (it sets the key only when
+  // the row exists), the auth pipeline for a key, whose `validateApiKey`
+  // inner-joins the creator's live membership and whose org the same middleware
+  // pins to the path. Re-querying would be a second identical round-trip per
+  // request.
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   return c.json(await buildOrgDetail(orgId));
@@ -638,8 +587,8 @@ router.get("/:orgId/settings", async (c) => {
   const orgId = c.req.param("orgId")!;
 
   // Membership gate — without it any cookie-session user could read an
-  // arbitrary org's settings by passing its id (apiKeyOrgScopeGuard only
-  // pins API keys, not sessions). Same already-loaded row as GET /:orgId.
+  // arbitrary org's settings by passing its id (`orgPathContext` only pins
+  // API keys, not sessions). Same already-loaded row as GET /:orgId.
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   const settings = await getOrgSettings(orgId);

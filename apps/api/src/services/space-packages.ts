@@ -79,6 +79,27 @@ async function assertMcpServerInstallable(scope: SpaceScope, packageId: string):
  * value behind it. An install writes the column's empty default and nothing
  * else.
  */
+/**
+ * Type of a package the org can see, or null when it cannot see it.
+ *
+ * The space-install routes need it BEFORE the write, because the permission
+ * that gates the write is per package type (`agents:configure` vs
+ * `skills:write` vs …) and only the row knows the type. Same visibility
+ * predicate as `installPackage` below, so a package the org cannot see reads
+ * as absent here exactly as it does there — never as a type oracle.
+ */
+export async function getCatalogPackageType(
+  orgId: string,
+  packageId: string,
+): Promise<PackageType | null> {
+  const [row] = await db
+    .select({ type: packages.type })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .limit(1);
+  return row ? (row.type as PackageType) : null;
+}
+
 export async function installPackage(scope: SpaceScope, packageId: string) {
   await assertSpaceInScope(scope);
   await assertMcpServerInstallable(scope, packageId);

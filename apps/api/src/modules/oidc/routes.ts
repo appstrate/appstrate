@@ -32,8 +32,8 @@ import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { user, spaces } from "@appstrate/db/schema";
 import { validateSpaceInOrg } from "../../middleware/space-context.ts";
-import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
-import { assertOrgRole, effectivePermissions, orgPermissions } from "../../lib/permissions.ts";
+import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
+import { getOrgSettings } from "../../services/organizations.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
 import {
   createClient,
@@ -2537,19 +2537,21 @@ export function createOidcRouter() {
   // `/api/orgs/*` so the X-Org-Id header is unnecessary — the orgId path
   // param IS the org context.
   //
-  // Authorization is the standard module RBAC contract: `ensureOrgMembership`
-  // resolves the caller's role from `org_members`, populates
-  // `c.var.permissions` via `orgPermissions(role)`, and then
-  // `requireModulePermission("cli-sessions", "read"|"delete")` enforces
-  // membership in that Set — same fail-closed primitive as every other
-  // module-owned route in the file. The `cli-sessions` resource is
-  // declared by the OIDC module's `permissionsContribution()` and granted
-  // to `owner`/`admin` only.
+  // Authorization is the standard module RBAC contract, and this module
+  // derives NONE of it. `orgPathContext` (`middleware/org-path-context.ts`) is
+  // mounted once at the app root for the whole `/api/orgs/:orgId*` family and
+  // has already written `orgRole` / `permissions` — ceiling-applied, so a
+  // scoped credential keeps its scope. `requireOrgPathMembership` turns
+  // non-membership into this family's 403, and
+  // `requireModulePermission("cli-sessions", "read"|"delete")` enforces the
+  // string — same fail-closed primitive as every other module-owned route in
+  // the file. The `cli-sessions` resource is declared by the OIDC module's
+  // `permissionsContribution()` and granted to `owner`/`admin` only.
 
   router.get(
     "/api/orgs/:orgId/cli-sessions",
     rateLimit(120),
-    ensureOrgMembership(),
+    requireOrgPathMembership,
     requireModulePermission("cli-sessions", "read"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
@@ -2561,7 +2563,7 @@ export function createOidcRouter() {
   router.delete(
     "/api/orgs/:orgId/cli-sessions/:familyId",
     rateLimit(30),
-    ensureOrgMembership(),
+    requireOrgPathMembership,
     requireModulePermission("cli-sessions", "delete"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
@@ -2586,39 +2588,6 @@ export function createOidcRouter() {
   );
 
   return router;
-}
-
-/**
- * Resolve the caller's membership in `:orgId` from the path param, then
- * stamp `orgId` / `orgRole` / `permissions` on the Hono context so the
- * standard `requireModulePermission` / `requireCorePermission` guards
- * downstream see a fully-populated authz state. Used by org-scoped
- * module routes mounted directly under `/api/orgs/:orgId/...` — those
- * paths skip core's `requireOrgContext` middleware (per `skipOrgContext`
- * in `auth-pipeline.ts`) because the org id lives in the URL, not in
- * the `X-Org-Id` header.
- *
- * Throws 403 when the caller is not a member of the org. Does NOT
- * itself enforce a role floor — that is the responsibility of the
- * `requireModulePermission(...)` guard chained after it.
- */
-function ensureOrgMembership() {
-  return async (c: Context<AppEnv>, next: () => Promise<void>) => {
-    const orgId = c.req.param("orgId");
-    if (!orgId) throw notFound("orgId path param required");
-    const userId = c.get("user").id;
-    const member = await getOrgMember(orgId, userId);
-    if (!member) throw forbidden("Not a member of this organization");
-    const role = assertOrgRole(member.role);
-    const org = orgPermissions(role);
-    c.set("orgId", orgId);
-    c.set("orgRole", role);
-    c.set("orgPermissions", org);
-    // `cli-sessions` is an ORG-level resource, so the org half is the whole
-    // answer here — these routes never enter a space.
-    c.set("permissions", effectivePermissions({ orgPermissions: org }));
-    return next();
-  };
 }
 
 function prefersHtml(acceptHeader: string | undefined | null): boolean {
