@@ -50,6 +50,12 @@ export const mePaths = {
                           description:
                             "Org role for member callers; `end_user` for OIDC end-user JWTs.",
                         },
+                        permissions: {
+                          type: "array",
+                          items: { type: "string" },
+                          description:
+                            "The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role.",
+                        },
                         createdAt: { type: "string", format: "date-time" },
                       },
                     },
@@ -66,6 +72,7 @@ export const mePaths = {
                     name: "Acme Corp",
                     slug: "acme",
                     role: "owner",
+                    permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
                   },
                 ],

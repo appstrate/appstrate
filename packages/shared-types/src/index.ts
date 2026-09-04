@@ -374,8 +374,15 @@ export type EnrichedSchedule = ScheduleWireDto & {
 // `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
 // `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
 // role is added to one side and not the other).
-import type { OrgRole } from "@appstrate/core/permissions";
+import type { OrgRole, SpaceAssignment } from "@appstrate/core/permissions";
 export type { OrgRole };
+
+/** Re-exported from core so the OpenAPI `SpaceAssignment` component can be
+ * registered against it — reached only by name.
+ *
+ * @openapiMirror
+ */
+export type { SpaceAssignment };
 
 import type { orgSettingsSchema } from "@appstrate/core/permissions";
 export type OrgSettings = z.infer<typeof orgSettingsSchema>;
@@ -413,6 +420,8 @@ export interface OrganizationWithRole {
   slug: string;
   createdAt: string;
   role: OrgRole;
+  /** Org-level effective set in this org, ceiling-applied (RBAC spec §6.5). */
+  permissions: string[];
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see
@@ -424,6 +433,8 @@ export interface OrgInvitation {
   id: string;
   email: string;
   role: OrgRole;
+  /** Space memberships applied when the invitation is accepted (RBAC spec §5). */
+  space_assignments: SpaceAssignment[];
   token: string;
   expiresAt: string;
   createdAt: string;

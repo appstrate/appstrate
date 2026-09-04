@@ -19,6 +19,7 @@ import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
 
 export const organizations = pgTable(
   "organizations",
@@ -139,7 +140,7 @@ export const orgInvitations = pgTable(
      * `[{ space_id, preset_role } | { space_id, custom_role_id }]`.
      */
     spaceAssignments: jsonb("space_assignments")
-      .$type<ReadonlyArray<{ space_id: string; preset_role?: string; custom_role_id?: string }>>()
+      .$type<ReadonlyArray<SpaceAssignment>>()
       .notNull()
       .default([]),
     status: invitationStatusEnum("status").notNull().default("pending"),

@@ -364,6 +364,21 @@ export const SPACE_VISIBILITIES = ["open", "closed", "private"] as const;
 /** Space visibility union — `"open" | "closed" | "private"`. */
 export type SpaceVisibility = (typeof SPACE_VISIBILITIES)[number];
 
+/**
+ * One space membership an invitation applies when it is accepted (RBAC spec
+ * §5), and the shape `org_invitations.space_assignments` stores.
+ *
+ * Wire-shaped (snake_case) because it is written straight from the validated
+ * invite body and read straight back onto it. Exactly one of `preset_role` /
+ * `custom_role_id` is set — the same either/or the `space_members` row is
+ * built from, validated at invite time rather than by the type.
+ */
+export interface SpaceAssignment {
+  space_id: string;
+  preset_role?: SpaceRolePreset;
+  custom_role_id?: string;
+}
+
 /** Zod validator for the per-org `settings` JSONB shape. */
 export const orgSettingsSchema = z.object({
   api_version: z.string().optional(),

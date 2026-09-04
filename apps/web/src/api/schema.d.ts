@@ -2558,7 +2558,7 @@ export interface paths {
         get?: never;
         /**
          * Change invitation role
-         * @description Change the role assigned to a pending invitation. Admin or owner required.
+         * @description Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.
          */
         put: operations["changeInvitationRole"];
         post?: never;
@@ -5119,6 +5119,8 @@ export interface components {
             email: string;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "guest";
+            /** @description Space memberships applied when the invitation is accepted. */
+            space_assignments: components["schemas"]["SpaceAssignment"][];
             token: string;
             /** Format: date-time */
             expiresAt: string;
@@ -5262,6 +5264,8 @@ export interface components {
             slug: string;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "guest";
+            /** @description The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces. */
+            permissions: string[];
             /**
              * Format: date-time
              * @description Creation timestamp
@@ -5589,6 +5593,13 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        /** @description A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set. */
+        SpaceAssignment: {
+            space_id: string;
+            /** @enum {string} */
+            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            custom_role_id?: string;
         };
         SpaceMemberAssignment: {
             /** @enum {string} */
@@ -12192,6 +12203,11 @@ export interface operations {
                      *           "name": "Acme Corp",
                      *           "slug": "acme",
                      *           "role": "owner",
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "org:update",
+                     *             "members:invite"
+                     *           ],
                      *           "createdAt": "2026-01-10T08:00:00Z"
                      *         }
                      *       ]
@@ -12209,6 +12225,8 @@ export interface operations {
                              * @enum {string}
                              */
                             role: "owner" | "admin" | "member" | "guest" | "end_user";
+                            /** @description The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role. */
+                            permissions?: string[];
                             /** Format: date-time */
                             createdAt: string;
                         }[];
@@ -13943,6 +13961,11 @@ export interface operations {
                      *           "name": "Acme Corp",
                      *           "slug": "acme-corp",
                      *           "role": "owner",
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "org:update",
+                     *             "members:invite"
+                     *           ],
                      *           "createdAt": "2026-01-10T08:00:00Z"
                      *         }
                      *       ]
@@ -14240,6 +14263,8 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     role: "guest" | "member" | "admin";
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
         };
@@ -14257,6 +14282,7 @@ export interface operations {
                      *       "id": "inv_abc123",
                      *       "email": "carol@acme.com",
                      *       "role": "admin",
+                     *       "space_assignments": [],
                      *       "token": "tok_xyz789",
                      *       "expiresAt": "2026-02-01T00:00:00Z",
                      *       "createdAt": "2026-01-25T00:00:00Z"
@@ -14316,6 +14342,8 @@ export interface operations {
                      * @enum {string}
                      */
                     role?: "guest" | "member" | "admin";
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
         };
@@ -14333,6 +14361,12 @@ export interface operations {
                      *       "id": "inv_abc123",
                      *       "email": "newuser@example.com",
                      *       "role": "member",
+                     *       "space_assignments": [
+                     *         {
+                     *           "space_id": "spc_...",
+                     *           "preset_role": "operator"
+                     *         }
+                     *       ],
                      *       "token": "inv_abc123def456",
                      *       "expiresAt": "2026-02-01T00:00:00Z",
                      *       "createdAt": "2026-01-25T00:00:00Z"
@@ -20939,6 +20973,10 @@ export interface operations {
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
                      *       "role": "member",
+                     *       "permissions": [
+                     *         "org:read",
+                     *         "spaces:read"
+                     *       ],
                      *       "createdAt": "2026-01-10T08:00:00Z"
                      *     }
                      */
@@ -21030,6 +21068,12 @@ export interface operations {
                      *       "email": "newuser@example.com",
                      *       "org_name": "Acme Corp",
                      *       "role": "member",
+                     *       "space_assignments": [
+                     *         {
+                     *           "space_id": "spc_...",
+                     *           "preset_role": "operator"
+                     *         }
+                     *       ],
                      *       "inviter_name": "Alice Martin",
                      *       "expiresAt": "2026-02-15T10:30:00Z",
                      *       "is_new_user": true
@@ -21040,6 +21084,8 @@ export interface operations {
                         org_name: string;
                         /** @enum {string} */
                         role: "owner" | "admin" | "member" | "guest";
+                        /** @description Space memberships applied when the invitation is accepted. */
+                        space_assignments: components["schemas"]["SpaceAssignment"][];
                         inviter_name: string;
                         expiresAt: string;
                         is_new_user: boolean;

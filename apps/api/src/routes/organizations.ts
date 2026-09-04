@@ -6,7 +6,12 @@ import { z } from "zod";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { assertOrgRole, effectivePermissions, orgPermissions } from "../lib/permissions.ts";
+import {
+  assertOrgRole,
+  effectivePermissions,
+  listedOrgPermissions,
+  orgPermissions,
+} from "../lib/permissions.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -26,6 +31,7 @@ import {
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
@@ -35,10 +41,12 @@ import {
 import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
+  assertSpaceAssignmentsValid,
   createInvitation,
   getOrgInvitations,
+  getPendingInvitation,
   cancelInvitation,
-  updateInvitationRole,
+  updateInvitation,
 } from "../services/invitations.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
@@ -68,16 +76,48 @@ export const updateOrgSchema = z
   })
   .strict();
 
+/**
+ * One space membership an invitation applies on accept: a space plus exactly
+ * one role reference. Same either/or shape (and same message) as the
+ * `/api/spaces/:id/members` bodies — the two write paths differ only in when
+ * the row lands.
+ */
+const spaceAssignmentSchema = z
+  .object({
+    space_id: z.string().min(1),
+    preset_role: z.enum(SPACE_ROLE_PRESETS).optional(),
+    custom_role_id: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((v) => (v.preset_role === undefined) !== (v.custom_role_id === undefined), {
+    message: "exactly one of preset_role or custom_role_id is required",
+  });
+
 export const addMemberSchema = z
   .object({
     email: z.email("Email is required"),
     role: z.enum(ASSIGNABLE_ORG_ROLES).default("member"),
+    space_assignments: z.array(spaceAssignmentSchema).default([]),
   })
   .strict();
 
 export const updateRoleSchema = z
   .object({
     role: z.enum(ASSIGNABLE_ORG_ROLES),
+  })
+  .strict();
+
+/**
+ * A pending invitation's role AND its space assignments are editable until it
+ * is accepted. Omitting `space_assignments` keeps the ones already stored —
+ * the role rules are then re-checked against them, so changing the role to
+ * `guest` on an invitation carrying no space is refused here just as it is at
+ * invite time.
+ */
+export const updateInvitationSchema = z
+  .object({
+    role: z.enum(ASSIGNABLE_ORG_ROLES),
+    space_assignments: z.array(spaceAssignmentSchema).optional(),
   })
   .strict();
 
@@ -146,6 +186,7 @@ router.get("/", async (c) => {
   // creator belongs to.
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
+  const ceiling = c.get("scopeCeiling");
 
   return c.json(
     listResponse(
@@ -154,6 +195,9 @@ router.get("/", async (c) => {
         name: o.name,
         slug: o.slug,
         role: o.role,
+        // The caller's org-level reach in THAT org, ceiling-applied (RBAC spec
+        // §6.5) — the SPA reads it instead of re-deriving anything from `role`.
+        permissions: listedOrgPermissions(o.role, ceiling),
         createdAt: o.createdAt,
       })),
     ),
@@ -273,6 +317,7 @@ async function buildOrgDetail(orgId: string) {
       id: inv.id,
       email: inv.email,
       role: inv.role,
+      space_assignments: inv.spaceAssignments,
       token: inv.token,
       expiresAt: inv.expiresAt?.toISOString(),
       createdAt: inv.createdAt?.toISOString(),
@@ -395,6 +440,9 @@ router.post("/:orgId/members", requirePermission("members", "invite"), async (c)
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, addMemberSchema);
   const role = data.role;
+  // Before the try: these are 400/404 refusals about the request, and the
+  // catch below turns everything it wraps into a 500 `invitation_failed`.
+  await assertSpaceAssignmentsValid({ orgId, role, assignments: data.space_assignments });
 
   try {
     const invitation = await createInvitation({
@@ -402,13 +450,14 @@ router.post("/:orgId/members", requirePermission("members", "invite"), async (c)
       orgId,
       role,
       invitedBy: user.id,
+      spaceAssignments: data.space_assignments,
     });
 
     await recordAuditFromContext(c, {
       action: "org.invitation_created",
       resourceType: "invitation",
       resourceId: invitation.id,
-      after: { email: invitation.email, role },
+      after: { email: invitation.email, role, space_assignments: invitation.spaceAssignments },
       orgIdOverride: orgId,
     });
 
@@ -420,6 +469,7 @@ router.post("/:orgId/members", requirePermission("members", "invite"), async (c)
         id: invitation.id,
         email: invitation.email,
         role: invitation.role,
+        space_assignments: invitation.spaceAssignments,
         token: invitation.token,
         expiresAt: invitation.expiresAt?.toISOString(),
         createdAt: invitation.createdAt?.toISOString(),
@@ -463,9 +513,19 @@ router.put(
     const orgId = c.req.param("orgId")!;
     const invitationId = c.req.param("invitationId")!;
 
-    const data = await readJsonBody(c, updateRoleSchema);
+    const data = await readJsonBody(c, updateInvitationSchema);
 
-    const updated = await updateInvitationRole(invitationId, orgId, data.role);
+    const existing = await getPendingInvitation(invitationId, orgId);
+    if (!existing) {
+      throw notFound("Invitation not found or already accepted");
+    }
+    const spaceAssignments = data.space_assignments ?? existing.spaceAssignments;
+    await assertSpaceAssignmentsValid({ orgId, role: data.role, assignments: spaceAssignments });
+
+    const updated = await updateInvitation(invitationId, orgId, {
+      role: data.role,
+      spaceAssignments,
+    });
     if (!updated) {
       throw notFound("Invitation not found or already accepted");
     }
@@ -474,7 +534,7 @@ router.put(
       action: "org.invitation_role_updated",
       resourceType: "invitation",
       resourceId: invitationId,
-      after: { role: data.role },
+      after: { role: data.role, space_assignments: spaceAssignments },
       orgIdOverride: orgId,
     });
 
@@ -484,6 +544,7 @@ router.put(
       id: updated.id,
       email: updated.email,
       role: updated.role,
+      space_assignments: updated.spaceAssignments,
       token: updated.token,
       expiresAt: updated.expiresAt?.toISOString(),
       createdAt: updated.createdAt?.toISOString(),

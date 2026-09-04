@@ -413,6 +413,19 @@ export function effectivePermissions(input: {
 }
 
 /**
+ * The org-level effective set an org LISTING exposes per item (RBAC spec
+ * §6.5): what the caller's org role grants at org level, narrowed by the
+ * credential's ceiling — an API key's scopes, an OIDC scope claim. Sorted, so
+ * the wire order is stable across requests.
+ *
+ * There is no space half here on purpose: a listing item is an org, and the
+ * space slice is answered per space by `GET /api/spaces`.
+ */
+export function listedOrgPermissions(role: OrgRole, scopeCeiling?: ReadonlySet<string>): string[] {
+  return [...effectivePermissions({ orgPermissions: orgPermissions(role), scopeCeiling })].sort();
+}
+
+/**
  * Validate API key scopes against the API-key allowlist, then narrow them to
  * the creator's own authority.
  *

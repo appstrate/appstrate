@@ -24,11 +24,15 @@ import {
   spaces,
   user as userTable,
 } from "@appstrate/db/schema";
-import type { OrgRole, SpaceRolePreset } from "@appstrate/core/permissions";
+import type { OrgRole, SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
+import { logger } from "../lib/logger.ts";
 import { assertOrgRole } from "../lib/permissions.ts";
 import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
+
+/** Accepts either the base client or an open transaction handle. */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** One row of `GET /api/spaces/:id/members` — the wire shape, from shared-types. */
 export type SpaceMemberWire = SpaceMember;
@@ -132,11 +136,15 @@ export async function upsertSpaceMember(params: {
   spaceId: string;
   userId: string;
   assignment: SpaceRoleAssignment;
-  addedBy: string;
+  /** Null when the attribution is gone — an invitation whose inviter's account was deleted. */
+  addedBy: string | null;
   requireExisting?: boolean;
+  /** Open transaction to run in — an invitation accept writes the membership
+   * row and these rows in one. */
+  tx?: DbOrTx;
 }): Promise<void> {
-  const { orgId, spaceId, userId, assignment, addedBy } = params;
-  const targetRole = await orgRoleOf(orgId, userId);
+  const { orgId, spaceId, userId, assignment, addedBy, tx = db } = params;
+  const targetRole = await orgRoleOf(tx, orgId, userId);
   if (!targetRole) throw notFound("User is not a member of this organization");
   if (targetRole === "owner" || targetRole === "admin") {
     throw conflict(
@@ -144,10 +152,10 @@ export async function upsertSpaceMember(params: {
       `${targetRole}s already run every space in the organization; an explicit role would grant nothing`,
     );
   }
-  const values = await assignmentColumns(orgId, assignment);
+  const values = await assignmentColumns(tx, orgId, assignment);
 
   if (params.requireExisting) {
-    const updated = await db
+    const updated = await tx
       .update(spaceMembers)
       .set(values)
       .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
@@ -156,13 +164,102 @@ export async function upsertSpaceMember(params: {
     return;
   }
 
-  await db
+  await tx
     .insert(spaceMembers)
     .values({ spaceId, userId, addedBy, ...values })
     .onConflictDoUpdate({
       target: [spaceMembers.spaceId, spaceMembers.userId],
       set: values,
     });
+}
+
+/**
+ * Apply the assignments an invitation carried, inside the accept transaction.
+ *
+ * An assignment naming a space or a custom role that was deleted between the
+ * invite and the accept is SKIPPED, not fatal: the invitee's right to join the
+ * org does not depend on a space still existing, and refusing the accept would
+ * strand them outside the org with a token already spent. The warn line is the
+ * record that a granted role was not applied.
+ *
+ * Returns the assignments actually written, for the audit payload.
+ */
+export async function applyInvitationSpaceAssignments(
+  tx: DbOrTx,
+  params: {
+    orgId: string;
+    userId: string;
+    addedBy: string | null;
+    assignments: ReadonlyArray<SpaceAssignment>;
+  },
+): Promise<SpaceAssignment[]> {
+  const { orgId, userId, addedBy, assignments } = params;
+  if (assignments.length === 0) return [];
+
+  // Idempotent accepts keep the membership row that was already there, so the
+  // invitation's role is not necessarily the role the user ends up with.
+  const orgRole = await orgRoleOf(tx, orgId, userId);
+  if (orgRole === "owner" || orgRole === "admin") {
+    logger.warn("Invitation space assignments skipped for an org admin", {
+      orgId,
+      userId,
+      orgRole,
+      count: assignments.length,
+    });
+    return [];
+  }
+
+  const namedRoles = [
+    ...new Set(assignments.map((a) => a.custom_role_id).filter((id): id is string => Boolean(id))),
+  ];
+  const [liveSpaces, liveRoles] = await Promise.all([
+    tx
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(
+        and(
+          eq(spaces.orgId, orgId),
+          inArray(spaces.id, [...new Set(assignments.map((a) => a.space_id))]),
+        ),
+      ),
+    namedRoles.length === 0
+      ? Promise.resolve([] as { id: string }[])
+      : tx
+          .select({ id: spaceRoles.id })
+          .from(spaceRoles)
+          .where(and(eq(spaceRoles.orgId, orgId), inArray(spaceRoles.id, namedRoles))),
+  ]);
+  const spaceIds = new Set(liveSpaces.map((row) => row.id));
+  const roleIds = new Set(liveRoles.map((row) => row.id));
+
+  const applied: SpaceAssignment[] = [];
+  for (const assignment of assignments) {
+    const gone = !spaceIds.has(assignment.space_id)
+      ? "space"
+      : assignment.custom_role_id && !roleIds.has(assignment.custom_role_id)
+        ? "custom role"
+        : null;
+    if (gone) {
+      logger.warn(`Invitation space assignment skipped — ${gone} no longer exists`, {
+        orgId,
+        userId,
+        assignment,
+      });
+      continue;
+    }
+    await upsertSpaceMember({
+      orgId,
+      spaceId: assignment.space_id,
+      userId,
+      assignment: assignment.preset_role
+        ? { preset_role: assignment.preset_role }
+        : { custom_role_id: assignment.custom_role_id! },
+      addedBy,
+      tx,
+    });
+    applied.push(assignment);
+  }
+  return applied;
 }
 
 /** Remove an explicit row. Returns false when there was none. */
@@ -199,8 +296,8 @@ export async function deleteSpaceMembershipsInOrg(
   );
 }
 
-async function orgRoleOf(orgId: string, userId: string): Promise<OrgRole | null> {
-  const [row] = await db
+async function orgRoleOf(tx: DbOrTx, orgId: string, userId: string): Promise<OrgRole | null> {
+  const [row] = await tx
     .select({ role: organizationMembers.role })
     .from(organizationMembers)
     .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
@@ -214,13 +311,14 @@ async function orgRoleOf(orgId: string, userId: string): Promise<OrgRole | null>
  * the FK alone would happily accept.
  */
 async function assignmentColumns(
+  tx: DbOrTx,
   orgId: string,
   assignment: SpaceRoleAssignment,
 ): Promise<{ presetRole: SpaceRolePreset | null; customRoleId: string | null }> {
   if ("preset_role" in assignment) {
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  const [role] = await db
+  const [role] = await tx
     .select({ id: spaceRoles.id })
     .from(spaceRoles)
     .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))

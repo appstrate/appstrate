@@ -26,6 +26,7 @@ import {
   orgInvitations,
   packageVersions,
   spaceMembers,
+  spaceRoles,
 } from "@appstrate/db/schema";
 import { eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { mcpServerManifest } from "./integration-manifests.ts";
@@ -207,6 +208,29 @@ export async function seedSpace(overrides: SpaceInsert): Promise<InferSelectMode
     })
     .returning();
   return space!;
+}
+
+// ─── Space roles (custom bundles) ─────────────────────────
+
+/**
+ * An org-defined space-role bundle (`space_roles`). Org-scoped, so a fixture
+ * can prove the cross-org refusal by seeding one in the OTHER org.
+ */
+export async function seedSpaceRole(
+  overrides: Partial<InferInsertModel<typeof spaceRoles>> & { orgId: string },
+): Promise<InferSelectModel<typeof spaceRoles>> {
+  const key = overrides.key ?? `role-${crypto.randomUUID().slice(0, 8)}`;
+  const [row] = await db
+    .insert(spaceRoles)
+    .values({
+      id: prefixedId("srl"),
+      name: "Test Space Role",
+      permissions: ["agents:read"],
+      ...overrides,
+      key,
+    })
+    .returning();
+  return row!;
 }
 
 // ─── Space membership ─────────────────────────────────────

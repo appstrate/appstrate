@@ -9,7 +9,7 @@ A space is the **unit of access**, not just the unit of scoping. "Who can see th
 
 Effective permissions for a request = permissions of the caller's org role ∪ permissions of the caller's role in the current space, intersected with the credential's ceiling (API-key scopes, OIDC scopes). Every guard stays what it is today: `Set.has("resource:action")`.
 
-> **Status.** Design spec — the target state. Sections that describe today's code are marked _(current)_ and carry file:line refs; everything else is the plan. The two `@see` references that pointed at this file before it existed (`apps/api/src/middleware/require-permission.ts:19`, `apps/api/src/lib/permissions.ts:35`) resolve to §4.3 and §4.
+> **Status.** Phases **1**, **2a** and **2b** of §12 are implemented: the level split and the preset table, `guest`, `space_members` / `space_roles` / visibility, the resolver and the three pipeline keys, `requireSpaceContext`'s membership step and the `enterSpaceContext` seam, the filtered `GET /api/spaces` with per-space `permissions`, `/api/spaces/:id/members`, API keys resolving their creator's membership, invitations carrying `space_assignments`, and `permissions` on the org listing. Phases **3** (SPA), **4** (custom-role CRUD + `features.custom_roles`), **5** (chat & modules), **6** (cloud) and **7** (release N+1) remain the plan. Everything below is written as the target state; where the two differ, the code is the authority for what ships today.
 
 Related: `SPACES.md` (space resolution on the wire), `SECURITY.md` §Layer 5 (permission guards), `docs/NO_TRANSITIONAL_CODE.md` (migration doctrine), `/docs/architecture/OSS_EE_SPEC.md` (custom roles are an EE surface).
 
@@ -32,6 +32,8 @@ Considered and rejected: §13.
 ---
 
 ## 2. Current state _(current)_
+
+> Snapshot of the codebase **before** any phase landed, kept as written: it is what the design argues against, and rewriting it would erase the baseline the rest of the document reasons from. Read §12 for what is implemented now.
 
 Better Auth provides identity only — sessions, magic link, social, the OIDC provider (`packages/db/src/auth.ts:615`; one base plugin, `magicLink`, at `:424`). The organization, admin and apiKey plugins are not used; `createAccessControl` has zero occurrences. Everything below is hand-rolled and stays hand-rolled (§13.1).
 

@@ -19,11 +19,24 @@ export const invitationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["email", "org_name", "role", "inviter_name", "expiresAt", "is_new_user"],
+                required: [
+                  "email",
+                  "org_name",
+                  "role",
+                  "space_assignments",
+                  "inviter_name",
+                  "expiresAt",
+                  "is_new_user",
+                ],
                 properties: {
                   email: { type: "string" },
                   org_name: { type: "string" },
                   role: { type: "string", enum: ["owner", "admin", "member", "guest"] },
+                  space_assignments: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/SpaceAssignment" },
+                    description: "Space memberships applied when the invitation is accepted.",
+                  },
                   inviter_name: { type: "string" },
                   expiresAt: { type: "string" },
                   is_new_user: { type: "boolean" },
@@ -33,6 +46,7 @@ export const invitationsPaths = {
                 email: "newuser@example.com",
                 org_name: "Acme Corp",
                 role: "member",
+                space_assignments: [{ space_id: "spc_...", preset_role: "operator" }],
                 inviter_name: "Alice Martin",
                 expiresAt: "2026-02-15T10:30:00Z",
                 is_new_user: true,
@@ -97,6 +111,7 @@ export const invitationsPaths = {
                 name: "Acme Corp",
                 slug: "acme-corp",
                 role: "member",
+                permissions: ["org:read", "spaces:read"],
                 createdAt: "2026-01-10T08:00:00Z",
               },
             },

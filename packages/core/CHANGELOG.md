@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`["open", "closed", "private"]`) and the type `SpaceVisibility`, read by
   the space-role resolver and by the `spaces.visibility` column.
 
+- **New: the type `SpaceAssignment`.** One space membership an invitation
+  applies when it is accepted (`{ space_id, preset_role }` or
+  `{ space_id, custom_role_id }`), and the shape
+  `org_invitations.space_assignments` stores. Wire-shaped, so the invite body,
+  the stored column and every invitation response read the same object.
+
 - **New: a module can enter a space.** `enterSpaceContext(c, spaceId?)` and its
   platform-side registration hook `setSpaceContextApplier()`. A module that
   gates a SPACE-level resource on a route family the platform does not

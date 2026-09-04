@@ -325,12 +325,18 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "role", "createdAt"],
+    required: ["id", "name", "slug", "role", "permissions", "createdAt"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces.",
+      },
       createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
     },
   },
@@ -347,13 +353,30 @@ export const schemas = {
       joinedAt: { type: "string", format: "date-time" },
     },
   },
+  SpaceAssignment: {
+    type: "object",
+    description:
+      "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
+    required: ["space_id"],
+    properties: {
+      space_id: { type: "string" },
+      preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      custom_role_id: { type: "string" },
+    },
+    additionalProperties: false,
+  },
   OrgInvitationInfo: {
     type: "object",
-    required: ["id", "email", "role", "token", "expiresAt", "createdAt"],
+    required: ["id", "email", "role", "space_assignments", "token", "expiresAt", "createdAt"],
     properties: {
       id: { type: "string" },
       email: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
+      space_assignments: {
+        type: "array",
+        items: { $ref: "#/components/schemas/SpaceAssignment" },
+        description: "Space memberships applied when the invitation is accepted.",
+      },
       token: { type: "string" },
       expiresAt: { type: "string", format: "date-time" },
       createdAt: { type: "string", format: "date-time" },

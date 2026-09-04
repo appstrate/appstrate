@@ -10673,6 +10673,7 @@
                       "name": "Acme Corp",
                       "slug": "acme-corp",
                       "role": "owner",
+                      "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z"
                     }
                   ]
@@ -10979,6 +10980,13 @@
                     "type": "string",
                     "enum": ["guest", "member", "admin"],
                     "default": "member"
+                  },
+                  "space_assignments": {
+                    "type": "array",
+                    "description": "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+                    "items": {
+                      "$ref": "#/components/schemas/SpaceAssignment"
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -11006,6 +11014,12 @@
                   "id": "inv_abc123",
                   "email": "newuser@example.com",
                   "role": "member",
+                  "space_assignments": [
+                    {
+                      "space_id": "spc_...",
+                      "preset_role": "operator"
+                    }
+                  ],
                   "token": "inv_abc123def456",
                   "expiresAt": "2026-02-01T00:00:00Z",
                   "createdAt": "2026-01-25T00:00:00Z"
@@ -11162,7 +11176,7 @@
         "operationId": "changeInvitationRole",
         "tags": ["Organizations"],
         "summary": "Change invitation role",
-        "description": "Change the role assigned to a pending invitation. Admin or owner required.",
+        "description": "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
         "parameters": [
           {
             "name": "orgId",
@@ -11192,6 +11206,13 @@
                   "role": {
                     "type": "string",
                     "enum": ["guest", "member", "admin"]
+                  },
+                  "space_assignments": {
+                    "type": "array",
+                    "description": "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+                    "items": {
+                      "$ref": "#/components/schemas/SpaceAssignment"
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -11219,6 +11240,7 @@
                   "id": "inv_abc123",
                   "email": "carol@acme.com",
                   "role": "admin",
+                  "space_assignments": [],
                   "token": "tok_xyz789",
                   "expiresAt": "2026-02-01T00:00:00Z",
                   "createdAt": "2026-01-25T00:00:00Z"
@@ -11734,6 +11756,13 @@
                             "enum": ["owner", "admin", "member", "guest", "end_user"],
                             "description": "Org role for member callers; `end_user` for OIDC end-user JWTs."
                           },
+                          "permissions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role."
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -11755,6 +11784,7 @@
                       "name": "Acme Corp",
                       "slug": "acme",
                       "role": "owner",
+                      "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z"
                     }
                   ]
@@ -12493,6 +12523,7 @@
                     "email",
                     "org_name",
                     "role",
+                    "space_assignments",
                     "inviter_name",
                     "expiresAt",
                     "is_new_user"
@@ -12507,6 +12538,13 @@
                     "role": {
                       "type": "string",
                       "enum": ["owner", "admin", "member", "guest"]
+                    },
+                    "space_assignments": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SpaceAssignment"
+                      },
+                      "description": "Space memberships applied when the invitation is accepted."
                     },
                     "inviter_name": {
                       "type": "string"
@@ -12523,6 +12561,12 @@
                   "email": "newuser@example.com",
                   "org_name": "Acme Corp",
                   "role": "member",
+                  "space_assignments": [
+                    {
+                      "space_id": "spc_...",
+                      "preset_role": "operator"
+                    }
+                  ],
                   "inviter_name": "Alice Martin",
                   "expiresAt": "2026-02-15T10:30:00Z",
                   "is_new_user": true
@@ -12611,6 +12655,7 @@
                   "name": "Acme Corp",
                   "slug": "acme-corp",
                   "role": "member",
+                  "permissions": ["org:read", "spaces:read"],
                   "createdAt": "2026-01-10T08:00:00Z"
                 }
               }
@@ -22191,7 +22236,7 @@
       },
       "Organization": {
         "type": "object",
-        "required": ["id", "name", "slug", "role", "createdAt"],
+        "required": ["id", "name", "slug", "role", "permissions", "createdAt"],
         "properties": {
           "id": {
             "type": "string"
@@ -22205,6 +22250,13 @@
           "role": {
             "type": "string",
             "enum": ["owner", "admin", "member", "guest"]
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces."
           },
           "createdAt": {
             "type": "string",
@@ -22236,9 +22288,27 @@
           }
         }
       },
+      "SpaceAssignment": {
+        "type": "object",
+        "description": "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
+        "required": ["space_id"],
+        "properties": {
+          "space_id": {
+            "type": "string"
+          },
+          "preset_role": {
+            "type": "string",
+            "enum": ["admin", "builder", "operator", "viewer"]
+          },
+          "custom_role_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "OrgInvitationInfo": {
         "type": "object",
-        "required": ["id", "email", "role", "token", "expiresAt", "createdAt"],
+        "required": ["id", "email", "role", "space_assignments", "token", "expiresAt", "createdAt"],
         "properties": {
           "id": {
             "type": "string"
@@ -22249,6 +22319,13 @@
           "role": {
             "type": "string",
             "enum": ["owner", "admin", "member", "guest"]
+          },
+          "space_assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpaceAssignment"
+            },
+            "description": "Space memberships applied when the invitation is accepted."
           },
           "token": {
             "type": "string"

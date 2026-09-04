@@ -67,6 +67,71 @@ describe("Organizations API", () => {
       const res = await app.request("/api/orgs");
       expect(res.status).toBe(401);
     });
+
+    // RBAC spec §6.5 — each item carries the caller's ORG-LEVEL effective set
+    // in that org, so the SPA never re-derives anything from `role`.
+    describe("permissions", () => {
+      async function permissionsFor(
+        role: "owner" | "admin" | "member" | "guest",
+      ): Promise<string[]> {
+        const ctx = await createTestContext({ orgSlug: `perms-${role}` });
+        let cookie = ctx.cookie;
+        if (role !== "owner") {
+          const other = await createTestUser({ email: `perms-${role}@test.com` });
+          await addOrgMember(ctx.orgId, other.id, role);
+          cookie = other.cookie;
+        }
+        const res = await app.request("/api/orgs", { headers: { Cookie: cookie } });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: { id: string; permissions: string[] }[] };
+        return body.data.find((o) => o.id === ctx.orgId)!.permissions;
+      }
+
+      it("gives an owner the org-level set including org:delete", async () => {
+        const perms = await permissionsFor("owner");
+        expect(perms).toContain("org:delete");
+        expect(perms).toContain("members:invite");
+        // Space-level strings never appear on an org listing item.
+        expect(perms).not.toContain("agents:read");
+      });
+
+      it("gives a member reads but not member administration", async () => {
+        const perms = await permissionsFor("member");
+        expect(perms).toContain("org:read");
+        expect(perms).toContain("members:read");
+        expect(perms).not.toContain("members:invite");
+        expect(perms).not.toContain("org:delete");
+      });
+
+      it("gives a guest no view of the org directory", async () => {
+        const perms = await permissionsFor("guest");
+        expect(perms).toContain("org:read");
+        expect(perms).toContain("spaces:read");
+        expect(perms).not.toContain("members:read");
+      });
+
+      it("narrows an API key's item to the key's own scopes", async () => {
+        const ctx = await createTestContext({ orgSlug: "perms-apikey" });
+        const key = await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          // `agents:read` is space-level and `spaces:read` org-level: only the
+          // second can survive the org half, which is what makes this
+          // assertion discriminate between "ceiling applied" and "role set".
+          scopes: ["agents:read", "spaces:read"],
+        });
+
+        const res = await app.request("/api/orgs", {
+          headers: { Authorization: `Bearer ${key.rawKey}` },
+        });
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: { permissions: string[] }[] };
+        expect(body.data).toHaveLength(1);
+        expect(body.data[0]!.permissions).toEqual(["spaces:read"]);
+      });
+    });
   });
 
   describe("POST /api/orgs", () => {
@@ -721,6 +786,7 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
+        spaceAssignments: [],
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
@@ -741,6 +807,7 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
+        spaceAssignments: [],
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
@@ -763,6 +830,7 @@ describe("Organizations API", () => {
         "expiresAt",
         "id",
         "role",
+        "space_assignments",
         "token",
       ]);
 
@@ -842,6 +910,7 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
+        spaceAssignments: [],
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {

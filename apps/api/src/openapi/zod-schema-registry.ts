@@ -36,6 +36,7 @@ import {
   createOrgSchema,
   updateOrgSchema,
   addMemberSchema,
+  updateInvitationSchema,
   updateRoleSchema,
 } from "../routes/organizations.ts";
 
@@ -286,8 +287,8 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PUT",
     path: "/api/orgs/{orgId}/invitations/{invitationId}",
-    jsonSchema: toJsonSchema(updateRoleSchema),
-    description: "Update invitation role",
+    jsonSchema: toJsonSchema(updateInvitationSchema),
+    description: "Update invitation role and space assignments",
   },
   {
     method: "PUT",

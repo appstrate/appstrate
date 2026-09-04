@@ -173,6 +173,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "OrgInvitationInfo ↔ OrgInvitation",
   },
   {
+    specSchemaName: "SpaceAssignment",
+    sharedTypeName: "SpaceAssignment",
+    description: "SpaceAssignment ↔ SpaceAssignment (org_invitations.space_assignments entry)",
+  },
+  {
     specSchemaName: "OrgMember",
     sharedTypeName: "OrganizationMember",
     description: "OrgMember ↔ OrganizationMember",
