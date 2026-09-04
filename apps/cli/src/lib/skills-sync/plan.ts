@@ -19,8 +19,20 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { collisionSlug, DROPPED_ENTRIES, SKILL_ENTRY, skillSlug } from "./materialize.ts";
-import { emptyTargetState, STATE_VERSION, type SyncState, type TargetState } from "./state.ts";
-import { destinationExists, skillDir, targetRoot, type SyncTarget } from "./targets.ts";
+import {
+  emptyTargetState,
+  ledgerKey,
+  STATE_VERSION,
+  type SyncState,
+  type TargetState,
+} from "./state.ts";
+import {
+  destinationExists,
+  skillDir,
+  targetRoot,
+  type Layout,
+  type SyncTarget,
+} from "./targets.ts";
 
 export const MAX_CONCURRENCY = 8;
 
@@ -49,6 +61,12 @@ export interface FileIndexEntry {
 
 export interface ResolvedSkill {
   packageId: string;
+  /**
+   * The space the package was listed from. The package routes only answer for
+   * a package installed in the space of the request, so every later call about
+   * this skill carries this id — not the profile's pinned one.
+   */
+  spaceId: string;
   version: string;
   /** SRI for a published artifact, ETag + `lock_version` for a draft. */
   integrity: string;
@@ -64,32 +82,53 @@ export interface PlannedSkill extends ResolvedSkill {
   renamedFrom?: string;
 }
 
+export interface ListedSkill {
+  packageId: string;
+  spaceId: string;
+}
+
+/** The request header that scopes the package routes to one space. */
+export function spaceHeaders(spaceId: string): Record<string, string> {
+  return { "X-Space-Id": spaceId };
+}
+
 /**
- * Sorted by package id, which is what makes collision resolution reproducible
- * rather than server-order dependent. System packages are the platform's.
+ * The union of the given spaces' skills, sorted by package id, which is what
+ * makes collision resolution reproducible rather than server-order dependent.
+ * A package installed in several spaces is listed once, from the first space
+ * that carries it (input order). System packages are the platform's.
  */
-export async function listSyncableSkills(profileName: string): Promise<string[]> {
-  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills");
-  return rows
-    .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
-    .map((row) => row.id)
-    .sort();
+export async function listSyncableSkills(
+  profileName: string,
+  spaceIds: string[],
+): Promise<ListedSkill[]> {
+  const seen = new Map<string, ListedSkill>();
+  for (const spaceId of spaceIds) {
+    const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", {
+      headers: spaceHeaders(spaceId),
+    });
+    for (const row of rows) {
+      if (row.source === "system" || typeof row.id !== "string" || row.id.length === 0) continue;
+      if (!seen.has(row.id)) seen.set(row.id, { packageId: row.id, spaceId });
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.packageId.localeCompare(b.packageId));
 }
 
 /** `null` means no published version — a note on stderr, not a failure. */
 export async function resolveSkill(
   profileName: string,
-  packageId: string,
+  listed: ListedSkill,
   source: SkillSource,
 ): Promise<ResolvedSkill | null> {
   return source === "published"
-    ? resolvePublished(profileName, packageId)
-    : resolveDraft(profileName, packageId);
+    ? resolvePublished(profileName, listed)
+    : resolveDraft(profileName, listed);
 }
 
 async function resolvePublished(
   profileName: string,
-  packageId: string,
+  { packageId, spaceId }: ListedSkill,
 ): Promise<ResolvedSkill | null> {
   interface VersionDetail {
     version?: unknown;
@@ -101,6 +140,7 @@ async function resolvePublished(
     detail = await apiFetch<VersionDetail>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+      { headers: spaceHeaders(spaceId) },
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
@@ -114,13 +154,17 @@ async function resolvePublished(
   }
   return {
     packageId,
+    spaceId,
     version: detail.version,
     integrity: detail.integrity,
     frontmatterName: frontmatterNameOf(detail.content),
   };
 }
 
-async function resolveDraft(profileName: string, packageId: string): Promise<ResolvedSkill | null> {
+async function resolveDraft(
+  profileName: string,
+  { packageId, spaceId }: ListedSkill,
+): Promise<ResolvedSkill | null> {
   interface DraftDetail {
     content?: unknown;
     lock_version?: unknown;
@@ -130,6 +174,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
     detail = await apiFetch<DraftDetail>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}`,
+      { headers: spaceHeaders(spaceId) },
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
@@ -140,6 +185,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
   const res = await apiFetchRaw(
     profileName,
     `/api/packages/${encodePackageIdPath(packageId)}/files`,
+    { headers: spaceHeaders(spaceId) },
   );
   if (!res.ok) {
     throw new SkillSyncError(
@@ -152,6 +198,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
   const index = (await res.json()) as { entries?: FileIndexEntry[] };
   return {
     packageId,
+    spaceId,
     version: "draft",
     integrity: `draft:${lock}:${etag}`,
     frontmatterName: frontmatterNameOf(detail.content),
@@ -206,6 +253,7 @@ async function fetchPublishedFiles(
   const res = await apiFetchRaw(
     profileName,
     `/api/packages/${encodePackageIdPath(skill.packageId)}/${encodeURIComponent(skill.version)}/download`,
+    { headers: spaceHeaders(skill.spaceId) },
   );
   if (!res.ok) {
     throw new SkillSyncError(
@@ -241,8 +289,13 @@ async function fetchDraftFiles(
   // snapshot that may have moved.
   const entries =
     skill.draftIndex ??
-    (await apiFetch<{ entries?: FileIndexEntry[] }>(profileName, `/api/packages/${encoded}/files`))
-      .entries ??
+    (
+      await apiFetch<{ entries?: FileIndexEntry[] }>(
+        profileName,
+        `/api/packages/${encoded}/files`,
+        { headers: spaceHeaders(skill.spaceId) },
+      )
+    ).entries ??
     [];
 
   const wanted = entries
@@ -265,6 +318,7 @@ async function fetchDraftFiles(
     const res = await apiFetchRaw(
       profileName,
       `/api/packages/${encoded}/files/content?path=${encodeURIComponent(entry.path)}`,
+      { headers: spaceHeaders(skill.spaceId) },
     );
     if (!res.ok) {
       throw new SkillSyncError(
@@ -314,10 +368,17 @@ export function ownedLedger(
   target: SyncTarget,
   state: SyncState,
   source: SkillSource,
+  scope: SyncScope,
 ): TargetState {
-  const previous = state.targets[target];
-  const root = targetRoot(target);
+  const previous = state.targets[ledgerKey(scope.profileName, target)];
+  const root = targetRoot(target, scope.layout);
   return !previous || previous.root !== root ? emptyTargetState(source, root) : previous;
+}
+
+/** Which profile is syncing, and where its plugin tree lives. */
+export interface SyncScope {
+  profileName: string;
+  layout: Layout;
 }
 
 export async function diffTarget(
@@ -325,14 +386,15 @@ export async function diffTarget(
   catalogue: Catalogue,
   state: SyncState,
   source: SkillSource,
+  scope: SyncScope,
 ): Promise<TargetPlan> {
-  const ledger = ownedLedger(target, state, source);
+  const ledger = ownedLedger(target, state, source, scope);
   // A ledger from a build whose materializer differs is stale, but still owned.
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
   const present = new Set<string>();
   for (const slug of Object.keys(ledger.managed)) {
-    if (await isMaterialized(target, slug)) present.add(slug);
+    if (await isMaterialized(target, slug, scope.layout)) present.add(slug);
   }
   const plan: TargetPlan = {
     target,
@@ -349,7 +411,7 @@ export async function diffTarget(
     if (!managed) {
       // The shared roots hold the user's own skills, and the swap deletes what
       // it renames aside — so an unproven destination is left alone.
-      if (shared && (await destinationExists(target, slug))) plan.blocked.push(slug);
+      if (shared && (await destinationExists(target, slug, scope.layout))) plan.blocked.push(slug);
       else plan.write.push(slug);
       continue;
     }
@@ -380,9 +442,9 @@ export async function diffTarget(
  * `<skillDir>/SKILL.md`, NOT "the directory exists": a directory outlives its
  * `SKILL.md` and would still match the ledger while loading nowhere.
  */
-async function isMaterialized(target: SyncTarget, slug: string): Promise<boolean> {
+async function isMaterialized(target: SyncTarget, slug: string, layout: Layout): Promise<boolean> {
   try {
-    return (await lstat(join(skillDir(target, slug), SKILL_ENTRY))).isFile();
+    return (await lstat(join(skillDir(target, slug, layout), SKILL_ENTRY))).isFile();
   } catch {
     return false;
   }

@@ -20,7 +20,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { skillsSyncCommand } from "../src/commands/skills.ts";
-import { getDataDir } from "../src/lib/config.ts";
+import { getDataDir, writeConfig } from "../src/lib/config.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
 import {
   installFakeKeyring,
@@ -260,7 +260,7 @@ describe("skills sync — shared targets", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(state.targets.codex!.managed)).toEqual(["pdf-tools"]);
+    expect(Object.keys(state.targets["default:codex"]!.managed)).toEqual(["pdf-tools"]);
   });
 
   it("re-materializes a skill whose SKILL.md was deleted but whose directory survives", async () => {
@@ -359,7 +359,7 @@ describe("skills sync — unmanaged destinations", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(state.targets.codex!.managed)).toEqual([]);
+    expect(Object.keys(state.targets["default:codex"]!.managed)).toEqual([]);
   });
 
   it("still syncs the plugin target when a shared target is blocked", async () => {
@@ -425,7 +425,7 @@ describe("skills sync — resilience", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, { version: string }> }>;
     };
-    expect(state.targets["claude-plugin"]!.managed["pdf-tools"]!.version).toBe("1.0.0");
+    expect(state.targets["default:claude-plugin"]!.managed["pdf-tools"]!.version).toBe("1.0.0");
   });
 
   it("rebuilds when the plugin root exists without its manifest", async () => {
@@ -563,11 +563,14 @@ describe("skills sync — a failed resolution is not a deletion", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(state.targets["claude-plugin"]!.managed).sort()).toEqual([
+    expect(Object.keys(state.targets["default:claude-plugin"]!.managed).sort()).toEqual([
       "notes",
       "pdf-tools",
     ]);
-    expect(Object.keys(state.targets.codex!.managed).sort()).toEqual(["notes", "pdf-tools"]);
+    expect(Object.keys(state.targets["default:codex"]!.managed).sort()).toEqual([
+      "notes",
+      "pdf-tools",
+    ]);
   });
 
   it("exits 0 under --print-path and still prints the path", async () => {
@@ -615,7 +618,7 @@ describe("skills sync — a failed resolution is not a deletion", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(state.targets.codex!.managed)).toEqual(["pdf-tools"]);
+    expect(Object.keys(state.targets["default:codex"]!.managed)).toEqual(["pdf-tools"]);
   });
 
   it("does not let a failed resolution hand its slug to another skill", async () => {
@@ -676,7 +679,7 @@ describe("skills sync — ledger ownership", () => {
     const after = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(after.targets.codex!.managed)).toEqual(["pdf-tools"]);
+    expect(Object.keys(after.targets["default:codex"]!.managed)).toEqual(["pdf-tools"]);
 
     const third = createMemoryIO();
     await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, third.io);
@@ -703,8 +706,8 @@ describe("skills sync — ledger ownership", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { root: string; managed: Record<string, unknown> }>;
     };
-    expect(state.targets.codex!.root).toBe(codexRoot());
-    expect(Object.keys(state.targets.codex!.managed)).toEqual(["pdf-tools"]);
+    expect(state.targets["default:codex"]!.root).toBe(codexRoot());
+    expect(Object.keys(state.targets["default:codex"]!.managed)).toEqual(["pdf-tools"]);
   });
 
   it("keeps --print-path at exit 0 when only the passenger target failed to write", async () => {
@@ -804,7 +807,7 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(state.targets["claude-plugin"]!.managed)).toEqual(["pdf-tools"]);
+    expect(Object.keys(state.targets["default:claude-plugin"]!.managed)).toEqual(["pdf-tools"]);
   });
 
   it("keeps existing ledger entries when a new skill's destination is not ours", async () => {
@@ -830,7 +833,10 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(state.targets.codex!.managed).sort()).toEqual(["notes", "pdf-tools"]);
+    expect(Object.keys(state.targets["default:codex"]!.managed).sort()).toEqual([
+      "notes",
+      "pdf-tools",
+    ]);
   });
 
   it("keeps existing ledger entries when a shared-target write actually fails", async () => {
@@ -855,7 +861,10 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
-    expect(Object.keys(state.targets.codex!.managed).sort()).toEqual(["notes", "pdf-tools"]);
+    expect(Object.keys(state.targets["default:codex"]!.managed).sort()).toEqual([
+      "notes",
+      "pdf-tools",
+    ]);
   });
 });
 
@@ -947,25 +956,29 @@ describe("skills sync — non-conforming frontmatter", () => {
 
 describe("skills sync — fresh install", () => {
   const setupSkill = (): string => join(pluginRoot(), "skills", "setup", "SKILL.md");
+  // An explicitly named profile that is not the default gets its own plugin
+  // tree; the marketplace path (no `--profile`) keeps `claude-plugin/`.
+  const nopeRoot = (): string => join(getDataDir(), "claude-plugin-nope");
+  const nopeSetupSkill = (): string => join(nopeRoot(), "skills", "setup", "SKILL.md");
 
   it("installs a setup skill under --print-path when the profile is not configured", async () => {
     const { io, stdout, stderr } = createMemoryIO();
 
     await skillsSyncCommand({ profile: "nope", printPath: true }, io);
 
-    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stdout()).toBe(`${nopeRoot()}\n`);
     expect(stderr()).toBe('Profile "nope" not configured. Run: appstrate login --profile nope\n');
-    const skill = await readText(setupSkill());
+    const skill = await readText(nopeSetupSkill());
     expect(skill).toContain("name: setup");
     expect(skill).toContain("appstrate login --profile nope");
-    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+    expect(await readdir(join(nopeRoot(), "skills"))).toEqual(["setup"]);
     expect(await exists(getStatePath())).toBe(false);
   });
 
   it("ships a SessionStart hook whose command prints the remedy to the user and the model", async () => {
     await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
 
-    const hooks = JSON.parse(await readText(join(pluginRoot(), "hooks", "hooks.json"))) as {
+    const hooks = JSON.parse(await readText(join(nopeRoot(), "hooks", "hooks.json"))) as {
       hooks: { SessionStart: { matcher: string; hooks: { type: string; command: string }[] }[] };
     };
     const [entry] = hooks.hooks.SessionStart;
@@ -992,22 +1005,23 @@ describe("skills sync — fresh install", () => {
 
   it("is byte-identical across runs, so the plugin version does not churn", async () => {
     await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
-    const first = await readText(setupSkill());
+    const first = await readText(nopeSetupSkill());
     await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
-    expect(await readText(setupSkill())).toBe(first);
+    expect(await readText(nopeSetupSkill())).toBe(first);
   });
 
   it("keeps an existing plugin and exits 1 instead when the profile is lost later", async () => {
     createSkillServer(ONE_SKILL).install();
     await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    // The profile section vanishes from config.toml; the marketplace command
+    // still runs under the same (default) profile name.
+    await writeConfig({ defaultProfile: "default", profiles: {} });
     const { io, stdout, stderr } = createMemoryIO();
 
-    await expect(
-      skillsSyncCommand({ profile: "nope", printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stdout()).toBe("");
-    expect(stderr()).toContain("Run: appstrate login --profile nope");
+    expect(stderr()).toContain("Run: appstrate login --profile default");
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toBe(true);
     expect(await exists(setupSkill())).toBe(false);
   });

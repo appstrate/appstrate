@@ -245,6 +245,11 @@ interface ApiFetchInit extends Omit<RequestInit, "headers"> {
   headers?: Record<string, string>;
 }
 
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  const wanted = name.toLowerCase();
+  return Object.keys(headers).some((k) => k.toLowerCase() === wanted);
+}
+
 /**
  * Low-level authenticated fetch — primitive shared by `apiFetch` (JSON)
  * and direct callers that need access to the raw Response (streaming,
@@ -279,8 +284,12 @@ export async function apiFetchRaw(
     if (!hasContentType && init.body) {
       headers["Content-Type"] = "application/json";
     }
-    if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
-    if (profile.spaceId) headers["X-Space-Id"] = profile.spaceId;
+    // A caller that names a space explicitly (`skills sync --space`) wins over
+    // the pinned one; the pin is the default, not a constraint.
+    if (profile.orgId && !hasHeader(headers, "X-Org-Id")) headers["X-Org-Id"] = profile.orgId;
+    if (profile.spaceId && !hasHeader(headers, "X-Space-Id")) {
+      headers["X-Space-Id"] = profile.spaceId;
+    }
     return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...init, headers });
   };
 

@@ -543,6 +543,11 @@ skillsGroup
   )
   .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
   .option(
+    "--space <space>",
+    "Space to sync, by id or exact name (repeatable). Default: the pinned space plus the profile's `syncSpaces`.",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
+  .option(
     "--print-path",
     "Print the Claude Code plugin directory as the only stdout line (what a marketplace `command` source consumes). Requires --target claude-plugin.",
   )
@@ -551,6 +556,7 @@ skillsGroup
     async (opts: {
       target?: SyncTarget[];
       source?: SkillSource;
+      space?: string[];
       printPath?: boolean;
       dryRun?: boolean;
     }) => {
@@ -559,6 +565,7 @@ skillsGroup
         profile: globalOpts.profile,
         target: opts.target,
         source: opts.source,
+        space: opts.space,
         printPath: opts.printPath,
         dryRun: opts.dryRun,
       });

@@ -44,6 +44,7 @@ afterEach(async () => {
 
 function resolved(overrides: Partial<ResolvedSkill> & { packageId: string }): ResolvedSkill {
   return {
+    spaceId: "spc_1",
     version: "1.0.0",
     integrity: "sha256-x",
     frontmatterName: "",
@@ -59,7 +60,10 @@ describe("listSyncableSkills", () => {
       { id: "@acme/alpha", skillMd: skillMd("alpha") },
     ]).install();
 
-    expect(await listSyncableSkills("default")).toEqual(["@acme/alpha", "@acme/zebra"]);
+    expect(await listSyncableSkills("default", ["spc_1"])).toEqual([
+      { packageId: "@acme/alpha", spaceId: "spc_1" },
+      { packageId: "@acme/zebra", spaceId: "spc_1" },
+    ]);
   });
 });
 
@@ -69,7 +73,11 @@ describe("resolveSkill", () => {
       { id: "@acme/pdf", skillMd: skillMd("PDF Tools", "Work with PDFs."), version: "2.3.1" },
     ]).install();
 
-    const skill = await resolveSkill("default", "@acme/pdf", "published");
+    const skill = await resolveSkill(
+      "default",
+      { packageId: "@acme/pdf", spaceId: "spc_1" },
+      "published",
+    );
     expect(skill?.version).toBe("2.3.1");
     expect(skill?.frontmatterName).toBe("PDF Tools");
     expect(skill?.integrity).toMatch(/^sha256-/);
@@ -80,7 +88,13 @@ describe("resolveSkill", () => {
       { id: "@acme/draft-only", skillMd: skillMd("draft-only"), unpublished: true },
     ]).install();
 
-    expect(await resolveSkill("default", "@acme/draft-only", "published")).toBeNull();
+    expect(
+      await resolveSkill(
+        "default",
+        { packageId: "@acme/draft-only", spaceId: "spc_1" },
+        "published",
+      ),
+    ).toBeNull();
   });
 });
 
@@ -138,7 +152,11 @@ describe("fetchSkillFiles", () => {
       },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "published"))!;
+    const skill = (await resolveSkill(
+      "default",
+      { packageId: "@acme/pdf", spaceId: "spc_1" },
+      "published",
+    ))!;
     const files = await fetchSkillFiles("default", skill, "published");
     expect(Object.keys(files).sort()).toEqual(["SKILL.md", "manifest.json", "reference/notes.md"]);
   });
@@ -148,7 +166,11 @@ describe("fetchSkillFiles", () => {
       { id: "@acme/pdf", skillMd: skillMd("pdf"), corruptDownload: true },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "published"))!;
+    const skill = (await resolveSkill(
+      "default",
+      { packageId: "@acme/pdf", spaceId: "spc_1" },
+      "published",
+    ))!;
     await expect(fetchSkillFiles("default", skill, "published")).rejects.toThrow(
       /Integrity mismatch/,
     );

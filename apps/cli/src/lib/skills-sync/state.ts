@@ -38,11 +38,36 @@ export interface TargetState {
 
 export interface SyncState {
   version: number;
+  /**
+   * Keyed by {@link ledgerKey}: one ledger per (profile, target). Two profiles
+   * pointing at different organizations share `~/.agents/skills`, and a ledger
+   * that ignored the profile would let one profile's sync delete the other's
+   * skills — they are absent from ITS catalogue.
+   */
   targets: Record<string, TargetState>;
 }
 
 export function getStatePath(): string {
   return join(getDataDir(), "skills-sync", "state.json");
+}
+
+/** `<profile>:<target>`; the profile name cannot contain `:` (validated at login). */
+export function ledgerKey(profileName: string, target: string): string {
+  return `${profileName}:${target}`;
+}
+
+/**
+ * Ledgers written before profiles were part of the key are bare target names.
+ * They are adopted by the first profile to run after the upgrade — in
+ * practice the only one that ever synced — and rewritten under its key.
+ */
+export function adoptLegacyLedgers(state: SyncState, profileName: string): SyncState {
+  const targets: Record<string, TargetState> = {};
+  for (const [key, entry] of Object.entries(state.targets)) {
+    const adopted = key.includes(":") ? key : ledgerKey(profileName, key);
+    if (!targets[adopted]) targets[adopted] = entry;
+  }
+  return { version: state.version, targets };
 }
 
 function emptySyncState(): SyncState {

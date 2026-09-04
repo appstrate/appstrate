@@ -32,6 +32,12 @@ export interface Profile {
   email: string;
   orgId?: string;
   spaceId?: string;
+  /**
+   * Spaces whose skills `appstrate skills sync` materializes, when the sync
+   * should cover more than the pinned one. The pinned `spaceId` is always
+   * included. Ids only (`spc_…`), the sync resolves names at the command line.
+   */
+  syncSpaces?: string[];
 }
 
 export interface Config {
@@ -133,7 +139,11 @@ export async function readConfig(): Promise<Config> {
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
       spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
+      syncSpaces: Array.isArray(row.syncSpaces)
+        ? row.syncSpaces.filter((v): v is string => typeof v === "string" && v.length > 0)
+        : undefined,
     };
+    if (profiles[name]!.syncSpaces === undefined) delete profiles[name]!.syncSpaces;
   }
   return { defaultProfile, profiles };
 }

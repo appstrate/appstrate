@@ -10,7 +10,8 @@
  */
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { resolveActiveProfile, type Profile } from "../lib/config.ts";
+import { readConfig, resolveProfileName, type Profile } from "../lib/config.ts";
+import { listSpaces, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
 import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
@@ -29,9 +30,12 @@ import {
   type ResolvedSkill,
   type SkillsBySlug,
   type SkillSource,
+  type SyncScope,
   type TargetPlan,
 } from "../lib/skills-sync/plan.ts";
 import {
+  adoptLegacyLedgers,
+  ledgerKey,
   readSyncState,
   STATE_VERSION,
   writeSyncState,
@@ -39,6 +43,7 @@ import {
   type SyncState,
 } from "../lib/skills-sync/state.ts";
 import {
+  layoutFor,
   pluginTreeMatches,
   removeManagedDir,
   setupPluginFiles,
@@ -55,6 +60,11 @@ export interface SkillsSyncOptions {
   profile?: string;
   target?: SyncTarget[];
   source?: SkillSource;
+  /**
+   * Spaces to sync, by id or exact name (repeatable). Overrides the profile's
+   * `syncSpaces`; both fall back to the pinned space alone.
+   */
+  space?: string[];
   printPath?: boolean;
   dryRun?: boolean;
 }
@@ -95,8 +105,11 @@ export async function skillsSyncCommand(
     io.exit(1);
   }
 
-  const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  const gap = connectionGap(profileName, profile);
+  const config = await readConfig();
+  const profileName = resolveProfileName(opts.profile, config);
+  const profile = config.profiles[profileName];
+  const scope: SyncScope = { profileName, layout: layoutFor(profileName, config.defaultProfile) };
+  const gap = connectionGap(profileName, profile, opts.space);
   if (gap && !printPath) {
     io.stderr.write(`${gap.problem}. Run: ${gap.remedy}\n`);
     io.exit(1);
@@ -121,36 +134,57 @@ export async function skillsSyncCommand(
 
   try {
     await withSyncLock(async () => {
-      const { state, corrupt } = await readSyncState();
-      if (corrupt) {
+      const read = await readSyncState();
+      if (read.corrupt) {
         io.stderr.write(
           "Sync state could not be used and has been ignored — this run re-materializes everything.\n",
         );
       }
+      const state = adoptLegacyLedgers(read.state, profileName);
 
       if (gap) {
-        pluginOk = await bootstrapPlugin(gap, state, source, report);
+        pluginOk = await bootstrapPlugin(gap, state, source, scope, report);
         return;
       }
 
-      const catalogue = await resolveAll(profileName, source, state, targets, report);
+      const spaceIds = await resolveSpaces(profileName, profile!, opts.space);
+      if (spaceIds.length > 1)
+        report.note(`Syncing ${spaceIds.length} spaces: ${spaceIds.join(", ")}`);
+
+      const catalogue = await resolveAll(
+        profileName,
+        source,
+        state,
+        targets,
+        spaceIds,
+        scope,
+        report,
+      );
       const plans = await Promise.all(
-        targets.map((target) => diffTarget(target, catalogue, state, source)),
+        targets.map((target) => diffTarget(target, catalogue, state, source, scope)),
       );
       for (const plan of plans) {
         for (const slug of plan.blocked) {
           report.skill(
-            `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
+            `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug, scope.layout)} exists and is not managed by appstrate — remove or rename it`,
           );
         }
       }
 
       if (opts.dryRun) {
-        reportPlans(plans, io.stdout);
+        reportPlans(plans, io.stdout, scope);
         return;
       }
-      pluginOk = await executePlans(profileName, source, plans, state, catalogue.bySlug, report);
-      if (!printPath) reportPlans(plans, io.stdout);
+      pluginOk = await executePlans(
+        profileName,
+        source,
+        plans,
+        state,
+        catalogue.bySlug,
+        scope,
+        report,
+      );
+      if (!printPath) reportPlans(plans, io.stdout, scope);
     });
   } catch (err) {
     report.run(formatError(err));
@@ -158,8 +192,42 @@ export async function skillsSyncCommand(
   }
 
   const failed = printPath ? runFailures > 0 || !pluginOk : runFailures + skillFailures > 0;
-  if (!failed && printPath) io.stdout.write(`${targetRoot("claude-plugin")}\n`);
+  if (!failed && printPath) io.stdout.write(`${targetRoot("claude-plugin", scope.layout)}\n`);
   if (failed) io.exit(1);
+}
+
+/**
+ * The spaces this run covers, ids only. `--space` accepts ids and exact names
+ * and replaces the profile's list; without it, the profile's `syncSpaces`
+ * plus its pinned space. Order is preserved: it decides which space a package
+ * installed in several of them is read from.
+ */
+async function resolveSpaces(
+  profileName: string,
+  profile: Profile,
+  requested: string[] | undefined,
+): Promise<string[]> {
+  const pinned = profile.spaceId ? [profile.spaceId] : [];
+  if (!requested || requested.length === 0) {
+    return unique([...pinned, ...(profile.syncSpaces ?? [])]);
+  }
+  const spaces = await listSpaces(profileName);
+  return unique(requested.map((ref) => resolveSpace(spaces, ref).id));
+}
+
+function resolveSpace(spaces: Space[], ref: string): Space {
+  const trimmed = ref.trim();
+  const byId = spaces.find((s) => s.id === trimmed);
+  if (byId) return byId;
+  const byName = spaces.filter((s) => s.name.toLowerCase() === trimmed.toLowerCase());
+  if (byName.length === 1) return byName[0]!;
+  const available = spaces.map((s) => `  - ${s.name} (${s.id})`).join("\n");
+  const why = byName.length > 1 ? "matches several spaces" : "matches no space";
+  throw new Error(`--space "${trimmed}" ${why}. Available:\n${available}`);
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)];
 }
 
 interface ConnectionGap {
@@ -168,7 +236,11 @@ interface ConnectionGap {
 }
 
 /** What still separates this profile from a syncable space, if anything. */
-function connectionGap(profileName: string, profile: Profile | undefined): ConnectionGap | null {
+function connectionGap(
+  profileName: string,
+  profile: Profile | undefined,
+  requestedSpaces: string[] | undefined,
+): ConnectionGap | null {
   if (!profile) {
     return {
       problem: `Profile "${profileName}" not configured`,
@@ -176,7 +248,11 @@ function connectionGap(profileName: string, profile: Profile | undefined): Conne
     };
   }
   if (!profile.orgId) return { problem: "No organization pinned", remedy: "appstrate org switch" };
-  if (!profile.spaceId) return { problem: "No space pinned", remedy: "appstrate space switch" };
+  const anySpace =
+    !!profile.spaceId ||
+    (profile.syncSpaces?.length ?? 0) > 0 ||
+    (requestedSpaces?.length ?? 0) > 0;
+  if (!anySpace) return { problem: "No space pinned", remedy: "appstrate space switch" };
   return null;
 }
 
@@ -190,16 +266,20 @@ async function bootstrapPlugin(
   gap: ConnectionGap,
   state: SyncState,
   source: SkillSource,
+  scope: SyncScope,
   report: Report,
 ): Promise<boolean> {
   const message = `${gap.problem}. Run: ${gap.remedy}`;
-  if (Object.keys(ownedLedger("claude-plugin", state, source).managed).length > 0) {
+  if (Object.keys(ownedLedger("claude-plugin", state, source, scope).managed).length > 0) {
     report.run(message);
     return false;
   }
   report.note(message);
   try {
-    await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap.problem, gap.remedy));
+    await writeSetupPlugin(
+      targetRoot("claude-plugin", scope.layout),
+      setupPluginFiles(gap.problem, gap.remedy),
+    );
     return true;
   } catch (err) {
     report.run(`Failed to write claude-plugin: ${formatError(err)}`);
@@ -216,12 +296,15 @@ async function resolveAll(
   source: SkillSource,
   state: SyncState,
   targets: SyncTarget[],
+  spaceIds: string[],
+  scope: SyncScope,
   report: Report,
 ): Promise<Catalogue> {
-  const packageIds = await listSyncableSkills(profileName);
-  const resolutions = await mapWithConcurrency(packageIds, MAX_CONCURRENCY, async (packageId) => {
+  const listed = await listSyncableSkills(profileName, spaceIds);
+  const resolutions = await mapWithConcurrency(listed, MAX_CONCURRENCY, async (entry) => {
+    const packageId = entry.packageId;
     try {
-      return { packageId, skill: await resolveSkill(profileName, packageId, source) };
+      return { packageId, skill: await resolveSkill(profileName, entry, source) };
     } catch (err) {
       return { packageId, error: err };
     }
@@ -246,7 +329,9 @@ async function resolveAll(
   // caused by nothing but a transient error.
   const reserved = new Set<string>();
   for (const target of targets) {
-    for (const [slug, managed] of Object.entries(ownedLedger(target, state, source).managed)) {
+    for (const [slug, managed] of Object.entries(
+      ownedLedger(target, state, source, scope).managed,
+    )) {
       if (unresolved.has(managed.packageId)) reserved.add(slug);
     }
   }
@@ -270,6 +355,7 @@ async function executePlans(
   plans: TargetPlan[],
   state: SyncState,
   bySlug: SkillsBySlug,
+  scope: SyncScope,
   report: Report,
 ): Promise<boolean> {
   const wanted = new Set(plans.flatMap((plan) => plan.write));
@@ -302,17 +388,18 @@ async function executePlans(
 
       const outcome =
         plan.target === "claude-plugin"
-          ? await applyPluginPlan(plan, fresh, carried, trees, report)
-          : await applySharedPlan(plan, fresh, trees, report);
+          ? await applyPluginPlan(plan, fresh, carried, trees, scope, report)
+          : await applySharedPlan(plan, fresh, trees, scope, report);
       pluginOk = pluginOk && outcome.ok;
       for (const slug of outcome.placed) managed.set(slug, ledgerEntry(bySlug.get(slug)!));
 
-      const root = targetRoot(plan.target);
-      const recorded = state.targets[plan.target];
+      const root = targetRoot(plan.target, scope.layout);
+      const key = ledgerKey(scope.profileName, plan.target);
+      const recorded = state.targets[key];
       // A ledger under a DIFFERENT root belongs to another `HOME`, which this
       // run could not act on: leave it unless we have something to record.
       if (managed.size > 0 || !recorded || recorded.root === root) {
-        next.targets[plan.target] = {
+        next.targets[key] = {
           source,
           root,
           managed: Object.fromEntries(managed),
@@ -383,9 +470,10 @@ async function applyPluginPlan(
   fresh: string[],
   carried: string[],
   trees: Map<string, SkillTree>,
+  scope: SyncScope,
   report: Report,
 ): Promise<ApplyOutcome> {
-  const root = targetRoot(plan.target);
+  const root = targetRoot(plan.target, scope.layout);
   if (fresh.length === 0 && plan.removed.length === 0 && (await pluginTreeMatches(root, carried))) {
     return { placed: new Set(), ok: true };
   }
@@ -413,13 +501,14 @@ async function applySharedPlan(
   plan: TargetPlan,
   fresh: string[],
   trees: Map<string, SkillTree>,
+  scope: SyncScope,
   report: Report,
 ): Promise<ApplyOutcome> {
-  const root = targetRoot(plan.target);
+  const root = targetRoot(plan.target, scope.layout);
   const placed = new Set<string>();
   for (const slug of fresh) {
     try {
-      await writeSharedSkill(plan.target, trees.get(slug)!, root);
+      await writeSharedSkill(plan.target, trees.get(slug)!, root, scope.layout);
       placed.add(slug);
     } catch (err) {
       report.skill(`Failed to write ${plan.target}/${slug}: ${formatError(err)}`);
@@ -429,7 +518,7 @@ async function applySharedPlan(
   // behind it. The entry leaves the ledger either way.
   for (const slug of plan.removed) {
     try {
-      await removeManagedDir(skillDir(plan.target, slug));
+      await removeManagedDir(skillDir(plan.target, slug, scope.layout));
     } catch (err) {
       report.skill(`Failed to remove ${plan.target}/${slug}: ${formatError(err)}`);
     }
@@ -441,13 +530,13 @@ function ledgerEntry(skill: PlannedSkill): ManagedSkill {
   return { packageId: skill.packageId, version: skill.version, integrity: skill.integrity };
 }
 
-function reportPlans(plans: TargetPlan[], sink: LineSink): void {
+function reportPlans(plans: TargetPlan[], sink: LineSink, scope: SyncScope): void {
   for (const plan of plans) {
     // New versus refreshed comes from the ledger, where that fact already lives.
     const glyph = (slug: string): string => (plan.ledger.managed[slug] ? "~" : "+");
     const added = plan.write.filter((slug) => glyph(slug) === "+").length;
     sink.write(
-      `${plan.target.padEnd(14)} ${targetRoot(plan.target)}` +
+      `${plan.target.padEnd(14)} ${targetRoot(plan.target, scope.layout)}` +
         `  +${added} ~${plan.write.length - added} =${plan.keep.length} -${plan.removed.length}\n`,
     );
     for (const slug of plan.write) sink.write(`  ${glyph(slug)} ${slug}\n`);

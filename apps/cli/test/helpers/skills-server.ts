@@ -62,6 +62,17 @@ export interface SkillFixture {
   corruptDownload?: boolean;
   /** Working-copy state for `--source draft`. */
   draft?: DraftFixture;
+  /**
+   * Spaces the package is installed in. When set, the stub behaves like the
+   * platform: the package is listed only under one of these `X-Space-Id`s and
+   * its routes answer 404 under any other. Unset means "every space".
+   */
+  spaces?: string[];
+}
+
+export interface SkillServerOptions {
+  /** Rows served by `/api/spaces`, for `--space <name>` resolution. */
+  spaces?: { id: string; name: string; isDefault?: boolean }[];
 }
 
 export interface SkillServer {
@@ -120,7 +131,10 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
     headers: { "Content-Type": "application/json", ...headers },
   });
 
-export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
+export function createSkillServer(
+  fixtures: SkillFixture[],
+  options: SkillServerOptions = {},
+): SkillServer {
   const prepared = fixtures.map(prepare);
   let downloads = 0;
   let indexReads = 0;
@@ -128,7 +142,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
   let inFlight = 0;
   let peakInFlight = 0;
 
-  const stub = async (input: string | URL | Request): Promise<Response> => {
+  const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     inFlight += 1;
     peakInFlight = Math.max(peakInFlight, inFlight);
     try {
@@ -136,33 +150,57 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
       // all: a stub that answers synchronously never has two in flight and
       // would measure a concurrency cap of 1 as if it were the real one.
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return await respond(input);
+      return await respond(input, init);
     } finally {
       inFlight -= 1;
     }
   };
 
-  const respond = async (input: string | URL | Request): Promise<Response> => {
+  /** Whether the request's space may see this fixture. */
+  const visible = (p: Prepared, space: string | null): boolean =>
+    !p.fixture.spaces || (space !== null && p.fixture.spaces.includes(space));
+
+  const respond = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input.toString());
     const path = url.pathname;
+    const space = new Headers(init?.headers).get("x-space-id");
+    const find = (scope: string, name: string): Prepared | undefined => {
+      const p = prepared.find((p) => p.scope === scope && p.name === name);
+      return p && visible(p, space) ? p : undefined;
+    };
+
+    if (path === "/api/spaces") {
+      return json({
+        object: "list",
+        data: (options.spaces ?? []).map((s) => ({
+          id: s.id,
+          orgId: "org_1",
+          name: s.name,
+          isDefault: s.isDefault ?? false,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })),
+      });
+    }
 
     if (path === "/api/packages/skills") {
       return json({
         object: "list",
-        data: prepared.map((p) => ({
-          id: p.fixture.id,
-          name: p.name,
-          description: MANIFEST_DESCRIPTION,
-          source: p.fixture.source ?? "local",
-          version: p.version,
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        })),
+        data: prepared
+          .filter((p) => visible(p, space))
+          .map((p) => ({
+            id: p.fixture.id,
+            name: p.name,
+            description: MANIFEST_DESCRIPTION,
+            source: p.fixture.source ?? "local",
+            version: p.version,
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          })),
       });
     }
 
     const latest = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)\/versions\/latest$/);
     if (latest) {
-      const found = prepared.find((p) => p.scope === latest[1] && p.name === latest[2]);
+      const found = find(latest[1]!, latest[2]!);
       if (!found || found.fixture.unpublished) {
         return json({ code: "not_found", message: "Version not found" }, 404);
       }
@@ -193,7 +231,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
 
     const download = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/([^/]+)\/download$/);
     if (download) {
-      const found = prepared.find((p) => p.scope === download[1] && p.name === download[2]);
+      const found = find(download[1]!, download[2]!);
       if (!found) return json({ code: "not_found", message: "Package not found" }, 404);
       downloads += 1;
       const body = found.fixture.corruptDownload
@@ -209,7 +247,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
 
     const detail = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)$/);
     if (detail) {
-      const found = prepared.find((p) => p.scope === detail[1] && p.name === detail[2]);
+      const found = find(detail[1]!, detail[2]!);
       if (!found?.fixture.draft) {
         return json({ code: "not_found", message: "Package not found" }, 404);
       }
@@ -235,7 +273,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
 
     const index = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/files$/);
     if (index) {
-      const found = prepared.find((p) => p.scope === index[1] && p.name === index[2]);
+      const found = find(index[1]!, index[2]!);
       if (!found?.fixture.draft) {
         return json({ code: "not_found", message: "Package not found" }, 404);
       }
@@ -255,7 +293,7 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
 
     const content = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/files\/content$/);
     if (content) {
-      const found = prepared.find((p) => p.scope === content[1] && p.name === content[2]);
+      const found = find(content[1]!, content[2]!);
       const wanted = url.searchParams.get("path") ?? "";
       const entry = found?.fixture.draft ? draftEntries(found)[wanted] : undefined;
       if (!entry) return json({ code: "not_found", message: "File not found" }, 404);
