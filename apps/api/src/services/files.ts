@@ -52,6 +52,7 @@ import { getEnv } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
+import { isUniqueViolation } from "../lib/db-helpers.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -932,21 +933,6 @@ interface CreatedFileFromStream {
 }
 
 /**
- * Postgres unique_violation (SQLSTATE 23505). Walks the `cause` chain since
- * Drizzle wraps the driver error in a `DrizzleQueryError` whose own `code` is
- * undefined (same pattern as `isInvalidTextRepresentation` in db-helpers.ts).
- */
-function isUniqueViolation(err: unknown): boolean {
-  let current: unknown = err;
-  for (let depth = 0; current != null && depth < 5; depth++) {
-    if (typeof current !== "object") break;
-    if ((current as { code?: unknown }).code === "23505") return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
-}
-
-/**
  * The existing `agent_output` file a re-published (run, sha256, name) tuple
  * dedups against — the same key the partial unique index enforces. Used both as
  * the fast-path pre-commit check and to recover the winner's row after losing a
@@ -1381,6 +1367,10 @@ async function chatContextFileFilter(
       and(
         eq(chatSessions.id, chatSessionId),
         eq(chatSessions.orgId, scope.orgId),
+        // Sessions are space-scoped rows (RBAC spec §5), so the space is part
+        // of ownership: the same user in another space must not resolve this
+        // conversation's files.
+        eq(chatSessions.spaceId, scope.spaceId),
         eq(chatSessions.userId, actor.id),
       ),
     )

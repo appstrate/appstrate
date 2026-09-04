@@ -30,6 +30,13 @@ export type ChatEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
     orgId: string;
+    /**
+     * Space the router entered (`enterSpaceContext`, mounted on every
+     * `/api/chat/*` route). Always set: entering is what makes the space-level
+     * `chat:*` guards satisfiable, and a caller that names no space is refused
+     * there before any handler runs.
+     */
+    space: { id: string };
     orgRole?: string;
     orgName?: string;
     orgSlug?: string;
@@ -300,19 +307,18 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?
  * platform app (auth + RBAC re-run on the dispatched Request), with a loopback
  * `fetch` fallback inside `deps.dispatch` for OSS/test wiring.
  *
- * The endpoint is space-scoped: without a space id `requireSpaceContext`
- * would 400, so we skip straight to an identity-only block built from the
- * already-authenticated request context (name/email/role/org). A 400 from the
- * dispatch degrades to that same identity-only block; any other failure
- * degrades to no block (""). Identity always survives so date/role grounding
- * holds even with no space context.
+ * `spaceId` is the space the chat router entered, so it is always known here.
+ * A 400 from the dispatch (the caller lost the space between the entry and this
+ * read) degrades to an identity-only block built from the already-authenticated
+ * request context (name/email/role/org); any other failure degrades to no block
+ * (""). Identity always survives so date/role grounding holds.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
   args: {
     origin: string;
     headers: Record<string, string>;
-    spaceId?: string;
+    spaceId: string;
     user: { id: string; name?: string | null; email?: string | null };
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
@@ -324,8 +330,8 @@ export async function buildCallerContextBlock(
   const orgName = c.get("orgName");
   const orgSlug = c.get("orgSlug");
 
-  // Identity/role straight off the request context — the fallback when there is
-  // no space context to fetch the space-scoped lists against.
+  // Identity/role straight off the request context — the fallback when the
+  // space-scoped read cannot answer.
   const identityOnly = (): string =>
     formatCallerContext(
       {
@@ -335,7 +341,6 @@ export async function buildCallerContextBlock(
       { locale },
     );
 
-  if (!spaceId) return identityOnly();
   try {
     const ctxHeaders = new Headers();
     for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);

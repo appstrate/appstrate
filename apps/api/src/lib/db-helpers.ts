@@ -116,6 +116,22 @@ export function isInvalidTextRepresentation(err: unknown): boolean {
   return false;
 }
 
+/**
+ * True when a DB error is Postgres `23505` (unique_violation). Walks the
+ * `cause` chain for the same reason {@link isInvalidTextRepresentation} does:
+ * Drizzle wraps the driver error in a `DrizzleQueryError` whose own `code` is
+ * undefined.
+ */
+export function isUniqueViolation(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; current != null && depth < 5; depth++) {
+    if (typeof current !== "object") break;
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 // --- System + DB merge ---
 
 interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {

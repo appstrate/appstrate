@@ -34,6 +34,7 @@ export const webhooksPaths = {
         "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -157,6 +158,7 @@ export const webhooksPaths = {
         "List webhooks visible to the current organization. When `spaceId` is passed, returns org-level + space-level webhooks pinned to that space. When `all=true`, returns every webhook in the org regardless of level.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "spaceId",
           in: "query",
@@ -227,6 +229,7 @@ export const webhooksPaths = {
       description: "Get a single webhook by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -269,6 +272,7 @@ export const webhooksPaths = {
         "Update webhook URL, events, filters, or enabled status. Cannot change the secret or the scoping level.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -341,6 +345,7 @@ export const webhooksPaths = {
       description: "Delete a webhook and all its delivery history.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -365,6 +370,7 @@ export const webhooksPaths = {
       description: "Send a synthetic test.ping event to verify webhook connectivity.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -406,6 +412,7 @@ export const webhooksPaths = {
         "Stage a new signing secret and open a dual-signature delivery window. During the window, every delivery is signed with BOTH the previous and new secrets in a space-separated `webhook-signature` header (Standard Webhooks multi-signature spec) so consumers can migrate without dropping events. After `rotationWindowEndsAt`, the next delivery promotes the new secret inline and the previous one is retired.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -482,6 +489,7 @@ export const webhooksPaths = {
       description: "List recent delivery attempts for a webhook (status, latency, response code).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",

@@ -50,6 +50,10 @@ export const openApiInfo = {
     { name: "Proxies", description: "Org-level HTTP proxy configuration" },
     { name: "Meta", description: "API documentation and specification" },
     { name: "Spaces", description: "Space management for headless API" },
+    {
+      name: "Roles",
+      description: "Space-role presets and organization-defined custom role bundles",
+    },
     { name: "Space Packages", description: "Manage packages installed in a space" },
     { name: "End Users", description: "End-user management for headless API" },
     { name: "Uploads", description: "Direct-upload protocol for agent input files" },

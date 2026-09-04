@@ -171,11 +171,23 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     expect((await ask(currentCtx!, other.id)).status).toBe(200);
   });
 
-  it("no webhooks:read at all is a 403, not an empty page", async () => {
-    const res = await app.request("/api/webhooks?all=true", {
-      headers: { "X-Test-Perms": "org-webhooks:read" },
+  it("neither half of the vocabulary is a 403, not an empty page", async () => {
+    // Either half authorises the LISTING (the per-row filter above decides what
+    // it contains), so the refusal is for a caller holding neither.
+    const denied = await app.request("/api/webhooks?all=true", {
+      headers: { "X-Test-Perms": "runs:read" },
     });
-    expect(res.status).toBe(403);
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { detail: string }).detail).toContain("org-webhooks:read");
+
+    // Control: one half is enough to be let in.
+    expect(
+      (
+        await app.request("/api/webhooks?all=true", {
+          headers: { "X-Test-Perms": "org-webhooks:read" },
+        })
+      ).status,
+    ).toBe(200);
   });
 
   it("a caller with no webhook permission cannot use 404-vs-403 as an existence oracle", async () => {

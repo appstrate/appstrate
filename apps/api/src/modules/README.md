@@ -188,7 +188,7 @@ itself, before its guard runs:
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
 
 router.use("/api/tasks/*", async (c, next) => {
-  await enterSpaceContext(c); // pinned space → X-Space-Id → the org default
+  await enterSpaceContext(c); // pinned space → X-Space-Id (400 when neither)
   return next();
 });
 router.get("/api/tasks", requireModulePermission("tasks", "read"), handler);
@@ -197,6 +197,23 @@ router.get("/api/tasks", requireModulePermission("tasks", "read"), handler);
 Pass an explicit id (`enterSpaceContext(c, spaceId)`) when the route addresses a
 space of its own — the `webhooks` module does, from its `spaceId` body/query
 field, and again from the row's own space on its by-id routes.
+
+A caller that names no space at all is a **400**, exactly as it is on a core
+space-scoped route. The org's default space answers only the trusted in-process
+MCP re-entry (the internal-dispatch marker), which is the one caller that
+physically cannot carry a header. A module route is not a weaker door than a
+core one: falling back to the default space for a session or CLI caller would
+put them in a space they never asked for.
+
+That makes the entry a decision, not a reflex. A router whose family mixes
+space-level and ORG-level resources must enter only when the caller identifies
+a space (`c.get("spaceId") ?? c.req.header("X-Space-Id")`) and skip otherwise —
+`webhooks` does, because a `level: "org"` webhook is space-less and its
+permission is org-level, so an unconditional entry would 400 a caller who needs
+no space. Skipping leaves `permissions` at the org half, which is the correct
+authority for those rows; a route that then wants either half gates on both
+strings rather than on one (`requireAnyWebhookRead` in
+`modules/webhooks/routes.ts`).
 
 This is not optional: a caller outside a space holds **org-level strings only**,
 so a space-level guard on a route that never entered a space can never pass. It

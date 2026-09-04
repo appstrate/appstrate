@@ -78,6 +78,11 @@ describe("effective permissions in an open space", () => {
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:configure")).toBe(false);
     expect(perms.has("agents:delete")).toBe(false);
+    // Can LIST the role catalog — a space `admin` who is only an org member
+    // assigns roles in their space — but never define one.
+    expect(perms.has("roles:read")).toBe(true);
+    expect(perms.has("roles:write")).toBe(false);
+    expect(perms.has("roles:delete")).toBe(false);
     // Cannot manage members
     expect(perms.has("members:invite")).toBe(false);
     expect(perms.has("members:remove")).toBe(false);
@@ -96,8 +101,10 @@ describe("effective permissions in an open space", () => {
     expect(perms.has("org:read")).toBe(true);
     expect(perms.has("spaces:read")).toBe(true);
     expect(perms.has("llm-proxy:call")).toBe(true);
-    // Not even the org directory — a guest is an outside collaborator.
+    // Not even the org directory, nor the role catalog — a guest is an outside
+    // collaborator, and roles are the org's own vocabulary.
     expect(perms.has("members:read")).toBe(false);
+    expect(perms.has("roles:read")).toBe(false);
     // No space slice whatsoever.
     expect(perms.has("agents:read")).toBe(false);
     expect(perms.has("runs:read")).toBe(false);

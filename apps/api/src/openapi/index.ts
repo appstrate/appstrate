@@ -40,6 +40,7 @@ import { metaPaths } from "./paths/meta.ts";
 import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
 import { spacesPaths } from "./paths/spaces.ts";
+import { rolesPaths } from "./paths/roles.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
 import { uploadsPaths } from "./paths/uploads.ts";
 import { filesPaths } from "./paths/files.ts";
@@ -71,6 +72,7 @@ const corePaths = {
   ...notificationsPaths,
   ...packagesPaths,
   ...spacesPaths,
+  ...rolesPaths,
   ...endUsersPaths,
   ...uploadsPaths,
   ...filesPaths,

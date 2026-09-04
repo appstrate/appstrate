@@ -25,9 +25,9 @@
  * the router's `ChatPlatformDeps` at module init (see index.ts).
  */
 
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
@@ -36,6 +36,7 @@ import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
+import { assertMigratedSession } from "./persistence.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
@@ -82,23 +83,43 @@ function toMessageDto(row: MessageRow) {
   };
 }
 
+/**
+ * The `(org, space, user)` triple every session query filters on. A session
+ * belongs to ONE space (RBAC spec §5), so the space is part of ownership, not
+ * a display filter: the same user in another space must not see it.
+ */
+function sessionScope(c: Context<ChatEnv>): { orgId: string; spaceId: string; userId: string } {
+  return { orgId: c.get("orgId"), spaceId: c.get("space").id, userId: c.get("user").id };
+}
+
 async function findOwnedSession(
   id: string,
-  orgId: string,
-  userId: string,
+  scope: { orgId: string; spaceId: string; userId: string },
 ): Promise<SessionRow | undefined> {
   const [session] = await db
     .select()
     .from(chatSessions)
     .where(
-      and(eq(chatSessions.id, id), eq(chatSessions.orgId, orgId), eq(chatSessions.userId, userId)),
+      and(
+        eq(chatSessions.id, id),
+        eq(chatSessions.orgId, scope.orgId),
+        eq(chatSessions.userId, scope.userId),
+        // An unmigrated row is deliberately MATCHED here rather than filtered
+        // out, so `assertMigratedSession` can refuse it by name — a filter
+        // would answer "not found" and hide a backfill that never ran.
+        or(eq(chatSessions.spaceId, scope.spaceId), isNull(chatSessions.spaceId)),
+      ),
     )
     .limit(1);
+  if (session) assertMigratedSession(session);
   return session;
 }
 
-async function getOwnedSession(id: string, orgId: string, userId: string): Promise<SessionRow> {
-  const session = await findOwnedSession(id, orgId, userId);
+async function getOwnedSession(
+  id: string,
+  scope: { orgId: string; spaceId: string; userId: string },
+): Promise<SessionRow> {
+  const session = await findOwnedSession(id, scope);
   if (!session) throw notFound("Chat session not found");
   return session;
 }
@@ -123,8 +144,9 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // space-scoped prefixes (that list is core-only by design), so this router
   // enters the space itself — otherwise `chat:read` / `chat:write` could never
   // be satisfied, since org permissions carry no space-level string
-  // (RBAC spec §4.3). The space is the caller's pinned one, then `X-Space-Id`,
-  // then the org default; a caller with no role in it is refused there.
+  // (RBAC spec §4.3). The space is the caller's pinned one, else `X-Space-Id`;
+  // a caller that names neither gets a 400 (there is no default-space fallback
+  // for a direct caller), and one with no role in the space is refused there.
   router.use("/api/chat/*", async (c, next) => {
     await enterSpaceContext(c);
     return next();
@@ -139,12 +161,20 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     // Fetch one past the page so `hasMore` reflects reality: previously it was
     // hardcoded `false`, so a caller with more than a page of sessions had no
     // signal that older conversations existed beyond the window.
+    const scope = sessionScope(c);
     const rows = await db
       .select()
       .from(chatSessions)
-      .where(and(eq(chatSessions.orgId, c.get("orgId")), eq(chatSessions.userId, c.get("user").id)))
+      .where(
+        and(
+          eq(chatSessions.orgId, scope.orgId),
+          eq(chatSessions.userId, scope.userId),
+          or(eq(chatSessions.spaceId, scope.spaceId), isNull(chatSessions.spaceId)),
+        ),
+      )
       .orderBy(desc(chatSessions.updatedAt))
       .limit(SESSIONS_PAGE_SIZE + 1);
+    for (const row of rows) assertMigratedSession(row);
     const hasMore = rows.length > SESSIONS_PAGE_SIZE;
     const page = hasMore ? rows.slice(0, SESSIONS_PAGE_SIZE) : rows;
     return c.json({ object: "list", data: page.map(toSessionDto), hasMore });
@@ -157,12 +187,14 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     requireModulePermission("chat", "write"),
     async (c) => {
       const data = parseBody(createSessionSchema, await c.req.json().catch(() => ({})));
+      const scope = sessionScope(c);
       const [row] = await db
         .insert(chatSessions)
         .values({
           id: mintSessionId(),
-          orgId: c.get("orgId"),
-          userId: c.get("user").id,
+          orgId: scope.orgId,
+          spaceId: scope.spaceId,
+          userId: scope.userId,
           title: data.title ?? null,
         })
         .returning();
@@ -173,14 +205,14 @@ export function createChatRouter(deps: ChatPlatformDeps) {
 
   // GET /api/chat/sessions/:id — the conversation's messages, in seq order (history load)
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
-    const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+    const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
     const messages = await loadMessages(session.id);
     return c.json({ ...toSessionDto(session), messages: messages.map(toMessageDto) });
   });
 
   // PATCH /api/chat/sessions/:id — rename
   router.patch("/api/chat/sessions/:id", requireModulePermission("chat", "write"), async (c) => {
-    const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+    const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
     const { title } = parseBody(renameSessionSchema, await c.req.json().catch(() => null));
     await db
       .update(chatSessions)
@@ -201,7 +233,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     rateLimited(120),
     requireModulePermission("chat", "write"),
     async (c) => {
-      const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+      const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
       await db
         .update(chatSessions)
         .set({
@@ -215,7 +247,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
 
   // DELETE /api/chat/sessions/:id — delete a session (entries cascade)
   router.delete("/api/chat/sessions/:id", requireModulePermission("chat", "write"), async (c) => {
-    const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+    const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
     // Detach-or-delete the session's files BEFORE the session row is removed:
     // a file a run still consumes is detached (kept); the rest are deleted
     // (row + counter + storage). Must precede the delete — the chat_session_id FK
@@ -252,7 +284,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     requireModulePermission("chat", "read"),
     async (c) => {
       // A brand-new, not-yet-sent conversation has no row — nothing to resume.
-      const session = await findOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+      const session = await findOwnedSession(c.req.param("id"), sessionScope(c));
       if (!session?.activeStreamId) return c.body(null, 204);
       const stream = await getResumableContext().resume(session.activeStreamId);
       if (!stream) {
@@ -292,7 +324,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     rateLimited(60),
     requireModulePermission("chat", "write"),
     async (c) => {
-      const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+      const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
       if (session.activeStreamId) stopStream(session.activeStreamId);
       return c.body(null, 204);
     },

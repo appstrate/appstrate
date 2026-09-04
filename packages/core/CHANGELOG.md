@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`ApiError` can carry RFC 9457 extension members.** New optional
+  `extensions` on the constructor options, merged into the problem body by
+  `toProblemDetail()` — only into keys the standard fields do not own, so an
+  extension can never rewrite `status` or `code`. `conflict(code, detail)`
+  takes them as a third argument. First consumer: `DELETE /api/roles/{id}`
+  answering `role_in_use` with `member_count`, so a client acts on the number
+  instead of parsing it out of `detail`.
+
 - **The org role `viewer` is retired; `guest` replaces it (BREAKING).**
   `ORG_ROLES` — and therefore the `OrgRole` union and the `org_role` pg enum
   it mirrors — is now `["owner", "admin", "member", "guest"]`. Read-only

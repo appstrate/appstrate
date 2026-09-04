@@ -44,12 +44,50 @@ function toContent(message: UIMessage): Record<string, unknown> {
 }
 
 /**
+ * A `chat_sessions` row still carrying `space_id IS NULL` — a session written
+ * before chat became space-scoped, whose backfill has not run.
+ *
+ * Mapping it to the caller's current space would move someone's conversation
+ * into a space it never belonged to, so the read refuses instead and names the
+ * script that fixes it. Same doctrine as `UnmigratedOrgRoleError`
+ * (`NO_TRANSITIONAL_CODE.md` §1): the retired form fails loudly, never falls
+ * back. Deleted with the `NOT NULL` migration in release N+1.
+ */
+export class UnmigratedChatSessionError extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string) {
+    super(
+      `chat_sessions.space_id IS NULL for session '${sessionId}'; ` +
+        `run scripts/migration/0008-org-viewer-to-guest.sql`,
+    );
+    this.name = "UnmigratedChatSessionError";
+    this.sessionId = sessionId;
+  }
+}
+
+/**
+ * Narrow a session row's nullable `space_id` to the string every read needs.
+ *
+ * @throws UnmigratedChatSessionError when the backfill has not run.
+ */
+export function assertMigratedSession(row: { id: string; spaceId: string | null }): string {
+  if (row.spaceId === null) throw new UnmigratedChatSessionError(row.id);
+  return row.spaceId;
+}
+
+/**
  * Create the session row if it does not exist yet (idempotent). The client
  * creates sessions up front, but a lazy ensure here closes the orphan-session
  * window (a row with zero messages) and lets the stream route be the single
  * writer of record.
  */
-export async function ensureSession(id: string, orgId: string, userId: string): Promise<void> {
+export async function ensureSession(
+  id: string,
+  orgId: string,
+  userId: string,
+  spaceId: string,
+): Promise<void> {
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -71,14 +109,25 @@ export async function ensureSession(id: string, orgId: string, userId: string): 
   // 404, not 403, so we don't reveal that the id exists for someone else.
   const [row] = await db
     .insert(chatSessions)
-    .values({ id, orgId, userId, title: null })
+    .values({ id, orgId, userId, spaceId, title: null })
     .onConflictDoUpdate({
       target: chatSessions.id,
       set: { id: sql`${chatSessions.id}` },
       setWhere: and(eq(chatSessions.orgId, orgId), eq(chatSessions.userId, userId)),
     })
-    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
+    .returning({
+      id: chatSessions.id,
+      orgId: chatSessions.orgId,
+      userId: chatSessions.userId,
+      spaceId: chatSessions.spaceId,
+    });
   if (!row || row.orgId !== orgId || row.userId !== userId) {
+    throw notFound("Chat session not found");
+  }
+  // The space stays OUT of `setWhere` and is checked here instead: a row of the
+  // caller's own that predates the backfill must produce the loud refusal, not
+  // a "not found" that reads as someone else's id.
+  if (assertMigratedSession(row) !== spaceId) {
     throw notFound("Chat session not found");
   }
 }

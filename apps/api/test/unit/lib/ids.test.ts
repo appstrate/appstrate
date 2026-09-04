@@ -17,7 +17,13 @@
 
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "@appstrate/core/api-errors";
-import { SPACE_ID_RE, assertSpaceId, prefixedId } from "../../../src/lib/ids.ts";
+import {
+  SPACE_ID_RE,
+  SPACE_ROLE_ID_RE,
+  assertSpaceId,
+  assertSpaceRoleId,
+  prefixedId,
+} from "../../../src/lib/ids.ts";
 
 /** Run `assertSpaceId` and return the `ApiError` it threw. Fails if it did not throw. */
 function captureThrow(id: string, param?: string): ApiError {
@@ -124,4 +130,40 @@ describe("assertSpaceId", () => {
       expect(captureThrow("spc_1").param).toBe("space_id");
     });
   });
+});
+
+describe("SPACE_ROLE_ID_RE / assertSpaceRoleId", () => {
+  it("matches exactly what prefixedId('srl') mints", () => {
+    for (let i = 0; i < 20; i++) {
+      expect(SPACE_ROLE_ID_RE.test(prefixedId("srl"))).toBe(true);
+    }
+    expect(() => assertSpaceRoleId(prefixedId("srl"))).not.toThrow();
+  });
+
+  const rejected = [
+    // A space id is not a role id — the prefixes are what tell them apart.
+    prefixedId("spc"),
+    "srl_1",
+    "srl_2f1c6d849a524f2bb1a70c9d3e5f7a10",
+    "srl_2F1C6D84-9A52-4F2B-B1A7-0C9D3E5F7A10",
+    "srl_",
+    "",
+  ];
+
+  for (const id of rejected) {
+    it(`rejects '${id}'`, () => {
+      expect(SPACE_ROLE_ID_RE.test(id)).toBe(false);
+      let thrown: unknown;
+      try {
+        assertSpaceRoleId(id, "custom_role_id");
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(ApiError);
+      const err = thrown as ApiError;
+      expect(err.status).toBe(400);
+      expect(err.param).toBe("custom_role_id");
+      expect(err.message).toContain("Malformed space role id");
+    });
+  }
 });

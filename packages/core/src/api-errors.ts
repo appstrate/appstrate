@@ -73,6 +73,23 @@ function codeToType(code: string): string {
 }
 
 /**
+ * Keys `ProblemDetail` owns. An extension member may never take one of these,
+ * present in this instance or not — see `toProblemDetail`.
+ */
+const RESERVED_PROBLEM_KEYS: ReadonlySet<string> = new Set<string>([
+  "type",
+  "title",
+  "status",
+  "detail",
+  "instance",
+  "code",
+  "requestId",
+  "param",
+  "retryAfter",
+  "errors",
+]);
+
+/**
  * Throwable API error that serialises to RFC 9457 Problem Details.
  * Middleware catches it and sends the response automatically.
  */
@@ -84,6 +101,7 @@ export class ApiError extends Error {
   readonly retryAfter?: number;
   readonly fieldErrors?: ValidationFieldError[];
   readonly headers?: Record<string, string>;
+  readonly extensions?: Readonly<Record<string, unknown>>;
 
   constructor(opts: {
     status: number;
@@ -94,6 +112,12 @@ export class ApiError extends Error {
     retryAfter?: number;
     errors?: ValidationFieldError[];
     headers?: Record<string, string>;
+    /**
+     * RFC 9457 §3.2 extension members merged into the problem body. Use for
+     * the machine-readable half of an error the client must act on — never for
+     * internal detail, which belongs in `cause` (log-only).
+     */
+    extensions?: Readonly<Record<string, unknown>>;
     /**
      * The underlying failure, when this error is raised from a `catch`.
      *
@@ -122,6 +146,7 @@ export class ApiError extends Error {
     this.retryAfter = opts.retryAfter;
     this.fieldErrors = opts.errors;
     this.headers = opts.headers;
+    this.extensions = opts.extensions;
   }
 
   /** Serialise to RFC 9457 Problem Details body. */
@@ -138,6 +163,19 @@ export class ApiError extends Error {
     if (this.param !== undefined) body.param = this.param;
     if (this.retryAfter !== undefined) body.retryAfter = this.retryAfter;
     if (this.fieldErrors?.length) body.errors = this.fieldErrors;
+    // RFC 9457 §3.2 extension members, written last and only into keys the
+    // standard fields do not own. The guard is the RESERVED SET, not
+    // `key in body`: an optional standard field that happens to be absent from
+    // this particular problem (`param`, `errors`) would otherwise be
+    // overwritable by an extension, and a client branching on `errors` cannot
+    // tell a real validation list from an extension that took the name. The
+    // cast is deliberate — `ProblemDetail` stays a closed shape so a typo in a
+    // standard field is still a compile error.
+    const extensible = body as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(this.extensions ?? {})) {
+      if (RESERVED_PROBLEM_KEYS.has(key)) continue;
+      extensible[key] = value;
+    }
     return body;
   }
 }
@@ -222,12 +260,17 @@ export function notFound(detail: string): ApiError {
   });
 }
 
-export function conflict(code: string, detail: string): ApiError {
+export function conflict(
+  code: string,
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 409,
     code,
     title: "Conflict",
     detail,
+    extensions,
   });
 }
 

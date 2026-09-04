@@ -23,8 +23,40 @@ export interface SessionSummary {
   updatedAt: string;
 }
 
-/** React Query key for the session list (module-local, not the typed client). */
+/**
+ * Prefix every chat-session-list key starts with (module-local, not the typed
+ * client). Exported for the app shell, which invalidates on it — a prefix match,
+ * so it still reaches the space-scoped keys below.
+ */
 export const SESSIONS_QUERY_KEY = ["chat", "sessions"] as const;
+
+/**
+ * The session list of ONE space. Sessions are space-scoped rows
+ * (`chat_sessions.space_id`) and `GET /api/chat/sessions` REQUIRES `X-Space-Id`,
+ * so the space belongs in the key twice over: a key without it would serve
+ * another space's list from cache, and would stay disabled forever instead of
+ * refetching when the space store resolves.
+ */
+export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {
+  return [...SESSIONS_QUERY_KEY, spaceId];
+}
+
+/**
+ * One conversation's stored history, in one space. The id stays at index 2 —
+ * the shell's chat-session matcher reads that position.
+ */
+export function sessionQueryKey(spaceId: string | null, id: string): readonly unknown[] {
+  return ["chat", "session", id, spaceId];
+}
+
+/**
+ * The space the host is scoped to, read off the injected scoping headers —
+ * the same value they put in `X-Space-Id`. The module has no space store of its
+ * own and must not grow one: the host owns that state and publishes it here.
+ */
+export function spaceIdFromHeaders(getHeaders: GetHeaders | null | undefined): string | null {
+  return getHeaders?.()["X-Space-Id"] ?? null;
+}
 
 function headers(getHeaders: GetHeaders | null | undefined, json = false): Record<string, string> {
   return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };

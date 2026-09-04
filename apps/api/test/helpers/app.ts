@@ -38,7 +38,7 @@ import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
 import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
-import { initAppConfig } from "../../src/lib/app-config.ts";
+import { getAppConfig, initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
 import { createResponseValidationMiddleware } from "./response-validation.ts";
@@ -57,6 +57,7 @@ import { createModelProvidersOAuthRouter } from "../../src/routes/model-provider
 import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createSpacesRouter } from "../../src/routes/spaces.ts";
+import { createRolesRouter } from "../../src/routes/roles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -91,6 +92,27 @@ interface GetTestAppOptions {
 }
 
 let cachedApp: Hono<AppEnv> | null = null;
+
+/**
+ * Turn a module-contributed feature flag on (or off) for the duration of a
+ * test, returning the restore function.
+ *
+ * Production merges these flags into `AppConfig` once, at boot, from the loaded
+ * modules (`applyModuleFeatures`) — and the test harness deliberately never
+ * boots. A test that needs `features.custom_roles` on and off in the SAME file
+ * therefore has nothing to reach for, which is why this seam exists: it writes
+ * the same object the routes read (`getAppConfig().features`), so what is
+ * exercised is the real gate, not a stand-in.
+ */
+export function setFeatureFlag(name: string, value: boolean): () => void {
+  const features = getAppConfig().features as Record<string, boolean | undefined>;
+  const previous = features[name];
+  features[name] = value;
+  return () => {
+    if (previous === undefined) delete features[name];
+    else features[name] = previous;
+  };
+}
 
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
@@ -279,6 +301,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
   app.route("/api/spaces", createSpacesRouter());
+  app.route("/api/roles", createRolesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());

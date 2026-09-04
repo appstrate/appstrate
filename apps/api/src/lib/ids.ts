@@ -36,3 +36,26 @@ export function assertSpaceId(id: string, param = "space_id"): void {
     param,
   );
 }
+
+/**
+ * Strict custom-space-role id shape: `srl_` + a canonical lowercase dashed
+ * UUID — exactly what `prefixedId("srl")` mints.
+ *
+ * Same reasoning as {@link SPACE_ID_RE}: a role id arrives on a path param
+ * (`/api/roles/:id`) and in a `space_members.custom_role_id` write, and both
+ * would otherwise answer 404 for a malformed id, saying nothing about WHY.
+ */
+export const SPACE_ROLE_ID_RE =
+  /^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Throw unless `id` is a canonical space-role id. `param` names the field the
+ * id arrived on so the 400 points at it (`id`, `custom_role_id`, …).
+ */
+export function assertSpaceRoleId(id: string, param = "id"): void {
+  if (SPACE_ROLE_ID_RE.test(id)) return;
+  throw invalidRequest(
+    `Malformed space role id '${id}'. Expected \`srl_\` followed by a canonical UUID.`,
+    param,
+  );
+}

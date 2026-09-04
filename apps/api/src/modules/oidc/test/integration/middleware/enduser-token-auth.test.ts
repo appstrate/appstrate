@@ -484,6 +484,48 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(allowed.status).toBe(200);
   });
 
+  it("a dashboard token for a guest reaches a space only through an explicit row", async () => {
+    // RBAC spec §7.2: the token's ceiling is its scope claim, the org slice
+    // comes from the subject's org role, and the SPACE slice is resolved per
+    // request from the subject's membership. A `guest` is implicit nowhere —
+    // not even in the default space.
+    const { organizationMembers, spaceMembers } = await import("@appstrate/db/schema");
+    await db.insert(organizationMembers).values({ userId: authUserId, orgId, role: "guest" });
+
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "guest",
+      email: "stage3@example.com",
+      scope: "openid agents:read agents:run",
+    });
+    const headers = { Authorization: `Bearer ${token}`, "X-Space-Id": spaceId };
+
+    const denied = await app.request("/api/agents", { headers });
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { code: string }).code).toBe("not_a_space_member");
+
+    // One `viewer` row later, the SAME token reads the space — and still
+    // cannot run, because `viewer` does not hold `agents:run` however broad
+    // the scope claim was.
+    await db.insert(spaceMembers).values({ spaceId, userId: authUserId, presetRole: "viewer" });
+
+    expect((await app.request("/api/agents", { headers })).status).toBe(200);
+
+    const { seedPackage, seedInstalledPackage } =
+      await import("../../../../../../test/helpers/seed.ts");
+    await seedPackage({ orgId, id: "@oidc/agent", type: "agent" });
+    await seedInstalledPackage(spaceId, "@oidc/agent");
+    const ran = await app.request("/api/agents/@oidc/agent/run", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+    });
+    expect(ran.status).toBe(403);
+    expect(((await ran.json()) as { detail: string }).detail).toContain("agents:run");
+  });
+
   it("ignores a spoofed X-Org-Id header when the JWT pinned a different org", async () => {
     // Cross-org escalation guard. A user who is a member of orgs X and Y
     // holds a dashboard token scoped to org X (consent only granted there).

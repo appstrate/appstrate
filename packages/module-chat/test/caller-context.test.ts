@@ -335,18 +335,6 @@ describe("buildCallerContextBlock", () => {
     expect(req.headers.get("cookie")).toBe("session=abc");
   });
 
-  it("falls back to an identity-only block when there is no space context", async () => {
-    // No spaceId → never dispatches; identity/role from request context.
-    const { deps, lastRequest } = fakeDeps(() => new Response(null, { status: 500 }));
-    const out = await buildCallerContextBlock(
-      fakeContext({ orgRole: "owner", orgName: "Acme", orgSlug: "acme" }),
-      { origin: "http://127.0.0.1:3000", headers: {}, spaceId: undefined, user, deps },
-    );
-    expect(out).toContain("Ada (ada@acme.com)");
-    expect(out).toContain('whose role is "owner"');
-    expect(lastRequest()).toBeNull();
-  });
-
   it("falls back to identity-only when the dispatch 400s (no app context)", async () => {
     const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {

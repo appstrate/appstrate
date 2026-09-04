@@ -1794,6 +1794,69 @@ export const schemas = {
     },
   },
 
+  RoleObject: {
+    type: "object",
+    required: [
+      "object",
+      "kind",
+      "id",
+      "key",
+      "name",
+      "description",
+      "permissions",
+      "created_at",
+      "updated_at",
+    ],
+    description:
+      "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
+    properties: {
+      object: { type: "string", enum: ["role"] },
+      kind: { type: "string", enum: ["preset", "custom"] },
+      id: {
+        type: ["string", "null"],
+        description: "`srl_` id for a custom bundle; null for a preset, which has no row.",
+      },
+      key: { type: "string" },
+      name: { type: "string" },
+      description: { type: ["string", "null"] },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description: "Space-level permission strings the role grants, sorted.",
+      },
+      created_at: { type: ["string", "null"], format: "date-time" },
+      updated_at: { type: ["string", "null"], format: "date-time" },
+    },
+  },
+
+  RoleVocabularyGroup: {
+    type: "object",
+    required: ["resource", "permissions"],
+    description: "Space-level permissions of one resource, with their delegation facts.",
+    properties: {
+      resource: { type: "string" },
+      permissions: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["permission", "action", "api_key_grantable", "end_user_grantable"],
+          properties: {
+            permission: { type: "string" },
+            action: { type: "string" },
+            api_key_grantable: {
+              type: "boolean",
+              description: "Can also be carried by an API key.",
+            },
+            end_user_grantable: {
+              type: "boolean",
+              description: "A loaded module opted this string in for end-user OIDC tokens.",
+            },
+          },
+        },
+      },
+    },
+  },
+
   SpaceMemberRemoval: {
     type: "object",
     required: ["access_after"],

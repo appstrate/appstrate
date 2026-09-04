@@ -266,6 +266,17 @@ setSpaceContextApplier(async (c, spaceId) => {
   const ctx = c as Context<AppEnv>;
   const orgId = ctx.get("orgId");
   const explicit = spaceId ?? ctx.get("spaceId") ?? ctx.req.header("X-Space-Id");
+  // Same rule as `requireSpaceContext`: the org's default space answers a
+  // header-less caller ONLY for the trusted in-process MCP re-entry. A module
+  // route is not a weaker door than a core one — a session or CLI caller that
+  // omits `X-Space-Id` gets the same 400 it would get on `/api/agents`, rather
+  // than silently landing in the default space (`SPACES.md` §Resolving).
+  if (!explicit && !isInternalDispatch(ctx.req.raw.headers)) {
+    throw invalidRequest(
+      "Space context required. Provide X-Space-Id header or use an API key.",
+      "X-Space-Id",
+    );
+  }
   const space = explicit
     ? await validateSpaceInOrg(explicit, orgId)
     : await defaultSpaceForOrg(orgId);

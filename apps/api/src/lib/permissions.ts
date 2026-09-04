@@ -69,6 +69,7 @@ import {
   getModuleRoleScopes,
   getModulePresetScopes,
   getModuleApiKeyScopes,
+  getModuleEndUserAllowedScopes,
 } from "@appstrate/core/permissions";
 
 // ---------------------------------------------------------------------------
@@ -122,11 +123,15 @@ const ADMIN_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelP
   [...OWNER_ORG_PERMISSIONS].filter((p) => p !== "org:delete" && p !== "org:update"),
 );
 
-/** Member: read the org and its infrastructure; run completions. */
+/** Member: read the org, its infrastructure and its role catalog; run completions. */
 const MEMBER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>([
   "org:read",
   "members:read",
   "spaces:read",
+  // A space `admin` who is only an org member assigns roles in their space, so
+  // they must be able to LIST what is assignable. Defining a bundle stays
+  // owner/admin (`roles:write` / `roles:delete`) — see RBAC spec §13.6.
+  "roles:read",
   "models:read",
   "proxies:read",
   // Members run completions through the platform with the org's configured
@@ -384,6 +389,58 @@ export function knownSpaceLevelPermissions(): ReadonlySet<string> {
     for (const perm of getModulePresetScopes(preset)) known.add(perm);
   }
   return known;
+}
+
+/** One space-level permission, with the delegation facts the roles UI shows. */
+export interface SpacePermissionEntry {
+  permission: string;
+  action: string;
+  /** Can be carried by an API key (`getApiKeyAllowedScopes`). */
+  api_key_grantable: boolean;
+  /**
+   * Declared `endUserGrantable` by a loaded module.
+   *
+   * Core resources are absent from this set by construction: the built-in
+   * end-user allowlist is the OIDC module's own vocabulary
+   * (`modules/oidc/auth/scopes.ts`), deliberately kept out of core, and this
+   * file must answer with `MODULES=none` too. So the flag says "a module opted
+   * this string in", not "no end-user token can ever hold it".
+   */
+  end_user_grantable: boolean;
+}
+
+/** Space-level permissions grouped under their resource, both sorted. */
+export interface SpaceVocabularyGroup {
+  resource: string;
+  permissions: SpacePermissionEntry[];
+}
+
+/**
+ * The vocabulary a custom space role may draw from, grouped for a picker
+ * (`GET /api/roles/vocabulary`, RBAC spec §6.2). Same source as
+ * {@link knownSpaceLevelPermissions} — that function IS the validator's
+ * allowlist, so what the picker offers and what the validator accepts cannot
+ * drift.
+ */
+export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
+  const apiKeyAllowed = getApiKeyAllowedScopes();
+  const endUserAllowed = getModuleEndUserAllowedScopes();
+  const byResource = new Map<string, SpacePermissionEntry[]>();
+  for (const permission of [...knownSpaceLevelPermissions()].sort()) {
+    const colon = permission.indexOf(":");
+    const resource = permission.slice(0, colon);
+    const entries = byResource.get(resource) ?? [];
+    entries.push({
+      permission,
+      action: permission.slice(colon + 1),
+      api_key_grantable: apiKeyAllowed.has(permission),
+      end_user_grantable: endUserAllowed.has(permission),
+    });
+    byResource.set(resource, entries);
+  }
+  return [...byResource.entries()]
+    .map(([resource, permissions]) => ({ resource, permissions }))
+    .sort((a, b) => a.resource.localeCompare(b.resource));
 }
 
 /**
