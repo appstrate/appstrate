@@ -3,7 +3,11 @@
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { z } from "zod";
-import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import {
+  reportPermissionDenial,
+  SPACE_ROLE_PRESETS,
+  SPACE_VISIBILITIES,
+} from "@appstrate/core/permissions";
 import type { CoreResource, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
   modelGenerationSettingsSchema,
@@ -266,7 +270,10 @@ async function gateSpacePackageWrite(
   op: SpacePackageOp,
 ): Promise<PackageType> {
   const held = c.get("permissions");
-  if (!grantsFor(op).some((grant) => held?.has(`${grant[0]}:${grant[1]}`))) {
+  const alternatives = grantsFor(op).map((grant) => `${grant[0]}:${grant[1]}`);
+  if (!alternatives.some((perm) => held?.has(perm))) {
+    // Audited like a guard denial — the disjunction is what the record names.
+    reportPermissionDenial(c, alternatives.join("|"));
     throw forbidden(`Insufficient permissions: cannot ${op} a package in this space`);
   }
 

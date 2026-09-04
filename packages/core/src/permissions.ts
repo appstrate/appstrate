@@ -691,23 +691,30 @@ export function makePermissionGuard(
     const perms = c.get("permissions") as ReadonlySet<string> | undefined;
     const granted = !!perms && typeof perms.has === "function" && perms.has(required);
     if (!granted) {
-      // Audit is best-effort — a throwing handler must not escalate an
-      // authz denial into a 500 (which would leak timing info and, worse,
-      // mask the 403 in the error-handler's generic path). Catch + swallow
-      // + continue to throw `forbidden` deterministically.
-      if (_denialHandler) {
-        try {
-          _denialHandler({ required, c });
-        } catch {
-          // Deliberately swallowed — we cannot log from core (no logger
-          // wired at this layer) and bubbling would break the fail-closed
-          // contract. Operators see the 403 in request logs either way.
-        }
-      }
+      reportPermissionDenial(c, required);
       throw forbidden(`Insufficient permissions: ${required} required`);
     }
     return next();
   };
+}
+
+/**
+ * Fire the denial audit hook for a refusal decided outside
+ * `makePermissionGuard` — a disjunction ("any of these strings") that a
+ * single guard cannot express. `required` is what the audit records; for a
+ * disjunction pass the alternatives joined with `|`.
+ *
+ * Best-effort: a throwing handler must not escalate an authz denial into a
+ * 500 (which would leak timing info and mask the 403), so it is swallowed —
+ * core has no logger, and operators see the 403 in request logs either way.
+ */
+export function reportPermissionDenial(c: HonoContextLike, required: string): void {
+  if (!_denialHandler) return;
+  try {
+    _denialHandler({ required, c });
+  } catch {
+    // Deliberately swallowed — see above.
+  }
 }
 
 /**

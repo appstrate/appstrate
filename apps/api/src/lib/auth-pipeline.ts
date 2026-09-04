@@ -156,9 +156,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           c.set("permissions", applyOrgPermissions(c, resolution.orgRole, ceiling));
         } else if (!resolution.deferOrgResolution) {
           // No org role, and not deferring: whatever the strategy computed IS
-          // the whole answer, empty list included. Writing the ceiling here is
-          // what makes an empty list mean "nothing", rather than "unceilinged"
-          // once `requireSpaceContext` unions the space slice.
+          // the whole answer, empty list included. Without an org role no
+          // space slice is ever unioned in (`applySpacePermissions` returns
+          // early), so this is defence in depth: the ceiling is written and
+          // `permissions` is a real (possibly empty) Set rather than undefined.
           const ceiling = new Set<string>(resolution.permissions);
           c.set("scopeCeiling", ceiling);
           c.set("permissions", new Set(ceiling));

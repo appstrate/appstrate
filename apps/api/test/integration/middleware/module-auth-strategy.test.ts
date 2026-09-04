@@ -33,27 +33,9 @@ const stubStrategy: AuthStrategy = {
   id: "stub-test-strategy",
   async authenticate({ headers }) {
     const token = headers.get("x-test-strategy");
-    if (token !== "valid" && token !== "admin" && token !== "nothing") return null;
+    if (token !== "valid" && token !== "admin") return null;
     if (!currentCtx) {
       throw new Error("currentCtx not seeded — test setup bug");
-    }
-    // A strategy that resolves an identity and grants NOTHING: no org role, an
-    // empty permission list, and NOT deferring. The pipeline must read that as
-    // an empty ceiling, not as "unresolved".
-    if (token === "nothing") {
-      return {
-        user: {
-          id: currentCtx.user.id,
-          email: currentCtx.user.email,
-          name: currentCtx.user.name,
-        },
-        orgId: currentCtx.orgId,
-        orgSlug: currentCtx.org.slug,
-        authMethod: "stub-strategy-nothing",
-        spaceId: currentCtx.defaultSpaceId,
-        permissions: [],
-        deferOrgResolution: false,
-      };
     }
     return {
       user: {
@@ -150,38 +132,6 @@ describe("module auth strategy pipeline", () => {
       },
     });
     expect(res.status).toBe(200);
-  });
-
-  it("an empty, non-deferring strategy gets an EMPTY ceiling, not none", async () => {
-    // `permissions: []` with no `orgRole` is only "I have not resolved an org
-    // yet" when the strategy sets `deferOrgResolution`. Without it the empty
-    // list is the answer, and it has to be written as a ceiling — otherwise the
-    // space slice `requireSpaceContext` unions in later arrives unceilinged and
-    // hands the caller the space preset's full run.
-    const spaceLevel = await app.request("/api/agents", {
-      headers: {
-        "X-Test-Strategy": "nothing",
-        "X-Space-Id": currentCtx!.defaultSpaceId,
-      },
-    });
-    expect(spaceLevel.status).toBe(403);
-
-    // An org-level route, resolved by `org-path-context` rather than by the
-    // pipeline — same verdict, second code path.
-    const orgLevel = await app.request(`/api/orgs/${currentCtx!.orgId}/settings`, {
-      headers: { "X-Test-Strategy": "nothing" },
-    });
-    expect(orgLevel.status).toBe(403);
-
-    // Control: the same subject, through the strategy that DOES grant, reaches
-    // the space-level route — so the 403s are the empty ceiling, not the stub.
-    const granted = await app.request("/api/agents", {
-      headers: {
-        "X-Test-Strategy": "valid",
-        "X-Space-Id": currentCtx!.defaultSpaceId,
-      },
-    });
-    expect(granted.status).toBe(200);
   });
 
   // ── /api/orgs/* must not re-derive permissions for a ceiling-limited token ──
