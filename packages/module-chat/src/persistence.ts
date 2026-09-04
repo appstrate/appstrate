@@ -51,7 +51,10 @@ function toContent(message: UIMessage): Record<string, unknown> {
  * into a space it never belonged to, so the read refuses instead and names the
  * script that fixes it. Same doctrine as `UnmigratedOrgRoleError`
  * (`NO_TRANSITIONAL_CODE.md` §1): the retired form fails loudly, never falls
- * back. Deleted with the `NOT NULL` migration in release N+1.
+ * back. The core-side twin lives in `apps/api/src/services/files.ts` (the
+ * platform reads `chat_sessions` too, and `module-chat` is optional, so it
+ * cannot import this one); keep the two in step and delete both in the release
+ * that retires the nullable column (RBAC spec §11, release N+1).
  */
 export class UnmigratedChatSessionError extends Error {
   readonly sessionId: string;

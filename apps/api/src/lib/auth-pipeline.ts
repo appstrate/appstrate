@@ -154,22 +154,23 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           const ceiling = new Set<string>(resolution.permissions);
           c.set("scopeCeiling", ceiling);
           c.set("permissions", applyOrgPermissions(c, resolution.orgRole, ceiling));
-        } else if (resolution.permissions.length > 0) {
+        } else if (!resolution.deferOrgResolution) {
+          // No org role, and not deferring: whatever the strategy computed IS
+          // the whole answer, empty list included. Writing the ceiling here is
+          // what makes an empty list mean "nothing", rather than "unceilinged"
+          // once `requireSpaceContext` unions the space slice.
           const ceiling = new Set<string>(resolution.permissions);
           c.set("scopeCeiling", ceiling);
           c.set("permissions", new Set(ceiling));
         }
-        // The remaining shape — no org role AND an empty list — writes NO
+        // The remaining shape — no org role, `deferOrgResolution` — writes NO
         // ceiling, deliberately. It is the "I have not resolved an org yet"
-        // answer, and only a `deferOrgResolution` strategy can give it: the
-        // OIDC instance token (`modules/oidc/auth/strategy.ts`,
-        // `resolveInstanceUser`), which is the CLI acting as the full user and
-        // picks its org through `X-Org-Id` exactly as a cookie session does.
-        // Writing an empty ceiling here would be a different decision — it
-        // would leave that caller with zero permissions in every org — so a
-        // strategy that means "nothing" must resolve an `orgRole` and pass an
-        // empty list, which the branch above already turns into a real,
-        // empty ceiling.
+        // answer, and today only the OIDC instance token gives it
+        // (`modules/oidc/auth/strategy.ts`, `resolveInstanceUser`): the CLI
+        // acting as the full user, picking its org through `X-Org-Id` exactly
+        // as a cookie session does. A strategy that means "nothing" must NOT
+        // set `deferOrgResolution` — the branch above then turns its empty list
+        // into a real, empty ceiling.
         c.set("authMethod", resolution.authMethod);
         if (resolution.spaceId !== undefined) {
           c.set("spaceId", resolution.spaceId);

@@ -162,7 +162,9 @@ async function validateSSEAuth(c: {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
       role: keyInfo.creatorRole,
-      canReadDebugLogs: grants.has("runs:delete"),
+      // From the CEILINGED set, not from `grants`: a key whose scopes stop at
+      // `runs:read` must not stream verbose logs just because its creator could.
+      canReadDebugLogs: permissions.has("runs:delete"),
       spaceId: keyInfo.spaceId,
     };
   }

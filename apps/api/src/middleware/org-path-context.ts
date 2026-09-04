@@ -31,6 +31,16 @@ async function orgPathContext(c: Context<AppEnv>, next: Next) {
   const orgId = c.req.param("orgId");
   if (!orgId) return next();
 
+  // A pinned org wins over the path, exactly as it wins over `X-Org-Id` in
+  // `requireOrgContext`, and it is checked for EVERY credential before anything
+  // else: a token scoped to org A whose holder is also a member of org B must
+  // not reach B by naming B in the URL — and that caller never reaches the
+  // derivation below, so checking it there would be checking nothing.
+  const pinned = c.get("orgId");
+  if (pinned && pinned !== orgId) {
+    throw forbidden("Path organization does not match authenticated organization");
+  }
+
   // Every other auth method already wrote a CEILING-LIMITED set (API-key scopes
   // ∩ creator role, a token's scope claim) and keeps it; overwriting it with the
   // membership row's full role set is a privilege escalation.

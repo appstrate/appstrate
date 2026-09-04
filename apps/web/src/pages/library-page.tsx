@@ -105,7 +105,12 @@ function LibraryMatrix({
   // which is the org-level catalog verb and would hide the checkboxes from
   // every space admin. One gate per tab is still correct on this cross-space
   // grid: a tab shows one type, and `can` reads the current space's set.
-  const canInstall = can(INSTALL_PERMISSION_BY_TYPE[type] ?? "agents:configure");
+  //
+  // An unmapped type renders no checkbox, matching the API's own fail-closed
+  // answer for a type with no install scope. A default here would offer a
+  // control whose request the server refuses.
+  const installPermission = INSTALL_PERMISSION_BY_TYPE[type];
+  const canInstall = installPermission !== undefined && can(installPermission);
   // Agents/skills treat a "system" package as globally available (locked on,
   // can't toggle). Integrations are different: they must be activated per
   // space even when system-sourced, so their system rows stay toggleable.

@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { z } from "zod";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
-import type { SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
+import type { CoreResource, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
@@ -35,7 +35,7 @@ import {
   assertOrgRole,
   effectivePermissions,
   orgPermissions as orgPermissionsFor,
-  type Resource,
+  type Action,
 } from "../lib/permissions.ts";
 import {
   loadSpaceMember,
@@ -203,10 +203,13 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
 // already draws between writing an agent and configuring one.
 type SpacePackageOp = "install" | "configure" | "uninstall";
 
-const SPACE_PACKAGE_PERMISSION: Record<
-  PackageType,
-  Record<SpacePackageOp, readonly [Resource, string]>
-> = {
+/**
+ * A `[resource, action]` pair whose action is checked against THAT resource —
+ * `["agents", "write"]` compiles, `["agents", "install"]` does not.
+ */
+type CoreGrant = { [R in CoreResource]: readonly [R, Action<R>] }[CoreResource];
+
+const SPACE_PACKAGE_PERMISSION = {
   agent: {
     install: ["agents", "configure"],
     configure: ["agents", "configure"],
@@ -227,29 +230,59 @@ const SPACE_PACKAGE_PERMISSION: Record<
     configure: ["integrations", "install"],
     uninstall: ["integrations", "uninstall"],
   },
-};
+} as const satisfies Record<PackageType, Record<SpacePackageOp, CoreGrant>>;
+
+/** Every string that could satisfy `op`, for the coarse gate below. */
+function grantsFor(op: SpacePackageOp): CoreGrant[] {
+  return Object.values(SPACE_PACKAGE_PERMISSION).map((byOp) => byOp[op]);
+}
+
+function guardFor<R extends CoreResource>(grant: readonly [R, Action<R>]) {
+  return requirePermission(grant[0], grant[1]);
+}
 
 /**
- * Enforce the per-type permission from INSIDE the handler.
+ * Gate a space-package write and resolve the package's type, in the order that
+ * keeps 403 and 404 independent of each other.
  *
- * Route-level middleware cannot: the resource depends on the package row, and
- * the row is only read once the handler runs. Reusing `requirePermission`
- * (rather than an inline `permissions.has`) keeps the denial audit hook, the
- * 403 shape and the fail-closed semantics identical to every other call site —
- * the same move `requirePackageReadPermission` makes in `routes/packages.ts`.
+ *   1. **Coarse gate, before any catalog read.** A caller holding none of the
+ *      four strings this op can require is refused without the row ever being
+ *      looked up, so it cannot tell an installed package from a package the org
+ *      does not have. This is the step that stops the route being an
+ *      enumeration oracle.
+ *   2. **Catalog lookup**, with the org/system predicate — a package the org
+ *      cannot see reads as absent, exactly as it does for the reader.
+ *   3. **Exact gate** for the resolved type.
  *
- * An unmapped type fails CLOSED.
+ * A residue remains at step 3 and is accepted: a caller holding `skills:write`
+ * but not `agents:configure` still tells an existing agent (403) from a missing
+ * one (404). That is inherent to gating per type, and it is a much narrower
+ * disclosure than "any authenticated space member can enumerate the catalog".
  */
-async function assertSpacePackagePermission(
+async function gateSpacePackageWrite(
   c: Context<AppEnv>,
-  type: string,
+  orgId: string,
+  packageId: string,
   op: SpacePackageOp,
-): Promise<void> {
-  const entry = SPACE_PACKAGE_PERMISSION[type as PackageType]?.[op];
-  if (!entry) {
+): Promise<PackageType> {
+  const held = c.get("permissions");
+  if (!grantsFor(op).some((grant) => held?.has(`${grant[0]}:${grant[1]}`))) {
+    throw forbidden(`Insufficient permissions: cannot ${op} a package in this space`);
+  }
+
+  const type = await getCatalogPackageType(orgId, packageId);
+  if (!type) throw notFound(`Package '${packageId}' not found in organization catalog`);
+
+  // Reusing `requirePermission` rather than an inline `has` keeps the denial
+  // audit hook, the 403 body and the fail-closed semantics identical to every
+  // other RBAC call site — the move `requirePackageReadPermission` makes in
+  // `routes/packages.ts`. An unmapped type fails CLOSED.
+  const grant = SPACE_PACKAGE_PERMISSION[type]?.[op];
+  if (!grant) {
     throw forbidden(`Insufficient permissions: no ${op} scope is defined for type '${type}'`);
   }
-  await requirePermission(entry[0], entry[1] as never)(c, async () => {});
+  await guardFor(grant)(c, async () => {});
+  return type;
 }
 
 export function createSpacesRouter() {
@@ -527,10 +560,7 @@ export function createSpacesRouter() {
     const spaceId = c.req.param("spaceId")!;
 
     const data = await readJsonBody(c, installPackageSchema);
-
-    const type = await getCatalogPackageType(orgId, data.packageId);
-    if (!type) throw notFound(`Package '${data.packageId}' not found in organization catalog`);
-    await assertSpacePackagePermission(c, type, "install");
+    await gateSpacePackageWrite(c, orgId, data.packageId, "install");
 
     await installPackage({ orgId, spaceId: spaceId }, data.packageId);
     const row = await getInstalledPackage({ orgId, spaceId: spaceId }, data.packageId);
@@ -566,10 +596,13 @@ export function createSpacesRouter() {
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
     const data = await readJsonBody(c, updatePackageSchema);
 
+    // Gate FIRST, unconditionally: the type comes from the catalog, not from
+    // the association row, so a caller with no authority never learns whether
+    // the package is installed. `requireInstalled` below turns a missing row
+    // into the 404, and only a caller who passed the gate can see it.
+    await gateSpacePackageWrite(c, orgId, packageId, "configure");
+
     const installed = await getInstalledPackage(scope, packageId);
-    // `requireInstalled` below turns a missing row into the 404; the type is
-    // read from the same row so the permission matches what is being changed.
-    if (installed) await assertSpacePackagePermission(c, installed.package_type, "configure");
     let generationConfig = data.generationConfig;
     if (installed && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : installed.modelId;
@@ -627,8 +660,7 @@ export function createSpacesRouter() {
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    const installed = await getInstalledPackage(scope, packageId);
-    if (installed) await assertSpacePackagePermission(c, installed.package_type, "uninstall");
+    await gateSpacePackageWrite(c, orgId, packageId, "uninstall");
     await uninstallPackage(scope, packageId);
     return c.body(null, 204);
   });

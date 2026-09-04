@@ -769,14 +769,13 @@ describe("realtime SSE routes (integration)", () => {
       }
     });
 
-    it("a non-admin subscriber does NOT receive debug-level run_log frames", async () => {
-      // Key created by a plain MEMBER → creatorRole "member" → isAdmin false.
-      // Pre-fix, the routes passed `isAdmin: true` for every subscriber, so
-      // the debug frame below reached this stream and the first collected
-      // event would be "debug-secret" — failing the assertion.
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-      const token = await seedSseKey({ createdBy: member.id, scopes: ["runs:read"] });
+    it("a key without `runs:delete` does NOT receive debug-level run_log frames", async () => {
+      // Debug visibility is `runs:delete` on the CEILINGED set — the key's
+      // scopes ∩ its creator's authority — not on the creator's authority
+      // alone. This key is minted by the org OWNER, who holds `runs:delete`,
+      // and asks for `runs:read` only: reading the grant instead of the ceiling
+      // is what would leak the debug frame below to it.
+      const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
 
       // `/api/realtime/runs` — no initial snapshot frame, keeps ordering simple.
       const res = await app.request(`/api/realtime/runs?token=${token}`);
@@ -812,9 +811,13 @@ describe("realtime SSE routes (integration)", () => {
       expect(JSON.parse(events[0]!.data).message).toBe("info-visible");
     });
 
-    it("an admin subscriber DOES receive debug-level run_log frames", async () => {
-      // Key created by the org OWNER → creatorRole "owner" → isAdmin true.
-      const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
+    it("a key WITH `runs:delete` DOES receive debug-level run_log frames", async () => {
+      // Same creator, same route, one extra scope — so the pair discriminates
+      // on the ceiling and on nothing else.
+      const token = await seedSseKey({
+        createdBy: ctx.user.id,
+        scopes: ["runs:read", "runs:delete"],
+      });
 
       const res = await app.request(`/api/realtime/runs?token=${token}`);
       expect(res.status).toBe(200);

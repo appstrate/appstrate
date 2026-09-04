@@ -5,7 +5,7 @@
  * packages within a space context.
  */
 
-import { eq, and, or, sql, isNotNull } from "drizzle-orm";
+import { eq, and, or, sql, isNotNull, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { notFound, conflict, parseBody } from "../lib/errors.ts";
@@ -148,9 +148,23 @@ export async function installPackage(scope: SpaceScope, packageId: string) {
 }
 
 export async function uninstallPackage(scope: SpaceScope, packageId: string): Promise<void> {
+  // The org predicate is the same one `getInstalledPackage` applies, and it
+  // belongs on the DELETE for the same reason: `space_packages` carries no
+  // `org_id`, so `(space_id, package_id)` alone would remove an association
+  // pointing at a package this org cannot see. A stray row of that shape reads
+  // as absent everywhere else; it must not be deletable here.
   const deleted = await db
     .delete(spacePackages)
-    .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)))
+    .where(
+      and(
+        eq(spacePackages.spaceId, scope.spaceId),
+        eq(spacePackages.packageId, packageId),
+        inArray(
+          spacePackages.packageId,
+          db.select({ id: packages.id }).from(packages).where(orgOrSystemFilter(scope.orgId)),
+        ),
+      ),
+    )
     .returning({ packageId: spacePackages.packageId });
 
   if (deleted.length === 0) {

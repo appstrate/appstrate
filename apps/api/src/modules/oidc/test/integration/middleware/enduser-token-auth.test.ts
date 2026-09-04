@@ -470,6 +470,42 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(denied.status).toBe(403);
   });
 
+  it("a token pinned to org A is refused on org B's path", async () => {
+    // `orgPathContext` must never overwrite a strategy-pinned org, for the
+    // reason `requireOrgContext` refuses a mismatched `X-Org-Id`: the holder is
+    // a member of both, and the token's consent scope is org A.
+    const { organizationMembers, organizations } = await import("@appstrate/db/schema");
+    await db.insert(organizationMembers).values({ userId: authUserId, orgId, role: "admin" });
+    const [orgB] = await db
+      .insert(organizations)
+      .values({ name: "Pinned Other", slug: "pinned-other-org", createdBy: authUserId })
+      .returning({ id: organizations.id });
+    await db
+      .insert(organizationMembers)
+      .values({ userId: authUserId, orgId: orgB!.id, role: "owner" });
+
+    const pinnedToA = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      scope: "openid org:settings",
+    });
+
+    const crossOrg = await app.request(`/api/orgs/${orgB!.id}/settings`, {
+      headers: { Authorization: `Bearer ${pinnedToA}` },
+    });
+    expect(crossOrg.status).toBe(403);
+
+    // Control: the SAME token on its own org passes, so the 403 is the pin and
+    // not the scope or the route.
+    const ownOrg = await app.request(`/api/orgs/${orgId}/settings`, {
+      headers: { Authorization: `Bearer ${pinnedToA}` },
+    });
+    expect(ownOrg.status).toBe(200);
+  });
+
   it("a dashboard token with identity-only scopes reaches no space-level route", async () => {
     // The token resolves an org role but asks for nothing beyond identity, so
     // `scopesToPermissions` returns an EMPTY set. That empty set is the

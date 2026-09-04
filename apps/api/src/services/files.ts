@@ -1352,18 +1352,22 @@ async function runContainerFilter(scope: SpaceScope, runId: string): Promise<SQL
  * became space-scoped, backfill not run.
  *
  * The core-side twin of module-chat's `UnmigratedChatSessionError`
- * (`packages/module-chat/src/persistence.ts`). It is duplicated rather than
- * imported because this is platform code and that is a module: a static import
- * would invert the dependency and make core unloadable without the module.
- * Both are deleted by `0057`, which makes the column `NOT NULL`.
+ * (`packages/module-chat/src/persistence.ts`), and duplicated on purpose:
+ * `module-chat` is optional (`MODULES`), so a static import here would pull a
+ * disabled module's code into platform boot. Keep the two in step — same
+ * message, same `sessionId` — and delete both in the release that retires the
+ * nullable column (RBAC spec §11, release N+1).
  */
 class UnmigratedChatSessionError extends Error {
+  readonly sessionId: string;
+
   constructor(sessionId: string) {
     super(
       `chat_sessions.space_id IS NULL for session '${sessionId}'; ` +
         `run scripts/migration/0008-org-viewer-to-guest.sql`,
     );
     this.name = "UnmigratedChatSessionError";
+    this.sessionId = sessionId;
   }
 }
 

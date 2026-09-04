@@ -8252,7 +8252,7 @@
     "public.org_role": {
       "name": "org_role",
       "schema": "public",
-      "values": ["owner", "admin", "member", "viewer", "guest"]
+      "values": ["owner", "admin", "member", "guest"]
     },
     "public.package_source": {
       "name": "package_source",

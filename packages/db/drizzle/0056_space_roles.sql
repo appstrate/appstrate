@@ -11,10 +11,12 @@
 --     `assertOrgRole` (`apps/api/src/lib/permissions.ts`) throws
 --     `UnmigratedOrgRoleError` naming that script rather than mapping the row
 --     to `guest`, which would silently change what those users reach.
---     `meta/0056_snapshot.json` therefore lists `viewer` BESIDE `guest` on
---     purpose: the snapshot describes the catalog this file leaves behind, and
---     a snapshot that omitted the value would make the next generated
---     migration try to recreate the type. `0057` removes it from both.
+--     `meta/0056_snapshot.json` deliberately does NOT list `viewer`: the
+--     snapshot tracks the CODE's enum (`packages/db/src/schema`), which is what
+--     drizzle-kit diffs against, so listing the value there would make every
+--     later `db:generate` emit an unguarded drop of it. The DB keeps `viewer`
+--     until the hand-written N+1 migration removes it — the same
+--     schema-ahead-of-data shape `docs/NO_TRANSITIONAL_CODE.md` §2 describes.
 --   * `chat_sessions.space_id` is NULLABLE. `0008` backfills it; `0057`
 --     promotes it. A NULL is refused by the chat module, never defaulted.
 --   * `oauth_clients_signup_role_check` is WIDENED, not replaced: `guest` is
