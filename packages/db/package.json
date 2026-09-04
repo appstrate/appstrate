@@ -27,15 +27,15 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/emails": "workspace:*",
     "@appstrate/env": "workspace:*",
-    "@aws-sdk/client-s3": "^3.1101.0",
-    "@aws-sdk/lib-storage": "^3.1101.0",
-    "@aws-sdk/s3-request-presigner": "^3.1101.0",
-    "@electric-sql/pglite": "^0.5.4",
-    "better-auth": "1.7.0-beta.4",
+    "@aws-sdk/client-s3": "^3.1121.0",
+    "@aws-sdk/lib-storage": "^3.1121.0",
+    "@aws-sdk/s3-request-presigner": "^3.1121.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "better-auth": "1.7.2",
     "drizzle-orm": "^0.45.2",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^9.0.6",
     "postgres": "^3.4.9",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1",
