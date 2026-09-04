@@ -11,7 +11,7 @@ import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/
 import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
-import { resolveApiKeyPermissions } from "../lib/permissions.ts";
+import { resolveApiKeyPermissions, resolvePermissions } from "../lib/permissions.ts";
 import { validateSpaceInOrg } from "../middleware/space-context.ts";
 import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
@@ -76,16 +76,25 @@ interface SSEAuthResult {
   orgId: string;
   role: OrgRole;
   /**
-   * Admin level derived from the resolved role (`admin`/`owner`), never
-   * hardcoded. Drives the subscriber filter's `isAdmin` flag — the only
-   * thing it gates is debug-level `run_log` visibility
-   * (services/realtime.ts).
+   * Whether the subscriber sees debug-level `run_log` events
+   * (services/realtime.ts) — the only thing this flag gates. Read from
+   * `runs:delete`, the admin-grade action of the run family: `runs:read`
+   * opens the stream for everyone, so it cannot discriminate here.
    */
-  isAdmin: boolean;
+  canReadDebugLogs: boolean;
   spaceId: string;
 }
 
-const isAdminRole = (role: OrgRole): boolean => role === "admin" || role === "owner";
+/**
+ * These SSE routes are exempt from the auth pipeline (`skipAuth` matches
+ * `/api/realtime/`), so the role's permission set is resolved here rather than
+ * read from the context. It is the ROLE's set, not the API key's ceiling:
+ * debug-log visibility follows the principal behind the stream, and narrowing
+ * it to the key's scopes would hide debug frames from a `runs:read`-only key
+ * that is allowed to see them today.
+ */
+const canReadDebugLogsForRole = (role: OrgRole): boolean =>
+  resolvePermissions(role).has("runs:delete");
 
 /**
  * Validate auth for SSE endpoints.
@@ -128,7 +137,7 @@ async function validateSSEAuth(c: {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
       role: keyInfo.creatorRole,
-      isAdmin: isAdminRole(keyInfo.creatorRole),
+      canReadDebugLogs: canReadDebugLogsForRole(keyInfo.creatorRole),
       spaceId: keyInfo.spaceId,
     };
   }
@@ -165,7 +174,7 @@ async function validateSSEAuth(c: {
     userId: session.user.id,
     orgId,
     role: rows[0].role,
-    isAdmin: isAdminRole(rows[0].role),
+    canReadDebugLogs: canReadDebugLogsForRole(rows[0].role),
     spaceId,
   };
 }
@@ -449,7 +458,7 @@ export function createRealtimeRouter() {
         runId,
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -475,7 +484,7 @@ export function createRealtimeRouter() {
         packageId,
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -497,7 +506,7 @@ export function createRealtimeRouter() {
       {
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },

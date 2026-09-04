@@ -1,26 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RBAC Permission Registry — role-grant matrix + API-key allowlist.
+ * RBAC Permission Registry — org-role matrix, space-role presets, API-key
+ * allowlist.
  *
- * The resource catalog itself (`CoreResources`, `CoreResource`,
- * `requireCorePermission`) lives in `@appstrate/core/permissions` so both
- * core routes and externally-published modules can type-check against the
- * same surface without pulling in the API package. This file only holds
- * the runtime role→permissions matrix and the core API-key allowlist —
- * coupled to the auth pipeline, not shippable from npm.
+ * The resource catalog itself (`CoreResources`, `CoreResource`, the level
+ * table, `requireCorePermission`) lives in `@appstrate/core/permissions` so
+ * both core routes and externally-published modules can type-check against
+ * the same surface without pulling in the API package. This file only holds
+ * the runtime policy — who gets what — which is coupled to the auth pipeline
+ * and not shippable from npm.
+ *
+ * ## Two levels, one Set
+ *
+ * Every permission belongs to exactly one level (RBAC spec §3.4). An org role
+ * grants org-level strings (`ORG_ROLE_PERMISSIONS`); a space role grants
+ * space-level ones (`SPACE_PRESET_PERMISSIONS`). `resolvePermissions` unions
+ * the two, so `c.get("permissions")` and every guard keep the exact shape they
+ * had. Until Phase 2 gives spaces their own membership rows, the preset an
+ * org role holds is fixed by `IMPLICIT_PRESET_BY_ORG_ROLE`.
  *
  * ## Core vs module resources
  *
- * Every resource name in `OWNER_PERMISSIONS` / `API_KEY_ALLOWED_SCOPES`
- * below is a **core** resource (i.e. one declared on
+ * Every resource named below is a **core** resource (i.e. one declared on
  * `CoreResources`). Built-in modules (`webhooks`, `oidc`) and
  * external modules contribute their resources at runtime through
  * `AppstrateModule.permissionsContribution()` (paired with declaration
  * merging on `ModuleResources` for compile-time narrowing).
  * Contributions are aggregated at boot by `collectModulePermissions()`
  * and merged into:
- *   - `resolvePermissions(role)` — role-specific grants
+ *   - `resolvePermissions(role)` — org-level entries by role, space-level
+ *     entries by preset
  *   - `getApiKeyAllowedScopes()` — when `apiKeyGrantable: true`
  *   - `getModuleEndUserAllowedScopes()` — when `endUserGrantable: true`
  *
@@ -43,8 +53,14 @@ import {
   type CoreAction,
   type CorePermission,
   type ModulePermission,
+  type OrgLevelPermission,
   type OrgRole,
+  type SpaceLevelPermission,
+  type SpaceRolePreset,
+  ORG_LEVEL_PERMISSIONS,
+  SPACE_LEVEL_PERMISSIONS,
   getModuleRoleScopes,
+  getModulePresetScopes,
   getModuleApiKeyScopes,
 } from "@appstrate/core/permissions";
 
@@ -74,153 +90,133 @@ export type Action<R extends Resource = Resource> = R extends CoreResource
 export type Permission = CorePermission | ModulePermission;
 
 // ---------------------------------------------------------------------------
-// Role → Permission matrix
+// Org roles → org-level permissions (RBAC spec §3.2)
+//
+// Only ORG-LEVEL strings live here — the type makes a space-level string a
+// compile error. What an org role reaches inside a space comes from the
+// space-role preset it maps to (below), which is what lets a later phase
+// swap the implicit mapping for an explicit `space_members` row without
+// touching this table.
 // ---------------------------------------------------------------------------
 
-/** All permissions for the owner role (all permissions). */
-const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
-  // Organization
-  "org:read",
-  "org:update",
-  "org:delete",
-  "members:read",
-  "members:invite",
-  "members:remove",
-  "members:change-role",
-  // Agents
-  "agents:read",
-  "agents:write",
-  "agents:configure",
-  "agents:delete",
-  "agents:run",
-  // Skills
-  "skills:read",
-  "skills:write",
-  "skills:delete",
-  // Runs
-  "runs:read",
-  "runs:cancel",
-  "runs:delete",
-  // Files (read mirrors `runs:read`; delete is owner/admin or the doc's creator)
-  "files:read",
-  "files:delete",
-  // MCP servers (AFPS §3.4 — browse/import/delete, no editor)
-  "mcp-servers:read",
-  "mcp-servers:write",
-  "mcp-servers:delete",
-  // Schedules
-  "schedules:read",
-  "schedules:write",
-  "schedules:delete",
-  // Persistence (unified checkpoints + memories)
-  "persistence:read",
-  "persistence:delete",
-  // Infrastructure
-  "models:read",
-  "models:write",
-  "models:delete",
-  "model-provider-credentials:read",
-  "model-provider-credentials:write",
-  "model-provider-credentials:delete",
-  "proxies:read",
-  "proxies:write",
-  "proxies:delete",
-  // Developer tools
-  "api-keys:read",
-  "api-keys:create",
-  "api-keys:revoke",
-  "spaces:read",
-  "spaces:write",
-  "spaces:delete",
-  "end-users:read",
-  "end-users:write",
-  "end-users:delete",
-  // Credential proxy (BYOI — see API_KEY_ALLOWED_SCOPES note below)
-  "credential-proxy:call",
-  // LLM proxy (remote-backed CLI execution — see API_KEY_ALLOWED_SCOPES note below)
-  "llm-proxy:call",
-  // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
-  "integrations:read",
-  "integrations:write",
-  "integrations:delete",
-  "integrations:install",
-  "integrations:uninstall",
-  "integrations:connect",
-  "integrations:disconnect",
-]);
+/**
+ * Owner: every org-level permission, derived from the core catalog rather
+ * than re-listed — a new org-level resource reaches the owner the moment it
+ * is declared, instead of silently reaching nobody.
+ */
+const OWNER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = ORG_LEVEL_PERMISSIONS;
 
-/** Admin: everything except deleting the organization. */
-const ADMIN_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>(
-  [...OWNER_PERMISSIONS].filter((p) => p !== "org:delete"),
+/**
+ * Admin: everything except deleting the organization and renaming it.
+ * `org:update` (name/slug) is owner-only per RBAC spec §3.4 — it is the org's
+ * identity, and the route that writes it has always been owner-gated.
+ */
+const ADMIN_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>(
+  [...OWNER_ORG_PERMISSIONS].filter((p) => p !== "org:delete" && p !== "org:update"),
 );
 
-/** Member: use the platform — run agents, manage own connections, schedules. */
-const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
-  // Organization (read only)
+/** Member: read the org and its infrastructure; run completions. */
+const MEMBER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>([
   "org:read",
   "members:read",
-  // Agents (read + run, no write/configure/delete)
-  "agents:read",
-  "agents:run",
-  // Skills (read only)
-  "skills:read",
-  // MCP servers (read only — import/delete is admin)
-  "mcp-servers:read",
-  // Runs (read + cancel own)
-  "runs:read",
-  "runs:cancel",
-  // Files (read only — deleting is owner/admin, or the creator via the
-  // per-file capability check, which needs no grant)
-  "files:read",
-  // Schedules (read only — creating/editing schedules, incl. choosing the
-  // execution identity, is an admin/owner operation; #738).
-  "schedules:read",
-  // Persistence (read only — unified checkpoints + memories)
-  "persistence:read",
-  // Integrations (members can browse + self-connect their connections;
-  // install/uninstall is admin)
-  "integrations:read",
-  "integrations:connect",
-  "integrations:disconnect",
-  // Infrastructure (read only, except model-provider-credentials which is admin-only)
+  "spaces:read",
   "models:read",
   "proxies:read",
-  // LLM proxy — members run completions through the platform with the org's
-  // configured models (powers first-party chat / remote CLI for ordinary
-  // members, not just admins). Usage metered per call in `llm_usage`.
+  // Members run completions through the platform with the org's configured
+  // models (powers first-party chat / remote CLI for ordinary members, not
+  // just admins). Usage metered per call in `llm_usage`.
   "llm-proxy:call",
-  // Developer tools
-  "spaces:read",
-  "end-users:read",
-  "end-users:write",
 ]);
 
-/** Viewer: read-only on everything visible. */
-const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+/** Viewer: read-only on the org surface. */
+const VIEWER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>([
   "org:read",
   "members:read",
-  "agents:read",
-  "skills:read",
-  "mcp-servers:read",
-  "runs:read",
-  // Aligned with `runs:read` — a viewer that can read a run can read the
-  // files that run produced (the container ACL still applies per row).
-  "files:read",
-  "schedules:read",
-  "persistence:read",
+  "spaces:read",
   "models:read",
   "proxies:read",
-  "spaces:read",
-  "end-users:read",
-  "integrations:read",
 ]);
 
-/** Role → core-permissions mapping. Module contributions are layered on top via the provider hook below. */
-const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
-  owner: OWNER_PERMISSIONS,
-  admin: ADMIN_PERMISSIONS,
-  member: MEMBER_PERMISSIONS,
-  viewer: VIEWER_PERMISSIONS,
+/** Org role → org-level permissions. Module org grants are layered on at resolve time. */
+const ORG_ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<OrgLevelPermission>> = {
+  owner: OWNER_ORG_PERMISSIONS,
+  admin: ADMIN_ORG_PERMISSIONS,
+  member: MEMBER_ORG_PERMISSIONS,
+  viewer: VIEWER_ORG_PERMISSIONS,
+};
+
+// ---------------------------------------------------------------------------
+// Space-role presets → space-level permissions (RBAC spec §3.3)
+//
+// Constants, not rows: a new space-level permission joins the right preset in
+// the same commit that adds it, with no data migration. The type makes an
+// org-level string a compile error, so the two halves cannot leak into each
+// other.
+// ---------------------------------------------------------------------------
+
+/**
+ * `admin`: run the space — every space-level permission, derived from the
+ * core catalog for the same reason the owner set is.
+ */
+const ADMIN_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = SPACE_LEVEL_PERMISSIONS;
+
+/** Families a `builder` authors and operates with, but does not govern. */
+const BUILDER_EXCLUDED_PREFIXES = ["space-settings:", "space-members:", "api-keys:"] as const;
+
+/** `builder`: author and operate — admin minus the governance surfaces. */
+const BUILDER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>(
+  [...ADMIN_PRESET_PERMISSIONS].filter(
+    (p) => !BUILDER_EXCLUDED_PREFIXES.some((prefix) => p.startsWith(prefix)),
+  ),
+);
+
+/** `operator`: use what is built — run agents, manage own connections. */
+const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
+  new Set<SpaceLevelPermission>([
+    "agents:read",
+    "agents:run",
+    "skills:read",
+    "mcp-servers:read",
+    "runs:read",
+    "runs:cancel",
+    // Files (read only — deleting is preset admin, or the creator via the
+    // per-file capability check, which needs no grant)
+    "files:read",
+    // Schedules (read only — creating/editing schedules, incl. choosing the
+    // execution identity, is a governance operation; #738).
+    "schedules:read",
+    "persistence:read",
+    // Browse the catalog + self-connect; install/uninstall is preset admin.
+    "integrations:read",
+    "integrations:connect",
+    "integrations:disconnect",
+    "end-users:read",
+    "end-users:write",
+  ]);
+
+/** `viewer`: look — the `:read` actions of `operator`. */
+const VIEWER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>(
+  [...OPERATOR_PRESET_PERMISSIONS].filter((p) => p.endsWith(":read")),
+);
+
+/** Space-role preset → space-level permissions. Module preset grants layered on at resolve time. */
+const SPACE_PRESET_PERMISSIONS: Record<SpaceRolePreset, ReadonlySet<SpaceLevelPermission>> = {
+  admin: ADMIN_PRESET_PERMISSIONS,
+  builder: BUILDER_PRESET_PERMISSIONS,
+  operator: OPERATOR_PRESET_PERMISSIONS,
+  viewer: VIEWER_PRESET_PERMISSIONS,
+};
+
+/**
+ * Space preset an org role holds implicitly, until Phase 2 replaces this with
+ * `space_members` rows and a per-space resolver. Owner/admin run every space;
+ * a member uses what is built; a viewer looks.
+ */
+const IMPLICIT_PRESET_BY_ORG_ROLE: Record<OrgRole, SpaceRolePreset> = {
+  owner: "admin",
+  admin: "admin",
+  member: "operator",
+  viewer: "viewer",
 };
 
 // ---------------------------------------------------------------------------
@@ -310,14 +306,18 @@ export function getApiKeyAllowedScopes(): ReadonlySet<string> {
 }
 
 /**
- * Resolve an org role to its full permission set — core grants merged
- * with any module-contributed grants for that role.
+ * Resolve an org role to its full permission set: its org-level grants union
+ * the space-level grants of the preset it implicitly holds, with module
+ * contributions merged into each half.
  */
 export function resolvePermissions(role: OrgRole): Set<Permission> {
-  const core = ROLE_PERMISSIONS[role];
-  const mod = getModuleRoleScopes(role);
-  if (mod.size === 0) return new Set(core);
-  return new Set<Permission>([...core, ...(mod as ReadonlySet<Permission>)]);
+  const preset = IMPLICIT_PRESET_BY_ORG_ROLE[role];
+  return new Set<Permission>([
+    ...ORG_ROLE_PERMISSIONS[role],
+    ...(getModuleRoleScopes(role) as ReadonlySet<Permission>),
+    ...SPACE_PRESET_PERMISSIONS[preset],
+    ...(getModulePresetScopes(preset) as ReadonlySet<Permission>),
+  ]);
 }
 
 /**

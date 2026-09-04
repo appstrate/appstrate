@@ -317,13 +317,14 @@ export function createAgentsRouter() {
     requirePermission("integrations", "read"),
     async (c) => {
       const agent = c.get("package");
-      const role = c.get("orgRole");
       return c.json(
         await resolveAgentConnectionReadiness({
           scope: getSpaceScope(c),
           agentPackageId: agent.id,
           actor: getActor(c),
-          isAdmin: role === "owner" || role === "admin",
+          // Drives `can_add_connection`: the same exemption the connect route
+          // applies, so the badge cannot promise what the mutation refuses.
+          canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           version: c.req.query("version"),
         }),
       );
@@ -444,13 +445,15 @@ export function createAgentsRouter() {
       // their own actor's view through this endpoint.
       const callerScope = scopeFromActor(getActor(c));
 
-      // Optional explicit scope override (admin only — the requirePermission
-      // gate above gates the route; a member who somehow had `persistence:read`
-      // would still see only their own data because we don't honour overrides
-      // for members. Guard:
-      const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
+      // Optional explicit scope override. `persistence:read` gates the route
+      // and every role holds it, so the cross-actor view is gated on
+      // `persistence:delete` instead — the admin-grade action of this family.
+      // Everyone else stays narrowed to their own actor scope.
+      const canReadEveryActor = c.get("permissions")?.has("persistence:delete") ?? false;
 
-      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
+      const scopeOverride = canReadEveryActor
+        ? scopeFromQueryParams(actorTypeParam, actorIdParam)
+        : null;
       const scope = scopeOverride ?? callerScope;
 
       const wantsPinned = !kindParam || kindParam === "pinned";
@@ -459,9 +462,10 @@ export function createAgentsRouter() {
         throw invalidRequest("kind must be 'pinned' or 'memory'");
       }
 
-      // Admins inspecting at agent-level (no scope override, no runId) see
-      // every actor's pinned slots; everyone else is narrowed to their scope.
-      const pinnedScope = isAdmin && !scopeOverride ? undefined : scope;
+      // A cross-actor reader inspecting at agent-level (no scope override, no
+      // runId) sees every actor's pinned slots; everyone else is narrowed to
+      // their scope.
+      const pinnedScope = canReadEveryActor && !scopeOverride ? undefined : scope;
 
       const [pinned, memories] = await Promise.all([
         wantsPinned
@@ -564,15 +568,17 @@ export function createAgentsRouter() {
       const actorTypeParam = c.req.query("actor_type");
       const actorIdParam = c.req.query("actor_id");
 
-      // Same actor-override guard the GET path applies: only admins/owners may
-      // target another actor's rows (or omit the scope to bulk-wipe every
-      // actor). A member — even one holding `persistence:delete` — is narrowed
-      // to their own actor scope, so they cannot delete another actor's
+      // Same actor-override guard the GET path applies: only a holder of
+      // `persistence:delete` may target another actor's rows (or omit the
+      // scope to bulk-wipe every actor). Everyone else is narrowed to their
+      // own actor scope, so they cannot delete another actor's
       // memories/checkpoints by supplying an arbitrary actor_type / actor_id.
       const callerScope = scopeFromActor(getActor(c));
-      const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
-      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
-      const scope = isAdmin ? (scopeOverride ?? undefined) : callerScope;
+      const canTouchEveryActor = c.get("permissions")?.has("persistence:delete") ?? false;
+      const scopeOverride = canTouchEveryActor
+        ? scopeFromQueryParams(actorTypeParam, actorIdParam)
+        : null;
+      const scope = canTouchEveryActor ? (scopeOverride ?? undefined) : callerScope;
 
       let memoriesDeleted = 0;
       let checkpointDeleted = false;

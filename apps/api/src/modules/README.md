@@ -127,9 +127,18 @@ const tasksModule: AppstrateModule = {
     {
       resource: "tasks",
       actions: ["read", "write"],
-      grantTo: ["owner", "admin", "member"],
+      // Space-level: the rows carry a `space_id`, so space roles grant it.
+      level: "space",
+      presets: ["admin", "builder", "operator"],
       apiKeyGrantable: true, // can be carried by API keys
       endUserGrantable: true, // can be carried by end-user OIDC tokens
+    },
+    {
+      resource: "task-settings",
+      actions: ["write"],
+      // Org-level: one row per org, so org roles grant it.
+      level: "org",
+      grantTo: ["owner", "admin"],
     },
   ],
   // ...
@@ -152,9 +161,17 @@ router.post(
 
 The built-in modules that contribute permissions (`webhooks`, `oidc`, `mcp`) use this pattern — read their `index.ts` + `routes.ts` for reference.
 
-**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, role validity) and aggregates them into:
+`level` is the discriminant (RBAC spec §3.4). Every permission string belongs
+to exactly one level: `level: "org"` takes `grantTo` (org roles) and
+`level: "space"` takes `presets` (space-role presets — `admin`, `builder`,
+`operator`, `viewer`). There is no default and no fallback; pick the level from
+where the resource's rows live. Listing the same resource twice with different
+`actions` is how per-action granularity is expressed, and both entries must
+declare the same level.
 
-- `resolvePermissions(role)` — module entries for the listed roles are written into the per-role permission Set returned to the auth pipeline.
+**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity) and aggregates them into:
+
+- `resolvePermissions(role)` — module entries reach the roles that hold the listed org role or the listed space preset.
 - `getApiKeyAllowedScopes()` — entries with `apiKeyGrantable: true` become grantable through API keys (filtered against the creator's role at issuance).
 - `getModuleEndUserAllowedScopes()` — entries with `endUserGrantable: true` are accepted on end-user OIDC JWTs (in addition to the built-in `OIDC_ALLOWED_SCOPES`). Defaults to `false` — admin / destructive surfaces stay closed to embedding apps.
 
@@ -166,7 +183,7 @@ Core routes use `requirePermission` (apps/api-internal, union-typed against core
 
 ### Adding a new core resource
 
-Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → edit `CORE_RESOURCE_NAMES` in the same file (drift caught by a unit test) → wire the role grants + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
+Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → add its actions to `CORE_RESOURCE_ACTIONS` and its level to `CORE_RESOURCE_LEVELS` in the same file (drift caught by the `satisfies` clauses plus a unit test) → wire the org-role grants or space-role presets + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
 
 ## Model providers
 

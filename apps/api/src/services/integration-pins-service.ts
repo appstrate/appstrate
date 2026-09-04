@@ -12,10 +12,9 @@
  * uniqueness key — OAuth and api_key connections are interchangeable at
  * runtime.
  *
- * All admin-only operations — the route layer enforces
- * `requirePermission("integrations", "install")` plus an org admin/owner check
- * (`assertOrgAdmin` in `routes/integrations.ts`); this layer assumes the caller
- * already has the role.
+ * All governance operations — the route layer enforces
+ * `requirePermission("integrations", "configure")`; this layer assumes the
+ * caller already holds it.
  */
 
 import { and, eq, isNull, sql } from "drizzle-orm";
@@ -622,7 +621,7 @@ async function resolveAgentIntegrationPick(args: {
   agentPackageId: string;
   integrationId: string;
   actor: Actor;
-  isAdmin: boolean;
+  canConfigureIntegrations: boolean;
   /** The manifest of the version under inspection — never re-read from the package. */
   agentManifest: Record<string, unknown>;
   /** Agent-level `includeInert: true` cascade, resolved once for every integration. */
@@ -632,7 +631,15 @@ async function resolveAgentIntegrationPick(args: {
   /** Shared integration-manifest memo, so N integrations cost N fetches, not N². */
   manifestCache: IntegrationManifestCache;
 }): Promise<IntegrationAgentResolution> {
-  const { scope, agentPackageId, integrationId, actor, isAdmin, agentManifest, resolution } = args;
+  const {
+    scope,
+    agentPackageId,
+    integrationId,
+    actor,
+    canConfigureIntegrations,
+    agentManifest,
+    resolution,
+  } = args;
 
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
   // AFPS §4.4 — preserve the wildcard literal `"*"` so `missingScopesForConnection`
@@ -736,7 +743,7 @@ async function resolveAgentIntegrationPick(args: {
     member_pinned_connection_id: memberPinnedConnectionId,
     org_default_connection_id: orgDefaultConnectionId,
     org_default_enforced: orgDefaultEnforced,
-    can_add_connection: isAdmin || !blocked,
+    can_add_connection: canConfigureIntegrations || !blocked,
     candidates,
   };
 }
@@ -772,7 +779,7 @@ export async function resolveAgentConnectionReadiness(args: {
   scope: SpaceScope;
   agentPackageId: string;
   actor: Actor;
-  isAdmin: boolean;
+  canConfigureIntegrations: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag).
    * Omitted ⇒ `draft` — preserves the launch-badge default. Any other value
@@ -781,7 +788,7 @@ export async function resolveAgentConnectionReadiness(args: {
    */
   version?: string;
 }): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, actor, isAdmin, version } = args;
+  const { scope, agentPackageId, actor, canConfigureIntegrations, version } = args;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   // Resolve the effective definition for the selected version. `draft`/omitted
@@ -859,7 +866,7 @@ export async function resolveAgentConnectionReadiness(args: {
         agentPackageId: agent.id,
         integrationId: e.id,
         actor,
-        isAdmin,
+        canConfigureIntegrations,
         agentManifest,
         resolution: pickResolution,
         memberPins,

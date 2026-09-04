@@ -16,11 +16,15 @@ describe("resolvePermissions", () => {
     expect(perms.has("agents:write")).toBe(true);
   });
 
-  it("admin can change member roles but cannot delete the organization", () => {
+  it("admin manages members and settings but never the org's identity", () => {
     const perms = resolvePermissions("admin");
     expect(perms.has("org:delete")).toBe(false);
+    // Renaming/re-slugging is owner-only (RBAC spec §3.4). The matrix used to
+    // grant it, but nothing read the matrix — `PUT /api/orgs/:orgId` was
+    // owner-gated by role name — so the entry was unreachable and wrong.
+    expect(perms.has("org:update")).toBe(false);
+    expect(perms.has("org:settings")).toBe(true);
     expect(perms.has("members:change-role")).toBe(true);
-    expect(perms.has("org:update")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("members:invite")).toBe(true);
   });

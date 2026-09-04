@@ -19,8 +19,11 @@ import { isValidRange, matchVersion } from "@appstrate/core/semver";
 import { getEnv } from "@appstrate/env";
 import {
   CORE_RESOURCE_NAMES,
+  ORG_ROLES,
+  SPACE_ROLE_PRESETS,
   setModulePermissionsProvider,
   type OrgRole,
+  type SpaceRolePreset,
   type ModulePermissionsSnapshot,
 } from "@appstrate/core/permissions";
 import { fileURLToPath } from "node:url";
@@ -382,11 +385,13 @@ const MODULE_RBAC_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
  *   - resource collision between two modules
  *   - action name format
  *   - empty `actions` (would contribute nothing)
- *   - empty `grantTo` (legal — declares the resource without granting it,
- *     useful when API-key-only access is intended; we just warn-log)
+ *   - one `level` per resource across all of a module's entries
+ *   - `grantTo` / `presets` name a known org role / space preset
+ *   - an empty `grantTo`/`presets` is legal (declares the resource without
+ *     granting it, useful when API-key-only access is intended) — warn-logged
  *
  * Returns the snapshot in `ModulePermissionsSnapshot` shape — Sets keyed
- * by role plus the API-key allowlist union.
+ * by org role and by space preset, plus the API-key allowlist union.
  */
 export function collectModulePermissions(
   modules: readonly AppstrateModule[],
@@ -397,33 +402,45 @@ export function collectModulePermissions(
     member: new Set(),
     viewer: new Set(),
   };
+  const byPreset: Record<SpaceRolePreset, Set<string>> = {
+    admin: new Set(),
+    builder: new Set(),
+    operator: new Set(),
+    viewer: new Set(),
+  };
   const apiKeyAllowed = new Set<string>();
   const endUserAllowed = new Set<string>();
   const ownerByResource = new Map<string, string>(); // resource → first module that claimed it
+  const levelByResource = new Map<string, "org" | "space">();
 
   for (const mod of modules) {
     const contributions = mod.permissionsContribution?.();
     if (!contributions) continue;
     for (const entry of contributions) {
-      validateContribution(entry, mod.manifest.id, ownerByResource);
+      validateContribution(entry, mod.manifest.id, ownerByResource, levelByResource);
       for (const action of entry.actions) {
         const perm = `${entry.resource}:${action}`;
-        for (const role of entry.grantTo) byRole[role].add(perm);
+        if (entry.level === "org") {
+          for (const role of entry.grantTo) byRole[role].add(perm);
+        } else {
+          for (const preset of entry.presets) byPreset[preset].add(perm);
+        }
         if (entry.apiKeyGrantable) apiKeyAllowed.add(perm);
         if (entry.endUserGrantable) endUserAllowed.add(perm);
       }
     }
   }
 
-  return { byRole, apiKeyAllowed, endUserAllowed };
+  return { byRole, byPreset, apiKeyAllowed, endUserAllowed };
 }
 
 function validateContribution(
   entry: ModulePermissionContribution,
   moduleId: string,
   ownerByResource: Map<string, string>,
+  levelByResource: Map<string, "org" | "space">,
 ): void {
-  const { resource, actions, grantTo } = entry;
+  const { resource, actions, level } = entry;
 
   if (!MODULE_RBAC_NAME_PATTERN.test(resource)) {
     throw new Error(
@@ -446,6 +463,25 @@ function validateContribution(
   }
   ownerByResource.set(resource, moduleId);
 
+  // One resource lives at one level. Two entries disagreeing would put half
+  // the actions in the org slice and half in the presets, so a role would
+  // hold `read` but never `write` with nothing failing at boot.
+  if (level !== "org" && level !== "space") {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown level ` +
+        `${JSON.stringify(level)}. Expected "org" or "space".`,
+    );
+  }
+  const previousLevel = levelByResource.get(resource);
+  if (previousLevel && previousLevel !== level) {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} at level ` +
+        `${JSON.stringify(previousLevel)} and ${JSON.stringify(level)}. ` +
+        `Every entry for one resource must declare the same level.`,
+    );
+  }
+  levelByResource.set(resource, level);
+
   if (!Array.isArray(actions) || actions.length === 0) {
     throw new Error(
       `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with no actions.`,
@@ -460,17 +496,45 @@ function validateContribution(
     }
   }
 
-  if (!Array.isArray(grantTo)) {
-    throw new Error(
-      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with non-array grantTo.`,
+  if (entry.level === "org") {
+    assertGrantList(
+      entry.grantTo,
+      "grantTo",
+      ORG_ROLES as readonly string[],
+      moduleId,
+      resource,
+      "org role",
+    );
+  } else {
+    assertGrantList(
+      entry.presets,
+      "presets",
+      SPACE_ROLE_PRESETS as readonly string[],
+      moduleId,
+      resource,
+      "space-role preset",
     );
   }
-  const allowedRoles = new Set<string>(["owner", "admin", "member", "viewer"]);
-  for (const role of grantTo) {
-    if (!allowedRoles.has(role)) {
+}
+
+function assertGrantList(
+  values: unknown,
+  field: "grantTo" | "presets",
+  allowed: readonly string[],
+  moduleId: string,
+  resource: string,
+  label: string,
+): void {
+  if (!Array.isArray(values)) {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with non-array ${field}.`,
+    );
+  }
+  for (const value of values) {
+    if (!allowed.includes(value as string)) {
       throw new Error(
-        `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown role ` +
-          `${JSON.stringify(role)}. Expected one of owner|admin|member|viewer.`,
+        `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown ` +
+          `${label} ${JSON.stringify(value)} in ${field}. Expected one of ${allowed.join("|")}.`,
       );
     }
   }

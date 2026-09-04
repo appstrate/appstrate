@@ -336,6 +336,42 @@ describe("Organizations API", () => {
       expect(body).not.toHaveProperty("created_by");
       expect(body).not.toHaveProperty("updatedAt");
     });
+
+    it("403s an admin — renaming the org is owner-only (org:update)", async () => {
+      // The route reads `org:update` from the matrix now; before Phase 1 it
+      // compared the role name. `admin` therefore must NOT hold `org:update`,
+      // or the conversion would have widened who can re-slug the org.
+      const ctx = await createTestContext({ orgSlug: "ownerorg" });
+      const admin = await createTestUser();
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Admin Rename" }),
+      });
+      expect(res.status).toBe(403);
+
+      // Discriminating control: the same admin CAN write the settings, so the
+      // 403 is about `org:update`, not about admins being locked out of the
+      // org routes wholesale.
+      const settings = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ dashboard_sso_enabled: true }),
+      });
+      expect(settings.status).toBe(200);
+    });
+
+    it("200s the owner on the same request", async () => {
+      const ctx = await createTestContext({ orgSlug: "ownerok" });
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Owner Rename" }),
+      });
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("PUT /api/orgs/:orgId/settings — api_version", () => {

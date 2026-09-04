@@ -14,8 +14,7 @@
  *   PUT    /api/integrations/:packageId/pins/:agentPackageId
  *   DELETE /api/integrations/:packageId/pins/:agentPackageId
  *          Admin org-level pins (sharedWithOrg-required, layer 1 of the
- *          resolver cascade). Admin-only via `requirePermission` +
- *          `assertOrgAdmin` defence-in-depth.
+ *          resolver cascade). Gated on `integrations:configure`.
  *
  *   GET    /api/integrations/:packageId/pins
  *          List all admin pins for an integration.
@@ -302,7 +301,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(res.status).toBe(400);
     });
 
-    it("DENY: non-admin member gets 403 (defence-in-depth assertOrgAdmin)", async () => {
+    it("DENY: non-admin member gets 403 (lacks integrations:configure)", async () => {
       const connId = await seedSharedConnection();
 
       // Seed a second user + add them as a regular `member` of the same org.
@@ -324,8 +323,8 @@ describe("/api/integrations/:packageId admin surface", () => {
         body: JSON.stringify({ connection_id: connId }),
       });
 
-      // RBAC denies via integrations:install scope OR assertOrgAdmin
-      // throws — either way the route refuses.
+      // A member's space preset (`operator`) does not hold
+      // `integrations:configure`, so the guard refuses.
       expect([401, 403]).toContain(res.status);
     });
 

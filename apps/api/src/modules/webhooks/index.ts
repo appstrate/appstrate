@@ -29,15 +29,22 @@ import {
 import { webhooksPaths } from "./openapi/paths.ts";
 import { webhooksSchemas } from "./openapi/schemas.ts";
 
-// Register `webhooks` as a module-owned RBAC resource. The declaration
-// merging on `ModuleResources` re-enters the typed Resource
+// Register the two webhook RBAC resources. A webhook is scoped at either
+// level (`level: "org" | "space"`), and the two halves are not the same
+// grant: an org-level webhook fires for every space, so it belongs to the
+// org roles, while a space-pinned one belongs to the space's own roles.
+// One resource for both would make "may administer this space's webhooks"
+// indistinguishable from "may fan out across every space in the org".
+//
+// The declaration merging on `ModuleResources` re-enters the typed Resource
 // union consumed by `apps/api/src/middleware/require-permission.ts` and
 // by the standalone `requireModulePermission` helper in core, so
 // `requirePermission("webhooks", "write")` and
-// `requireModulePermission("webhooks", "write")` stay fully narrowed.
+// `requireModulePermission("org-webhooks", "write")` stay fully narrowed.
 declare module "@appstrate/core/permissions" {
   interface ModuleResources {
     webhooks: "read" | "write" | "delete";
+    "org-webhooks": "read" | "write" | "delete";
   }
 }
 
@@ -95,18 +102,28 @@ const webhooksModule: AppstrateModule = {
 
   features: { webhooks: true },
 
-  // RBAC contribution: webhooks is admin-tier. No member/viewer access —
-  // webhook secrets and delivery data are sensitive (org integrations,
-  // downstream systems). API keys can carry the scope (`apiKeyGrantable`)
-  // since headless deployments need programmatic webhook management.
-  // End-user OIDC tokens are denied (`endUserGrantable` stays false) —
+  // RBAC contribution: webhooks stay admin-tier at both levels. Webhook
+  // secrets and delivery data are sensitive (org integrations, downstream
+  // systems), so the space half reaches the `admin` and `builder` presets
+  // only — `operator`/`viewer` get nothing, matching the org-role matrix this
+  // replaced. Only the SPACE half is API-key-grantable: a key always resolves
+  // to a `SpaceScope`, so it can never reach an org-level row and an
+  // `org-webhooks` scope on a key would grant nothing it could use. End-user
+  // OIDC tokens are denied at both levels (`endUserGrantable` stays false) —
   // embedding apps do not administer the org's outbound integrations.
   permissionsContribution: () => [
     {
       resource: "webhooks",
       actions: ["read", "write", "delete"],
-      grantTo: ["owner", "admin"],
+      level: "space",
+      presets: ["admin", "builder"],
       apiKeyGrantable: true,
+    },
+    {
+      resource: "org-webhooks",
+      actions: ["read", "write", "delete"],
+      level: "org",
+      grantTo: ["owner", "admin"],
     },
   ],
 

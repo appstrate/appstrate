@@ -296,24 +296,28 @@ export const oauthClientUpdateSchema = oauthClientSchema
 
 /**
  * Refuse a connection-creation attempt when the (space, integration)
- * has `block_user_connections=true` and the caller is not an org admin.
+ * has `block_user_connections=true` and the caller is not allowed to
+ * govern this integration.
  *
- * Workflow this enables: admin toggles the gate → connects → marks the
+ * Workflow this enables: an admin toggles the gate → connects → marks the
  * connection sharedWithOrg → members are funnelled onto the shared
  * connection via the resolver's fallback path. Members trying to bypass
  * with their own connection get a clean 403 instead of a silent override.
  *
- * Admins (`owner` / `admin`) are exempt — they can connect even when the
- * gate is on, which is the whole point (otherwise nobody could create
- * the shared connection).
+ * The exemption is `integrations:configure` — the very permission that sets
+ * the gate. Whoever can turn it on can connect while it is on, which is the
+ * whole point (otherwise nobody could create the shared connection).
+ *
+ * Deliberately tighter than the role check it replaced: `configure` is
+ * session-only, so an owner-minted API key that used to bypass the gate on
+ * its creator's role now gets the 403 the gate exists to produce.
  */
 async function assertConnectionCreationAllowed(
   c: import("hono").Context<AppEnv>,
   spaceId: string,
   integrationId: string,
 ): Promise<void> {
-  const role = c.get("orgRole");
-  if (role === "owner" || role === "admin") return;
+  if (canConfigureIntegrations(c)) return;
   const blocked = await isUserConnectionCreationBlocked(spaceId, integrationId);
   if (blocked) {
     throw new ApiError({
@@ -1032,9 +1036,8 @@ export function createIntegrationsRouter() {
 
   router.patch(
     "/:packageId{@[^/]+/[^/]+}/settings",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
-      assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
@@ -1084,9 +1087,8 @@ export function createIntegrationsRouter() {
 
   router.put(
     "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
-      assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
@@ -1109,9 +1111,8 @@ export function createIntegrationsRouter() {
 
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
-      assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
@@ -1149,9 +1150,8 @@ export function createIntegrationsRouter() {
 
   router.put(
     "/:packageId{@[^/]+/[^/]+}/default",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
-      assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setOrgDefaultSchema);
@@ -1173,9 +1173,8 @@ export function createIntegrationsRouter() {
 
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/default",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
-      assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const result = await deleteOrgDefault(scope, packageId);
@@ -1208,20 +1207,20 @@ export function createIntegrationsRouter() {
       if (!ownership || ownership.spaceId !== scope.spaceId) {
         throw notFound(`Connection '${connectionId}' not found`);
       }
-      // Owner OR org admin can edit metadata. Sharing the connection
-      // is consent: only the owner should toggle sharedWithOrg, so we
-      // refuse non-owner edits to that field specifically.
+      // The connection owner, or whoever governs this space's integrations,
+      // can edit metadata. Sharing the connection is consent: only the owner
+      // should toggle sharedWithOrg, so we refuse non-owner edits to that
+      // field specifically.
       const isOwner =
         (actor.type === "user" && ownership.userId === actor.id) ||
         (actor.type === "end_user" && ownership.endUserId === actor.id);
-      const role = c.get("orgRole");
-      const isAdmin = role === "owner" || role === "admin";
-      if (!isOwner && !isAdmin) {
+      if (!isOwner && !canConfigureIntegrations(c)) {
         throw new ApiError({
           status: 403,
           code: "forbidden",
           title: "Forbidden",
-          detail: "Only the connection owner or an org admin can update this connection",
+          detail:
+            "Only the connection owner or a principal with integrations:configure can update this connection",
         });
       }
       const body = await readJsonBody(c, updateConnectionSchema);
@@ -1263,21 +1262,15 @@ export function createIntegrationsRouter() {
 }
 
 /**
- * Defence-in-depth role gate paired with `requirePermission("integrations",
- * "install")` on the OAuth-client + org-default write routes. The permission
- * alone is owner/admin-only for cookie/role auth, but an API key minted by an
- * admin can carry `integrations:install` without the key itself being trusted
- * for full admin actions — this check refuses such keys on the admin-only
- * mutations regardless of the granted scope.
+ * Does the caller govern this space's integrations?
+ *
+ * `integrations:configure` is deliberately absent from the API-key allowlist,
+ * so an API key can never hold it however it was minted — which is what keeps
+ * the space-wide governance mutations (settings gate, agent pins, org default)
+ * session-only. Used for the in-handler branches; the routes that are wholly
+ * governance mutations carry `requirePermission("integrations", "configure")`
+ * as middleware instead.
  */
-function assertOrgAdmin(c: import("hono").Context<AppEnv>): void {
-  const role = c.get("orgRole");
-  if (role !== "owner" && role !== "admin") {
-    throw new ApiError({
-      status: 403,
-      code: "forbidden",
-      title: "Forbidden",
-      detail: "Org admin or owner role required",
-    });
-  }
+function canConfigureIntegrations(c: import("hono").Context<AppEnv>): boolean {
+  return c.get("permissions")?.has("integrations:configure") ?? false;
 }

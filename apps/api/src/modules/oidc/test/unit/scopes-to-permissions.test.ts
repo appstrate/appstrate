@@ -90,6 +90,13 @@ function installSnapshot(snapshot: Partial<ModulePermissionsSnapshot>): void {
       viewer: new Set(),
       ...(snapshot.byRole ?? {}),
     },
+    byPreset: {
+      admin: new Set(),
+      builder: new Set(),
+      operator: new Set(),
+      viewer: new Set(),
+      ...(snapshot.byPreset ?? {}),
+    },
     apiKeyAllowed: snapshot.apiKeyAllowed ?? new Set(),
     endUserAllowed: snapshot.endUserAllowed ?? new Set(),
   };

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **RBAC vocabulary gains a level (BREAKING for module authors).** Every
+  permission string now belongs to exactly one level, `org` or `space`
+  (`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4): an org role grants
+  org-level strings, a space role grants space-level ones. Changed exports:
+  `CoreResources` (`org` gains `settings`; `integrations` gains `configure`;
+  new resources `roles`, `space-settings`, `space-members`),
+  `CORE_RESOURCE_NAMES` (same shape, now derived from `CORE_RESOURCE_ACTIONS`),
+  `ModulePermissionContribution` (a discriminated union on a new required
+  `level` field: `{ level: "org"; grantTo }` | `{ level: "space"; presets }` —
+  there is no default and no compatibility reading of a bare `grantTo`), and
+  `ModulePermissionsSnapshot` (new required `byPreset` member). New exports:
+  `CORE_RESOURCE_ACTIONS`, `CORE_RESOURCE_LEVELS`, `ORG_LEVEL_PERMISSIONS`,
+  `SPACE_LEVEL_PERMISSIONS`, `SPACE_ROLE_PRESETS`, `permissionLevel()`,
+  `getModulePresetScopes()`, and the types `PermissionLevel`,
+  `OrgLevelPermission`, `SpaceLevelPermission`, `SpaceRolePreset`. Every
+  module contributing permissions must add `level` to each entry and swap
+  `grantTo` for `presets` on its space-level resources; `@appstrate/cloud`'s
+  `billing` entries are org-level.
+
 - **`extractSkillMeta` no longer owns its own frontmatter parser.** It returns
   exactly what it did for a conforming document and keeps its `warnings`, but
   the PARSE now comes from `parseSkillFrontmatter`
