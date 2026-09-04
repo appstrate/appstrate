@@ -9,7 +9,7 @@ A space is the **unit of access**, not just the unit of scoping. "Who can see th
 
 Effective permissions for a request = permissions of the caller's org role ∪ permissions of the caller's role in the current space, intersected with the credential's ceiling (API-key scopes, OIDC scopes). Every guard stays what it is today: `Set.has("resource:action")`.
 
-> **Status.** Phases **1**, **2a**, **2b**, **4** and **5** of §12 are implemented: the level split and the preset table, `guest`, `space_members` / `space_roles` / visibility, the resolver and the three pipeline keys, `requireSpaceContext`'s membership step and the `enterSpaceContext` seam, the filtered `GET /api/spaces` with per-space `permissions`, `/api/spaces/:id/members`, API keys resolving their creator's membership, invitations carrying `space_assignments`, `permissions` on the org listing, the `/api/roles` CRUD + vocabulary route behind `features.custom_roles`, and space-scoped `chat_sessions` with the `enterSpaceContext` seam refusing a header-less direct caller exactly as `requireSpaceContext` does. Phase **6** is half-landed: the **core half** — the `principalPermissions` module member (§4.2), its boot validation, the cached union and `invalidatePrincipalPermissions` — ships; the **cloud half** (billing managers, billing contact, Stripe email, `getOrgAdminEmails` removed from the contract) does not, so no module declares the member yet and the surface is inert in OSS. Phases **3** (SPA) and **7** (release N+1) remain the plan. Everything below is written as the target state; where the two differ, the code is the authority for what ships today.
+> **Status.** Phases **1** through **6** of §12 are implemented: the level split and the preset table, `guest`, `space_members` / `space_roles` / visibility, the resolver and the three pipeline keys, `requireSpaceContext`'s membership step and the `enterSpaceContext` seam, the filtered `GET /api/spaces` with per-space `permissions`, `/api/spaces/:id/members`, API keys resolving their creator's membership, invitations carrying `space_assignments`, `permissions` on the org listing, the `/api/roles` CRUD + vocabulary route behind `features.custom_roles`, the SPA (`can()`, space switcher, space-members and roles pages, org members with `guest` + assignments), space-scoped `chat_sessions`, and the `principalPermissions` module member (§4.2) with its boot validation, cached union and `invalidatePrincipalPermissions`. Phase 6's **cloud half** — billing managers, billing contact, Stripe email, `getOrgAdminEmails` removed from the contract — ships in a separate PR against `@appstrate/cloud`, so no module declares the member yet and the surface is inert in OSS. Phase **7** is release N+1 (§11). Everything below is written as the target state; where the two differ, the code is the authority for what ships today.
 
 Related: `SPACES.md` (space resolution on the wire), `SECURITY.md` §Layer 5 (permission guards), `docs/NO_TRANSITIONAL_CODE.md` (migration doctrine), `/docs/architecture/OSS_EE_SPEC.md` (custom roles are an EE surface).
 
@@ -438,14 +438,13 @@ Doctrine: `NO_TRANSITIONAL_CODE.md`. Catalog changes are drizzle migrations; row
 **Release N** — everything additive, plus the refusal:
 
 - `packages/db/drizzle/0056_space_roles.sql`: `ALTER TYPE org_role ADD VALUE 'guest'`; `space_roles`, `space_members`; `spaces.visibility/default_role` + check; `org_invitations.space_assignments`; `chat_sessions.space_id` **nullable**.
-- `scripts/migration/0008-org-viewer-to-guest-and-space-scoped-chat.sql`, one transaction:
+- `scripts/migration/0008-org-viewer-to-guest.sql`, one transaction:
   1. `INSERT INTO space_members (space_id, user_id, preset_role) SELECT s.id, m.user_id, 'viewer' FROM org_members m JOIN spaces s ON s.org_id = m.org_id WHERE m.role = 'viewer'`
   2. `UPDATE org_members SET role = 'guest' WHERE role = 'viewer'`
   3. `UPDATE org_invitations SET role = 'guest' WHERE role = 'viewer' AND status = 'pending'` — a pending viewer invite lands as a guest with no space; the inviter re-adds them (there is no faithful mapping, and the audit log names the inviter)
   4. `UPDATE chat_sessions c SET space_id = s.id FROM spaces s WHERE s.org_id = c.org_id AND s.is_default AND c.space_id IS NULL`
   5. Verification query that **discriminates**: counts of `org_members.role = 'viewer'` and `chat_sessions.space_id IS NULL` must both be 0 **and** the inserted `space_members` count must equal the pre-update viewer×space product — printed before and after.
-- Code in release N: `ORG_ROLES = ["owner", "admin", "member", "guest"]`. A `viewer` row reaching `resolvePermissions` throws `UnmigratedOrgRoleError("org_members.role = 'viewer' is retired; run scripts/migration/0008")` — a 500 for that user, logged once per boot with the count, never a fallback to `guest`. A `chat_sessions` row with `space_id IS NULL` is refused the same way by module-chat.
-- Runbook (`prod-deploy-preflight-rehearsal`): apply 0056 on the replica, run 0008, read the two counts, then deploy. Viewers are locked out between 0056 and 0008 in prod; run 0008 immediately after the migration step, before `up`.
+- Code in release N: `ORG_ROLES = ["owner", "admin", "member", "guest"]`. A `viewer` row reaching `assertOrgRole` (`apps/api/src/lib/permissions.ts`) throws `UnmigratedOrgRoleError("org_members.role = 'viewer' is retired; run scripts/migration/0008")` — a 500 for that user, logged once per boot with the count, never a fallback to `guest`. A `chat_sessions` row with `space_id IS NULL` is refused the same way by module-chat.
 
 **Release N+1** — the catalog forgets:
 
@@ -453,6 +452,20 @@ Doctrine: `NO_TRANSITIONAL_CODE.md`. Catalog changes are drizzle migrations; row
 - `UnmigratedOrgRoleError` and the chat NULL refusal are deleted in this release (they cannot fire once the column forbids the value).
 
 The drizzle snapshot is rebuilt by hand and checked against the pre-conflict one (`drizzle-migration-index-collision`).
+
+### Deploying
+
+`0056` and `0008` are **two files that are one deploy**, in this order:
+
+1. **Rehearse on a replica.** Restore a `pg_dump` copy, apply `0056`, run `0008`, and read the counts it prints at step 0 and step 5. `0008` ships with its rows UNMEASURED; the rehearsal is what produces the numbers, and it is also what tells you how long the two steps take against real volume.
+2. **Stop the application**, then apply the schema half alone. `0056` runs at boot with the rest of the pending drizzle migrations — count what is actually pending from the journal, not from the last merged PR.
+3. **Run `scripts/migration/0008-org-viewer-to-guest.sql` immediately after**, before bringing the new version `up`. One transaction, idempotent, fenced; it aborts rather than committing a half-rewrite.
+4. **Verify.** `0008` raises rather than returns: zero `org_members.role = 'viewer'`, zero pending `viewer` invitations, zero `oauth_clients.signup_role = 'viewer'`, zero `chat_sessions.space_id IS NULL`, and every former (user, space) pair covered by a `space_members` row. A commit means all five held.
+5. **Bring the application `up`.**
+
+**Viewers are locked out between step 2 and step 3.** That window is deliberate: the code refuses a `viewer` row loudly (`UnmigratedOrgRoleError`) instead of mapping it to `guest` behind the operator's back, so the gap is visible rather than silently wrong. Keep it short — do not deploy the application in between.
+
+The two file headers are the authority on what each step touches and what it deliberately leaves alone. Read them there, not here.
 
 ---
 

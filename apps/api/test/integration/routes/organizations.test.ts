@@ -1088,15 +1088,15 @@ describe("Organizations API", () => {
 
   // ── CRIT-02 — API keys must not reach org administration ─────────────────
   //
-  // `requireOrgRole` (routes/organizations.ts) used to resolve the CREATOR's
-  // live membership row for API-key callers, so ANY key created by an owner —
-  // whatever its scopes (`runs:read` here) — inherited full org-admin rights.
-  // The fix rejects `authMethod === "api_key"` before the membership lookup.
+  // Org administration is org-level and session-only: `org:*` and `members:*`
+  // are absent from the API-key scope allowlist, so a key never holds them —
+  // whatever its creator's role, and whatever scopes it carries (`runs:read`
+  // here).
   //
   // Unlike the issue-#172 suite above (foreign org → apiKeyOrgScopeGuard),
-  // these requests target the key's OWN org: if the fix is reverted, the
-  // membership lookup finds the creator's owner row and every gated request
-  // below succeeds — each 403 assertion here fails.
+  // these requests target the key's OWN org: drop the session-only rule and
+  // the creator's owner standing flows straight into the key, so every gated
+  // request below succeeds — each 403 assertion here fails.
   describe("API keys cannot administer their OWN org (CRIT-02)", () => {
     async function setupOwnerKeyInOwnOrg() {
       const ctx = await createTestContext({ orgSlug: "crit02-org" });

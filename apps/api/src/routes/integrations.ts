@@ -308,9 +308,8 @@ export const oauthClientUpdateSchema = oauthClientSchema
  * the gate. Whoever can turn it on can connect while it is on, which is the
  * whole point (otherwise nobody could create the shared connection).
  *
- * Deliberately tighter than the role check it replaced: `configure` is
- * session-only, so an owner-minted API key that used to bypass the gate on
- * its creator's role now gets the 403 the gate exists to produce.
+ * `configure` is session-only, so no API key can hold it — however privileged
+ * its creator. A key hitting this path gets the 403 the gate exists to produce.
  */
 async function assertConnectionCreationAllowed(
   c: import("hono").Context<AppEnv>,

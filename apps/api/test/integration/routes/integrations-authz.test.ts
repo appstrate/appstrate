@@ -212,11 +212,10 @@ describe("block_user_connections workflow", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("no longer exempts an owner-minted API KEY — configure is session-only", async () => {
-    // Deliberate tightening: the exemption used to read the caller's ROLE, and
-    // an API key carries its creator's role, so an owner's key bypassed the
-    // gate the org had just turned on. `integrations:configure` is absent from
-    // the API-key allowlist, so no key can hold it and the gate now applies.
+  it("does not exempt an owner-minted API KEY — configure is session-only", async () => {
+    // The exemption is a PERMISSION, not a role. `integrations:configure` is
+    // absent from the API-key allowlist, so no key can hold it, and the gate
+    // applies to an owner's key exactly as it does to a member's.
     await app.request("/api/integrations/@myorg/gmail/settings", {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },

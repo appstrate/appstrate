@@ -215,9 +215,9 @@ describe("RBAC — Permission enforcement", () => {
     });
   });
 
-  // ─── Organization management (uses inline requireOrgRole, not middleware) ──
+  // ─── Organization management ───────────────────────────────
 
-  describe("org routes (inline auth)", () => {
+  describe("org routes", () => {
     it("admin gets 403 on delete org (owner-only)", async () => {
       const res = await app.request(`/api/orgs/${owner.orgId}`, {
         method: "DELETE",

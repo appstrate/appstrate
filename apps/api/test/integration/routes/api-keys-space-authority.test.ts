@@ -92,7 +92,7 @@ describe("API keys carry their creator's authority in the key's space", () => {
     expect(asOwner).toContain("spaces:write");
   });
 
-  it("a key whose creator lost the space 403s where it used to work", async () => {
+  it("a key stops working the moment its creator loses the space", async () => {
     const closed = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
     await seedPackage({ orgId: owner.orgId, id: "@keyspace/other", type: "agent" });
     await seedInstalledPackage(closed.id, "@keyspace/other");
