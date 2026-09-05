@@ -1658,10 +1658,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List all packages visible to the org with per-space install state
-         * @description Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of space ids — the spaces belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.
-         *
-         *     The response also includes the org's spaces (id, name, isDefault) so the UI can render a single grid keyed by space without an additional `/api/spaces` call.
+         * List readable packages with accessible-space install state
+         * @description Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -3311,7 +3309,7 @@ export interface paths {
         put?: never;
         /**
          * Fork a package to your organization
-         * @description Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.
+         * @description Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. Reading a source in another organization requires a session caller with live membership and package read access in that source organization; space-pinned credentials cannot cross organizations. Published versions alone do not grant visibility. The caller also needs the source package type's write permission in the destination space. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.
          */
         post: operations["forkPackage"];
         delete?: never;
@@ -4045,7 +4043,7 @@ export interface paths {
         head?: never;
         /**
          * Update a space
-         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Making the org's default space non-`open` is a 400.
+         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.
          */
         patch: operations["updateSpace"];
         trace?: never;
@@ -4065,7 +4063,7 @@ export interface paths {
         put?: never;
         /**
          * Add a space member
-         * @description Grant a user an explicit role in this space. The user must already be an org member (404 otherwise). Owners and admins are refused with 409 `redundant_space_role` — they already run every space.
+         * @description Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.
          */
         post: operations["addSpaceMember"];
         delete?: never;
@@ -4086,16 +4084,36 @@ export interface paths {
         post?: never;
         /**
          * Remove a space member
-         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely.
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.
          */
         delete: operations["removeSpaceMember"];
         options?: never;
         head?: never;
         /**
          * Change a space member's role
-         * @description Change the role of an EXISTING explicit membership row (404 when there is none).
+         * @description Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.
          */
         patch: operations["updateSpaceMember"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List assignable space roles
+         * @description Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.
+         */
+        get: operations["listAssignableSpaceRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/spaces/{id}/smtp-config": {
@@ -5133,6 +5151,7 @@ export interface components {
             allowSignup: boolean;
             /** @enum {string} */
             signupRole: "guest" | "member" | "admin";
+            signupSpaceAssignments: components["schemas"]["SpaceAssignment"][];
             createdAt: string | null;
             updatedAt: string | null;
         };
@@ -5152,6 +5171,7 @@ export interface components {
             allowSignup: boolean;
             /** @enum {string} */
             signupRole: "guest" | "member" | "admin";
+            signupSpaceAssignments: components["schemas"]["SpaceAssignment"][];
             createdAt: string | null;
             updatedAt: string | null;
             clientSecret: string;
@@ -5179,7 +5199,9 @@ export interface components {
                 /** @description Effective limit in bytes the write path enforces (override ?? global quota), or null when unlimited. */
                 effective_limit_bytes: number | null;
             };
+            /** @description Empty unless the caller holds members:read. */
             members?: components["schemas"]["OrgMember"][];
+            /** @description Empty unless the caller holds members:invite, including any credential scope ceiling. */
             invitations?: components["schemas"]["OrgInvitationInfo"][];
         };
         OrgInvitationInfo: {
@@ -11630,7 +11652,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "library";
-                        /** @description Spaces belonging to the caller's organization. The default space (if any) is listed first. */
+                        /** @description Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first. */
                         spaces: {
                             /** @description Space id (`spc_…`). */
                             id: string;
@@ -13737,6 +13759,8 @@ export interface operations {
                     isFirstParty?: boolean;
                     /** @description When `true`, users signing in for the first time through this client are auto-joined to `referencedOrgId` with `signupRole`. When `false` (default), non-members are rejected. Only meaningful for org-level clients. */
                     allowSignup?: boolean;
+                    /** @description Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments. */
+                    signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
                     /**
                      * @description Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.
                      * @enum {string}
@@ -13871,6 +13895,8 @@ export interface operations {
                     isFirstParty?: boolean;
                     /** @description Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Space: brand-new BA users + JIT `end_users` provisioning. */
                     allowSignup?: boolean;
+                    /** @description Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments. */
+                    signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
                     /**
                      * @description Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.
                      * @enum {string}
@@ -19560,11 +19586,13 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    userId: string;
+                    userId?: string;
+                    /** Format: email */
+                    email?: string;
                     /** @enum {string} */
                     preset_role?: "admin" | "builder" | "operator" | "viewer";
                     custom_role_id?: string;
-                };
+                } & (unknown | unknown);
             };
         };
         responses: {
@@ -19583,7 +19611,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The target is an owner or admin — an explicit space role would grant nothing */
+            /** @description The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19672,6 +19700,41 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    listAssignableSpaceRoles: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignable space roles */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RoleObject"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getSpaceSmtpConfig: {

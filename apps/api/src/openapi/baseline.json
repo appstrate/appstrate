@@ -15968,7 +15968,7 @@
         "operationId": "forkPackage",
         "tags": ["Packages"],
         "summary": "Fork a package to your organization",
-        "description": "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
+        "description": "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. Reading a source in another organization requires a session caller with live membership and package read access in that source organization; space-pinned credentials cannot cross organizations. Published versions alone do not grant visibility. The caller also needs the source package type's write permission in the destination space. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17685,7 +17685,7 @@
         "operationId": "updateSpace",
         "tags": ["Spaces"],
         "summary": "Update a space",
-        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Making the org's default space non-`open` is a 400.",
+        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18246,6 +18246,72 @@
         }
       }
     },
+    "/api/spaces/{id}/roles": {
+      "get": {
+        "operationId": "listAssignableSpaceRoles",
+        "tags": ["Spaces"],
+        "summary": "List assignable space roles",
+        "description": "Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Assignable space roles",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RoleObject"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/spaces/{id}/members": {
       "get": {
         "operationId": "listSpaceMembers",
@@ -18316,7 +18382,7 @@
         "operationId": "addSpaceMember",
         "tags": ["Spaces"],
         "summary": "Add a space member",
-        "description": "Grant a user an explicit role in this space. The user must already be an org member (404 otherwise). Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
+        "description": "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18336,11 +18402,26 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["userId"],
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "required": ["userId"]
+                      },
+                      {
+                        "required": ["email"]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "userId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
                   },
                   "preset_role": {
                     "type": "string",
@@ -18388,7 +18469,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The target is an owner or admin — an explicit space role would grant nothing",
+            "description": "The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18405,7 +18486,7 @@
         "operationId": "updateSpaceMember",
         "tags": ["Spaces"],
         "summary": "Change a space member's role",
-        "description": "Change the role of an EXISTING explicit membership row (404 when there is none).",
+        "description": "Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18495,7 +18576,7 @@
         "operationId": "removeSpaceMember",
         "tags": ["Spaces"],
         "summary": "Remove a space member",
-        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely.",
+        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -22051,8 +22132,8 @@
       "get": {
         "operationId": "getLibrary",
         "tags": ["Library"],
-        "summary": "List all packages visible to the org with per-space install state",
-        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of space ids — the spaces belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's spaces (id, name, isDefault) so the UI can render a single grid keyed by space without an additional `/api/spaces` call.",
+        "summary": "List readable packages with accessible-space install state",
+        "description": "Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -22081,7 +22162,7 @@
                     },
                     "spaces": {
                       "type": "array",
-                      "description": "Spaces belonging to the caller's organization. The default space (if any) is listed first.",
+                      "description": "Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first.",
                       "items": {
                         "type": "object",
                         "required": ["id", "name", "isDefault"],
@@ -22849,13 +22930,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OrgMember"
-            }
+            },
+            "description": "Empty unless the caller holds members:read."
           },
           "invitations": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OrgInvitationInfo"
-            }
+            },
+            "description": "Empty unless the caller holds members:invite, including any credential scope ceiling."
           }
         }
       },
