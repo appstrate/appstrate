@@ -106,6 +106,10 @@
       "description": "Space management for headless API"
     },
     {
+      "name": "Roles",
+      "description": "Space-role presets and organization-defined custom role bundles"
+    },
+    {
       "name": "Space Packages",
       "description": "Manage packages installed in a space"
     },
@@ -451,7 +455,8 @@
                     "minLength": 1,
                     "maxLength": 120
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -655,6 +660,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -684,7 +692,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentInputSettings"
+                "type": "object",
+                "required": ["values", "locked_fields"],
+                "description": "The input settings to store for this space. Both members are full replacements — an omitted key means cleared, never unchanged.",
+                "properties": {
+                  "values": {
+                    "type": "object",
+                    "description": "Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
+                    "additionalProperties": true
+                  },
+                  "locked_fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`."
+                  }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -773,6 +799,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -809,7 +838,8 @@
                     "type": ["string", "null"],
                     "description": "Proxy ID, \"none\" to opt out, or null for org default"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -1338,6 +1368,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -1384,7 +1417,8 @@
                       }
                     ]
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -1474,7 +1508,8 @@
                       "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
                     }
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -2099,7 +2134,7 @@
         "operationId": "runInline",
         "tags": ["Runs"],
         "summary": "Execute an inline agent (no persisted package)",
-        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.",
+        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2301,6 +2336,9 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "409": {
             "$ref": "#/components/responses/IdempotencyInProgress"
           },
@@ -2365,7 +2403,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2480,6 +2518,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -2706,8 +2747,7 @@
                     "output": {
                       "processed": 42,
                       "labeled": 38
-                    },
-                    "text": "## Inbox triage\nProcessed 42 emails, labeled 38."
+                    }
                   },
                   "artifacts": {
                     "status": "complete",
@@ -3039,7 +3079,7 @@
         "operationId": "createRemoteRun",
         "tags": ["Runs"],
         "summary": "Create a remote-backed run (caller executes the agent)",
-        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. See `docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md`.",
+        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3220,6 +3260,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/IdempotencyInProgress"
@@ -4076,7 +4119,8 @@
                     "minimum": 1,
                     "maximum": 86400
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -4530,7 +4574,10 @@
                   "createdAt": "2026-01-15T10:30:00Z",
                   "updatedAt": "2026-01-15T10:30:00Z",
                   "actor_name": "Pierre",
-                  "actor_type": "user"
+                  "actor_type": "user",
+                  "running_runs": 0,
+                  "unread_count": 0,
+                  "last_run_number": 0
                 }
               }
             }
@@ -4624,7 +4671,10 @@
                   "createdAt": "2026-01-14T14:00:00Z",
                   "updatedAt": "2026-01-15T09:00:05Z",
                   "actor_name": "Pierre",
-                  "actor_type": "user"
+                  "actor_type": "user",
+                  "running_runs": 0,
+                  "unread_count": 2,
+                  "last_run_number": 12
                 }
               }
             }
@@ -5732,7 +5782,8 @@
                     "type": "string",
                     "format": "uri"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -5877,7 +5928,8 @@
                     "type": "string",
                     "format": "uri"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -6180,7 +6232,8 @@
                     "type": "string",
                     "description": "Client to make default — a `client_ref` from GET .../clients."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -6323,7 +6376,8 @@
                     "format": "uuid",
                     "description": "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -6525,7 +6579,8 @@
                     "type": "string",
                     "format": "uuid"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -6626,7 +6681,8 @@
                     "format": "uuid",
                     "description": "Reconnect/upgrade an existing connection in place."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -6794,7 +6850,8 @@
                     "type": "object",
                     "additionalProperties": true
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -7136,7 +7193,8 @@
                   "shared_with_org": {
                     "type": "boolean"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -7300,7 +7358,8 @@
                   "block_user_connections": {
                     "type": "boolean"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -7728,7 +7787,8 @@
                     "type": "string",
                     "format": "uuid"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -7943,7 +8003,8 @@
                     "type": "boolean",
                     "default": false
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -8214,7 +8275,8 @@
                     "type": "boolean",
                     "description": "Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -8273,7 +8335,8 @@
                     "type": ["string", "null"],
                     "description": "Model ID to set as default, or null to unset"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -8362,7 +8425,8 @@
                       "minLength": 1
                     }
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -8624,7 +8688,8 @@
                     "type": "string",
                     "description": "Existing model ID to fall back to for stored API key"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -8744,7 +8809,8 @@
                     "type": "boolean",
                     "description": "Managed-model flag. When true, this model's binding is not exposed on user-facing surfaces."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -9168,7 +9234,8 @@
                     "format": "uri",
                     "description": "Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -9258,7 +9325,8 @@
                     "type": "string",
                     "description": "Existing credential ID to fall back to for stored API key"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -9334,7 +9402,8 @@
                     "type": "string",
                     "minLength": 1
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -9594,7 +9663,8 @@
                     "format": "uuid",
                     "description": "Existing OAuth credential to reconnect in place. It must belong to the current organization and match `providerId`; omit it when connecting a new account."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -9806,7 +9876,8 @@
                     "maxLength": 120,
                     "description": "Abstract account/tenant identifier — the well-known `accountId` slot from the provider's identity surface. When the CLI forwards it, the platform persists this value verbatim; otherwise the provider's `extractTokenIdentity` hook fills it in server-side."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -9963,7 +10034,8 @@
                     "format": "uri",
                     "description": "Proxy URL (http://user:pass@host:port)"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -10034,7 +10106,8 @@
                     "type": ["string", "null"],
                     "description": "Proxy ID to set as default, or null to unset"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -10129,7 +10202,8 @@
                   "enabled": {
                     "type": "boolean"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -10453,7 +10527,8 @@
                     },
                     "description": "Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass an empty array for full role access. A scope no API key can carry — unknown, or session-only such as `org:delete` — is rejected with a 400 naming it; a scope the creator's own role does not hold is dropped, since a key cannot be granted more than its creator has. `GET /api/api-keys/available-scopes` lists what the caller can grant."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -10611,6 +10686,7 @@
                       "name": "Acme Corp",
                       "slug": "acme-corp",
                       "role": "owner",
+                      "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z"
                     }
                   ]
@@ -10644,7 +10720,8 @@
                     "type": "string",
                     "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -10806,7 +10883,8 @@
                     "type": "string",
                     "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -10913,10 +10991,18 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["viewer", "member", "admin"],
+                    "enum": ["guest", "member", "admin"],
                     "default": "member"
+                  },
+                  "space_assignments": {
+                    "type": "array",
+                    "description": "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+                    "items": {
+                      "$ref": "#/components/schemas/SpaceAssignment"
+                    }
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -10941,6 +11027,12 @@
                   "id": "inv_abc123",
                   "email": "newuser@example.com",
                   "role": "member",
+                  "space_assignments": [
+                    {
+                      "space_id": "spc_...",
+                      "preset_role": "operator"
+                    }
+                  ],
                   "token": "inv_abc123def456",
                   "expiresAt": "2026-02-01T00:00:00Z",
                   "createdAt": "2026-01-25T00:00:00Z"
@@ -10968,7 +11060,7 @@
         "operationId": "changeMemberRole",
         "tags": ["Organizations"],
         "summary": "Change member role",
-        "description": "Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.",
+        "description": "Change a member's role. Owners can manage any non-owner; admins can manage guests and members.",
         "parameters": [
           {
             "name": "orgId",
@@ -10997,9 +11089,10 @@
                 "properties": {
                   "role": {
                     "type": "string",
-                    "enum": ["viewer", "member", "admin"]
+                    "enum": ["guest", "member", "admin"]
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -11096,7 +11189,7 @@
         "operationId": "changeInvitationRole",
         "tags": ["Organizations"],
         "summary": "Change invitation role",
-        "description": "Change the role assigned to a pending invitation. Admin or owner required.",
+        "description": "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
         "parameters": [
           {
             "name": "orgId",
@@ -11125,9 +11218,17 @@
                 "properties": {
                   "role": {
                     "type": "string",
-                    "enum": ["viewer", "member", "admin"]
+                    "enum": ["guest", "member", "admin"]
+                  },
+                  "space_assignments": {
+                    "type": "array",
+                    "description": "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+                    "items": {
+                      "$ref": "#/components/schemas/SpaceAssignment"
+                    }
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -11152,6 +11253,7 @@
                   "id": "inv_abc123",
                   "email": "carol@acme.com",
                   "role": "admin",
+                  "space_assignments": [],
                   "token": "tok_xyz789",
                   "expiresAt": "2026-02-01T00:00:00Z",
                   "createdAt": "2026-01-25T00:00:00Z"
@@ -11285,7 +11387,19 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrgSettings"
+                "type": "object",
+                "description": "Organization settings patch — only provided fields are updated.",
+                "properties": {
+                  "api_version": {
+                    "type": "string",
+                    "description": "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization."
+                  },
+                  "dashboard_sso_enabled": {
+                    "type": "boolean",
+                    "description": "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users."
+                  }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -11385,7 +11499,8 @@
                     "type": "string",
                     "enum": ["fr", "en"]
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -11453,7 +11568,8 @@
                     "minLength": 8,
                     "maxLength": 128
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -11542,7 +11658,8 @@
                     },
                     "maxItems": 100
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -11649,8 +11766,15 @@
                           },
                           "role": {
                             "type": "string",
-                            "enum": ["owner", "admin", "member", "viewer", "end_user"],
+                            "enum": ["owner", "admin", "member", "guest", "end_user"],
                             "description": "Org role for member callers; `end_user` for OIDC end-user JWTs."
+                          },
+                          "permissions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role."
                           },
                           "createdAt": {
                             "type": "string",
@@ -11673,6 +11797,7 @@
                       "name": "Acme Corp",
                       "slug": "acme",
                       "role": "owner",
+                      "permissions": ["org:read", "org:update", "members:invite"],
                       "createdAt": "2026-01-10T08:00:00Z"
                     }
                   ]
@@ -11959,7 +12084,8 @@
                     "type": "string",
                     "format": "uuid"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -12130,7 +12256,7 @@
                         },
                         "role": {
                           "type": "string",
-                          "enum": ["owner", "admin", "member", "viewer", "end_user"]
+                          "enum": ["owner", "admin", "member", "guest", "end_user"]
                         },
                         "name": {
                           "type": ["string", "null"],
@@ -12410,6 +12536,7 @@
                     "email",
                     "org_name",
                     "role",
+                    "space_assignments",
                     "inviter_name",
                     "expiresAt",
                     "is_new_user"
@@ -12423,7 +12550,14 @@
                     },
                     "role": {
                       "type": "string",
-                      "enum": ["owner", "admin", "member", "viewer"]
+                      "enum": ["owner", "admin", "member", "guest"]
+                    },
+                    "space_assignments": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SpaceAssignment"
+                      },
+                      "description": "Space memberships applied when the invitation is accepted."
                     },
                     "inviter_name": {
                       "type": "string"
@@ -12440,6 +12574,12 @@
                   "email": "newuser@example.com",
                   "org_name": "Acme Corp",
                   "role": "member",
+                  "space_assignments": [
+                    {
+                      "space_id": "spc_...",
+                      "preset_role": "operator"
+                    }
+                  ],
                   "inviter_name": "Alice Martin",
                   "expiresAt": "2026-02-15T10:30:00Z",
                   "is_new_user": true
@@ -12528,6 +12668,7 @@
                   "name": "Acme Corp",
                   "slug": "acme-corp",
                   "role": "member",
+                  "permissions": ["org:read", "spaces:read"],
                   "createdAt": "2026-01-10T08:00:00Z"
                 }
               }
@@ -12897,7 +13038,7 @@
         "operationId": "getIntegrationCredentials",
         "tags": ["Internal"],
         "summary": "Fetch live credentials + HTTP delivery plans for an installed integration",
-        "description": "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed.",
+        "description": "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: \"link\"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.",
         "security": [
           {
             "bearerExecToken": []
@@ -12972,7 +13113,7 @@
         "operationId": "refreshIntegrationCredentials",
         "tags": ["Internal"],
         "summary": "Force-refresh OAuth2 credentials for an installed integration",
-        "description": "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged.",
+        "description": "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
         "security": [
           {
             "bearerExecToken": []
@@ -13007,7 +13148,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit.",
+            "description": "The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. A fourth cause is unique to this operation: `connect_run_no_refresh` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as \"do not retry now\" and leaves the upstream response untouched.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13047,7 +13188,7 @@
         "operationId": "getMcpServerBundle",
         "tags": ["Internal"],
         "summary": "Fetch the AFPS bundle bytes for a referenced mcp-server package",
-        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).",
+        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).",
         "security": [
           {
             "bearerExecToken": []
@@ -13064,7 +13205,7 @@
             "name": "version",
             "in": "query",
             "required": false,
-            "description": "Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). When omitted, the latest non-yanked version is served.",
+            "description": "Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Required for every mcp-server the spawn resolver pinned a version for; omitted only for system mcp-servers, which the route short-circuits to the in-memory boot registry by id alone.",
             "schema": {
               "type": "string"
             }
@@ -13082,6 +13223,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -13089,7 +13233,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Agent does not reference this mcp-server through an installed integration, or no published version exists.",
+            "description": "Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13128,7 +13272,8 @@
                     "type": "string",
                     "maxLength": 100
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -13754,7 +13899,7 @@
             }
           },
           "400": {
-            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`.",
+            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13873,7 +14018,7 @@
             }
           },
           "400": {
-            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`).",
+            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13930,7 +14075,8 @@
                     "type": "string",
                     "description": "GitHub URL pointing to a repository or subdirectory (e.g. https://github.com/owner/repo/tree/main/path)"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -13977,7 +14123,7 @@
             }
           },
           "400": {
-            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`).",
+            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14519,7 +14665,8 @@
                     "type": "string",
                     "description": "SKILL.md content (markdown with YAML frontmatter). Must not be blank."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -14545,7 +14692,8 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "$ref": "#/components/responses/ValidationError",
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14708,7 +14856,8 @@
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -14734,7 +14883,8 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "$ref": "#/components/responses/ValidationError",
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14803,6 +14953,10 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -15022,7 +15176,8 @@
                     "type": "integer",
                     "description": "Optimistic lock version"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -15048,7 +15203,8 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "$ref": "#/components/responses/ValidationError",
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -15199,7 +15355,8 @@
                     "type": "string",
                     "description": "Agent prompt (markdown). Must not be blank."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -15241,7 +15398,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including integrations, config, state, and skills.",
+        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15262,7 +15419,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns config / input / integrations / skills from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
+            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
           }
         ],
         "responses": {
@@ -15332,7 +15489,8 @@
                     "type": "integer",
                     "description": "Optimistic lock version"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -15580,7 +15738,8 @@
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -15818,7 +15977,7 @@
         "operationId": "forkPackage",
         "tags": ["Packages"],
         "summary": "Fork a package to your organization",
-        "description": "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
+        "description": "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. Reading a source in another organization requires a session caller with live membership and package read access in that source organization; space-pinned credentials cannot cross organizations. Published versions alone do not grant visibility. The caller also needs the source package type's write permission in the destination space. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15845,7 +16004,8 @@
                     "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
                     "description": "Custom name for the forked package (slug format). Defaults to the source package name."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -16004,7 +16164,8 @@
                     "type": "string",
                     "description": "Primary package file content (manifest file)."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -16193,7 +16354,8 @@
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -16507,7 +16669,8 @@
                     "type": "integer",
                     "description": "Optimistic lock version"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -16875,7 +17038,8 @@
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -17189,7 +17353,8 @@
                     "type": "integer",
                     "description": "Optimistic lock version"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -17317,7 +17482,8 @@
                     },
                     "description": "Space settings"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -17347,6 +17513,15 @@
                   "settings": {
                     "allowedRedirectDomains": ["myapp.com", "staging.myapp.com"]
                   },
+                  "visibility": "open",
+                  "default_role": "operator",
+                  "access": "member",
+                  "role": {
+                    "kind": "preset",
+                    "key": "admin",
+                    "name": "admin"
+                  },
+                  "permissions": ["agents:read", "agents:run"],
                   "created_by": "usr_k7x9m2p4q1",
                   "createdAt": "2026-01-15T10:30:00Z",
                   "updatedAt": "2026-01-15T10:30:00Z"
@@ -17420,6 +17595,15 @@
                       "settings": {
                         "allowedRedirectDomains": []
                       },
+                      "visibility": "open",
+                      "default_role": "operator",
+                      "access": "member",
+                      "role": {
+                        "kind": "preset",
+                        "key": "operator",
+                        "name": "operator"
+                      },
+                      "permissions": ["agents:read", "agents:run"],
                       "created_by": null,
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
@@ -17433,6 +17617,11 @@
                       "settings": {
                         "allowedRedirectDomains": ["myapp.com"]
                       },
+                      "visibility": "closed",
+                      "default_role": "operator",
+                      "access": "none",
+                      "role": null,
+                      "permissions": ["org:read", "spaces:read"],
                       "created_by": "usr_k7x9m2p4q1",
                       "createdAt": "2026-01-15T10:30:00Z",
                       "updatedAt": "2026-01-15T10:30:00Z"
@@ -17505,7 +17694,7 @@
         "operationId": "updateSpace",
         "tags": ["Spaces"],
         "summary": "Update a space",
-        "description": "Update space name or settings.",
+        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17544,8 +17733,19 @@
                       }
                     },
                     "description": "Space settings"
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": ["open", "closed", "private"],
+                    "description": "Who reaches the space without an explicit membership row. The default space must stay `open`."
+                  },
+                  "default_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "viewer"],
+                    "description": "Preset the implicit members of an `open` space hold"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -17630,7 +17830,7 @@
         "operationId": "listInstalledPackages",
         "tags": ["Space Packages"],
         "summary": "List installed packages",
-        "description": "List all packages installed in this space, with their model/proxy/version overrides.",
+        "description": "List packages installed in this space, with their model/proxy/version overrides. Returns only package types the caller has permission to read, within the credential scope ceiling.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17690,6 +17890,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -17726,7 +17929,8 @@
                     "minLength": 1,
                     "description": "Package ID from org catalog"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -17816,6 +18020,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -17873,7 +18080,8 @@
                   "enabled": {
                     "type": "boolean"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -18047,6 +18255,855 @@
         }
       }
     },
+    "/api/spaces/{id}/roles": {
+      "get": {
+        "operationId": "listAssignableSpaceRoles",
+        "tags": ["Spaces"],
+        "summary": "List assignable space roles",
+        "description": "Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Assignable space roles",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RoleObject"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/members": {
+      "get": {
+        "operationId": "listSpaceMembers",
+        "tags": ["Spaces"],
+        "summary": "List space members",
+        "description": "Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: \"org_role\"`) and — in an `open` space — every org member (`source: \"open_space\"`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Space member list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SpaceMemberObject"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Whether more results exist beyond this page"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addSpaceMember",
+        "tags": ["Spaces"],
+        "summary": "Add a space member",
+        "description": "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "required": ["userId"]
+                      },
+                      {
+                        "required": ["email"]
+                      }
+                    ]
+                  }
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "viewer"]
+                  },
+                  "custom_role_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Space member added",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceMemberAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/members/{userId}": {
+      "patch": {
+        "operationId": "updateSpaceMember",
+        "tags": ["Spaces"],
+        "summary": "Change a space member's role",
+        "description": "Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "viewer"]
+                  },
+                  "custom_role_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Space member role changed",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceMemberAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The target is an owner or admin — an explicit space role would grant nothing",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeSpaceMember",
+        "tags": ["Spaces"],
+        "summary": "Remove a space member",
+        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Space member removed",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceMemberRemoval"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/roles": {
+      "get": {
+        "operationId": "listRoles",
+        "tags": ["Roles"],
+        "summary": "List space roles",
+        "description": "Every role assignable in a space of this organization: the four platform presets (`kind: \"preset\"`, read-only, `id: null`) followed by the organization's own bundles (`kind: \"custom\"`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Role list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RoleObject"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Whether more results exist beyond this page"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRole",
+        "tags": ["Roles"],
+        "summary": "Create a custom space role",
+        "description": "Define an organization-scoped bundle of space-level permissions. Requires the `custom_roles` feature. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["key", "name", "permissions"],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$",
+                    "description": "Slug, unique per organization. Never one of the preset keys (`admin`, `builder`, `operator`, `viewer`)."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "description": {
+                    "type": ["string", "null"],
+                    "maxLength": 500
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Space-level permission strings the role grants (at least one)."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Role created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Missing permission",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/forbidden",
+                      "title": "Forbidden",
+                      "status": 403,
+                      "detail": "Insufficient permissions: roles:write required",
+                      "instance": "urn:appstrate:request:req_2f1c6d84",
+                      "code": "forbidden",
+                      "requestId": "req_2f1c6d84"
+                    }
+                  },
+                  "feature_unavailable": {
+                    "summary": "Feature not on this deployment",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
+                      "title": "Feature Unavailable",
+                      "status": 403,
+                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/cloud` module).",
+                      "instance": "urn:appstrate:request:req_2f1c6d84",
+                      "code": "feature_unavailable",
+                      "requestId": "req_2f1c6d84"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A role with this key already exists (`role_key_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/roles/vocabulary": {
+      "get": {
+        "operationId": "listRoleVocabulary",
+        "tags": ["Roles"],
+        "summary": "List the permissions a custom role may hold",
+        "description": "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Space-level permission vocabulary",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RoleVocabularyGroup"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Whether more results exist beyond this page"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/roles/{id}": {
+      "patch": {
+        "operationId": "updateRole",
+        "tags": ["Roles"],
+        "summary": "Update a custom space role",
+        "description": "Rename, re-describe or re-scope a bundle. Requires the `custom_roles` feature. The `srl_` id never changes, so assignments follow the edit.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^srl_"
+            },
+            "description": "Custom role id (`srl_` prefix). Presets are not addressable."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "description": {
+                    "type": ["string", "null"],
+                    "maxLength": 500
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Missing permission",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/forbidden",
+                      "title": "Forbidden",
+                      "status": 403,
+                      "detail": "Insufficient permissions: roles:write required",
+                      "instance": "urn:appstrate:request:req_2f1c6d84",
+                      "code": "forbidden",
+                      "requestId": "req_2f1c6d84"
+                    }
+                  },
+                  "feature_unavailable": {
+                    "summary": "Feature not on this deployment",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
+                      "title": "Feature Unavailable",
+                      "status": 403,
+                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/cloud` module).",
+                      "instance": "urn:appstrate:request:req_2f1c6d84",
+                      "code": "feature_unavailable",
+                      "requestId": "req_2f1c6d84"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "A role with this key already exists (`role_key_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteRole",
+        "tags": ["Roles"],
+        "summary": "Delete a custom space role",
+        "description": "Requires the `custom_roles` feature. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^srl_"
+            },
+            "description": "Custom role id (`srl_` prefix). Presets are not addressable."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Role deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Missing permission",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/forbidden",
+                      "title": "Forbidden",
+                      "status": 403,
+                      "detail": "Insufficient permissions: roles:write required",
+                      "instance": "urn:appstrate:request:req_2f1c6d84",
+                      "code": "forbidden",
+                      "requestId": "req_2f1c6d84"
+                    }
+                  },
+                  "feature_unavailable": {
+                    "summary": "Feature not on this deployment",
+                    "value": {
+                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
+                      "title": "Feature Unavailable",
+                      "status": 403,
+                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/cloud` module).",
+                      "instance": "urn:appstrate:request:req_2f1c6d84",
+                      "code": "feature_unavailable",
+                      "requestId": "req_2f1c6d84"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The role is still assigned (`role_in_use`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ProblemDetail"
+                    },
+                    {
+                      "type": "object",
+                      "required": ["member_count", "pending_invitation_count"],
+                      "properties": {
+                        "member_count": {
+                          "type": "integer",
+                          "description": "Space members still holding this role."
+                        },
+                        "pending_invitation_count": {
+                          "type": "integer",
+                          "description": "Pending invitations whose `space_assignments` name this role."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/end-users": {
       "post": {
         "operationId": "createEndUser",
@@ -18094,7 +19151,8 @@
                     },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
-                }
+                },
+                "additionalProperties": false
               },
               "example": {
                 "name": "Alice Martin",
@@ -18470,7 +19528,8 @@
                     },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -18633,7 +19692,8 @@
                     "pattern": "^[0-9a-fA-F]{64}$",
                     "description": "Optional client integrity claim: lowercase-hex SHA-256 of the payload. When provided it is enforced server-side — direct-presign S3 mode binds a signed `x-amz-checksum-sha256` header the client MUST echo (returned in `headers`), the proxy sink re-hashes the streamed bytes, and consume re-checks it — a mismatch is rejected (400 `checksum_mismatch`)."
                   }
-                }
+                },
+                "additionalProperties": false
               },
               "example": {
                 "name": "invoice.pdf",
@@ -21081,8 +22141,8 @@
       "get": {
         "operationId": "getLibrary",
         "tags": ["Library"],
-        "summary": "List all packages visible to the org with per-space install state",
-        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of space ids — the spaces belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's spaces (id, name, isDefault) so the UI can render a single grid keyed by space without an additional `/api/spaces` call.",
+        "summary": "List readable packages with accessible-space install state",
+        "description": "Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -21111,7 +22171,7 @@
                     },
                     "spaces": {
                       "type": "array",
-                      "description": "Spaces belonging to the caller's organization. The default space (if any) is listed first.",
+                      "description": "Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first.",
                       "items": {
                         "type": "object",
                         "required": ["id", "name", "isDefault"],
@@ -21736,7 +22796,7 @@
       },
       "Organization": {
         "type": "object",
-        "required": ["id", "name", "slug", "role", "createdAt"],
+        "required": ["id", "name", "slug", "role", "permissions", "createdAt"],
         "properties": {
           "id": {
             "type": "string"
@@ -21749,7 +22809,14 @@
           },
           "role": {
             "type": "string",
-            "enum": ["owner", "admin", "member", "viewer"]
+            "enum": ["owner", "admin", "member", "guest"]
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces."
           },
           "createdAt": {
             "type": "string",
@@ -21773,7 +22840,7 @@
           },
           "role": {
             "type": "string",
-            "enum": ["owner", "admin", "member", "viewer"]
+            "enum": ["owner", "admin", "member", "guest"]
           },
           "joinedAt": {
             "type": "string",
@@ -21781,9 +22848,27 @@
           }
         }
       },
+      "SpaceAssignment": {
+        "type": "object",
+        "description": "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
+        "required": ["space_id"],
+        "properties": {
+          "space_id": {
+            "type": "string"
+          },
+          "preset_role": {
+            "type": "string",
+            "enum": ["admin", "builder", "operator", "viewer"]
+          },
+          "custom_role_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "OrgInvitationInfo": {
         "type": "object",
-        "required": ["id", "email", "role", "token", "expiresAt", "createdAt"],
+        "required": ["id", "email", "role", "space_assignments", "token", "expiresAt", "createdAt"],
         "properties": {
           "id": {
             "type": "string"
@@ -21793,7 +22878,14 @@
           },
           "role": {
             "type": "string",
-            "enum": ["owner", "admin", "member", "viewer"]
+            "enum": ["owner", "admin", "member", "guest"]
+          },
+          "space_assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpaceAssignment"
+            },
+            "description": "Space memberships applied when the invitation is accepted."
           },
           "token": {
             "type": "string"
@@ -21847,13 +22939,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OrgMember"
-            }
+            },
+            "description": "Empty unless the caller holds members:read."
           },
           "invitations": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OrgInvitationInfo"
-            }
+            },
+            "description": "Empty unless the caller holds members:invite, including any credential scope ceiling."
           }
         }
       },
@@ -23634,6 +24728,11 @@
           "name",
           "isDefault",
           "settings",
+          "visibility",
+          "default_role",
+          "access",
+          "role",
+          "permissions",
           "created_by",
           "createdAt",
           "updatedAt"
@@ -23673,6 +24772,45 @@
               }
             }
           },
+          "visibility": {
+            "type": "string",
+            "enum": ["open", "closed", "private"],
+            "description": "Who reaches the space without an explicit membership row: `open` (every org member), `closed` (listed, not enterable), `private` (not listed)."
+          },
+          "default_role": {
+            "type": "string",
+            "enum": ["admin", "builder", "operator", "viewer"],
+            "description": "Preset the implicit members of an `open` space hold"
+          },
+          "access": {
+            "type": "string",
+            "enum": ["member", "none"],
+            "description": "Whether the caller may enter this space"
+          },
+          "role": {
+            "type": ["object", "null"],
+            "required": ["kind", "key", "name"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["preset", "custom"]
+              },
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "description": "The caller's role in this space, or null when they have none"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The caller's effective permission set in this space, ceiling applied"
+          },
           "created_by": {
             "type": ["string", "null"],
             "description": "ID of the user who created the space"
@@ -23684,6 +24822,177 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "SpaceMemberObject": {
+        "type": "object",
+        "required": [
+          "object",
+          "userId",
+          "name",
+          "email",
+          "org_role",
+          "source",
+          "role",
+          "created_at"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["space_member"]
+          },
+          "userId": {
+            "type": "string"
+          },
+          "name": {
+            "type": ["string", "null"]
+          },
+          "email": {
+            "type": ["string", "null"]
+          },
+          "org_role": {
+            "type": "string",
+            "enum": ["owner", "admin", "member", "guest"]
+          },
+          "source": {
+            "type": "string",
+            "enum": ["explicit", "org_role", "open_space"],
+            "description": "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default."
+          },
+          "role": {
+            "type": ["object", "null"],
+            "required": ["kind", "key", "name"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["preset", "custom"]
+              },
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "created_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the explicit row was written; null for an implicit member"
+          }
+        }
+      },
+      "SpaceMemberAssignment": {
+        "type": "object",
+        "required": ["object", "userId"],
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["space_member"]
+          },
+          "userId": {
+            "type": "string"
+          },
+          "preset_role": {
+            "type": "string",
+            "enum": ["admin", "builder", "operator", "viewer"]
+          },
+          "custom_role_id": {
+            "type": "string"
+          }
+        }
+      },
+      "RoleObject": {
+        "type": "object",
+        "required": [
+          "object",
+          "kind",
+          "id",
+          "key",
+          "name",
+          "description",
+          "permissions",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["role"]
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["preset", "custom"]
+          },
+          "id": {
+            "type": ["string", "null"],
+            "description": "`srl_` id for a custom bundle; null for a preset, which has no row."
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": ["string", "null"]
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Space-level permission strings the role grants, sorted."
+          },
+          "created_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "RoleVocabularyGroup": {
+        "type": "object",
+        "required": ["resource", "permissions"],
+        "description": "Space-level permissions of one resource, with their delegation facts.",
+        "properties": {
+          "resource": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["permission", "action", "api_key_grantable"],
+              "properties": {
+                "permission": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "api_key_grantable": {
+                  "type": "boolean",
+                  "description": "Can also be carried by an API key."
+                }
+              }
+            }
+          }
+        }
+      },
+      "SpaceMemberRemoval": {
+        "type": "object",
+        "required": ["access_after"],
+        "properties": {
+          "access_after": {
+            "type": "string",
+            "enum": ["implicit", "none"],
+            "description": "Whether the removed member keeps implicit access (open space) or loses the space entirely."
           }
         }
       },

@@ -11,7 +11,7 @@ describe("assignableRolesForMember", () => {
         targetRole: "member",
         isSelf: false,
       }),
-    ).toEqual(["viewer", "member", "admin"]);
+    ).toEqual(["guest", "member", "admin"]);
   });
 
   it("lets an owner change another admin's role", () => {
@@ -21,18 +21,18 @@ describe("assignableRolesForMember", () => {
         targetRole: "admin",
         isSelf: false,
       }),
-    ).toEqual(["viewer", "member", "admin"]);
+    ).toEqual(["guest", "member", "admin"]);
   });
 
   it("enforces the complete actor-target hierarchy", () => {
     const cases = [
-      ["owner", "viewer", false, ["viewer", "member", "admin"]],
-      ["owner", "member", false, ["viewer", "member", "admin"]],
-      ["admin", "viewer", false, ["viewer", "member", "admin"]],
+      ["owner", "guest", false, ["guest", "member", "admin"]],
+      ["owner", "member", false, ["guest", "member", "admin"]],
+      ["admin", "guest", false, ["guest", "member", "admin"]],
       ["admin", "admin", false, []],
       ["admin", "owner", false, []],
-      ["member", "viewer", false, []],
-      ["viewer", "member", false, []],
+      ["member", "guest", false, []],
+      ["guest", "member", false, []],
       ["owner", "owner", true, []],
       ["admin", "admin", true, []],
     ] as const;
@@ -53,10 +53,10 @@ describe("canRemoveMember", () => {
     const cases = [
       ["owner", "admin", false, true],
       ["owner", "member", false, true],
-      ["admin", "viewer", false, true],
+      ["admin", "guest", false, true],
       ["admin", "admin", false, false],
       ["admin", "owner", false, false],
-      ["member", "viewer", false, false],
+      ["member", "guest", false, false],
       ["owner", "owner", true, false],
       ["admin", "admin", true, false],
     ] as const;

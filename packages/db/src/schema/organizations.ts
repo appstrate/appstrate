@@ -19,6 +19,7 @@ import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
 
 export const organizations = pgTable(
   "organizations",
@@ -132,6 +133,16 @@ export const orgInvitations = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     role: orgRoleEnum("role").notNull(),
+    /**
+     * Space memberships applied when the invitation is accepted (RBAC spec
+     * §5). Wire-shaped (snake_case keys) because it is written straight from
+     * the validated invite body and read straight back onto it:
+     * `[{ space_id, preset_role } | { space_id, custom_role_id }]`.
+     */
+    spaceAssignments: jsonb("space_assignments")
+      .$type<ReadonlyArray<SpaceAssignment>>()
+      .notNull()
+      .default([]),
     status: invitationStatusEnum("status").notNull().default("pending"),
     invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

@@ -9,7 +9,9 @@ Core code: `apps/api/src/routes/spaces.ts` (routes), `apps/api/src/services/spac
 ## Model
 
 ```
-Organization ──┬── Space ──┬── Agents (via space_packages)
+Organization ──┬── space_roles (org-defined permission bundles)
+               ├── Space ──┬── space_members (explicit role per user)
+               │           ├── Agents (via space_packages)
                │           ├── Runs ── Files
                │           ├── Schedules
                │           ├── Integrations (connections, OAuth clients, pins, org defaults)
@@ -19,6 +21,14 @@ Organization ──┬── Space ──┬── Agents (via space_packages)
                │           └── Notifications
                └── Space … (one org, N spaces, exactly one default)
 ```
+
+A space is also the **unit of access**, not only of scoping: who reaches it is
+answered by `spaces.visibility` (`open` / `closed` / `private`), `spaces.default_role`
+and the `space_members` row for `(space, user)` — a preset (`admin` / `builder` /
+`operator` / `viewer`) or one of the org's `space_roles` bundles. Owners and
+admins reach every space by org role and are never rows. The resolver and the
+vocabulary live in `docs/architecture/RBAC_PERMISSIONS_SPEC.md`; this page
+describes where it plugs into space resolution.
 
 The row itself is deliberately thin (`packages/db/src/schema/spaces.ts:17`): `id`, `org_id`, `name`, `is_default`, `settings` (jsonb), `created_by`, timestamps. The only validated setting today is `allowedRedirectDomains` (`spaceSettingsSchema`, `apps/api/src/services/spaces.ts:15`), capped at 20 entries and checked through `validateDomainList` on both create and update (`apps/api/src/routes/spaces.ts:110`, `:157`).
 
@@ -66,7 +76,17 @@ Resolution order, symmetric with `requireOrgContext`:
 
 **Every path a space id can enter a request funnels through `validateSpaceInOrg`** (`space-context.ts:74`) — the middleware, SSE auth and the MCP router all call it — which is why the shape guard lives there rather than at each call site. The shape check runs **before** the SELECT: a `spc_` id that does not exist is a 404; a retired `app_` id is not a missing row, it is un-migrated data, and `assertSpaceId` says so. The one path that never passes through it is the default-space fallback, where the id comes straight off the row — so `assertSpaceId(active.id)` is called there explicitly (`space-context.ts:167`), which is where an un-migrated `spaces` table would otherwise slip in unnoticed.
 
-On success the middleware sets both `c.set("spaceId", …)` and `c.set("space", row)` — the resolved `{ id, orgId, isDefault }` (`SpaceContextRow`, `space-context.ts:55`), so a service called from a space-scoped route takes the row rather than re-SELECTing it.
+On success the middleware sets both `c.set("spaceId", …)` and `c.set("space", row)` — the resolved `{ id, orgId, isDefault, visibility, defaultRole }` (`SpaceContextRow`, `space-context.ts`), so a service called from a space-scoped route takes the row rather than re-SELECTing it.
+
+### The membership step
+
+Validating that the space belongs to the org is half the job; the other half is what the caller may do **in** it. Right after `validateSpaceInOrg`, `applySpacePermissions` (`space-context.ts`) loads the `space_members` row for `(spaceId, userId)` — one lookup on the composite primary key — runs the resolver, and rewrites `c.set("permissions", …)` to `ceiling(orgPermissions ∪ spacePermissions)`; it also sets `c.set("spaceRole", ref)`. A guard downstream reads the same single `permissions` Set it always did.
+
+No role in the space is a refusal, and which one depends on the visibility: **403 `not_a_space_member`** for `open` and `closed`, **404** for `private` — a private space does not exist for someone who is not in it, so the error must not confirm that it does. Outside a space, a caller holds org-level strings only, which is why a space-level guard can never pass on an org route.
+
+`applySpacePermissions` is **exported**, because two families of routes are deliberately not in `SPACE_SCOPED_PREFIXES` and must reach the same code path: the spaces router itself (its per-space routes resolve the space from the PATH), and a module gating a space-level resource off its own `spaceId` field, which calls it through the core seam `enterSpaceContext` (`@appstrate/core/permissions`). A module that skips it holds no space-level string and its own guard can never pass — fail-closed, and the wrong behaviour.
+
+The principal whose membership is resolved is `c.get("user")`: the subject under a session or dashboard token, and the **key's creator** under API-key auth (below). A caller with no `orgRole` — an OIDC end-user token, which carries a fixed allowlist and is never a space member — keeps whatever set its strategy wrote.
 
 ### API-key binding
 
@@ -78,6 +98,8 @@ Two consequences the routes enforce explicitly:
 - `GET /api/spaces` filters its result to the key's own space for API-key auth, and API keys cannot create spaces at all (`apps/api/src/routes/spaces.ts:95`, `:103`).
 - `Appstrate-User` impersonation resolves the end-user **inside the key's space** (`isEndUserInSpace`, `auth-pipeline.ts:196`); an `eu_` id from another space is a 403, not a 404-shaped miss.
 
+**A key delegates its creator's standing in that space, live.** At mint, the requested scopes are validated against the creator's effective set in the key's space and filtered to it (`validateScopes`), so a `builder` cannot mint `api-keys:create`. On every request the pinned space goes through the membership step above with the **creator** as the principal, and the key's `scopes` as the ceiling. A creator who later loses the space — removed from it, or demoted to `guest` without a row — leaves the key with `scopes ∩ orgPermissions`, which 403s where it used to work. That is the live-ceiling semantics the API-key design already chose; there is no revocation sweep.
+
 ### Other transports
 
 - **SSE** cannot send headers, so the realtime routes take `?spaceId=` for cookie auth and resolve it through the same `validateSpaceInOrg` (`apps/api/src/routes/realtime.ts:150`); API-key SSE uses the key's own space (`:125`). Both parameters are declared in the spec as `SseSpaceId` / `XSpaceId` (`apps/api/src/openapi/parameters.ts:76`, `:92`).
@@ -86,18 +108,31 @@ Two consequences the routes enforce explicitly:
 
 ## HTTP surface
 
-Mounted at `/api/spaces` (`apps/api/src/index.ts:356`). All CRUD is gated by the `spaces` RBAC resource — `spaces:read` / `spaces:write` / `spaces:delete` (`packages/core/src/permissions.ts:90`, `apps/api/src/lib/permissions.ts:132`). Owners and admins hold all three; members and viewers hold `spaces:read` only (`apps/api/src/lib/permissions.ts:193`, `:213`).
+Mounted at `/api/spaces` (`apps/api/src/index.ts`). The catalog verbs are gated by the **org-level** `spaces` resource — `spaces:read` (list) / `spaces:write` (create) / `spaces:delete`; editing ONE space is `space-settings:write` and its membership is `space-members:*`, both **space-level** and both held by preset `admin` only. Owners and admins hold the org half outright; members and guests hold `spaces:read` (`apps/api/src/lib/permissions.ts`).
 
-| Method               | Path                                                  | Permission         | Notes                                                      |
-| -------------------- | ----------------------------------------------------- | ------------------ | ---------------------------------------------------------- |
-| `GET`                | `/api/spaces`                                         | `spaces:read`      | Default first, then oldest-first (`services/spaces.ts:65`) |
-| `POST`               | `/api/spaces`                                         | `spaces:write`     | 403 for API keys                                           |
-| `GET`                | `/api/spaces/{id}`                                    | `spaces:read`      |                                                            |
-| `PATCH`              | `/api/spaces/{id}`                                    | `spaces:write`     | `name`, `settings`                                         |
-| `DELETE`             | `/api/spaces/{id}`                                    | `spaces:delete`    | 400 on the default space                                   |
-| `GET`/`POST`         | `/api/spaces/{id}/packages`                           | — / `spaces:write` |                                                            |
-| `GET`/`PUT`/`DELETE` | `/api/spaces/{id}/packages/{scope}/{name}`            | — / `spaces:write` | model, proxy, generation config, version pin               |
-| `GET`                | `/api/spaces/{id}/packages/{scope}/{name}/run-config` | `agents:read`      | Resolved per-space config + overrides + pin, in one call   |
+| Method   | Path                                                  | Permission                  | Notes                                                                                                                                                   |
+| -------- | ----------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/spaces`                                         | `spaces:read`               | Filtered per caller (below). Default first, then oldest-first                                                                                           |
+| `POST`   | `/api/spaces`                                         | `spaces:write`              | 403 for API keys. The creator gets no row — they are an admin already                                                                                   |
+| `GET`    | `/api/spaces/{id}`                                    | `spaces:read`               | Visible exactly when the listing shows it; hidden is a 404                                                                                              |
+| `PATCH`  | `/api/spaces/{id}`                                    | `space-settings:write`      | `name`, `settings`, `visibility`, `default_role`                                                                                                        |
+| `DELETE` | `/api/spaces/{id}`                                    | `spaces:delete`             | 400 on the default space                                                                                                                                |
+| `GET`    | `/api/spaces/{id}/members`                            | `space-members:read`        | Explicit rows always; the implicit ones (`source` `org_role` / `open_space`) are the org directory seen through a space and need `members:read` as well |
+| `POST`   | `/api/spaces/{id}/members`                            | `space-members:invite`      | Exactly one of `userId`/`email`, plus one preset/custom role; existing org member only; 409 for org admin or existing row                               |
+| `PATCH`  | `/api/spaces/{id}/members/{userId}`                   | `space-members:change-role` | Same either/or body; 404 when there is no explicit row                                                                                                  |
+| `DELETE` | `/api/spaces/{id}/members/{userId}`                   | `space-members:remove`      | Answers `access_after: "implicit" \| "none"`                                                                                                            |
+| `GET`    | `/api/spaces/{id}/packages`                           | `spaces:read`               | Only package types the caller may read, within the credential ceiling                                                                                   |
+| `POST`   | `/api/spaces/{id}/packages`                           | per package TYPE            | `agents:configure` / `skills:write` / `mcp-servers:write` / `integrations:install`                                                                      |
+| `GET`    | `/api/spaces/{id}/packages/{scope}/{name}`            | `spaces:read`               |                                                                                                                                                         |
+| `PUT`    | `/api/spaces/{id}/packages/{scope}/{name}`            | per package TYPE            | model, proxy, generation config, version pin — same strings as `POST`                                                                                   |
+| `DELETE` | `/api/spaces/{id}/packages/{scope}/{name}`            | per package TYPE            | `integrations:uninstall` for integrations, otherwise the `POST` string                                                                                  |
+| `GET`    | `/api/spaces/{id}/packages/{scope}/{name}/run-config` | `agents:read`               | Resolved per-space config + overrides + pin, in one call                                                                                                |
+
+**The listing is filtered, and every item carries the caller's standing.** An owner or admin sees every space; a member sees the `open` ones plus any `closed`/`private` one they hold a row in (a `closed` space is listed with `access: "none"` — visible, not enterable); a guest sees only the spaces they hold a row in; an API key sees its own space. Each item adds `visibility`, `default_role`, `access` (`"member" | "none"`), `role` (`{ kind, key, name }` or `null`) and `permissions` — the caller's effective set in that space, ceiling already applied — so a client decides what to render without re-deriving anything from a role name. Setting `visibility` to anything but `open` on the default space is a 400, and the DB check backs it.
+
+`GET /api/spaces/{id}/roles` requires any of `space-members:invite`, `space-members:change-role` or `space-settings:write` and returns only roles whose effective grants fit the actor's space permissions. The same ceiling guards assigning roles, changing the implicit default, opening a space and removing a row that exposes a stronger implicit role. `POST` never overwrites an existing membership. Exact-email addition does not enumerate the org directory or send an invitation.
+
+Member mutations record `space.member_added` / `space.member_role_changed` / `space.member_removed`. Someone who is not yet in the org is invited through `POST /api/orgs/{orgId}/members` with `space_assignments`, which applies the rows on accept.
 
 **Wire shape.** The object discriminator is `object: "space"` (and `object: "space_package"` on the install rows). Per `docs/CASING_CONVENTIONS.md`, four fields stay **camelCase** on the wire, under two different carve-outs: `id` and `spaceId` are universal DB-convention names (Carve-out 4b), while `isDefault` and `allowedRedirectDomains` are headless-platform DTO fields (Carve-out 4n). The domain fields on the space-package DTO are snake_case (`version_id`, `installed_at`, `package_type`, `package_source`). The one projection the route does by hand is `created_by`: the Drizzle field is `createdBy` but `*By` is an actor reference, not a carve-out, so `toSpaceWire` renames it (`apps/api/src/routes/spaces.ts:46`).
 
@@ -119,6 +154,7 @@ Everything else follows the FK — except the last row, which since `0055` no lo
 
 | Table                                   | `space_id`    | On delete                                |
 | --------------------------------------- | ------------- | ---------------------------------------- |
+| `space_members`                         | NOT NULL (PK) | cascade                                  |
 | `space_packages`                        | NOT NULL      | cascade                                  |
 | `runs`                                  | NOT NULL      | cascade                                  |
 | `package_schedules`                     | NOT NULL      | cascade                                  |

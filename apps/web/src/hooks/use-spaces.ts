@@ -34,6 +34,7 @@ function useInvalidateSpaces() {
   return () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
   };
 }
 

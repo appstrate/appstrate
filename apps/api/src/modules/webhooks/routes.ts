@@ -30,9 +30,10 @@ import {
   buildEventEnvelope,
   webhookEventSchema,
 } from "./service.ts";
+import type { WebhookInfo } from "@appstrate/shared-types";
 import { forbidden } from "../../lib/errors.ts";
 import { readJsonBody } from "../../lib/request-body.ts";
-import { requireModulePermission } from "@appstrate/core/permissions";
+import { enterSpaceContext, makePermissionGuard } from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../middleware/space-context.ts";
@@ -51,6 +52,45 @@ async function assertSpaceBelongsToOrg(spaceId: string, orgId: string): Promise<
   if (!(await validateSpaceInOrg(spaceId, orgId))) {
     throw forbidden("spaceId must belong to the current organization");
   }
+}
+
+/** RBAC resource for a webhook, picked from the level it is scoped at. */
+function webhookResource(level: string): "webhooks" | "org-webhooks" {
+  return level === "org" ? "org-webhooks" : "webhooks";
+}
+
+/**
+ * Gate on the permission the webhook's own level implies. The level is only
+ * known once the body is parsed (create) or the row is read (everything
+ * else), so this runs inside the handler rather than as route middleware —
+ * `makePermissionGuard` keeps the audit hook and the 403 shape identical to
+ * every other guarded route.
+ */
+async function assertWebhookPermission(
+  c: Context<AppEnv>,
+  level: string,
+  action: "read" | "write" | "delete",
+): Promise<void> {
+  await makePermissionGuard(`${webhookResource(level)}:${action}`)(c, async () => undefined);
+}
+
+/**
+ * The listing spans BOTH levels, so EITHER half of the split vocabulary
+ * authorises it — the page is then filtered per row (`readable`), which is what
+ * turns "I only hold one level" into a shorter page instead of a 403.
+ *
+ * Delegates to `makePermissionGuard` rather than re-deciding: same fail-closed
+ * check, same denial audit, same 403 body. A caller holding NEITHER is denied by
+ * the org guard, and `org-webhooks:read` is the right string to name — the
+ * unfiltered listing returns the org-level rows.
+ */
+function requireAnyWebhookRead() {
+  const spaceGuard = makePermissionGuard("webhooks:read");
+  const orgGuard = makePermissionGuard("org-webhooks:read");
+  return (c: Context<AppEnv>, next: () => Promise<void>) => {
+    const permissions = c.get("permissions") ?? new Set<string>();
+    return permissions.has("webhooks:read") ? spaceGuard(c, next) : orgGuard(c, next);
+  };
 }
 
 const createOrgWebhookSchema = z
@@ -107,6 +147,29 @@ export const rotateSecretSchema = z
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
+  // `webhooks` is a SPACE-level resource and `/api/webhooks` is deliberately
+  // NOT in `SPACE_SCOPED_PREFIXES` (this module validates an explicit
+  // `spaceId` field instead of taking `X-Space-Id`), so the router enters a
+  // space itself — org permissions carry no space-level string, so
+  // `webhooks:*` could otherwise never be satisfied (RBAC spec §4.3). There is
+  // no default-space fallback: the seam answers 400 to a direct caller that
+  // names none, which is why the entry below is conditional.
+  //
+  // Entered ONLY when the caller identifies one (the credential's pinned space,
+  // or `X-Space-Id`). The seam refuses a header-less direct caller by design,
+  // and `level: "org"` webhooks are space-less: their permission is org-level,
+  // so a cookie caller managing them names no space and must not be turned away
+  // for it. Skipping leaves `permissions` at the org half, which is exactly
+  // what the org-level routes need. A route addressing a DIFFERENT space (the
+  // `spaceId` body field, the `?spaceId=` filter, the row's own space) re-enters
+  // that one before its own guard.
+  const enterCallerSpace = async (c: Context<AppEnv>, next: () => Promise<void>) => {
+    if (c.get("spaceId") ?? c.req.header("X-Space-Id")) await enterSpaceContext(c);
+    return next();
+  };
+  router.use("/api/webhooks", enterCallerSpace);
+  router.use("/api/webhooks/*", enterCallerSpace);
+
   // Issue #172 (extension) — webhooks are space-scoped (or org-level
   // and span every space). API keys must never reach a webhook outside their
   // bound space, so we narrow their scope to `SpaceScope`; sessions
@@ -121,196 +184,224 @@ export function createWebhooksRouter() {
   }
 
   // POST /api/webhooks — create a webhook (returns secret once)
-  router.post(
-    "/api/webhooks",
-    rateLimit(10),
-    idempotency(),
-    requireModulePermission("webhooks", "write"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const data = await readJsonBody(c, createWebhookSchema);
+  router.post("/api/webhooks", rateLimit(10), idempotency(), async (c) => {
+    const orgId = c.get("orgId");
+    const data = await readJsonBody(c, createWebhookSchema);
 
-      if (data.level === "space") {
-        assertSpaceId(data.spaceId, "spaceId");
+    // The space named by the BODY, not the caller's current one — the
+    // permission below is that space's. Shape and org-membership are proved
+    // first so a malformed id is a 400 naming the field, never a 403 about a
+    // space that does not exist.
+    if (data.level === "space") {
+      assertSpaceId(data.spaceId, "spaceId");
+      await assertSpaceBelongsToOrg(data.spaceId, orgId);
+      await enterSpaceContext(c, data.spaceId);
+    }
+    await assertWebhookPermission(c, data.level, "write");
+
+    // API keys cannot create org-level webhooks (would span foreign spaces)
+    // and cannot create space-level webhooks targeting another space.
+    const isApiKey = c.get("authMethod") === "api_key";
+    if (isApiKey) {
+      if (data.level !== "space") {
+        throw forbidden("API keys cannot create org-level webhooks");
       }
-
-      // API keys cannot create org-level webhooks (would span foreign spaces)
-      // and cannot create space-level webhooks targeting another space.
-      const isApiKey = c.get("authMethod") === "api_key";
-      if (isApiKey) {
-        if (data.level !== "space") {
-          throw forbidden("API keys cannot create org-level webhooks");
-        }
-        if (data.spaceId !== c.get("spaceId")) {
-          throw forbidden("API key scope does not include this space");
-        }
+      if (data.spaceId !== c.get("spaceId")) {
+        throw forbidden("API key scope does not include this space");
       }
+    }
 
-      if (data.level === "space") {
-        await assertSpaceBelongsToOrg(data.spaceId, orgId);
-      }
-
-      const result = await createWebhook(
-        data.level === "org"
-          ? {
-              level: "org",
-              scope: { orgId },
-              url: data.url,
-              events: data.events,
-              packageId: data.packageId,
-              payloadMode: data.payloadMode,
-              enabled: data.enabled,
-            }
-          : {
-              level: "space",
-              scope: { orgId, spaceId: data.spaceId },
-              url: data.url,
-              events: data.events,
-              packageId: data.packageId,
-              payloadMode: data.payloadMode,
-              enabled: data.enabled,
-            },
-      );
-      await recordAuditFromContext(c, {
-        action: "webhook.created",
-        resourceType: "webhook",
-        resourceId: result.id,
-        after: { url: data.url, events: data.events, level: data.level },
-      });
-      return c.json(result, 201);
-    },
-  );
+    const result = await createWebhook(
+      data.level === "org"
+        ? {
+            level: "org",
+            scope: { orgId },
+            url: data.url,
+            events: data.events,
+            packageId: data.packageId,
+            payloadMode: data.payloadMode,
+            enabled: data.enabled,
+          }
+        : {
+            level: "space",
+            scope: { orgId, spaceId: data.spaceId },
+            url: data.url,
+            events: data.events,
+            packageId: data.packageId,
+            payloadMode: data.payloadMode,
+            enabled: data.enabled,
+          },
+    );
+    await recordAuditFromContext(c, {
+      action: "webhook.created",
+      resourceType: "webhook",
+      resourceId: result.id,
+      after: { url: data.url, events: data.events, level: data.level },
+    });
+    return c.json(result, 201);
+  });
 
   // GET /api/webhooks[?spaceId=...&all=true] — list webhooks visible to the caller
-  router.get(
-    "/api/webhooks",
-    rateLimit(300),
-    requireModulePermission("webhooks", "read"),
-    async (c) => {
-      const scope = webhookScope(c);
+  router.get("/api/webhooks", rateLimit(300), requireAnyWebhookRead(), async (c) => {
+    const scope = webhookScope(c);
 
-      // SpaceScope callers (API keys) are fully narrowed inside listWebhooks —
-      // it ignores `opts` and returns only webhooks pinned to the key's space.
-      if ("spaceId" in scope) {
-        const result = await listWebhooks(scope);
-        return c.json(listResponse(result));
-      }
+    /**
+     * The listing spans BOTH levels — `?all=true` returns every row in the
+     * org and the default filter returns the org-level ones — so the guard
+     * above is not sufficient on its own. Drop the rows whose LEVEL the
+     * caller cannot read (a `builder` holds `webhooks:read` but not
+     * `org-webhooks:read`) rather than answering 403 for a mixed page.
+     *
+     * Read from the context at call time, never captured: entering a space
+     * below rewrites `permissions`, and a closure over the pre-entry Set
+     * would filter the page against the wrong space's authority.
+     */
+    const readable = (rows: WebhookInfo[]): WebhookInfo[] => {
+      const permissions = c.get("permissions") ?? new Set<string>();
+      return rows.filter((w) => permissions.has(`${webhookResource(w.level)}:read`));
+    };
 
-      const all = c.req.query("all") === "true";
-      const spaceId = c.req.query("spaceId") || undefined;
-      if (spaceId) {
-        assertSpaceId(spaceId, "spaceId");
-        await assertSpaceBelongsToOrg(spaceId, scope.orgId);
+    // SpaceScope callers (API keys) are fully narrowed inside listWebhooks —
+    // it ignores `opts` and returns only webhooks pinned to the key's space.
+    if ("spaceId" in scope) {
+      return c.json(listResponse(readable(await listWebhooks(scope))));
+    }
+
+    const all = c.req.query("all") === "true";
+    const spaceId = c.req.query("spaceId") || undefined;
+    if (spaceId) {
+      assertSpaceId(spaceId, "spaceId");
+      await assertSpaceBelongsToOrg(spaceId, scope.orgId);
+      // The filter can name a DIFFERENT space from the one the router
+      // entered, so the permission that authorises this page is that
+      // space's — exactly as the by-id routes take it from the row's own
+      // space.
+      await enterSpaceContext(c, spaceId);
+      await assertWebhookPermission(c, "space", "read");
+    }
+    if (all) {
+      // `all=true` enumerates rows across EVERY space in the org, including
+      // spaces the caller holds no role in. A `webhooks:read` earned in one
+      // space cannot authorise that, and the `readable` filter cannot catch
+      // it either — the filter checks the LEVEL, not the space, so it would
+      // hand a space admin of A every space webhook of B. Only the org-level
+      // half authorises a cross-space view, and that is owner/admin's.
+      await assertWebhookPermission(c, "org", "read");
+    }
+    return c.json(listResponse(readable(await listWebhooks(scope, { spaceId, all }))));
+  });
+
+  /**
+   * Load the webhook a by-id route addresses, then gate on the permission its
+   * own level implies.
+   *
+   * The row must be read before the check — the level IS the row — so a
+   * caller with no webhook permission at all would otherwise learn from
+   * 404-vs-403 whether an id exists. For such a caller the miss answers 403:
+   * whether a webhook exists is itself something only a reader may know.
+   */
+  async function loadWebhookForAction(
+    c: Context<AppEnv>,
+    action: "read" | "write" | "delete",
+  ): Promise<WebhookInfo> {
+    let webhook: WebhookInfo;
+    try {
+      webhook = await getWebhook(webhookScope(c), c.req.param("id")!);
+    } catch (err) {
+      const permissions = c.get("permissions");
+      if (!permissions?.has("webhooks:read") && !permissions?.has("org-webhooks:read")) {
+        throw forbidden("Insufficient permissions: webhooks:read required");
       }
-      const result = await listWebhooks(scope, { spaceId, all });
-      return c.json(listResponse(result));
-    },
-  );
+      throw err;
+    }
+    // The row's own space decides the permission, and it need not be the one
+    // the caller entered above (an admin listing org-wide, a `?spaceId=` that
+    // named another). Enter it before the guard reads the set.
+    if (webhook.level === "space" && webhook.spaceId) {
+      await enterSpaceContext(c, webhook.spaceId);
+    }
+    await assertWebhookPermission(c, webhook.level, action);
+    return webhook;
+  }
 
   // GET /api/webhooks/:id — get webhook detail
-  router.get(
-    "/api/webhooks/:id",
-    rateLimit(300),
-    requireModulePermission("webhooks", "read"),
-    async (c) => {
-      const result = await getWebhook(webhookScope(c), c.req.param("id")!);
-      return c.json(result);
-    },
-  );
+  router.get("/api/webhooks/:id", rateLimit(300), async (c) => {
+    return c.json(await loadWebhookForAction(c, "read"));
+  });
 
   // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
-  router.put(
-    "/api/webhooks/:id",
-    rateLimit(10),
-    requireModulePermission("webhooks", "write"),
-    async (c) => {
-      const data = await readJsonBody(c, updateWebhookSchema);
+  router.put("/api/webhooks/:id", rateLimit(10), async (c) => {
+    // Permission first: the level comes from the row, so the check cannot move
+    // to middleware, but it must still precede reading the body.
+    await loadWebhookForAction(c, "write");
+    const data = await readJsonBody(c, updateWebhookSchema);
 
-      const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
-      await recordAuditFromContext(c, {
-        action: "webhook.updated",
-        resourceType: "webhook",
-        resourceId: c.req.param("id")!,
-        after: data as unknown as Record<string, unknown>,
-      });
-      return c.json(result);
-    },
-  );
+    const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
+    await recordAuditFromContext(c, {
+      action: "webhook.updated",
+      resourceType: "webhook",
+      resourceId: c.req.param("id")!,
+      after: data as unknown as Record<string, unknown>,
+    });
+    return c.json(result);
+  });
 
   // DELETE /api/webhooks/:id — delete webhook
-  router.delete(
-    "/api/webhooks/:id",
-    rateLimit(10),
-    requireModulePermission("webhooks", "delete"),
-    async (c) => {
-      const id = c.req.param("id")!;
-      await deleteWebhook(webhookScope(c), id);
-      await recordAuditFromContext(c, {
-        action: "webhook.deleted",
-        resourceType: "webhook",
-        resourceId: id,
-      });
-      return c.body(null, 204);
-    },
-  );
+  router.delete("/api/webhooks/:id", rateLimit(10), async (c) => {
+    const id = c.req.param("id")!;
+    await loadWebhookForAction(c, "delete");
+    await deleteWebhook(webhookScope(c), id);
+    await recordAuditFromContext(c, {
+      action: "webhook.deleted",
+      resourceType: "webhook",
+      resourceId: id,
+    });
+    return c.body(null, 204);
+  });
 
   // POST /api/webhooks/:id/test — send a synthetic test.ping event
-  router.post(
-    "/api/webhooks/:id/test",
-    rateLimit(5),
-    requireModulePermission("webhooks", "write"),
-    async (c) => {
-      const webhookId = c.req.param("id")!;
-      const wh = await getWebhook(webhookScope(c), webhookId);
+  router.post("/api/webhooks/:id/test", rateLimit(5), async (c) => {
+    const wh = await loadWebhookForAction(c, "write");
 
-      const { eventId, payload } = buildEventEnvelope({
-        eventType: "test.ping",
-        run: { id: "run_test", packageId: "test", status: "success" },
-        payloadMode:
-          wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
-      });
+    const { eventId, payload } = buildEventEnvelope({
+      eventType: "test.ping",
+      run: { id: "run_test", packageId: "test", status: "success" },
+      payloadMode:
+        wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
+    });
 
-      return c.json({ eventId, payload });
-    },
-  );
+    return c.json({ eventId, payload });
+  });
 
   // POST /api/webhooks/:id/rotate — open a dual-signature rotation window.
   // Body is optional: `{ windowSeconds?: number }` overrides the default
   // 7-day window (capped at 30 days). The response carries both the new
   // secret (for consumer migration) and the previous one (still valid
   // until the window closes), plus the deadline.
-  router.post(
-    "/api/webhooks/:id/rotate",
-    rateLimit(5),
-    requireModulePermission("webhooks", "write"),
-    async (c) => {
-      const id = c.req.param("id")!;
-      const parsed = await readJsonBody(c, rotateSecretSchema, { allowEmpty: true });
-      const result = await rotateSecret(webhookScope(c), id, parsed);
-      await recordAuditFromContext(c, {
-        action: "webhook.secret_rotated",
-        resourceType: "webhook",
-        resourceId: id,
-        after: { rotationWindowEndsAt: result.rotationWindowEndsAt },
-      });
-      return c.json(result);
-    },
-  );
+  router.post("/api/webhooks/:id/rotate", rateLimit(5), async (c) => {
+    const id = c.req.param("id")!;
+    await loadWebhookForAction(c, "write");
+    const parsed = await readJsonBody(c, rotateSecretSchema, { allowEmpty: true });
+    const result = await rotateSecret(webhookScope(c), id, parsed);
+    await recordAuditFromContext(c, {
+      action: "webhook.secret_rotated",
+      resourceType: "webhook",
+      resourceId: id,
+      after: { rotationWindowEndsAt: result.rotationWindowEndsAt },
+    });
+    return c.json(result);
+  });
 
   // GET /api/webhooks/:id/deliveries — delivery history
-  router.get(
-    "/api/webhooks/:id/deliveries",
-    rateLimit(300),
-    requireModulePermission("webhooks", "read"),
-    async (c) => {
-      // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
-      // would otherwise reach the query and 500. Out-of-range / unparseable
-      // falls back to 20 — `parseListPagination` owns that idiom.
-      const { limit } = parseListPagination(c, { defaultLimit: 20 });
-      const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);
-      return c.json(listResponse(result));
-    },
-  );
+  router.get("/api/webhooks/:id/deliveries", rateLimit(300), async (c) => {
+    await loadWebhookForAction(c, "read");
+    // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
+    // would otherwise reach the query and 500. Out-of-range / unparseable
+    // falls back to 20 — `parseListPagination` owns that idiom.
+    const { limit } = parseListPagination(c, { defaultLimit: 20 });
+    const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);
+    return c.json(listResponse(result));
+  });
 
   return router;
 }

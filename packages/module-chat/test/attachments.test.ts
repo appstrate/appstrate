@@ -66,9 +66,9 @@ async function stageUpload(
 }
 
 /** A chat session row owned by `userId`. */
-async function createSession(orgId: string, userId: string): Promise<string> {
+async function createSession(orgId: string, spaceId: string, userId: string): Promise<string> {
   const id = `chs_${crypto.randomUUID()}`;
-  await db.insert(chatSessions).values({ id, orgId, userId, title: null });
+  await db.insert(chatSessions).values({ id, orgId, spaceId, userId, title: null });
   return id;
 }
 
@@ -109,7 +109,7 @@ describe("chat attachments", () => {
 
   it("materializes an upload:// part into a session-scoped file and rewrites it to appfile://", async () => {
     const bytes = new TextEncoder().encode("a real pdf-ish payload");
-    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "rapport.txt", bytes);
 
     const message = fileMessage("m1", `upload://${uploadId}`, "rapport.txt");
@@ -156,7 +156,7 @@ describe("chat attachments", () => {
     // — a pairing no build ever emitted. Both halves are refused now, and the
     // one that used to get through failed one line later anyway.
     const bytes = new TextEncoder().encode("legacy-scheme payload");
-    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "vieux.txt", bytes);
     const resolve = resolverFor(scope, ctx.user.id, sessionId);
 
@@ -179,7 +179,7 @@ describe("chat attachments", () => {
   it("rejects an appfile:// belonging to another user (container ACL)", async () => {
     // User A materializes a file in A's own chat session.
     const bytes = new TextEncoder().encode("owner-only file");
-    const sessionA = await createSession(ctx.orgId, ctx.user.id);
+    const sessionA = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "a.pdf", bytes);
     const [ownFile] = (
       await materializeUserAttachments(
@@ -191,7 +191,7 @@ describe("chat attachments", () => {
     // User B (same org, different user) cannot resolve A's file.
     const userB = await createTestUser();
     await addOrgMember(ctx.orgId, userB.id, "member");
-    const sessionB = await createSession(ctx.orgId, userB.id);
+    const sessionB = await createSession(ctx.orgId, ctx.defaultSpaceId, userB.id);
 
     await expect(resolverFor(scope, userB.id, sessionB)(ownFile!.url)).rejects.toMatchObject({
       status: 404,
@@ -200,7 +200,7 @@ describe("chat attachments", () => {
 
   it("flattens file parts into the model-facing attachment block (both paths)", async () => {
     const bytes = new TextEncoder().encode("x".repeat(2_400_000));
-    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "rapport.txt", bytes);
     const rewritten = await materializeUserAttachments(
       fileMessage("m1", `upload://${uploadId}`, "rapport.txt"),
@@ -230,7 +230,7 @@ describe("chat attachments", () => {
   it("rejects an attachment URI that is neither upload:// nor appfile:// (e.g. https://)", async () => {
     // The composer seam only resolves staged uploads or existing files — a
     // remote URL must be refused, never fetched (SSRF / exfil vector).
-    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     await expect(
       resolverFor(scope, ctx.user.id, sessionId)("https://evil.example.com/secret.txt"),
     ).rejects.toMatchObject({ status: 400 });
@@ -238,7 +238,7 @@ describe("chat attachments", () => {
 
   it("surfaces a storage-quota rejection as an RFC 9457 error", async () => {
     const bytes = new TextEncoder().encode("over quota");
-    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "big.pdf", bytes);
 
     const prev = process.env.ORG_STORAGE_QUOTA_BYTES;

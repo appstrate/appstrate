@@ -10,11 +10,25 @@ import { ConfirmModal } from "../../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
+import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@appstrate/ui/components/select";
+import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { useSpaceRoleOptions, type SpaceRolePreset } from "../../../hooks/use-roles";
+import type { components } from "../../../api/client";
 import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
 import { getErrorMessage } from "@appstrate/core/errors";
+
+type SpaceObject = components["schemas"]["SpaceObject"];
+type SpaceVisibility = SpaceObject["visibility"];
 
 interface SettingsFormData {
   name: string;
@@ -22,32 +36,23 @@ interface SettingsFormData {
 
 export function OrgSettingsSpaceGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
   const spaceId = useCurrentSpaceId();
   const { data: space, isLoading, error } = useSpace(spaceId ?? "");
 
-  if (!isAdmin) return null;
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!space) return <ErrorState />;
 
-  return <GeneralForm spaceId={spaceId} space={space} />;
+  return <GeneralForm key={spaceId} spaceId={spaceId} space={space} />;
 }
 
-function GeneralForm({
-  spaceId,
-  space,
-}: {
-  spaceId: string;
-  space: {
-    name: string;
-    isDefault: boolean;
-    settings?: { allowedRedirectDomains?: string[] };
-  };
-}) {
+function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const navigate = useNavigate();
+  const { roles } = useSpaceRoleOptions(spaceId);
+  const presets = (roles ?? []).filter((role) => role.kind === "preset");
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
 
@@ -56,6 +61,13 @@ function GeneralForm({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const activeDomains = editedDomains ?? domains;
 
+  // The default space must stay `open` — the API answers 400 otherwise, and a
+  // DB check backs it, so the control is disabled rather than merely warned on.
+  const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
+  const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
+  const visibility = editedVisibility ?? space.visibility;
+  const defaultRole = editedDefaultRole ?? space.default_role;
+
   const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
     values: { name: space.name },
   });
@@ -63,7 +75,12 @@ function GeneralForm({
   const onSubmit = (data: SettingsFormData) => {
     updateMutation.mutate({
       params: { path: { id: spaceId } },
-      body: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
+      body: {
+        name: data.name.trim(),
+        settings: { allowedRedirectDomains: activeDomains },
+        visibility,
+        default_role: defaultRole,
+      },
     });
   };
 
@@ -123,12 +140,68 @@ function GeneralForm({
           </div>
         </div>
 
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">{t("spaces.visibilityLabel")}</legend>
+          <p className="text-muted-foreground text-sm">{t("spaces.visibilityHint")}</p>
+          <RadioGroup
+            value={visibility}
+            onValueChange={(v) => setEditedVisibility(v as SpaceVisibility)}
+            disabled={space.isDefault}
+            aria-label={t("spaces.visibilityLabel")}
+          >
+            {SPACE_VISIBILITIES.map((value) => (
+              <div key={value} className="flex items-start gap-2">
+                <RadioGroupItem value={value} id={`space-visibility-${value}`} className="mt-1" />
+                <Label htmlFor={`space-visibility-${value}`} className="flex flex-col items-start">
+                  <span>{t(`spaces.visibility.${value}`)}</span>
+                  <span className="text-muted-foreground text-xs font-normal">
+                    {t(`spaces.visibilityDesc.${value}`)}
+                  </span>
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+          {space.isDefault && (
+            <p className="text-muted-foreground text-sm">{t("spaces.visibilityDefaultLocked")}</p>
+          )}
+        </fieldset>
+
+        {visibility === "open" && (
+          <div className="space-y-2">
+            <Label htmlFor="space-default-role">{t("spaces.defaultRoleLabel")}</Label>
+            <p className="text-muted-foreground text-sm">{t("spaces.defaultRoleHint")}</p>
+            <Select
+              value={defaultRole}
+              onValueChange={(v) => setEditedDefaultRole(v as SpaceRolePreset)}
+            >
+              <SelectTrigger id="space-default-role" className="w-[200px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {!presets.some((preset) => preset.key === defaultRole) && (
+                  <SelectItem value={defaultRole} disabled>
+                    {t(`roles.preset.${defaultRole}`)}
+                  </SelectItem>
+                )}
+                {presets.map((preset) => (
+                  <SelectItem key={preset.key} value={preset.key}>
+                    {t(`roles.preset.${preset.key}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <Button type="submit" disabled={updateMutation.isPending}>
           {updateMutation.isPending ? <Spinner /> : t("btn.save")}
         </Button>
       </form>
 
-      {!space.isDefault && (
+      {/* Deleting a space is an ORG-level grant (`DELETE /api/spaces/:id`),
+          not part of governing this one — a space admin who is an org member
+          holds `space-settings:write` and still cannot delete it. */}
+      {!space.isDefault && can("spaces:delete") && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("spaces.dangerZone")}

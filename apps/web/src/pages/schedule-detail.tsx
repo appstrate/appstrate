@@ -31,7 +31,7 @@ import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -64,7 +64,7 @@ export function ScheduleDetailPage() {
           actions={
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
-              {isAdmin && (
+              {can("schedules:write") && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="icon">
@@ -80,15 +80,19 @@ export function ScheduleDetailPage() {
                       {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
                       {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onSelect={() => setConfirmOpen(true)}
-                      disabled={deleteSchedule.isPending}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 size={14} />
-                      {t("schedule.delete")}
-                    </DropdownMenuItem>
+                    {can("schedules:delete") && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() => setConfirmOpen(true)}
+                          disabled={deleteSchedule.isPending}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 size={14} />
+                          {t("schedule.delete")}
+                        </DropdownMenuItem>
+                      </>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}

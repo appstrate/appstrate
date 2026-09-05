@@ -632,9 +632,11 @@ function assertBundleRootConforms(bundle: Bundle): void {
 export async function preflightBundleImport(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
+  authorize?: (bundle: Bundle) => Promise<void>,
 ): Promise<BundleImportPreflight> {
   const bundle = await readOrBuildBundle(bytes, scope);
   assertBundleRootConforms(bundle);
+  await authorize?.(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
@@ -648,8 +650,9 @@ export async function handleImportBundle(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
   userId: string,
+  authorize?: (bundle: Bundle) => Promise<void>,
 ): Promise<ImportBundleResult> {
-  const { bundle, conflicts } = await preflightBundleImport(bytes, scope);
+  const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
   if (conflicts.length > 0) {
     const summary = conflicts
       .map((c) =>

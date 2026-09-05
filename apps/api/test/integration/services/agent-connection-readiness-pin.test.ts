@@ -139,7 +139,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id },
-      isAdmin: true,
+      canConfigureIntegrations: true,
     });
 
     // THE negative control. Unseeded, the cascade reads the draft (which needs
@@ -175,7 +175,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id } as const,
-      isAdmin: true,
+      canConfigureIntegrations: true,
     };
 
     // `draft` still reads the working copy — one declared integration, and the

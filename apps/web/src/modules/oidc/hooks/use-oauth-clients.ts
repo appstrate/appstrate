@@ -10,10 +10,10 @@ import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
 import { useOrgOnlyScope } from "@/hooks/use-org-scope";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 
 /** Wire shapes from the OpenAPI spec. */
 export type OAuthClient = components["schemas"]["OAuthClientObject"];
-export type SignupRole = OAuthClient["signupRole"];
 
 type CreateOAuthClientBody =
   paths["/api/oauth/clients"]["post"]["requestBody"]["content"]["application/json"];
@@ -82,7 +82,8 @@ export function useCreateOAuthClient(level?: "org" | "space") {
       /** Unified signup opt-in (instance/org/space). */
       allowSignup?: boolean;
       /** Org-level only — role assigned on auto-join. `owner` forbidden. */
-      signupRole?: SignupRole;
+      signupRole?: AssignableOrgRole;
+      signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
     }) => {
       // The level discriminator and pinned reference come from the current
       // org/space context — call sites only provide the client fields.

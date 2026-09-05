@@ -15,9 +15,11 @@
  * regex, not decoration.
  */
 
+import { z } from "zod";
+import { spaceRoleAssignmentShape } from "../../../src/lib/space-role-assignment.ts";
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "@appstrate/core/api-errors";
-import { SPACE_ID_RE, assertSpaceId, prefixedId } from "../../../src/lib/ids.ts";
+import { SPACE_ID_RE, assertSpaceId, assertSpaceRoleId, prefixedId } from "../../../src/lib/ids.ts";
 
 /** Run `assertSpaceId` and return the `ApiError` it threw. Fails if it did not throw. */
 function captureThrow(id: string, param?: string): ApiError {
@@ -123,5 +125,49 @@ describe("assertSpaceId", () => {
       expect(captureThrow("spc_1", "spaceId").param).toBe("spaceId");
       expect(captureThrow("spc_1").param).toBe("space_id");
     });
+  });
+});
+
+describe("assertSpaceRoleId", () => {
+  it("accepts exactly what prefixedId('srl') mints", () => {
+    for (let i = 0; i < 20; i++) {
+      expect(() => assertSpaceRoleId(prefixedId("srl"))).not.toThrow();
+    }
+  });
+
+  const rejected = [
+    // A space id is not a role id — the prefixes are what tell them apart.
+    prefixedId("spc"),
+    "srl_1",
+    "srl_2f1c6d849a524f2bb1a70c9d3e5f7a10",
+    "srl_2F1C6D84-9A52-4F2B-B1A7-0C9D3E5F7A10",
+    "srl_",
+    "",
+  ];
+
+  for (const id of rejected) {
+    it(`rejects '${id}'`, () => {
+      let thrown: unknown;
+      try {
+        assertSpaceRoleId(id, "custom_role_id");
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(ApiError);
+      const err = thrown as ApiError;
+      expect(err.status).toBe(400);
+      expect(err.param).toBe("custom_role_id");
+      expect(err.message).toContain("Malformed space role id");
+    });
+  }
+});
+
+describe("spaceRoleAssignmentShape.custom_role_id", () => {
+  const schema = z.object(spaceRoleAssignmentShape);
+  it("refuses a malformed id and accepts a canonical one", () => {
+    expect(schema.safeParse({ custom_role_id: "srl_nope" }).success).toBe(false);
+    expect(
+      schema.safeParse({ custom_role_id: "srl_0f6c4c4e-1b2a-4c3d-8e9f-0a1b2c3d4e5f" }).success,
+    ).toBe(true);
   });
 });

@@ -497,7 +497,8 @@ describe("oidcModule.init() — boot wiring", () => {
       // Migrations are already applied by the test preload — we only care
       // about the post-migration steps of `init()` here.
       getSendMail: async () => () => {},
-      getOrgAdminEmails: async () => [],
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
       getOrgName: async () => null,
       services: {} as import("@appstrate/core/module").PlatformServices,
     };
@@ -535,7 +536,8 @@ describe("oidcModule.init() — boot wiring", () => {
       redisUrl: process.env.REDIS_URL ?? null,
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
       getSendMail: async () => () => {},
-      getOrgAdminEmails: async () => [],
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
       getOrgName: async () => null,
       services: {} as import("@appstrate/core/module").PlatformServices,
     };

@@ -122,6 +122,7 @@ export interface McpToolContext {
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
+  authorizeBundle?: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**

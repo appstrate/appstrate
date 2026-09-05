@@ -5,14 +5,15 @@ import { streamSSE } from "hono/streaming";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
-import { organizationMembers, runs } from "@appstrate/db/schema";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { runs } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/realtime.ts";
 import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
-import { resolveApiKeyPermissions } from "../lib/permissions.ts";
-import { validateSpaceInOrg } from "../middleware/space-context.ts";
+import { getOrgMember } from "../services/organizations.ts";
+import { effectivePermissions, orgPermissions } from "../lib/permissions.ts";
+import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
+import { validateSpaceInOrg, type SpaceContextRow } from "../middleware/space-context.ts";
 import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgRole } from "../types/index.ts";
@@ -74,18 +75,37 @@ function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | 
 interface SSEAuthResult {
   userId: string;
   orgId: string;
-  role: OrgRole;
   /**
-   * Admin level derived from the resolved role (`admin`/`owner`), never
-   * hardcoded. Drives the subscriber filter's `isAdmin` flag — the only
-   * thing it gates is debug-level `run_log` visibility
-   * (services/realtime.ts).
+   * Whether the subscriber sees debug-level `run_log` events
+   * (services/realtime.ts) — the only thing this flag gates. Read from
+   * `runs:delete`, the admin-grade action of the run family: `runs:read`
+   * opens the stream for everyone, so it cannot discriminate here.
    */
-  isAdmin: boolean;
+  canReadDebugLogs: boolean;
   spaceId: string;
 }
 
-const isAdminRole = (role: OrgRole): boolean => role === "admin" || role === "owner";
+/**
+ * These SSE routes are exempt from the auth pipeline (`skipAuth` matches
+ * `/api/realtime/`), so the principal's permission set is resolved here rather
+ * than read from the context. It is the PRINCIPAL's set in the streamed space,
+ * not the API key's ceiling: debug-log visibility follows the principal behind
+ * the stream, and narrowing it to the key's scopes would hide debug frames
+ * from a `runs:read`-only key that is allowed to see them today.
+ *
+ * `null` when the principal has no role in that space — a guest without a row,
+ * or a member of a closed/private space they were never added to. The caller
+ * turns that into a denied stream.
+ */
+async function resolveSpaceGrants(
+  role: OrgRole,
+  space: SpaceContextRow,
+  userId: string,
+): Promise<ReadonlySet<string> | null> {
+  const ref = resolveSpaceRole(role, space, await loadSpaceMember(space.id, userId));
+  if (!ref) return null;
+  return new Set<string>([...orgPermissions(role), ...spacePermissions(ref)]);
+}
 
 /**
  * Validate auth for SSE endpoints.
@@ -96,10 +116,11 @@ const isAdminRole = (role: OrgRole): boolean => role === "admin" || role === "ow
  *
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
  *
- * API keys go through the same canonical scope resolution as the HTTP
- * pipeline (`resolveApiKeyPermissions` — key scopes ∩ creator's live role)
- * and must carry `runs:read` to open any run stream; a valid key without
- * that grant is rejected with 403 instead of silently inheriting admin.
+ * Both branches go through the same canonical resolution as the HTTP pipeline
+ * (for a key: scopes ∩ the creator's live authority in the key's space; for a
+ * session: the org ∪ space union) and both must carry `runs:read` to open any
+ * run stream. A caller that reached the space without that permission is
+ * rejected with 403 instead of silently inheriting admin.
  */
 async function validateSSEAuth(c: {
   req: {
@@ -113,22 +134,35 @@ async function validateSSEAuth(c: {
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
-    const permissions = resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole);
+    // The key's `spaceId` comes straight off the `api_keys` row, so this is
+    // the shape check for that path: `assertSpaceId` refuses anything that is
+    // not a canonical `spc_` id before it reaches the stream. The row is then
+    // loaded because the space's visibility and default role are what decide
+    // the creator's membership.
+    assertSpaceId(keyInfo.spaceId);
+    const keySpace = await validateSpaceInOrg(keyInfo.spaceId, keyInfo.orgId);
+    if (!keySpace) return null;
+
+    // The creator's live authority in the key's space (RBAC spec §7.1): a
+    // creator who lost the space leaves the key with nothing to read here.
+    const grants = await resolveSpaceGrants(keyInfo.creatorRole, keySpace, keyInfo.userId);
+    if (!grants) {
+      throw forbidden("The key's creator is not a member of the key's space");
+    }
+    const permissions = effectivePermissions({
+      orgPermissions: grants,
+      scopeCeiling: new Set(keyInfo.scopes),
+    });
     if (!permissions.has("runs:read")) {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
 
-    // The key's `spaceId` comes straight off the `api_keys` row and never
-    // reaches `validateSpaceInOrg` (the key already proves org+space binding),
-    // so this is the shape check for that path — an un-migrated `api_keys`
-    // table would otherwise open a stream on an `app_` id in silence.
-    assertSpaceId(keyInfo.spaceId);
-
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
-      role: keyInfo.creatorRole,
-      isAdmin: isAdminRole(keyInfo.creatorRole),
+      // From the CEILINGED set, not from `grants`: a key whose scopes stop at
+      // `runs:read` must not stream verbose logs just because its creator could.
+      canReadDebugLogs: permissions.has("runs:delete"),
       spaceId: keyInfo.spaceId,
     };
   }
@@ -140,19 +174,8 @@ async function validateSSEAuth(c: {
   const orgId = c.req.query("orgId");
   if (!orgId) return null;
 
-  // Verify org membership
-  const rows = await db
-    .select({ role: organizationMembers.role })
-    .from(organizationMembers)
-    .where(
-      scopedWhere(organizationMembers, {
-        orgId,
-        extra: [eq(organizationMembers.userId, session.user.id)],
-      }),
-    )
-    .limit(1);
-
-  if (!rows[0]) return null;
+  const member = await getOrgMember(orgId, session.user.id);
+  if (!member) return null;
 
   const spaceId = c.req.query("spaceId");
   if (!spaceId) return null;
@@ -161,11 +184,22 @@ async function validateSSEAuth(c: {
   const space = await validateSpaceInOrg(spaceId, orgId);
   if (!space) return null;
 
+  const role = member.role;
+  // Same membership resolution the HTTP pipeline applies (`applySpacePermissions`):
+  // being in the org is not being in the space.
+  const grants = await resolveSpaceGrants(role, space, session.user.id);
+  if (!grants) return null;
+  // Same floor as the API-key branch above. A cookie session carries no scope
+  // ceiling, so its effective set IS `grants` — a custom space role without
+  // `runs:read` must not open a run stream just because it reached the space.
+  if (!grants.has("runs:read")) {
+    throw forbidden("Caller does not have the 'runs:read' permission in this space");
+  }
+
   return {
     userId: session.user.id,
     orgId,
-    role: rows[0].role,
-    isAdmin: isAdminRole(rows[0].role),
+    canReadDebugLogs: grants.has("runs:delete"),
     spaceId,
   };
 }
@@ -449,7 +483,7 @@ export function createRealtimeRouter() {
         runId,
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -475,7 +509,7 @@ export function createRealtimeRouter() {
         packageId,
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -497,7 +531,7 @@ export function createRealtimeRouter() {
       {
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },

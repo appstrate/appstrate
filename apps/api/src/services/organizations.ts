@@ -26,6 +26,7 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
+import { deleteSpaceMembershipsInOrg } from "./space-members.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -124,7 +125,7 @@ export async function getUserOrganizations(
 
   return rows.map((row) => ({
     ...toOrgResult(row.org),
-    role: row.role as OrgRole,
+    role: row.role,
   }));
 }
 
@@ -283,8 +284,16 @@ export async function getOrgMembers(orgId: string) {
   }));
 }
 
-export async function getOrgMember(orgId: string, userId: string) {
-  const [row] = await db
+/**
+ * The one reader of `org_members` for a `(org, user)` pair. Every caller that
+ * needs a role goes through it.
+ *
+ * `tx` is not a convenience: an invitation accept inserts the membership row
+ * and the space rows in one transaction, so the read that follows must see its
+ * own write.
+ */
+export async function getOrgMember(orgId: string, userId: string, tx: DbOrTx = db) {
+  const [row] = await tx
     .select()
     .from(organizationMembers)
     .where(
@@ -340,8 +349,9 @@ export async function addMember(
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {
-  // One transaction: the member row, the member's notifications, AND the
-  // member's schedules in this org are handled atomically. The member's runs
+  // One transaction: the member row, the member's notifications, the member's
+  // explicit space roles AND the member's schedules in this org are handled
+  // atomically. The member's runs
   // stay in the org for history, so their notifications are not cascaded away
   // — and since notifications carry the recipient as a polymorphic
   // (recipientType, recipientId) tuple with NO foreign key, nothing else would
@@ -375,6 +385,12 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
         ),
       );
 
+    // `space_members` does NOT cascade here: its foreign keys point at
+    // `spaces` and `user`, and removing an org membership deletes neither.
+    // Left behind, the rows would silently restore every space role the moment
+    // the person is re-invited.
+    await deleteSpaceMembershipsInOrg(tx, orgId, userId);
+
     // Disable (not delete — the row is org history) every schedule the
     // removed member owns as its execution actor in THIS org.
     const disabled = await tx
@@ -399,20 +415,30 @@ export async function updateMemberRole(
   userId: string,
   role: OrgRole,
 ): Promise<void> {
-  const updated = await db
-    .update(organizationMembers)
-    .set({ role })
-    .where(
-      scopedWhere(organizationMembers, {
-        orgId,
-        extra: [eq(organizationMembers.userId, userId)],
-      }),
-    )
-    .returning({ orgId: organizationMembers.orgId });
+  // One transaction: promoting someone to admin/owner makes their explicit
+  // space roles unreadable (the resolver answers `admin` from the org role
+  // before it looks at the row), so the rows go with the promotion rather than
+  // lying in wait for a later demotion to silently restore a role nobody
+  // re-granted. RBAC spec §3.2.
+  await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(organizationMembers)
+      .set({ role })
+      .where(
+        scopedWhere(organizationMembers, {
+          orgId,
+          extra: [eq(organizationMembers.userId, userId)],
+        }),
+      )
+      .returning({ orgId: organizationMembers.orgId });
 
-  if (updated.length === 0) {
-    throw new Error("Failed to update member role: member not found");
-  }
+    if (updated.length === 0) {
+      throw new Error("Failed to update member role: member not found");
+    }
+    if (role === "owner" || role === "admin") {
+      await deleteSpaceMembershipsInOrg(tx, orgId, userId);
+    }
+  });
 }
 
 /**

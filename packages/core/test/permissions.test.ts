@@ -5,7 +5,11 @@ import {
   requireModulePermission,
   requireCorePermission,
   setPermissionDenialHandler,
+  CORE_RESOURCE_ACTIONS,
+  CORE_RESOURCE_LEVELS,
   CORE_RESOURCE_NAMES,
+  ORG_LEVEL_PERMISSIONS,
+  SPACE_LEVEL_PERMISSIONS,
   type CoreResources,
 } from "../src/permissions.ts";
 
@@ -169,16 +173,18 @@ describe("setPermissionDenialHandler — fault isolation", () => {
   });
 });
 
-describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
-  // The interface is the compile-time vocabulary; CORE_RESOURCE_NAMES is
-  // the runtime collision-detection Set the platform's module loader
-  // reads to reject any module that re-declares a core resource.
+describe("CoreResources ↔ runtime catalog drift", () => {
+  // The interface is the compile-time vocabulary; CORE_RESOURCE_ACTIONS is
+  // the runtime mirror the level sets and the module loader's
+  // collision-detection Set are both derived from.
   //
-  // They MUST list the same resource names — drift would mean either
-  // (a) a core resource exists at the type level but a module can still
-  // claim it at runtime (security hole), or (b) the loader rejects a
-  // resource that core doesn't actually own (false positive blocking
-  // legitimate modules). Both are silent failures without this test.
+  // They MUST list the same resource names AND the same actions — drift
+  // would mean either (a) a core resource/action exists at the type level
+  // but no permission string is ever produced for it, or (b) the loader
+  // rejects a resource core doesn't actually own. Both are silent failures
+  // without this test. The resource half is a compile error (the `satisfies`
+  // clause plus the exhaustive record below); the action half is the
+  // `Exclude` assertion.
 
   it("every keyof CoreResources is in CORE_RESOURCE_NAMES", () => {
     // Materialize the interface keys via a typed dictionary literal —
@@ -188,6 +194,9 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
     const allCoreResources: Record<keyof CoreResources, true> = {
       org: true,
       members: true,
+      roles: true,
+      "space-settings": true,
+      "space-members": true,
       agents: true,
       skills: true,
       "mcp-servers": true,
@@ -205,36 +214,57 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       "llm-proxy": true,
       integrations: true,
     };
-    for (const name of Object.keys(allCoreResources)) {
+    const interfaceNames = Object.keys(allCoreResources);
+    for (const name of interfaceNames) {
       expect(CORE_RESOURCE_NAMES.has(name)).toBe(true);
     }
+    expect(CORE_RESOURCE_NAMES.size).toBe(interfaceNames.length);
   });
 
-  it("CORE_RESOURCE_NAMES has no extra entries beyond the interface", () => {
-    const allCoreResources: Record<keyof CoreResources, true> = {
-      org: true,
-      members: true,
-      agents: true,
-      skills: true,
-      "mcp-servers": true,
-      runs: true,
-      files: true,
-      schedules: true,
-      persistence: true,
-      models: true,
-      "model-provider-credentials": true,
-      proxies: true,
-      "api-keys": true,
-      spaces: true,
-      "end-users": true,
-      "credential-proxy": true,
-      "llm-proxy": true,
-      integrations: true,
-    };
-    const interfaceNames = new Set(Object.keys(allCoreResources));
-    for (const name of CORE_RESOURCE_NAMES) {
-      expect(interfaceNames.has(name)).toBe(true);
+  it("every action declared on CoreResources appears in CORE_RESOURCE_ACTIONS", () => {
+    // Compile-time: an action present on the interface but missing from the
+    // runtime table widens `MissingAction` away from `never`, which makes the
+    // annotation below unsatisfiable.
+    type MissingAction = {
+      [R in keyof CoreResources]: Exclude<
+        CoreResources[R],
+        (typeof CORE_RESOURCE_ACTIONS)[R][number]
+      >;
+    }[keyof CoreResources];
+    const noMissingAction: [MissingAction] extends [never] ? true : false = true;
+    expect(noMissingAction).toBe(true);
+  });
+});
+
+describe("permission levels", () => {
+  const everyPermission = Object.entries(CORE_RESOURCE_ACTIONS).flatMap(([resource, actions]) =>
+    (actions as readonly string[]).map((action) => `${resource}:${action}`),
+  );
+
+  it("every CoreResource has a level", () => {
+    for (const resource of CORE_RESOURCE_NAMES) {
+      expect(["org", "space"]).toContain(CORE_RESOURCE_LEVELS[resource as keyof CoreResources]);
     }
-    expect(CORE_RESOURCE_NAMES.size).toBe(interfaceNames.size);
+    expect(Object.keys(CORE_RESOURCE_LEVELS).length).toBe(CORE_RESOURCE_NAMES.size);
+  });
+
+  it("the two level sets are disjoint and cover the whole catalog", () => {
+    for (const permission of everyPermission) {
+      const inOrg = ORG_LEVEL_PERMISSIONS.has(permission as never);
+      const inSpace = SPACE_LEVEL_PERMISSIONS.has(permission as never);
+      // Exactly one — a permission in both would be granted twice, a
+      // permission in neither would be ungrantable by any role.
+      expect([inOrg, inSpace].filter(Boolean).length).toBe(1);
+    }
+    expect(ORG_LEVEL_PERMISSIONS.size + SPACE_LEVEL_PERMISSIONS.size).toBe(everyPermission.length);
+  });
+
+  it("api-keys is space-level and llm-proxy is org-level", () => {
+    // The two resources whose level is not obvious from their name: keys are
+    // bound to a space (`api_keys.space_id NOT NULL`), the LLM proxy is
+    // metered per org and is not space-scoped.
+    expect(CORE_RESOURCE_LEVELS["api-keys"]).toBe("space");
+    expect(CORE_RESOURCE_LEVELS["llm-proxy"]).toBe("org");
+    expect(CORE_RESOURCE_LEVELS["credential-proxy"]).toBe("space");
   });
 });

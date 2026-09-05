@@ -16,7 +16,7 @@
  * injected `extraModules` list). Callers collect them and pass them in.
  */
 
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
 import { eq } from "drizzle-orm";
@@ -31,11 +31,12 @@ import { ApiError, unauthorized } from "./errors.ts";
 import { clearStaleAuthCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
-import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
+import { effectivePermissions, orgPermissions } from "./permissions.ts";
+import { principalGrants } from "./principal-permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
-import type { AppEnv } from "../types/index.ts";
+import type { AppEnv, OrgRole } from "../types/index.ts";
 
 interface AuthPipelineOptions {
   /**
@@ -136,9 +137,41 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
         if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
         if (resolution.orgRole !== undefined) c.set("orgRole", resolution.orgRole);
-        if (resolution.permissions.length > 0) {
-          c.set("permissions", new Set(resolution.permissions));
+        // What the strategy computed is the CEILING (a token's scope claim),
+        // not the grant. When the strategy also resolved an org role, the grant
+        // is the role's org set narrowed by it — and grows by the space slice
+        // once `requireSpaceContext` runs. A strategy without an org role (an
+        // OIDC end-user token) keeps its fixed allowlist as the effective set,
+        // unchanged (RBAC spec §7.2).
+        //
+        // The ceiling is written for an EMPTY list too, and that is the whole
+        // point: an OIDC dashboard token carrying only identity scopes resolves
+        // an org role with zero permissions, and skipping the write would leave
+        // `scopeCeiling` undefined — so `applySpacePermissions` would later hand
+        // it the space preset's full, UNCEILINGED set. A token that asked for
+        // nothing must get nothing.
+        if (resolution.orgRole !== undefined) {
+          const ceiling = new Set<string>(resolution.permissions);
+          c.set("scopeCeiling", ceiling);
+          c.set("permissions", applyOrgPermissions(c, resolution.orgRole, ceiling));
+        } else if (!resolution.deferOrgResolution) {
+          // No org role, and not deferring: whatever the strategy computed IS
+          // the whole answer, empty list included. Without an org role no
+          // space slice is ever unioned in (`applySpacePermissions` returns
+          // early), so this is defence in depth: the ceiling is written and
+          // `permissions` is a real (possibly empty) Set rather than undefined.
+          const ceiling = new Set<string>(resolution.permissions);
+          c.set("scopeCeiling", ceiling);
+          c.set("permissions", new Set(ceiling));
         }
+        // The remaining shape — no org role, `deferOrgResolution` — writes NO
+        // ceiling, deliberately. It is the "I have not resolved an org yet"
+        // answer, and today only the OIDC instance token gives it
+        // (`modules/oidc/auth/strategy.ts`, `resolveInstanceUser`): the CLI
+        // acting as the full user, picking its org through `X-Org-Id` exactly
+        // as a cookie session does. A strategy that means "nothing" must NOT
+        // set `deferOrgResolution` — the branch above then turns its empty list
+        // into a real, empty ceiling.
         c.set("authMethod", resolution.authMethod);
         if (resolution.spaceId !== undefined) {
           c.set("spaceId", resolution.spaceId);
@@ -176,7 +209,13 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       c.set("orgId", keyInfo.orgId);
       c.set("orgSlug", keyInfo.orgSlug);
       c.set("orgRole", keyInfo.creatorRole);
-      c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
+      // The key's scopes are the ceiling; the grant is the creator's live
+      // authority narrowed by them. The space half arrives in
+      // `requireSpaceContext`, resolved against the key's pinned space from
+      // the CREATOR's membership (RBAC spec §7.1).
+      const keyCeiling = new Set<string>(keyInfo.scopes);
+      c.set("scopeCeiling", keyCeiling);
+      c.set("permissions", applyOrgPermissions(c, keyInfo.creatorRole, keyCeiling));
       c.set("authMethod", "api_key");
       c.set("apiKeyId", keyInfo.keyId);
       c.set("spaceId", keyInfo.spaceId);
@@ -350,10 +389,38 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (authMethod !== "session" && !c.get("deferOrgResolution")) return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
-      c.set("permissions", resolvePermissions(orgRole));
+      // The only branch that resolves per-principal grants: this middleware
+      // runs for session auth and for `deferOrgResolution` strategies, which
+      // is exactly the eligible population (see `lib/principal-permissions.ts`).
+      const granted = await principalGrants(c, c.get("orgId"));
+      c.set("permissions", applyOrgPermissions(c, orgRole, c.get("scopeCeiling"), granted));
     }
     return next();
   });
+}
+
+/**
+ * Write `orgPermissions` and return the org-level effective set for `role`,
+ * plus whatever a module granted this principal directly. One helper because
+ * all three auth branches owe the same two writes, and a branch that set only
+ * `permissions` would leave `requireSpaceContext` with nothing to union the
+ * space slice onto — which is also why the principal grants go into
+ * `orgPermissions` rather than into the returned set: the space step re-derives
+ * `permissions` from that key.
+ */
+function applyOrgPermissions(
+  c: Context<AppEnv>,
+  role: OrgRole,
+  scopeCeiling: ReadonlySet<string> | undefined,
+  principal?: ReadonlySet<string>,
+): Set<string> {
+  const fromRole = orgPermissions(role);
+  // Allocate a second Set only when a module actually granted something —
+  // with no such module the OSS path keeps the exact shape it had.
+  const org: Set<string> =
+    principal && principal.size > 0 ? new Set<string>([...fromRole, ...principal]) : fromRole;
+  c.set("orgPermissions", org);
+  return effectivePermissions({ orgPermissions: org, scopeCeiling });
 }
 
 /**

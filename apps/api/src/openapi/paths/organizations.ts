@@ -5,6 +5,14 @@ import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 
+/** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
+const SPACE_ASSIGNMENTS_BODY = {
+  type: "array",
+  description:
+    "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+  items: { $ref: "#/components/schemas/SpaceAssignment" },
+} as const;
+
 export const organizationsPaths = {
   "/api/orgs": {
     get: {
@@ -39,6 +47,7 @@ export const organizationsPaths = {
                     name: "Acme Corp",
                     slug: "acme-corp",
                     role: "owner",
+                    permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
                   },
                 ],
@@ -222,6 +231,7 @@ export const organizationsPaths = {
               properties: {
                 email: { type: "string", format: "email" },
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES], default: "member" },
+                space_assignments: SPACE_ASSIGNMENTS_BODY,
               },
               additionalProperties: false,
             },
@@ -240,6 +250,7 @@ export const organizationsPaths = {
                 id: "inv_abc123",
                 email: "newuser@example.com",
                 role: "member",
+                space_assignments: [{ space_id: "spc_...", preset_role: "operator" }],
                 token: "inv_abc123def456",
                 expiresAt: "2026-02-01T00:00:00Z",
                 createdAt: "2026-01-25T00:00:00Z",
@@ -260,7 +271,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Change member role",
       description:
-        "Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.",
+        "Change a member's role. Owners can manage any non-owner; admins can manage guests and members.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -328,7 +339,8 @@ export const organizationsPaths = {
       operationId: "changeInvitationRole",
       tags: ["Organizations"],
       summary: "Change invitation role",
-      description: "Change the role assigned to a pending invitation. Admin or owner required.",
+      description:
+        "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
@@ -342,6 +354,7 @@ export const organizationsPaths = {
               required: ["role"],
               properties: {
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
+                space_assignments: SPACE_ASSIGNMENTS_BODY,
               },
               additionalProperties: false,
             },
@@ -360,6 +373,7 @@ export const organizationsPaths = {
                 id: "inv_abc123",
                 email: "carol@acme.com",
                 role: "admin",
+                space_assignments: [],
                 token: "tok_xyz789",
                 expiresAt: "2026-02-01T00:00:00Z",
                 createdAt: "2026-01-25T00:00:00Z",

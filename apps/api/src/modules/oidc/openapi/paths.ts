@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+
 const clientListResponse = {
   type: "object",
   required: ["object", "data", "hasMore"],
@@ -40,9 +42,15 @@ const orgLevelClientRequest = {
       description:
         "When `true`, users signing in for the first time through this client are auto-joined to `referencedOrgId` with `signupRole`. When `false` (default), non-members are rejected. Only meaningful for org-level clients.",
     },
+    signupSpaceAssignments: {
+      type: "array",
+      items: { $ref: "#/components/schemas/SpaceAssignment" },
+      description:
+        "Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments.",
+    },
     signupRole: {
       type: "string",
-      enum: ["admin", "member", "viewer"],
+      enum: [...ASSIGNABLE_ORG_ROLES],
       description:
         "Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.",
     },
@@ -114,9 +122,15 @@ const updateClientRequest = {
       description:
         "Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Space: brand-new BA users + JIT `end_users` provisioning.",
     },
+    signupSpaceAssignments: {
+      type: "array",
+      items: { $ref: "#/components/schemas/SpaceAssignment" },
+      description:
+        "Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments.",
+    },
     signupRole: {
       type: "string",
-      enum: ["admin", "member", "viewer"],
+      enum: [...ASSIGNABLE_ORG_ROLES],
       description:
         "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.",
     },

@@ -374,8 +374,15 @@ export type EnrichedSchedule = ScheduleWireDto & {
 // `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
 // `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
 // role is added to one side and not the other).
-import type { OrgRole } from "@appstrate/core/permissions";
+import type { OrgRole, SpaceAssignment } from "@appstrate/core/permissions";
 export type { OrgRole };
+
+/** Re-exported from core so the OpenAPI `SpaceAssignment` component can be
+ * registered against it — reached only by name.
+ *
+ * @openapiMirror
+ */
+export type { SpaceAssignment };
 
 import type { orgSettingsSchema } from "@appstrate/core/permissions";
 export type OrgSettings = z.infer<typeof orgSettingsSchema>;
@@ -413,6 +420,8 @@ export interface OrganizationWithRole {
   slug: string;
   createdAt: string;
   role: OrgRole;
+  /** Org-level effective set in this org, ceiling-applied (RBAC spec §6.5). */
+  permissions: string[];
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see
@@ -424,6 +433,8 @@ export interface OrgInvitation {
   id: string;
   email: string;
   role: OrgRole;
+  /** Space memberships applied when the invitation is accepted (RBAC spec §5). */
+  space_assignments: SpaceAssignment[];
   token: string;
   expiresAt: string;
   createdAt: string;
@@ -927,9 +938,33 @@ export interface SpaceInfo {
   name: string;
   isDefault: boolean;
   settings: { allowedRedirectDomains?: string[] };
+  /** Who reaches the space without an explicit membership row (RBAC spec §3.1). */
+  visibility: "open" | "closed" | "private";
+  /** Preset the implicit members of an `open` space hold. */
+  default_role: "admin" | "builder" | "operator" | "viewer";
+  /** Whether the caller may enter — a `closed` space is listed as `"none"`. */
+  access: "member" | "none";
+  /** The caller's role here, or `null` when they have none. */
+  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  /** The caller's effective permission set in this space, ceiling applied. */
+  permissions: string[];
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One row of `GET /api/spaces/:id/members` — who reaches the space, and how. */
+export interface SpaceMember {
+  object: "space_member";
+  userId: string;
+  name: string | null;
+  email: string | null;
+  org_role: OrgRole;
+  /** Explicit row, org role (owner/admin), or the open space's default. */
+  source: "explicit" | "org_role" | "open_space";
+  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  /** When the explicit row was written; null for an implicit member. */
+  created_at: string | null;
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see

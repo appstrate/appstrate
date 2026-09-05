@@ -5,9 +5,12 @@ import type { AppEnv } from "../types/index.ts";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spaces } from "@appstrate/db/schema";
-import { forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import { assertSpaceId } from "../lib/ids.ts";
 import { isInternalDispatch } from "../lib/internal-dispatch.ts";
+import { setSpaceContextApplier } from "@appstrate/core/permissions";
+import { effectivePermissions } from "../lib/permissions.ts";
+import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 
 /**
  * Core route prefixes that require a space context (`X-Space-Id`,
@@ -56,7 +59,18 @@ export interface SpaceContextRow {
   id: string;
   orgId: string;
   isDefault: boolean;
+  visibility: import("@appstrate/core/permissions").SpaceVisibility;
+  defaultRole: import("@appstrate/core/permissions").SpaceRolePreset;
 }
+
+/** Projection behind {@link SpaceContextRow} — declared once so the two readers cannot drift. */
+const SPACE_CONTEXT_COLUMNS = {
+  id: spaces.id,
+  orgId: spaces.orgId,
+  isDefault: spaces.isDefault,
+  visibility: spaces.visibility,
+  defaultRole: spaces.defaultRole,
+} as const;
 
 /**
  * Validate that a space belongs to the given org.
@@ -85,11 +99,7 @@ export async function validateSpaceInOrg(
 ): Promise<SpaceContextRow | null> {
   assertSpaceId(spaceId);
   const [space] = await db
-    .select({
-      id: spaces.id,
-      orgId: spaces.orgId,
-      isDefault: spaces.isDefault,
-    })
+    .select(SPACE_CONTEXT_COLUMNS)
     .from(spaces)
     .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
     .limit(1);
@@ -103,15 +113,64 @@ export async function validateSpaceInOrg(
  */
 export async function defaultSpaceForOrg(orgId: string): Promise<SpaceContextRow | null> {
   const [space] = await db
-    .select({
-      id: spaces.id,
-      orgId: spaces.orgId,
-      isDefault: spaces.isDefault,
-    })
+    .select(SPACE_CONTEXT_COLUMNS)
     .from(spaces)
     .where(and(eq(spaces.orgId, orgId), eq(spaces.isDefault, true)))
     .limit(1);
   return space ?? null;
+}
+
+/**
+ * Resolve the caller's role in `space` and rewrite `permissions` to the
+ * effective set there (RBAC spec §4.2).
+ *
+ * Exported because a router outside `SPACE_SCOPED_PREFIXES` — the spaces
+ * router itself, or a module gating a space-level resource off an explicit
+ * `spaceId` field — must reach the same code path; otherwise its guard can
+ * never pass for a non-admin.
+ *
+ * The principal whose membership is resolved is `c.get("user")`, which is the
+ * API key's **creator** under key auth and under end-user impersonation (the
+ * key's own row is what the pipeline resolved), and the subject under a
+ * session or dashboard token (RBAC spec §7.1).
+ *
+ * A caller whose `orgRole` was never resolved keeps whatever set its auth
+ * strategy wrote: an OIDC end-user token carries a fixed allowlist and no org
+ * role, and end-users are never space members (§7.2).
+ *
+ * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
+ *   `private` — a private space does not exist for someone who is not in it.
+ */
+export async function applySpacePermissions(
+  c: Context<AppEnv>,
+  space: SpaceContextRow,
+): Promise<void> {
+  const orgRole = c.get("orgRole");
+  if (!orgRole) return;
+
+  const memberRow = await loadSpaceMember(space.id, c.get("user").id);
+  const ref = resolveSpaceRole(orgRole, space, memberRow);
+  if (!ref) {
+    if (space.visibility === "private") {
+      throw notFound(`Space '${space.id}' not found in this organization`);
+    }
+    throw new ApiError({
+      status: 403,
+      code: "not_a_space_member",
+      title: "Not a Space Member",
+      detail: `You are not a member of space '${space.id}'`,
+    });
+  }
+
+  c.set("spaceRole", ref);
+  c.set(
+    "permissions",
+    effectivePermissions({
+      orgPermissions: c.get("orgPermissions") ?? new Set<string>(),
+      spacePermissions: spacePermissions(ref),
+      scopeCeiling: c.get("scopeCeiling"),
+    }),
+  );
 }
 
 /**
@@ -160,6 +219,7 @@ export function requireSpaceContext() {
       }
       c.set("spaceId", explicitSpace);
       c.set("space", space);
+      await applySpacePermissions(c, space);
       return next();
     }
 
@@ -177,6 +237,10 @@ export function requireSpaceContext() {
         assertSpaceId(active.id);
         c.set("spaceId", active.id);
         c.set("space", active);
+        // The in-process MCP re-entry lands on the default space; the token
+        // subject's membership there decides what it reaches — every `member`
+        // is implicit, a `guest` without a row is refused (spec §7.3).
+        await applySpacePermissions(c, active);
         return next();
       }
     }
@@ -187,3 +251,42 @@ export function requireSpaceContext() {
     );
   };
 }
+
+/**
+ * Wire the core seam a module route uses to enter a space
+ * (`enterSpaceContext`, `@appstrate/core/permissions`).
+ *
+ * Registered at MODULE EVALUATION, not from a boot function: both the
+ * production wiring (`apps/api/src/index.ts`) and the test harness
+ * (`apps/api/test/helpers/app.ts`) import `requireSpaceContext` from this file,
+ * so the registration cannot be present in one and missing in the other — the
+ * exact drift a second wiring call site would reintroduce.
+ */
+setSpaceContextApplier(async (c, spaceId) => {
+  const ctx = c as Context<AppEnv>;
+  const orgId = ctx.get("orgId");
+  const explicit = spaceId ?? ctx.get("spaceId") ?? ctx.req.header("X-Space-Id");
+  // Same rule as `requireSpaceContext`: the org's default space answers a
+  // header-less caller ONLY for the trusted in-process MCP re-entry. A module
+  // route is not a weaker door than a core one — a session or CLI caller that
+  // omits `X-Space-Id` gets the same 400 it would get on `/api/agents`, rather
+  // than silently landing in the default space (`SPACES.md` §Resolving).
+  if (!explicit && !isInternalDispatch(ctx.req.raw.headers)) {
+    throw invalidRequest(
+      "Space context required. Provide X-Space-Id header or use an API key.",
+      "X-Space-Id",
+    );
+  }
+  const space = explicit
+    ? await validateSpaceInOrg(explicit, orgId)
+    : await defaultSpaceForOrg(orgId);
+  if (!space) {
+    throw notFound(`Space '${explicit ?? "(default)"}' not found in this organization`);
+  }
+  // Deliberately does NOT write `spaceId`: that key is the CREDENTIAL's space
+  // for an API key, and a module naming another space must not be able to
+  // rewrite it — the webhooks module compares the two to refuse a key reaching
+  // a sibling space. `space` and `permissions` are what entering a space means.
+  ctx.set("space", space);
+  await applySpacePermissions(ctx, space);
+});

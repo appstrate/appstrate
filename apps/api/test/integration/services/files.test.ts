@@ -373,7 +373,12 @@ describe("files service + routes", () => {
     // container is the chat session, so runId is NULL — it would be missed by a
     // plain `files.run_id = run` filter).
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const upA = await stageUpload(scope, ctx.user.id, "in.txt", new TextEncoder().encode("input"));
     const docA = await createFileFromUpload(scope, userActor, upA, {
       chatSessionId: sessionId,
@@ -402,7 +407,12 @@ describe("files service + routes", () => {
 
   it("run_id filter finds file refs nested in objects and arrays", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const upA = await stageUpload(scope, ctx.user.id, "n.txt", new TextEncoder().encode("nested"));
     const docA = await createFileFromUpload(scope, userActor, upA, {
       chatSessionId: sessionId,
@@ -451,7 +461,12 @@ describe("files service + routes", () => {
 
   it("lists the complete private chat context without parsing messages", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
 
     const directUpload = await stageUpload(
       scope,
@@ -492,11 +507,48 @@ describe("files service + routes", () => {
     );
   });
 
+  it("does not reveal a conversation's context from another space", async () => {
+    // Sessions are space-scoped rows (RBAC spec §5), so the space is part of
+    // ownership: the SAME user asking from another space resolves nothing.
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
+    const upload = await stageUpload(
+      scope,
+      ctx.user.id,
+      "scoped.txt",
+      new TextEncoder().encode("scoped"),
+    );
+    const file = await createFileFromUpload(scope, userActor, upload, {
+      chatSessionId: sessionId,
+    });
+
+    const own = await listFilesForActor(scope, userActor, { contextChatSessionId: sessionId });
+    expect(own.data.map((d) => d.id)).toEqual([file.id]);
+
+    const otherSpace = await seedSpace({ orgId: ctx.orgId });
+    const fromOther = await listFilesForActor(
+      { orgId: ctx.orgId, spaceId: otherSpace.id },
+      userActor,
+      { contextChatSessionId: sessionId },
+    );
+    expect(fromOther.data).toEqual([]);
+  });
+
   it("does not reveal another member's conversation context", async () => {
     const other = await createTestUser({ email: "other-chat-owner@docs.test" });
     await addOrgMember(ctx.orgId, other.id, "member");
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: other.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: other.id,
+    });
     const runId = await seedRunRow(scope, { chatSessionId: sessionId });
     await publishStream(scope, runId, "private-context.txt", "context");
 
@@ -779,7 +831,12 @@ describe("files service + routes", () => {
 
     // Member B's CHAT-contained file (private to B's session).
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: memberB.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: memberB.id,
+    });
     const upChat = await stageUpload(
       scope,
       memberB.id,
@@ -1427,7 +1484,12 @@ describe("files service + routes", () => {
     // A chat-session user_upload consumed by a run (link row). Deleting the
     // session detaches the doc (kept) rather than cascade-deleting it.
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const up = await stageUpload(scope, ctx.user.id, "att.txt", new TextEncoder().encode("attach"));
     const doc = await createFileFromUpload(scope, userActor, up, { chatSessionId: sessionId });
     const runB = await seedRunRow(scope);
@@ -1464,7 +1526,12 @@ describe("files service + routes", () => {
 
   it("deletes an unconsumed chat-session file when the session is deleted", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const up = await stageUpload(scope, ctx.user.id, "solo.txt", new TextEncoder().encode("solo"));
     const doc = await createFileFromUpload(scope, userActor, up, { chatSessionId: sessionId });
 
@@ -1478,7 +1545,12 @@ describe("files service + routes", () => {
   it("rejects a file with both containers set (chk_files_single_container)", async () => {
     const runId = await seedRunRow(scope);
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     await expect(
       (async () =>
         db.insert(files).values({

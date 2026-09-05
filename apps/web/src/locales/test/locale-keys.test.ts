@@ -163,21 +163,26 @@ describe("t() keys", () => {
  * site, so the reverse guard cannot see them. Each entry below is a prefix
  * under which a REAL interpolation site exists — the comment names it. This
  * is the one list that must be justified per line: widening it to silence a
- * failure is how a dead-key guard becomes decorative.
+ * failure is how a dead-key guard becomes decorative. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
   "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
+  "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
-  "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
-  "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/space/general.tsx
+  "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
+  "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)
+  "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
+  "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
 ];
 

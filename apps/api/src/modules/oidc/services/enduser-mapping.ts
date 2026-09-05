@@ -50,6 +50,8 @@ export async function loadSpaceById(spaceId: string): Promise<SpaceContextRow | 
       id: spaces.id,
       orgId: spaces.orgId,
       isDefault: spaces.isDefault,
+      visibility: spaces.visibility,
+      defaultRole: spaces.defaultRole,
     })
     .from(spaces)
     .where(eq(spaces.id, spaceId))

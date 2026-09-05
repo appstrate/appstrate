@@ -36,6 +36,7 @@ import {
   createOrgSchema,
   updateOrgSchema,
   addMemberSchema,
+  updateInvitationSchema,
   updateRoleSchema,
 } from "../routes/organizations.ts";
 
@@ -82,9 +83,14 @@ import {
 import {
   createSpaceSchema,
   updateSpaceSchema,
+  addSpaceMemberSchema,
+  updateSpaceMemberSchema,
   installPackageSchema,
   updatePackageSchema,
 } from "../routes/spaces.ts";
+
+// --- Role schemas (routes/roles.ts) ---
+import { createSpaceRoleSchema, updateSpaceRoleSchema } from "../routes/roles.ts";
 
 // --- Run launch schemas (routes/runs.ts) ---
 import { runAgentBodySchema } from "../routes/runs.ts";
@@ -284,8 +290,8 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PUT",
     path: "/api/orgs/{orgId}/invitations/{invitationId}",
-    jsonSchema: toJsonSchema(updateRoleSchema),
-    description: "Update invitation role",
+    jsonSchema: toJsonSchema(updateInvitationSchema),
+    description: "Update invitation role and space assignments",
   },
   {
     method: "PUT",
@@ -402,6 +408,33 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/spaces/{id}",
     jsonSchema: toJsonSchema(updateSpaceSchema),
     description: "Update space",
+  },
+
+  {
+    method: "POST",
+    path: "/api/spaces/{id}/members",
+    jsonSchema: toJsonSchema(addSpaceMemberSchema),
+    description: "Add a space member",
+  },
+  {
+    method: "PATCH",
+    path: "/api/spaces/{id}/members/{userId}",
+    jsonSchema: toJsonSchema(updateSpaceMemberSchema),
+    description: "Change a space member's role",
+  },
+
+  // ─── Roles ─────────────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/roles",
+    jsonSchema: toJsonSchema(createSpaceRoleSchema),
+    description: "Create a custom space role",
+  },
+  {
+    method: "PATCH",
+    path: "/api/roles/{id}",
+    jsonSchema: toJsonSchema(updateSpaceRoleSchema),
+    description: "Update a custom space role",
   },
 
   // ─── Space Packages ────────────────────────────────────────────────────

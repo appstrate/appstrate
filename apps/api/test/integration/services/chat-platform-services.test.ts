@@ -125,7 +125,9 @@ describe("recordChatUsage — pricing provenance", () => {
   });
 
   async function seedSession(id: string): Promise<string> {
-    await db.insert(chatSessions).values({ id, orgId: ctx.orgId, userId: ctx.user.id });
+    await db
+      .insert(chatSessions)
+      .values({ id, orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, userId: ctx.user.id });
     return id;
   }
 

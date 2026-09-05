@@ -25,6 +25,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { useChatUnreadCount } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "../lib/scoping-headers";
+import { WEBHOOK_READ_PERMISSIONS } from "../lib/webhook-permissions";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -42,7 +43,7 @@ export function NavOrg() {
   const location = useLocation();
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
@@ -82,12 +83,17 @@ export function NavOrg() {
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
   ];
 
+  const canReadWebhooks = WEBHOOK_READ_PERMISSIONS.some((p) => can(p));
   const adminItems: NavItem[] = [
-    ...(isAdmin && features.webhooks
+    ...(features.webhooks && canReadWebhooks
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
-    ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
-    ...(isAdmin ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }] : []),
+    ...(can("end-users:read")
+      ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }]
+      : []),
+    ...(can("org:read")
+      ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }]
+      : []),
   ];
 
   const renderItems = (items: NavItem[]) =>

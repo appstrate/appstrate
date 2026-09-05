@@ -4,8 +4,11 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
+  addOrgMember,
   createTestContext,
+  createTestUser,
   authHeaders,
+  orgOnlyHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import { seedApiKey, seedSpace } from "../../../../../../test/helpers/seed.ts";
@@ -297,6 +300,68 @@ describe("Webhooks API", () => {
   // org-level webhooks that span every app). The fix funnels API key
   // calls through `spaceIdScope` and forces list/create to the
   // key's bound app.
+  /**
+   * `level: "org"` webhooks are space-less and their permission is org-level, so
+   * managing them must not require a space the caller does not have. The router
+   * therefore enters a space only when the caller identifies one.
+   */
+  describe("a cookie caller with no X-Space-Id", () => {
+    const orgPayload = {
+      level: "org" as const,
+      url: "https://example.com/o",
+      events: ["run.success"],
+    };
+
+    it("creates, lists and reads an org-level webhook", async () => {
+      const created = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...orgOnlyHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(orgPayload),
+      });
+      expect(created.status).toBe(201);
+      const { id } = (await created.json()) as { id: string };
+
+      const listed = await app.request("/api/webhooks", { headers: orgOnlyHeaders(ctx) });
+      expect(listed.status).toBe(200);
+      expect(((await listed.json()) as { data: { id: string }[] }).data.map((w) => w.id)).toEqual([
+        id,
+      ]);
+
+      expect(
+        (await app.request(`/api/webhooks/${id}`, { headers: orgOnlyHeaders(ctx) })).status,
+      ).toBe(200);
+    });
+
+    it("still creates a SPACE-level webhook — the body names the space", async () => {
+      // Not a 400: `spaceId` in the body is the space, and the handler enters it
+      // explicitly before its guard. Nothing is missing from the request.
+      const created = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...orgOnlyHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(webhookPayload()),
+      });
+      expect(created.status).toBe(201);
+
+      // …and its by-id read works header-less too (the row's own space is
+      // re-entered from the row).
+      const { id } = (await created.json()) as { id: string };
+      expect(
+        (await app.request(`/api/webhooks/${id}`, { headers: orgOnlyHeaders(ctx) })).status,
+      ).toBe(200);
+    });
+
+    it("403s a member, who holds neither half of the split vocabulary", async () => {
+      // The control for the owner cases above: the header-less listing is
+      // reachable because of the ORG permission, not because the guard is gone.
+      const user = await createTestUser();
+      await addOrgMember(ctx.orgId, user.id, "member");
+      const asMember: TestContext = { ...ctx, user, cookie: user.cookie };
+      const denied = await app.request("/api/webhooks", { headers: orgOnlyHeaders(asMember) });
+      expect(denied.status).toBe(403);
+      expect(((await denied.json()) as { detail: string }).detail).toContain("org-webhooks:read");
+    });
+  });
+
   describe("API key space scope (issue #172 extension)", () => {
     async function setupCrossSpaceFixture() {
       const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Webhook Other Space" });
@@ -438,5 +503,128 @@ describe("Webhooks API", () => {
       const res = await app.request(`/api/webhooks/${ownWebhookId}`, { headers: bearer });
       expect(res.status).toBe(200);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Level-dependent guards: `webhooks` (space) and `org-webhooks` (org) are two
+// distinct resources, and every route picks the one the webhook's level
+// implies.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("webhooks vs org-webhooks (level-dependent guard)", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "levels" });
+  });
+
+  async function keyWith(scopes: string[]) {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes,
+    });
+    return { Authorization: `Bearer ${key.rawKey}` };
+  }
+
+  it("either half of the split lets a key list; neither is a 403", async () => {
+    // The listing spans both levels, so either half authorises it and the
+    // per-row filter decides the contents (asserted per level in
+    // `webhooks-level-visibility.test.ts`). A key is additionally narrowed to
+    // its own space by `webhookScope`, so the ORG half admits it and yields
+    // nothing — that pair is what tells the guard apart from the filter.
+    for (const payload of [
+      { level: "org", url: "https://example.com/o", events: ["run.success"] },
+      {
+        level: "space",
+        spaceId: ctx.defaultSpaceId,
+        url: "https://example.com/s",
+        events: ["run.success"],
+      },
+    ]) {
+      const seeded = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      expect(seeded.status).toBe(201);
+    }
+    const levels = async (headers: Record<string, string>) => {
+      const res = await app.request("/api/webhooks?all=true", { headers });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { data: { level: string }[] }).data.map((w) => w.level);
+    };
+
+    expect(await levels(await keyWith(["org-webhooks:read"]))).toEqual([]);
+    expect(await levels(await keyWith(["webhooks:read"]))).toEqual(["space"]);
+
+    // Neither half: a 403, not an empty page — "you may read nothing here" is
+    // not the same answer as "there is nothing here".
+    const neither = await keyWith(["runs:read"]);
+    expect((await app.request("/api/webhooks", { headers: neither })).status).toBe(403);
+  });
+
+  it("creating an org-level webhook needs org-webhooks:write, not webhooks:write", async () => {
+    // A key can never create an org-level webhook (it would span foreign
+    // spaces), and the permission guard is what refuses it now — before the
+    // level check the route already had.
+    const spaceOnly = await keyWith(["webhooks:write"]);
+    const res = await app.request("/api/webhooks", {
+      method: "POST",
+      headers: { ...spaceOnly, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        level: "org",
+        url: "https://example.com/org-hook",
+        events: ["run.success"],
+      }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("an owner session administers both levels end to end", async () => {
+    // Control for the two refusals above: the split did not close the routes,
+    // it only named who may open them. An owner holds both resources.
+    for (const payload of [
+      { level: "org", url: "https://example.com/o", events: ["run.success"] },
+      {
+        level: "space",
+        spaceId: ctx.defaultSpaceId,
+        url: "https://example.com/s",
+        events: ["run.success"],
+      },
+    ]) {
+      const created = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      expect(created.status).toBe(201);
+      const { id, level } = (await created.json()) as { id: string; level: string };
+      expect(level).toBe(payload.level);
+
+      const read = await app.request(`/api/webhooks/${id}`, { headers: authHeaders(ctx) });
+      expect(read.status).toBe(200);
+
+      const updated = await app.request(`/api/webhooks/${id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(updated.status).toBe(200);
+
+      const deliveries = await app.request(`/api/webhooks/${id}/deliveries`, {
+        headers: authHeaders(ctx),
+      });
+      expect(deliveries.status).toBe(200);
+
+      const removed = await app.request(`/api/webhooks/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(removed.status).toBe(204);
+    }
   });
 });

@@ -41,7 +41,27 @@ export type AppEnv = {
     orgSlug: string;
     orgName: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
+    /**
+     * Org-level effective set, written once the org role is known (RBAC spec
+     * §4.2). Kept beside `permissions` because `requireSpaceContext` needs the
+     * org half again to union the space half onto it.
+     */
+    orgPermissions?: Set<string>;
+    /**
+     * Credential ceiling: an API key's `scopes`, an OIDC scope claim, whatever
+     * a module strategy computed. `undefined` for cookie sessions, which have
+     * no ceiling. Every write of `permissions` intersects with it.
+     */
+    scopeCeiling?: ReadonlySet<string>;
+    /**
+     * Effective permissions for this request: `ceiling(orgPermissions)` on an
+     * org route, `ceiling(orgPermissions ∪ spacePermissions)` once
+     * `requireSpaceContext` has resolved the space. The only thing every
+     * permission guard reads.
+     */
     permissions?: Set<string>;
+    /** Role the caller holds in `space`, set by `applySpacePermissions`. */
+    spaceRole?: import("../lib/space-role.ts").SpaceRoleRef;
     /**
      * Auth method that resolved the request. Core values: `"session"`,
      * `"api_key"`. Auth-strategy modules set their own identifier (e.g.

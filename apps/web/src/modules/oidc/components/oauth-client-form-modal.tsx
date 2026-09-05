@@ -21,19 +21,25 @@ import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "@/components/spinner";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useAppForm } from "@/hooks/use-app-form";
+import { SpaceAssignmentsField } from "@/components/space-assignments-field";
+import { useSpaces } from "@/hooks/use-spaces";
+import { spaceRoleValue, useSpaceRoleOptions } from "@/hooks/use-roles";
+import {
+  assignmentsFor,
+  toSpaceAssignments,
+  validateSpaceAssignments,
+  type AssignmentDraft,
+} from "@/lib/space-assignments";
 import { usePermissions } from "@/hooks/use-permissions";
 import {
   useCreateOAuthClient,
   useUpdateOAuthClient,
   useOAuthScopes,
   type OAuthClient,
-  type SignupRole,
 } from "../hooks/use-oauth-clients";
+import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { looksLoopback } from "../lib/redirect-uri";
-
-/** Role allowlist for org-level auto-provisioning. `owner` deliberately excluded. */
-const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "viewer"];
 
 /** Scopes that are always granted — cannot be unchecked in the UI. */
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
@@ -65,13 +71,15 @@ function OAuthClientFormBody({
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const isEditing = !!client;
 
   const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
   const formLevel = effectiveLevel ?? level;
   const isOrgLevel = formLevel === "org";
   const isSpaceLevel = formLevel === "space";
+  const { data: spaces } = useSpaces();
+  const { options: roleOptions } = useSpaceRoleOptions();
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient();
   const { data: availableScopes } = useOAuthScopes();
@@ -91,7 +99,13 @@ function OAuthClientFormBody({
   // brand-new clients start with the flag off. On org-level clients the
   // `signupRole` controls the role assigned to the auto-joined user.
   const [allowSignup, setAllowSignup] = useState(client?.allowSignup ?? false);
-  const [signupRole, setSignupRole] = useState<SignupRole>(client?.signupRole ?? "member");
+  const [signupRole, setSignupRole] = useState<AssignableOrgRole>(client?.signupRole ?? "member");
+  const [assignments, setAssignments] = useState<AssignmentDraft[]>(() =>
+    (client?.signupSpaceAssignments ?? []).map((assignment) => ({
+      space_id: assignment.space_id,
+      role: spaceRoleValue(assignment),
+    })),
+  );
   const [createdSecret, setCreatedSecret] = useState<{
     clientId: string;
     clientSecret: string;
@@ -167,6 +181,18 @@ function OAuthClientFormBody({
   }
 
   function onSubmit(data: FormData) {
+    const signupSpaceAssignments = assignmentsFor(signupRole, toSpaceAssignments(assignments));
+    if (isOrgLevel) {
+      const validation = validateSpaceAssignments(
+        signupRole,
+        signupSpaceAssignments,
+        t("settings:orgSettings.inviteSpacesRequired"),
+      );
+      if (validation !== true) {
+        setError("root", { message: validation });
+        return;
+      }
+    }
     const cleaned = redirectUris.map((u) => u.trim()).filter((u) => u.length > 0);
     if (cleaned.length === 0) {
       setError("root", { message: t("settings:oauthClients.redirectUrisRequired") });
@@ -187,10 +213,10 @@ function OAuthClientFormBody({
             redirectUris: cleaned,
             postLogoutRedirectUris: cleanedPostLogout,
             scopes: Array.from(selectedScopes),
-            ...(isAdmin ? { isFirstParty } : {}),
+            ...(can("oauth-clients:write") ? { isFirstParty } : {}),
             // Unified `allowSignup` (all levels). `signupRole` is org-only.
             allowSignup,
-            ...(isOrgLevel ? { signupRole } : {}),
+            ...(isOrgLevel ? { signupRole, signupSpaceAssignments } : {}),
           },
         },
         {
@@ -212,7 +238,7 @@ function OAuthClientFormBody({
           scopes: Array.from(selectedScopes),
           ...(isFirstParty && { isFirstParty: true }),
           allowSignup,
-          ...(isOrgLevel ? { signupRole } : {}),
+          ...(isOrgLevel ? { signupRole, signupSpaceAssignments } : {}),
         },
         {
           onSuccess: (result) => {
@@ -340,7 +366,7 @@ function OAuthClientFormBody({
           </div>
         </div>
 
-        {isAdmin && (
+        {can("oauth-clients:write") && (
           <div className="space-y-2">
             <label className="flex items-start gap-2 text-sm">
               <input
@@ -383,11 +409,11 @@ function OAuthClientFormBody({
                 <select
                   id="oauth-client-signup-role"
                   value={signupRole}
-                  onChange={(e) => setSignupRole(e.target.value as SignupRole)}
-                  disabled={!allowSignup}
+                  onChange={(e) => setSignupRole(e.target.value as AssignableOrgRole)}
+                  disabled={isPending}
                   className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {SIGNUP_ROLE_OPTIONS.map((role) => (
+                  {ASSIGNABLE_ORG_ROLES.map((role) => (
                     <option key={role} value={role}>
                       {t(`settings:oauthClients.signupRoleOption.${role}`)}
                     </option>
@@ -397,6 +423,16 @@ function OAuthClientFormBody({
                   {t("settings:oauthClients.signupRoleHint")}
                 </p>
               </div>
+            )}
+            {isOrgLevel && signupRole !== "admin" && (
+              <SpaceAssignmentsField
+                hint={t("settings:oauthClients.signupSpacesHint")}
+                value={assignments}
+                onChange={setAssignments}
+                spaces={spaces ?? []}
+                roleOptions={roleOptions}
+                disabled={isPending}
+              />
             )}
           </div>
         )}

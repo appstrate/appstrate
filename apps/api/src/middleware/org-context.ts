@@ -2,7 +2,7 @@
 
 import type { Context, Next } from "hono";
 import type { OrgSettings } from "@appstrate/shared-types";
-import type { AppEnv, OrgRole } from "../types/index.ts";
+import type { AppEnv } from "../types/index.ts";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations } from "@appstrate/db/schema";
@@ -65,7 +65,7 @@ export function requireOrgContext() {
     }
 
     c.set("orgId", orgId);
-    c.set("orgRole", rows[0].role as OrgRole);
+    c.set("orgRole", rows[0].role);
     c.set("orgSlug", rows[0].slug);
     c.set("orgName", rows[0].name);
     c.set("orgSettings", (rows[0].orgSettings ?? {}) as OrgSettings);

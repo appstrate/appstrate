@@ -50,6 +50,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
   OrgSignupClosedError,
+  OrgSignupConfigurationError,
   loadClientSignupPolicy,
   resolveOrCreateOrgMembership,
 } from "../services/orgmember-mapping.ts";
@@ -522,9 +523,13 @@ async function buildOrgLevelClaims(
   // metadata drifted — better to reject a legitimate mint than silently
   // auto-join to a wrong role.
   const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
-  const policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } =
+  const policy: Parameters<typeof resolveOrCreateOrgMembership>[2] =
     loaded && loaded.level === "org" && loaded.orgId === orgId
-      ? { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole }
+      ? {
+          allowSignup: loaded.allowSignup,
+          signupRole: loaded.signupRole,
+          signupSpaceAssignments: loaded.signupSpaceAssignments,
+        }
       : { allowSignup: false, signupRole: "member" };
 
   // Resolve or create the membership. For existing members this is a
@@ -554,6 +559,9 @@ async function buildOrgLevelClaims(
       org_role: resolved.role,
     };
   } catch (err) {
+    if (err instanceof OrgSignupConfigurationError) {
+      throw new APIError("FORBIDDEN", { error: "access_denied", error_description: err.message });
+    }
     if (err instanceof OrgSignupClosedError) {
       logger.warn("oidc: user is not a member of the pinned org — rejecting token", {
         module: "oidc",

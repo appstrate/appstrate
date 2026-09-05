@@ -105,8 +105,8 @@ tree, no `__drizzle_migrations_<id>` table.
 
 The platform ships RBAC as a typed contract that **both** core and modules contribute to. The role-to-permission matrix lives in `apps/api/src/lib/permissions.ts` — it composes:
 
-1. **Core resources** (`CoreResources` interface from `@appstrate/core/permissions`): the static platform catalog (`agents`, `runs`, `org`, `api-keys`, …). This set is fixed at core-release time and mapped to roles in `apps/api/src/lib/permissions.ts`.
-2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface ModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `resolvePermissions(role)`, and exposes them through the same RBAC machinery.
+1. **Core resources** (`CoreResources` interface from `@appstrate/core/permissions`): the static platform catalog (`agents`, `runs`, `org`, `api-keys`, …). Each one declares its LEVEL in `CORE_RESOURCE_LEVELS` next to its actions; org-level resources are mapped to org roles and space-level ones to the four space-role presets, both in `apps/api/src/lib/permissions.ts`.
+2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface ModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `orgPermissions(role)` / `presetPermissions(preset)`, and exposes them through the same RBAC machinery.
 
 Built-in and external modules use the **exact same contribution pattern**. Built-ins do not extend `CoreResources` — that interface is reserved for the platform's own resource catalog. The only difference is where the module source lives (this directory vs. an npm package).
 
@@ -127,9 +127,18 @@ const tasksModule: AppstrateModule = {
     {
       resource: "tasks",
       actions: ["read", "write"],
-      grantTo: ["owner", "admin", "member"],
+      // Space-level: the rows carry a `space_id`, so space roles grant it.
+      level: "space",
+      presets: ["admin", "builder", "operator"],
       apiKeyGrantable: true, // can be carried by API keys
       endUserGrantable: true, // can be carried by end-user OIDC tokens
+    },
+    {
+      resource: "task-settings",
+      actions: ["write"],
+      // Org-level: one row per org, so org roles grant it.
+      level: "org",
+      grantTo: ["owner", "admin"],
     },
   ],
   // ...
@@ -152,13 +161,127 @@ router.post(
 
 The built-in modules that contribute permissions (`webhooks`, `oidc`, `mcp`) use this pattern — read their `index.ts` + `routes.ts` for reference.
 
-**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, role validity) and aggregates them into:
+`level` is the discriminant (RBAC spec §3.4). Every permission string belongs
+to exactly one level: `level: "org"` takes `grantTo` (org roles) and
+`level: "space"` takes `presets` (space-role presets — `admin`, `builder`,
+`operator`, `viewer`). There is no default and no fallback; pick the level from
+where the resource's rows live. Listing the same resource twice with different
+`actions` is how per-action granularity is expressed, and both entries must
+declare the same level.
 
-- `resolvePermissions(role)` — module entries for the listed roles are written into the per-role permission Set returned to the auth pipeline.
+**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity) and aggregates them into:
+
+- `orgPermissions(role)` / `presetPermissions(preset)` — module entries reach the org role or the space preset they listed.
 - `getApiKeyAllowedScopes()` — entries with `apiKeyGrantable: true` become grantable through API keys (filtered against the creator's role at issuance).
 - `getModuleEndUserAllowedScopes()` — entries with `endUserGrantable: true` are accepted on end-user OIDC JWTs (in addition to the built-in `OIDC_ALLOWED_SCOPES`). Defaults to `false` — admin / destructive surfaces stay closed to embedding apps.
 
 Disabling a module leaves **zero footprint**: the `declare module` augmentation widens types but contributes nothing at runtime (interface keys aren't iterated), and the runtime contribution is gone the moment `permissionsContribution()` stops being called. No dead scope strings in role sets, no dead entries in the API-key allowlist.
+
+### `permissionsContribution` vs `principalPermissions`
+
+Two contribution members, one question: **is the population that holds this
+permission a ROLE, or a LIST the module maintains?**
+
+|               | `permissionsContribution()`                           | `principalPermissions`            |
+| ------------- | ----------------------------------------------------- | --------------------------------- |
+| Grants to     | an org role (`grantTo`) or a space preset (`presets`) | one `(orgId, userId)`             |
+| Level         | org or space                                          | **org only**                      |
+| Vocabulary    | declares NEW resources                                | reuses strings that already exist |
+| Evaluated for | every caller                                          | session-shaped callers only       |
+| Cost          | a boot-time table                                     | one cached lookup per principal   |
+
+`permissionsContribution` is the common case and the two compose: a module
+declares its resource and its role grants there, then hands **extra copies of
+those same strings** to named principals here. There is no third case — a
+per-principal grant never invents vocabulary.
+
+```ts
+const billingModule: AppstrateModule = {
+  manifest: { id: "billing", name: "Billing", version: "1.0.0" },
+  permissionsContribution: () => [
+    { resource: "billing", actions: ["read"], level: "org", grantTo: ["owner", "admin", "member"] },
+    { resource: "billing", actions: ["manage"], level: "org", grantTo: ["owner", "admin"] },
+  ],
+  // …and these people hold both without being admins.
+  principalPermissions: {
+    mayGrant: ["billing:read", "billing:manage"],
+    resolve: async ({ orgId, userId }) =>
+      (await isBillingManager(orgId, userId)) ? ["billing:read", "billing:manage"] : [],
+  },
+  // ...
+};
+```
+
+Reach for `principalPermissions` when the answer is a row in the module's own
+table — billing managers, an SSO group mapping — and the alternative would be
+inventing an org role for them. That alternative is what the surface exists to
+avoid: an org role is platform vocabulary, and `billing` is not.
+
+**Two boot rules, both fail-fast and both naming the module and the string.**
+Every `mayGrant` entry must be a known ORG-level permission (the core catalog,
+or a `level: "org"` contribution of some loaded module) — a space-level string
+is granted per space and this surface has no space. And no entry may be
+`apiKeyGrantable` / `endUserGrantable`: the surface is evaluated for
+session-shaped callers only, so a delegated credential's ceiling can never
+carry the grant and declaring one would advertise access no key can obtain.
+
+**At runtime**: the resolver is called once per principal per cache miss, its
+answer is filtered to `mayGrant` (an undeclared string is dropped and logged,
+never granted), and a throwing resolver contributes nothing rather than failing
+the request — a module's outage must not lock a caller out of the permissions
+their own role gives them.
+
+**Invalidation is yours.** Results are cached per `(orgId, userId)` with a 10s
+TTL. The platform cannot know when your table changed, so call
+`invalidatePrincipalPermissions(orgId, userId?)` from
+`@appstrate/core/principal-permissions` after every write the resolver reads —
+omit `userId` to drop the whole org. The TTL is only the backstop for a lost
+bus broadcast, not the invalidation mechanism.
+
+### A space-level resource on a route the platform does not space-scope
+
+`SPACE_SCOPED_PREFIXES` (`apps/api/src/middleware/space-context.ts`) is
+**core-only by design** — a module never adds a row to it. So a module that
+gates a `level: "space"` resource on its own route family must enter a space
+itself, before its guard runs:
+
+```ts
+import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
+
+router.use("/api/tasks/*", async (c, next) => {
+  await enterSpaceContext(c); // pinned space → X-Space-Id (400 when neither)
+  return next();
+});
+router.get("/api/tasks", requireModulePermission("tasks", "read"), handler);
+```
+
+Pass an explicit id (`enterSpaceContext(c, spaceId)`) when the route addresses a
+space of its own — the `webhooks` module does, from its `spaceId` body/query
+field, and again from the row's own space on its by-id routes.
+
+A caller that names no space at all is a **400**, exactly as it is on a core
+space-scoped route. The org's default space answers only the trusted in-process
+MCP re-entry (the internal-dispatch marker), which is the one caller that
+physically cannot carry a header. A module route is not a weaker door than a
+core one: falling back to the default space for a session or CLI caller would
+put them in a space they never asked for.
+
+That makes the entry a decision, not a reflex. A router whose family mixes
+space-level and ORG-level resources must enter only when the caller identifies
+a space (`c.get("spaceId") ?? c.req.header("X-Space-Id")`) and skip otherwise —
+`webhooks` does, because a `level: "org"` webhook is space-less and its
+permission is org-level, so an unconditional entry would 400 a caller who needs
+no space. Skipping leaves `permissions` at the org half, which is the correct
+authority for those rows; a route that then wants either half gates on both
+strings rather than on one (`requireAnyWebhookRead` in
+`modules/webhooks/routes.ts`).
+
+This is not optional: a caller outside a space holds **org-level strings only**,
+so a space-level guard on a route that never entered a space can never pass. It
+fails closed, which is the right default and the wrong behaviour. `chat`, `mcp`
+and `webhooks` are the three in-repo examples. A caller with no role in the
+resolved space is refused there (403 `not_a_space_member`, or 404 for a
+`private` space) — the same answer the core middleware gives.
 
 ### Middleware symmetry: one guard path
 
@@ -166,7 +289,7 @@ Core routes use `requirePermission` (apps/api-internal, union-typed against core
 
 ### Adding a new core resource
 
-Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → edit `CORE_RESOURCE_NAMES` in the same file (drift caught by a unit test) → wire the role grants + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
+Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → add its actions to `CORE_RESOURCE_ACTIONS` and its level to `CORE_RESOURCE_LEVELS` in the same file (drift caught by the `satisfies` clauses plus a unit test) → wire the org-role grants or space-role presets + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
 
 ## Model providers
 

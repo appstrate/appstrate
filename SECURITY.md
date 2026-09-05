@@ -449,8 +449,8 @@ if (!rows[0] || rows[0].status !== "running") {
 
 Privileged operations (package import, configuration, deletion, …) are gated on a
 **permission**, not on a role name. There is no `requireAdmin()` / `requireOwner()`
-middleware: role → permission expansion happens once, in the org-context stage of
-the request pipeline, and every route asserts the concrete permission it needs.
+middleware: role → permission expansion happens in the pipeline, and every route
+asserts the concrete permission it needs.
 The single runtime path is `makePermissionGuard` in
 `packages/core/src/permissions.ts`, wrapped by three typed façades —
 `requirePermission` (`apps/api/src/middleware/require-permission.ts`, core +
@@ -474,17 +474,55 @@ export function makePermissionGuard(required: string) {
 router.post("/path", requirePermission("agents", "write"), handler);
 ```
 
-Three properties matter for the threat model:
+**Two levels, one Set.** Every permission string belongs to exactly one level
+(`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4): an ORG role
+(`owner`/`admin`/`member`/`guest`) grants org-level strings; a SPACE role — one
+of the four presets (`admin`/`builder`/`operator`/`viewer`) or one of the org's
+own bundles — grants space-level ones. The pipeline therefore writes three
+context keys instead of one:
+
+| Key              | Written by                                  | Value                                                                                                 |
+| ---------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `orgPermissions` | auth pipeline, once the org role is known   | the org-level effective set                                                                           |
+| `scopeCeiling`   | auth pipeline                               | an API key's `scopes`, an OIDC scope claim; `undefined` for a cookie                                  |
+| `permissions`    | auth pipeline **and** `requireSpaceContext` | `ceiling(orgPermissions)`, then `ceiling(orgPermissions ∪ spacePermissions)` once a space is resolved |
+
+`makePermissionGuard` keeps reading `permissions` and nothing else. **The
+ceiling is applied on every write of that key**, never once at the edge, so a
+bearer scoped to `runs:read` cannot inherit `org:delete` from the subject behind
+it — and a route outside a space context sees org-level strings only, which is
+why a space-level guard can never be satisfied on an org route.
+
+A module may add org-level strings to `orgPermissions` for ONE named principal
+rather than for a role (`principalPermissions`, RBAC spec §4.2 — cloud's billing
+managers): each module declares up front what it may ever grant, anything else
+its resolver returns is dropped, the strings may never be API-key- or
+end-user-grantable, and the surface is evaluated for session-shaped callers
+only, so no delegated credential can carry such a grant.
+
+`applySpacePermissions(c, space)` (`middleware/space-context.ts`) is the single
+place the space slice is added: it loads the caller's `space_members` row, runs
+the resolver, and refuses with 403 `not_a_space_member` (or 404 for a `private`
+space) when there is no role. It is exported, and a module gating a space-level
+resource on a route family the platform does not space-scope reaches it through
+the core seam `enterSpaceContext` — a module that skips it holds no space-level
+string, so its own guard fails closed.
+
+Four properties matter for the threat model:
 
 - **Fail-closed.** An absent or malformed permission set denies; it never falls
   through to a role comparison.
 - **Denials are audited exactly once.** The handler is registered at boot
   (`installPermissionAuditLogger`), and a throwing audit handler is swallowed so
   an authz denial can never be converted into a 500 that masks the 403.
+- **A credential can never exceed its ceiling.** Both halves of the union are
+  intersected with `scopeCeiling` on the way into `permissions`, including an
+  empty OIDC scope claim.
 - **Modules cannot widen core.** A module gates on core resources through
   `requireCorePermission` (typechecked against the core catalog) and on its own
-  through `requireModulePermission`; the role→permission matrix lives in
-  `apps/api/src/lib/permissions.ts`.
+  through `requireModulePermission`; the role→permission policy lives in
+  `apps/api/src/lib/permissions.ts` and its level table in
+  `@appstrate/core/permissions`.
 
 ### Orphaned run recovery
 
@@ -510,6 +548,8 @@ for (const runId of orphanIds) {
 **Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/space-context.ts`, `apps/api/src/services/state/`, all route handlers
 
 Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and space-scoped resources are additionally scoped by `spaceId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the space-context middleware (`X-Space-Id`) validates the space belongs to the org.
+
+Belonging to the org is not enough to enter one of its spaces: the same middleware then resolves the caller's role in that space from the `space_members` row (or from the org role, or from an `open` space's default) and refuses when there is none — 403 `not_a_space_member`, or 404 for a `private` space, which must not confirm its own existence to a non-member. So the second tier filters rows by `spaceId` **and** gates entry to the space, and a `guest` reaches exactly the spaces someone put them in.
 
 | Table               | Scoping     | SELECT        | INSERT                  | UPDATE                  | DELETE                  |
 | ------------------- | ----------- | ------------- | ----------------------- | ----------------------- | ----------------------- |

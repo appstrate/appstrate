@@ -82,6 +82,10 @@ const CORE_TABLES = [
   "model_provider_credentials",
   "org_proxies",
   "org_invitations",
+  // Space membership: rows first, then the custom bundles they may reference
+  // (`custom_role_id` is ON DELETE RESTRICT, so the order is load-bearing).
+  "space_members",
+  "space_roles",
   // Mid-level tables
   "runs",
   "package_versions",

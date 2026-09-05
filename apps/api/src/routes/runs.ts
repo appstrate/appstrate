@@ -45,6 +45,7 @@ import {
   normalizeContextFileUris,
   triggerInlineRun,
 } from "../services/inline-run.ts";
+import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -689,7 +690,13 @@ export function createRunsRouter() {
 
       // Preflight BEFORE any input file streams — a bad manifest or
       // readiness problem 4xxes without touching storage.
-      const preflight = await runInlinePreflight({ orgId, spaceId, actor, body });
+      const preflight = await runInlinePreflight({
+        orgId,
+        spaceId,
+        actor,
+        body,
+        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+      });
 
       // ----- Context files (fan-in by reference) -----
       // Both entry paths land on ONE synthesized reserved input field, and the
@@ -802,7 +809,14 @@ export function createRunsRouter() {
       const actor = getActor(c);
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      await runInlinePreflight({ orgId, spaceId, actor, body, mode: "accumulate" });
+      await runInlinePreflight({
+        orgId,
+        spaceId,
+        actor,
+        body,
+        mode: "accumulate",
+        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+      });
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.
       assertContextFilesFieldAvailable(body.manifest, body.input);

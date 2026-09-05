@@ -46,7 +46,10 @@ import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
+import { assertSpaceAssignmentsValid } from "../../../services/space-assignments.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
 // ─── SECURITY: Trust boundary ─────────────────────────────────────────────────
@@ -138,15 +141,6 @@ function assertValidRedirectUris(uris: readonly string[]): void {
   }
 }
 
-/**
- * Role allowlist for org-level auto-provisioning. `owner` is intentionally
- * excluded at the service, DB, and UI layers: self-promotion to owner via a
- * misconfigured client is an unacceptable operational risk. Admins who
- * genuinely need a new owner must promote after the fact.
- */
-export const SIGNUP_ROLE_ALLOWED = ["admin", "member", "viewer"] as const;
-export type SignupRole = (typeof SIGNUP_ROLE_ALLOWED)[number];
-
 export interface OAuthClientRecord {
   id: string;
   clientId: string;
@@ -169,7 +163,8 @@ export interface OAuthClientRecord {
    */
   allowSignup: boolean;
   /** Org-level: role assigned on auto-join. `owner` forbidden. Defaults to `"member"`. */
-  signupRole: SignupRole;
+  signupRole: AssignableOrgRole;
+  signupSpaceAssignments: ReadonlyArray<SpaceAssignment>;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -195,7 +190,8 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     disabled: row.disabled ?? false,
     isFirstParty: row.skipConsent ?? false,
     allowSignup: row.allowSignup ?? false,
-    signupRole: row.signupRole as SignupRole,
+    signupRole: row.signupRole,
+    signupSpaceAssignments: row.signupSpaceAssignments,
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
@@ -303,7 +299,8 @@ interface CreateOrgClientInput {
   /** Defaults to `false` at org level. */
   allowSignup?: boolean;
   /** Defaults to `"member"`. `owner` forbidden. */
-  signupRole?: SignupRole;
+  signupRole?: AssignableOrgRole;
+  signupSpaceAssignments?: ReadonlyArray<SpaceAssignment>;
 }
 
 interface CreateSpaceClientInput {
@@ -359,17 +356,31 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   // auto-join). Space clients have no org membership to attach to;
   // instance clients have no fixed org to attach to either. Reject loudly
   // on the non-org levels to surface configuration mistakes.
-  if (input.level !== "org" && (input as { signupRole?: unknown }).signupRole !== undefined) {
+  if (
+    input.level !== "org" &&
+    ((input as { signupRole?: unknown }).signupRole !== undefined ||
+      (input as { signupSpaceAssignments?: unknown }).signupSpaceAssignments !== undefined)
+  ) {
     throw new OAuthAdminValidationError(
       "signupPolicy",
-      "OIDC: signupRole is only valid for org-level clients",
+      "OIDC: signupRole and signupSpaceAssignments are only valid for org-level clients",
     );
   }
   // `allowSignup` is honored on every level (unified Auth0/Keycloak/Okta
   // semantic). Defaults to `false` (secure-by-default); `ensureInstanceClient()`
   // opts in at boot to keep the fresh-install signup page open.
   const allowSignup = input.allowSignup ?? false;
-  const signupRole: SignupRole = input.level === "org" ? (input.signupRole ?? "member") : "member";
+  const signupRole: AssignableOrgRole =
+    input.level === "org" ? (input.signupRole ?? "member") : "member";
+  const signupSpaceAssignments = input.level === "org" ? (input.signupSpaceAssignments ?? []) : [];
+  if (input.level === "org") {
+    await assertSpaceAssignmentsValid({
+      orgId: input.referencedOrgId,
+      role: signupRole,
+      assignments: signupSpaceAssignments,
+      param: "signupSpaceAssignments",
+    });
+  }
 
   const inserted = await db
     .insert(oauthClient)
@@ -388,6 +399,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       skipConsent: input.isFirstParty ?? false,
       allowSignup,
       signupRole,
+      signupSpaceAssignments,
       disabled: false,
       type: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
@@ -505,7 +517,8 @@ interface UpdateClientInput {
   /** Honored on every level (unified semantic). */
   allowSignup?: boolean;
   /** Honored only on org-level clients; rejected on instance/space. `owner` forbidden. */
-  signupRole?: SignupRole;
+  signupRole?: AssignableOrgRole;
+  signupSpaceAssignments?: ReadonlyArray<SpaceAssignment>;
 }
 
 export async function updateClient(
@@ -522,14 +535,21 @@ export async function updateClient(
   // `signupRole` is only meaningful on org-level clients — reject updates
   // targeting instance/space levels loudly so configuration mistakes
   // surface. `allowSignup` is valid on every level.
-  if (input.signupRole !== undefined) {
+  if (input.signupRole !== undefined || input.signupSpaceAssignments !== undefined) {
     const existing = await getClient(clientId);
-    if (existing && existing.level !== "org") {
+    if (!existing) return null;
+    if (existing.level !== "org" || !existing.referencedOrgId) {
       throw new OAuthAdminValidationError(
         "signupPolicy",
-        "OIDC: signupRole is only valid for org-level clients",
+        "OIDC: signupRole and signupSpaceAssignments are only valid for org-level clients",
       );
     }
+    await assertSpaceAssignmentsValid({
+      orgId: existing.referencedOrgId,
+      role: input.signupRole ?? existing.signupRole,
+      assignments: input.signupSpaceAssignments ?? existing.signupSpaceAssignments,
+      param: "signupSpaceAssignments",
+    });
   }
 
   // Build a single SET clause — atomic, no partial-update risk.
@@ -542,6 +562,8 @@ export async function updateClient(
   if (input.isFirstParty !== undefined) set.skipConsent = input.isFirstParty;
   if (input.allowSignup !== undefined) set.allowSignup = input.allowSignup;
   if (input.signupRole !== undefined) set.signupRole = input.signupRole;
+  if (input.signupSpaceAssignments !== undefined)
+    set.signupSpaceAssignments = input.signupSpaceAssignments;
 
   const [row] = await db
     .update(oauthClient)

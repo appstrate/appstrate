@@ -163,3 +163,33 @@ describe("custom Error classes carry a cause through construction", () => {
     expect(err.cause).toBe(inner);
   });
 });
+
+describe("ApiError extension members (RFC 9457 §3.2)", () => {
+  const build = (extensions: Record<string, unknown>) =>
+    new ApiError({
+      status: 409,
+      code: "role_in_use",
+      title: "Conflict",
+      detail: "Still assigned",
+      extensions,
+    }).toProblemDetail("req_test");
+
+  it("carries a machine-readable extension onto the wire", () => {
+    const body = build({ member_count: 3 }) as unknown as Record<string, unknown>;
+    expect(body.member_count).toBe(3);
+    expect(body.code).toBe("role_in_use");
+  });
+
+  it("drops an extension named after a standard field, present or absent", () => {
+    // `errors` is OPTIONAL and absent on this problem, so a `key in body` guard
+    // would have let it through — and a client branching on `errors` cannot
+    // tell a validation list from an extension that took the name.
+    const body = build({ errors: ["nope"], status: 200, param: "x" }) as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(body.errors).toBeUndefined();
+    expect(body.param).toBeUndefined();
+    expect(body.status).toBe(409);
+  });
+});

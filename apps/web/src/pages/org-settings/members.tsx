@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { Users } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -20,6 +20,15 @@ import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
+import { useSpaces } from "../../hooks/use-spaces";
+import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "../../hooks/use-roles";
+import {
+  assignmentsFor,
+  toSpaceAssignments,
+  validateSpaceAssignments,
+  type AssignmentDraft,
+} from "../../lib/space-assignments";
+import { SpaceAssignmentsField } from "../../components/space-assignments-field";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
@@ -33,21 +42,48 @@ import {
 } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
+type SpaceAssignment = components["schemas"]["SpaceAssignment"];
+
+interface InviteFormValues {
+  email: string;
+  role: AssignableOrgRole;
+  assignments: AssignmentDraft[];
+}
+
+/** `Space — Role` for a pending invitation's assignment list. */
+function spaceLabel(
+  assignment: SpaceAssignment,
+  spaces: { id: string; name: string }[] | undefined,
+  roleOptions: SpaceRoleOption[],
+): string {
+  const name = spaces?.find((s) => s.id === assignment.space_id)?.name ?? assignment.space_id;
+  const role = roleOptions.find((o) => o.value === spaceRoleValue(assignment))?.label;
+  return role ? `${name} — ${role}` : name;
+}
 
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
   const { user } = useAuth();
-  const { role, isAdmin } = usePermissions();
+  const { can, orgRole } = usePermissions();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
+  const { data: spaces } = useSpaces();
+  const { options: roleOptions } = useSpaceRoleOptions();
+
+  const canInvite = can("members:invite");
+  const canChangeRole = can("members:change-role");
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
-  const inviteForm = useForm<{ email: string; role: AssignableOrgRole }>({
-    defaultValues: { email: "", role: "member" },
+  const inviteForm = useForm<InviteFormValues>({
+    defaultValues: { email: "", role: "member", assignments: [] },
   });
   const inviteRole = useWatch({ control: inviteForm.control, name: "role" });
+  // `admin` runs every space already; the API refuses assignments for it. The
+  // Controller stays MOUNTED either way so the field is never unregistered
+  // mid-form — only its UI is conditional.
+  const showAssignments = inviteRole !== "admin";
 
   const {
     data: orgData,
@@ -110,12 +146,13 @@ export function OrgSettingsMembersPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
-  const handleInvite = (data: { email: string; role: AssignableOrgRole }) => {
+  const handleInvite = (data: InviteFormValues) => {
     const trimmed = data.email.trim();
     if (!trimmed || !orgId) return;
+    const assignments = assignmentsFor(data.role, toSpaceAssignments(data.assignments));
     addMemberMutation.mutate({
       params: { path: { orgId } },
-      body: { email: trimmed, role: data.role },
+      body: { email: trimmed, role: data.role, space_assignments: assignments },
     });
   };
 
@@ -134,43 +171,78 @@ export function OrgSettingsMembersPage() {
 
   return (
     <>
-      {isAdmin && (
-        <form
-          onSubmit={inviteForm.handleSubmit(handleInvite)}
-          className="mb-4 flex items-start gap-2"
-        >
-          <div className="flex-1">
-            <div className="flex gap-2">
-              <Input
-                type="email"
-                {...inviteForm.register("email", { required: true })}
-                placeholder="email@example.com"
-              />
-              <Select
-                value={inviteRole}
-                onValueChange={(v) => inviteForm.setValue("role", v as AssignableOrgRole)}
-              >
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ASSIGNABLE_ORG_ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {t(roleI18nKey(r))}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {canInvite && (
+        <form onSubmit={inviteForm.handleSubmit(handleInvite)} className="mb-6 space-y-4">
+          <div className="flex items-start gap-2">
+            <div className="flex-1">
+              <div className="flex gap-2">
+                <Input
+                  type="email"
+                  aria-label={t("orgSettings.inviteEmailAriaLabel")}
+                  {...inviteForm.register("email", { required: true })}
+                  placeholder="email@example.com"
+                />
+                <Select
+                  value={inviteRole}
+                  onValueChange={(v) => inviteForm.setValue("role", v as AssignableOrgRole)}
+                >
+                  <SelectTrigger
+                    className="w-[140px]"
+                    aria-label={t("orgSettings.inviteRoleAriaLabel")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ASSIGNABLE_ORG_ROLES.map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {t(roleI18nKey(r))}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {inviteForm.formState.errors.root && (
+                <p className="text-destructive mt-1 text-sm">
+                  {inviteForm.formState.errors.root.message}
+                </p>
+              )}
             </div>
-            {inviteForm.formState.errors.root && (
-              <p className="text-destructive mt-1 text-sm">
-                {inviteForm.formState.errors.root.message}
-              </p>
-            )}
+            <Button type="submit" disabled={addMemberMutation.isPending}>
+              {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
+            </Button>
           </div>
-          <Button type="submit" disabled={addMemberMutation.isPending}>
-            {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
-          </Button>
+
+          <Controller
+            control={inviteForm.control}
+            name="assignments"
+            rules={{
+              validate: (value) =>
+                validateSpaceAssignments(
+                  inviteForm.getValues("role"),
+                  toSpaceAssignments(value),
+                  t("orgSettings.inviteSpacesRequired"),
+                ),
+            }}
+            render={({ field, fieldState }) =>
+              showAssignments ? (
+                <div className="space-y-2">
+                  <SpaceAssignmentsField
+                    hint={t("orgSettings.inviteSpacesHint")}
+                    value={field.value}
+                    onChange={field.onChange}
+                    spaces={spaces ?? []}
+                    roleOptions={roleOptions}
+                    disabled={addMemberMutation.isPending}
+                  />
+                  {fieldState.error && (
+                    <p className="text-destructive text-sm">{fieldState.error.message}</p>
+                  )}
+                </div>
+              ) : (
+                <></>
+              )
+            }
+          />
         </form>
       )}
 
@@ -179,12 +251,14 @@ export function OrgSettingsMembersPage() {
           const label = member.displayName || member.email || member.userId;
           const isMemberOwner = member.role === "owner";
           const isSelf = member.userId === user?.id;
-          const assignableRoles = role
-            ? assignableRolesForMember({ actorRole: role, targetRole: member.role, isSelf })
-            : [];
-          const canRemove = role
-            ? canRemoveMember({ actorRole: role, targetRole: member.role, isSelf })
-            : false;
+          const assignableRoles =
+            orgRole && canChangeRole
+              ? assignableRolesForMember({ actorRole: orgRole, targetRole: member.role, isSelf })
+              : [];
+          const canRemove =
+            orgRole && can("members:remove")
+              ? canRemoveMember({ actorRole: orgRole, targetRole: member.role, isSelf })
+              : false;
           return (
             <div key={member.userId} className="border-border bg-card rounded-lg border p-5">
               <div className="flex items-center gap-3">
@@ -254,22 +328,47 @@ export function OrgSettingsMembersPage() {
                     <span className="text-muted-foreground text-sm">
                       {t(roleI18nKey(inv.role))}
                     </span>
+                    {inv.space_assignments.length > 0 && (
+                      <p className="text-muted-foreground mt-1 text-xs">
+                        {t("orgSettings.inviteSpacesSummary", {
+                          spaces: inv.space_assignments
+                            .map((a) => spaceLabel(a, spaces, roleOptions))
+                            .join(", "),
+                        })}
+                      </p>
+                    )}
                   </div>
                   <Badge variant="pending">{t("orgSettings.invited")}</Badge>
                 </div>
                 <div className="border-border mt-3 flex gap-2 border-t pt-3">
-                  {isAdmin && (
+                  {canChangeRole && (
                     <Select
                       value={inv.role}
-                      onValueChange={(v) =>
+                      onValueChange={(v) => {
+                        const nextRole = v as AssignableOrgRole;
+                        // Same two rules as the invite form, over the list the
+                        // invitation already carries.
+                        const next = assignmentsFor(nextRole, inv.space_assignments);
+                        const verdict = validateSpaceAssignments(
+                          nextRole,
+                          next,
+                          t("orgSettings.inviteSpacesRequired"),
+                        );
+                        if (verdict !== true) {
+                          toast.error(verdict);
+                          return;
+                        }
                         changeInvitationRoleMutation.mutate({
                           params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
-                          body: { role: v as AssignableOrgRole },
-                        })
-                      }
+                          body: { role: nextRole, space_assignments: next },
+                        });
+                      }}
                       disabled={changeInvitationRoleMutation.isPending}
                     >
-                      <SelectTrigger className="w-[140px]">
+                      <SelectTrigger
+                        className="w-[140px]"
+                        aria-label={t("orgSettings.inviteRoleAriaLabel")}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -282,7 +381,7 @@ export function OrgSettingsMembersPage() {
                     </Select>
                   )}
                   <CopyLinkButton token={inv.token} />
-                  {isAdmin && (
+                  {canInvite && (
                     <Button
                       variant="destructive"
                       size="sm"

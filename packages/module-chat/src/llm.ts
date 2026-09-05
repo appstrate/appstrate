@@ -18,7 +18,6 @@ import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
-import { createCache } from "@appstrate/core/cache";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelCost } from "@appstrate/core/module";
 
@@ -101,74 +100,4 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
     );
   }
   return chosen;
-}
-
-/**
- * Space-scoped operations (agents, runs, …) need a space context. A
- * session carries none by default, so resolve the org's default space
- * and forward it as `X-Space-Id` on the MCP request. Cached per org; an
- * entry expires after {@link SPACE_CACHE_TTL_MS} so a process never routes
- * MCP calls at a space that stopped being the default for longer than that.
- */
-export const SPACE_CACHE_TTL_MS = 5 * 60_000;
-
-// Only RESOLVED ids are cached — a miss answers `undefined`, which the cache
-// never stores, so the next turn retries. A miss (transient failure OR an
-// empty 200) is anomalous (every org normally has a default space), and
-// caching it would strip space-scoped MCP tools org-wide. Concurrent turns of
-// one org share a single lookup.
-const spaceCache = createCache<string>({
-  name: "chat-default-space",
-  ttlMs: SPACE_CACHE_TTL_MS,
-});
-
-export function resolveDefaultSpaceId(
-  origin: string,
-  headers: Record<string, string>,
-  orgId: string,
-  // Required (no default): callers must pass the platform's in-process dispatch
-  // so the default-space lookup rides the loopback-auth seam. A plain
-  // `fetch` default would silently bypass it — symmetry with listModels.
-  fetchImpl: typeof fetch,
-): Promise<string | undefined> {
-  return spaceCache.get(orgId, () => fetchDefaultSpaceId(origin, headers, orgId, fetchImpl));
-}
-
-async function fetchDefaultSpaceId(
-  origin: string,
-  headers: Record<string, string>,
-  orgId: string,
-  fetchImpl: typeof fetch,
-): Promise<string | undefined> {
-  try {
-    const res = await fetchImpl(`${origin}/api/spaces`, { headers });
-    if (!res.ok) {
-      // A persistent miss silently strips every space-scoped MCP tool for the
-      // turn — leave a breadcrumb so it isn't invisible.
-      logger.warn("chat: default-space lookup returned non-ok", {
-        orgId,
-        status: res.status,
-      });
-      return undefined; // transient — don't cache
-    }
-    interface Space {
-      id: string;
-      isDefault?: boolean;
-    }
-    // `/api/spaces` answers with the same Stripe-canonical list envelope as
-    // `/api/models` (`{ object: "list", data, hasMore }` — apps/api
-    // `listResponse`, `data` required by the OpenAPI schema): `data` is the
-    // only shape. Same reader as `listModels` above, for the same reason.
-    const body = (await res.json()) as { data?: Space[] };
-    if (!Array.isArray(body.data)) {
-      logger.warn("chat: /api/spaces returned an unexpected shape (no data array)", { orgId });
-      return undefined; // not the contract — don't cache
-    }
-    const id = (body.data.find((s) => s.isDefault) ?? body.data[0])?.id;
-    if (id) return id;
-    return undefined; // empty 200 — anomalous, don't cache
-  } catch (err) {
-    logger.warn("chat: default-space lookup failed", { orgId, err: String(err) });
-    return undefined; // network error — transient, don't cache
-  }
 }

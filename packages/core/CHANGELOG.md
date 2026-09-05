@@ -7,7 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
+
 ### Changed
+
+- **BREAKING: `ModuleInitContext.getOrgAdminEmails` is REMOVED**, replaced by
+  two narrower queries. `getOrgOwnerEmails(orgId)` returns the emails of the
+  org's OWNERS only — the live fallback recipient for an unset billing contact,
+  and deliberately not owner-or-admin, since admin is an operational role and
+  billing mail is not an operational notification. `getOrgMembers(orgId,
+userIds)` resolves a module's own stored user ids to
+  `ModuleOrgMember[]` (`{ userId, email, role }`, also a new export), omitting
+  any id that is no longer a member of `orgId` rather than throwing — "which of
+  these still hold membership" is the question a module with its own principal
+  list actually asks. A module calling `getOrgAdminEmails` fails to compile;
+  the replacement is `getOrgOwnerEmails` when the answer wanted was "who is
+  responsible for this org", and an explicit id list through `getOrgMembers`
+  when it wanted a named audience. First consumer: `@appstrate/cloud`'s billing
+  managers and billing contact.
+
+- **New subpath `@appstrate/core/principal-permissions` — org-level grants per
+  principal.** A module may now grant org-level permissions to ONE user in ONE
+  org instead of to a role, through the new optional `principalPermissions`
+  member on `AppstrateModule` (type `ModulePrincipalPermissions`: a `mayGrant`
+  allowlist plus a `resolve({ orgId, userId })`). The platform validates
+  `mayGrant` at boot — every entry must be a known org-level permission and
+  must not be API-key- or end-user-grantable — evaluates the resolver for
+  session-shaped callers only, filters each answer to that module's `mayGrant`
+  (an undeclared string is dropped and logged), and isolates a throwing
+  resolver. First consumer: `@appstrate/cloud`'s billing managers.
+  New exports on the subpath: `resolvePrincipalPermissions`,
+  `invalidatePrincipalPermissions`, `setPrincipalPermissionsProviders`, and the
+  types `ModulePrincipalPermissions`, `PrincipalPermissionContext`,
+  `RegisteredPrincipalPermissions`. Results are cached per `(orgId, userId)`
+  with a 10s TTL and dropped across replicas by the cache bus, so a module that
+  declares the surface MUST call `invalidatePrincipalPermissions(orgId,
+userId?)` after writing the table its resolver reads —
+  `setPrincipalPermissionsProviders` is the platform's own boot wiring and a
+  module never calls it. No behaviour change for a platform where no module
+  declares the member: the resolver short-circuits without touching the cache.
+
+- **`ApiError` can carry RFC 9457 extension members.** New optional
+  `extensions` on the constructor options, merged into the problem body by
+  `toProblemDetail()` — only into keys the standard fields do not own, so an
+  extension can never rewrite `status` or `code`. `conflict(code, detail)`
+  takes them as a third argument. First consumer: `DELETE /api/roles/{id}`
+  answering `role_in_use` with `member_count`, so a client acts on the number
+  instead of parsing it out of `detail`.
+
+- **The org role `viewer` is retired; `guest` replaces it (BREAKING).**
+  `ORG_ROLES` — and therefore the `OrgRole` union and the `org_role` pg enum
+  it mirrors — is now `["owner", "admin", "member", "guest"]`. Read-only
+  access to everything is a SPACE concern (preset `viewer`); an org role that
+  implicitly reads every space is exactly what space membership exists to
+  stop, so a `viewer` becomes a `guest` plus an explicit `viewer` row in each
+  space that existed at migration time. `ModulePermissionsSnapshot.byRole`
+  changes key accordingly (`viewer` → `guest`); a module whose
+  `permissionsContribution()` names `viewer` in `grantTo` must name `guest`
+  (no in-tree module did — `@appstrate/cloud` grants `billing:read` to
+  owner/admin/member and needs no change, but a guest holding it would be a
+  deliberate decision, not a rename). Existing `viewer` rows are moved by
+  `scripts/migration/0008-org-viewer-to-guest.sql` (release notes).
+
+- **New exports for space visibility.** `SPACE_VISIBILITIES`
+  (`["open", "closed", "private"]`) and the type `SpaceVisibility`, read by
+  the space-role resolver and by the `spaces.visibility` column.
+
+- **New: the type `SpaceAssignment`.** One space membership an invitation
+  applies when it is accepted (`{ space_id, preset_role }` or
+  `{ space_id, custom_role_id }`), and the shape
+  `org_invitations.space_assignments` stores. Wire-shaped, so the invite body,
+  the stored column and every invitation response read the same object.
+
+- **New: a module can enter a space.** `enterSpaceContext(c, spaceId?)` and its
+  platform-side registration hook `setSpaceContextApplier()`. A module that
+  gates a SPACE-level resource on a route family the platform does not
+  space-scope (`chat`, `webhooks`, `mcp`) must call `enterSpaceContext` before
+  its guard: org-level permissions carry no space-level string, so the guard is
+  otherwise unsatisfiable. Same registration pattern as
+  `setModulePermissionsProvider` / `setPermissionDenialHandler` — the platform
+  wires the implementation at boot; calling it unwired throws rather than
+  silently no-op-ing.
+
+- **RBAC vocabulary gains a level (BREAKING for module authors).** Every
+  permission string now belongs to exactly one level, `org` or `space`
+  (`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4): an org role grants
+  org-level strings, a space role grants space-level ones. Changed exports:
+  `CoreResources` (`org` gains `settings`; `integrations` gains `configure`;
+  new resources `roles`, `space-settings`, `space-members`),
+  `CORE_RESOURCE_NAMES` (same shape, now derived from `CORE_RESOURCE_ACTIONS`),
+  `ModulePermissionContribution` (a discriminated union on a new required
+  `level` field: `{ level: "org"; grantTo }` | `{ level: "space"; presets }` —
+  there is no default and no compatibility reading of a bare `grantTo`), and
+  `ModulePermissionsSnapshot` (new required `byPreset` member). New exports:
+  `CORE_RESOURCE_ACTIONS`, `CORE_RESOURCE_LEVELS`, `ORG_LEVEL_PERMISSIONS`,
+  `SPACE_LEVEL_PERMISSIONS`, `SPACE_ROLE_PRESETS`,
+  `getModulePresetScopes()`, and the types `PermissionLevel`,
+  `OrgLevelPermission`, `SpaceLevelPermission`, `SpaceRolePreset`. Every
+  module contributing permissions must add `level` to each entry and swap
+  `grantTo` for `presets` on its space-level resources; `@appstrate/cloud`'s
+  `billing` entries are org-level.
 
 - **`extractSkillMeta` no longer owns its own frontmatter parser.** It returns
   exactly what it did for a conforming document and keeps its `warnings`, but

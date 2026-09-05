@@ -8,6 +8,8 @@
  * any drift between the runtime responses and this shape.
  */
 
+import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+
 const oauthClientObject: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -25,6 +27,7 @@ const oauthClientObject: Record<string, unknown> = {
     "isFirstParty",
     "allowSignup",
     "signupRole",
+    "signupSpaceAssignments",
     "createdAt",
     "updatedAt",
   ],
@@ -41,7 +44,11 @@ const oauthClientObject: Record<string, unknown> = {
     disabled: { type: "boolean" },
     isFirstParty: { type: "boolean" },
     allowSignup: { type: "boolean" },
-    signupRole: { type: "string", enum: ["admin", "member", "viewer"] },
+    signupRole: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
+    signupSpaceAssignments: {
+      type: "array",
+      items: { $ref: "#/components/schemas/SpaceAssignment" },
+    },
     createdAt: { type: ["string", "null"] },
     updatedAt: { type: ["string", "null"] },
   },

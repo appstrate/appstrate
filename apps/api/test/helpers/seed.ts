@@ -25,6 +25,8 @@ import {
   orgModels,
   orgInvitations,
   packageVersions,
+  spaceMembers,
+  spaceRoles,
 } from "@appstrate/db/schema";
 import { eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { mcpServerManifest } from "./integration-manifests.ts";
@@ -206,6 +208,49 @@ export async function seedSpace(overrides: SpaceInsert): Promise<InferSelectMode
     })
     .returning();
   return space!;
+}
+
+// ─── Space roles (custom bundles) ─────────────────────────
+
+/**
+ * An org-defined space-role bundle (`space_roles`). Org-scoped, so a fixture
+ * can prove the cross-org refusal by seeding one in the OTHER org.
+ */
+export async function seedSpaceRole(
+  overrides: Partial<InferInsertModel<typeof spaceRoles>> & { orgId: string },
+): Promise<InferSelectModel<typeof spaceRoles>> {
+  const key = overrides.key ?? `role-${crypto.randomUUID().slice(0, 8)}`;
+  const [row] = await db
+    .insert(spaceRoles)
+    .values({
+      id: prefixedId("srl"),
+      name: "Test Space Role",
+      permissions: ["agents:read"],
+      ...overrides,
+      key,
+    })
+    .returning();
+  return row!;
+}
+
+// ─── Space membership ─────────────────────────────────────
+
+/**
+ * Grant `userId` an explicit role in `spaceId`. Straight to the table, so a
+ * test can seed a shape the write route refuses (an owner's row, say) when
+ * that is exactly what it is asserting about.
+ */
+export async function seedSpaceMember(
+  overrides: Partial<InferInsertModel<typeof spaceMembers>> & {
+    spaceId: string;
+    userId: string;
+  },
+): Promise<InferSelectModel<typeof spaceMembers>> {
+  const [row] = await db
+    .insert(spaceMembers)
+    .values({ presetRole: "viewer", ...overrides })
+    .returning();
+  return row!;
 }
 
 // ─── End Users ────────────────────────────────────────────

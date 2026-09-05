@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { orgRoleEnum } from "@appstrate/db/schema";
+import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "../lib/ids.ts";
 
@@ -324,12 +325,18 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "role", "createdAt"],
+    required: ["id", "name", "slug", "role", "permissions", "createdAt"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces.",
+      },
       createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
     },
   },
@@ -346,13 +353,30 @@ export const schemas = {
       joinedAt: { type: "string", format: "date-time" },
     },
   },
+  SpaceAssignment: {
+    type: "object",
+    description:
+      "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
+    required: ["space_id"],
+    properties: {
+      space_id: { type: "string" },
+      preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      custom_role_id: { type: "string" },
+    },
+    additionalProperties: false,
+  },
   OrgInvitationInfo: {
     type: "object",
-    required: ["id", "email", "role", "token", "expiresAt", "createdAt"],
+    required: ["id", "email", "role", "space_assignments", "token", "expiresAt", "createdAt"],
     properties: {
       id: { type: "string" },
       email: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
+      space_assignments: {
+        type: "array",
+        items: { $ref: "#/components/schemas/SpaceAssignment" },
+        description: "Space memberships applied when the invitation is accepted.",
+      },
       token: { type: "string" },
       expiresAt: { type: "string", format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
@@ -387,10 +411,13 @@ export const schemas = {
       members: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgMember" },
+        description: "Empty unless the caller holds members:read.",
       },
       invitations: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgInvitationInfo" },
+        description:
+          "Empty unless the caller holds members:invite, including any credential scope ceiling.",
       },
     },
   },
@@ -1662,6 +1689,11 @@ export const schemas = {
       "name",
       "isDefault",
       "settings",
+      "visibility",
+      "default_role",
+      "access",
+      "role",
+      "permissions",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1682,12 +1714,158 @@ export const schemas = {
           },
         },
       },
+      visibility: {
+        type: "string",
+        enum: [...SPACE_VISIBILITIES],
+        description:
+          "Who reaches the space without an explicit membership row: `open` (every org member), `closed` (listed, not enterable), `private` (not listed).",
+      },
+      default_role: {
+        type: "string",
+        enum: [...SPACE_ROLE_PRESETS],
+        description: "Preset the implicit members of an `open` space hold",
+      },
+      access: {
+        type: "string",
+        enum: ["member", "none"],
+        description: "Whether the caller may enter this space",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+        description: "The caller's role in this space, or null when they have none",
+      },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description: "The caller's effective permission set in this space, ceiling applied",
+      },
       created_by: {
         type: ["string", "null"],
         description: "ID of the user who created the space",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+
+  SpaceMemberObject: {
+    type: "object",
+    required: ["object", "userId", "name", "email", "org_role", "source", "role", "created_at"],
+    properties: {
+      object: { type: "string", enum: ["space_member"] },
+      userId: { type: "string" },
+      name: { type: ["string", "null"] },
+      email: { type: ["string", "null"] },
+      org_role: { type: "string", enum: ORG_ROLES },
+      source: {
+        type: "string",
+        enum: ["explicit", "org_role", "open_space"],
+        description:
+          "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      created_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "When the explicit row was written; null for an implicit member",
+      },
+    },
+  },
+
+  SpaceMemberAssignment: {
+    type: "object",
+    required: ["object", "userId"],
+    properties: {
+      object: { type: "string", enum: ["space_member"] },
+      userId: { type: "string" },
+      preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      custom_role_id: { type: "string" },
+    },
+  },
+
+  RoleObject: {
+    type: "object",
+    required: [
+      "object",
+      "kind",
+      "id",
+      "key",
+      "name",
+      "description",
+      "permissions",
+      "created_at",
+      "updated_at",
+    ],
+    description:
+      "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
+    properties: {
+      object: { type: "string", enum: ["role"] },
+      kind: { type: "string", enum: ["preset", "custom"] },
+      id: {
+        type: ["string", "null"],
+        description: "`srl_` id for a custom bundle; null for a preset, which has no row.",
+      },
+      key: { type: "string" },
+      name: { type: "string" },
+      description: { type: ["string", "null"] },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description: "Space-level permission strings the role grants, sorted.",
+      },
+      created_at: { type: ["string", "null"], format: "date-time" },
+      updated_at: { type: ["string", "null"], format: "date-time" },
+    },
+  },
+
+  RoleVocabularyGroup: {
+    type: "object",
+    required: ["resource", "permissions"],
+    description: "Space-level permissions of one resource, with their delegation facts.",
+    properties: {
+      resource: { type: "string" },
+      permissions: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["permission", "action", "api_key_grantable"],
+          properties: {
+            permission: { type: "string" },
+            action: { type: "string" },
+            api_key_grantable: {
+              type: "boolean",
+              description: "Can also be carried by an API key.",
+            },
+          },
+        },
+      },
+    },
+  },
+
+  SpaceMemberRemoval: {
+    type: "object",
+    required: ["access_after"],
+    properties: {
+      access_after: {
+        type: "string",
+        enum: ["implicit", "none"],
+        description:
+          "Whether the removed member keeps implicit access (open space) or loses the space entirely.",
+      },
     },
   },
   EndUserObject: {

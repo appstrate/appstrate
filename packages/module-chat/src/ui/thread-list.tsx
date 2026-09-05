@@ -15,6 +15,8 @@ import { useChatHeaders, useSelectConversation } from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
+  sessionsQueryKey,
+  spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   type SessionSummary,
 } from "./sessions.ts";
@@ -139,8 +141,9 @@ function ConversationRow({
     // row; then drop the row. The server is already updated and the periodic
     // poll reconciles any later drift.
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
-    queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) =>
-      (prev ?? []).filter((s) => s.id !== session.id),
+    queryClient.setQueryData<SessionSummary[]>(
+      sessionsQueryKey(spaceIdFromHeaders(getHeaders)),
+      (prev) => (prev ?? []).filter((s) => s.id !== session.id),
     );
     if (active) select?.(null);
   };

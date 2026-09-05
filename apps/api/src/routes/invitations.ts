@@ -13,9 +13,11 @@ import {
   getOrgName,
 } from "../services/invitations.ts";
 import { addMember, getOrgById } from "../services/organizations.ts";
+import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
+import { listedOrgPermissions } from "../lib/permissions.ts";
 
 const router = new Hono();
 
@@ -61,6 +63,7 @@ router.get("/:token/info", async (c) => {
     email: invitation.email,
     org_name: orgName,
     role: invitation.role,
+    space_assignments: invitation.spaceAssignments,
     inviter_name: inviterName,
     expiresAt: invitation.expiresAt.toISOString(),
     is_new_user: !existingUser,
@@ -128,9 +131,17 @@ router.post("/:token/accept", async (c) => {
   // unique violation), so an existing membership keeps the claim valid.
   const claimed = await db.transaction(async (tx) => {
     const won = await markInvitationAccepted(invitation.id, tx);
-    if (!won) return false;
+    if (!won) return null;
     await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
-    return true;
+    // Same transaction as the claim: an invitation that granted spaces must
+    // never be spent while leaving the invitee out of them.
+    return applySpaceAssignments(tx, {
+      orgId: invitation.orgId,
+      userId: session.user.id,
+      addedBy: invitation.invitedBy,
+      assignments: invitation.spaceAssignments,
+      onMissing: "skip",
+    });
   });
 
   if (!claimed) {
@@ -163,7 +174,11 @@ router.post("/:token/accept", async (c) => {
     action: "org.invitation_accepted",
     resourceType: "invitation",
     resourceId: invitation.id,
-    after: { email: invitation.email, role: invitation.role },
+    after: {
+      email: invitation.email,
+      role: invitation.role,
+      space_assignments: claimed,
+    },
     ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,
   });
@@ -175,6 +190,7 @@ router.post("/:token/accept", async (c) => {
     name: org.name,
     slug: org.slug,
     role: invitation.role,
+    permissions: listedOrgPermissions(invitation.role),
     createdAt: org.createdAt,
   });
 });

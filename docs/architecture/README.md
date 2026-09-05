@@ -13,6 +13,7 @@ duplicating the detail.
 
 ## Tenancy & data
 
+- [**RBAC_PERMISSIONS_SPEC.md**](./RBAC_PERMISSIONS_SPEC.md) — Roles & permissions: fixed org roles, per-space membership with preset/custom role bundles, the effective-permission resolver, and the OSS/EE line for custom roles. Design spec.
 - [**SPACES.md**](./SPACES.md) — Spaces: the org-scoped container for agents, runs and connections. `X-Space-Id` resolution, the `spc_` id guard, and the delete cascade.
 - [**FILES.md**](./FILES.md) — Files platform: staged uploads, agent outputs, `appfile://` refs, durable storage quotas, and the untrusted-HTML preview origin.
 

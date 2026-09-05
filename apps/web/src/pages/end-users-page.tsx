@@ -74,7 +74,7 @@ export function EndUsersPage() {
 
 function EndUsersPageContent() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const spaceId = useCurrentSpaceId();
 
   const [search, setSearch] = useState("");
@@ -121,7 +121,6 @@ function EndUsersPageContent() {
     );
   }, [endUsers, search]);
 
-  if (!isAdmin) return null;
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
@@ -134,7 +133,11 @@ function EndUsersPageContent() {
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("endUsers.pageTitle") },
         ]}
-        actions={<Button onClick={() => setCreateOpen(true)}>{t("spaces.newEndUser")}</Button>}
+        actions={
+          can("end-users:write") ? (
+            <Button onClick={() => setCreateOpen(true)}>{t("spaces.newEndUser")}</Button>
+          ) : undefined
+        }
       />
 
       <div className="relative mb-4">

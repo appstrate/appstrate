@@ -43,12 +43,16 @@ import { z } from "zod";
 //
 // Adding/removing entries here is a coordinated edit:
 //   1. Update this interface (compile-time vocabulary)
-//   2. Update CORE_RESOURCE_NAMES below (runtime collision-detection set)
-//   3. Update apps/api/src/lib/permissions.ts: role grants + API-key allowlist
+//   2. Update CORE_RESOURCE_ACTIONS below (runtime mirror) and
+//      CORE_RESOURCE_LEVELS (org or space)
+//   3. Update apps/api/src/lib/permissions.ts: role grants / space-role
+//      presets + API-key allowlist
 //
-// Drift between (1) and (2) is caught by a unit test in core
-// (`packages/core/test/permissions.test.ts`) and drift between (1) and (3)
-// surfaces immediately as a TypeScript error in the role-grant matrix.
+// Drift between (1) and (2) is a TypeScript error (the `satisfies` on the
+// runtime table) plus a unit test in core
+// (`packages/core/test/permissions.test.ts`) for the per-action half; drift
+// between (1) and (3) surfaces immediately as a TypeScript error in the
+// role-grant matrix.
 // ---------------------------------------------------------------------------
 
 /**
@@ -61,8 +65,19 @@ import { z } from "zod";
  * importing from `apps/api`.
  */
 export interface CoreResources {
-  org: "read" | "update" | "delete";
+  // `update` = name/slug (owner only); `settings` = the per-org settings
+  // JSONB (owner + admin). Two actions because the two writes have never
+  // had the same audience.
+  org: "read" | "update" | "settings" | "delete";
   members: "read" | "invite" | "remove" | "change-role";
+  // Custom space-role definitions (org-scoped bundles of space-level
+  // permissions). The presets below are code, not rows, and are not
+  // reachable through this resource.
+  roles: "read" | "write" | "delete";
+  // Per-space configuration (name, settings, visibility, default role) —
+  // distinct from `spaces`, which is the org-level catalog (list/create/delete).
+  "space-settings": "write";
+  "space-members": "read" | "invite" | "remove" | "change-role";
   agents: "read" | "write" | "configure" | "delete" | "run";
   skills: "read" | "write" | "delete";
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
@@ -97,7 +112,13 @@ export interface CoreResources {
   // editor, parity with agents/skills). Install/uninstall = manage per-space
   // installation. Connect/disconnect = manage credentials (connections) per
   // declared `auths.{key}`.
-  integrations: "read" | "write" | "delete" | "install" | "uninstall" | "connect" | "disconnect";
+  // `configure` covers the space-wide governance surface (per-space
+  // integration settings, agent pins, org-default connection). It is
+  // deliberately absent from the API-key allowlist: these mutations decide
+  // which credential every other principal in the space resolves to, so
+  // they stay session-only.
+  integrations:
+    "read" | "write" | "delete" | "install" | "uninstall" | "configure" | "connect" | "disconnect";
 }
 
 /** Core resource names. */
@@ -112,36 +133,135 @@ export type CorePermission = {
 }[CoreResource];
 
 /**
- * Runtime mirror of `keyof CoreResources`. The platform's module
- * loader reads this at boot to reject any module that would re-declare a
- * core resource name in `permissionsContribution()` — without it the
- * collision would only surface as a TypeScript error in apps/api, never
- * for an externally-published module.
+ * Runtime mirror of `CoreResources`. The `satisfies` clause makes a missing
+ * resource a compile error; a missing *action* is caught by the unit test in
+ * `packages/core/test/permissions.test.ts`.
  *
- * Drift with the interface above is caught by a unit test in
- * `packages/core/test/permissions.test.ts` (`CoreResources matches
- * CORE_RESOURCE_NAMES`) — keep both in sync when adding a resource.
+ * The catalog must exist at runtime (not only as a type) because
+ * `ORG_LEVEL_PERMISSIONS` / `SPACE_LEVEL_PERMISSIONS` below enumerate every
+ * `resource:action` string, and the custom-role validator (§3.3 of the RBAC
+ * spec) checks user input against those sets.
  */
-export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
-  "org",
-  "members",
-  "agents",
-  "skills",
-  "mcp-servers",
-  "runs",
-  "files",
-  "schedules",
-  "persistence",
-  "models",
-  "model-provider-credentials",
-  "proxies",
-  "api-keys",
-  "spaces",
-  "end-users",
-  "credential-proxy",
-  "llm-proxy",
-  "integrations",
-]);
+export const CORE_RESOURCE_ACTIONS = {
+  org: ["read", "update", "settings", "delete"],
+  members: ["read", "invite", "remove", "change-role"],
+  roles: ["read", "write", "delete"],
+  "space-settings": ["write"],
+  "space-members": ["read", "invite", "remove", "change-role"],
+  agents: ["read", "write", "configure", "delete", "run"],
+  skills: ["read", "write", "delete"],
+  "mcp-servers": ["read", "write", "delete"],
+  runs: ["read", "cancel", "delete"],
+  files: ["read", "delete"],
+  schedules: ["read", "write", "delete"],
+  persistence: ["read", "delete"],
+  models: ["read", "write", "delete"],
+  "model-provider-credentials": ["read", "write", "delete"],
+  proxies: ["read", "write", "delete"],
+  "api-keys": ["read", "create", "revoke"],
+  spaces: ["read", "write", "delete"],
+  "end-users": ["read", "write", "delete"],
+  "credential-proxy": ["call"],
+  "llm-proxy": ["call"],
+  integrations: [
+    "read",
+    "write",
+    "delete",
+    "install",
+    "uninstall",
+    "configure",
+    "connect",
+    "disconnect",
+  ],
+} as const satisfies { readonly [R in CoreResource]: readonly CoreResources[R][] };
+
+/**
+ * Core resource names. The platform's module loader reads this at boot to
+ * reject any module that would re-declare a core resource name in
+ * `permissionsContribution()` — without it the collision would only surface
+ * as a TypeScript error in apps/api, never for an externally-published module.
+ */
+export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>(
+  Object.keys(CORE_RESOURCE_ACTIONS),
+);
+
+// ---------------------------------------------------------------------------
+// Permission levels (RBAC spec §3.4)
+//
+// Every permission string belongs to exactly one level. An org role grants
+// org-level strings only; a space role grants space-level strings only. The
+// level is declared here, next to the resource, so the platform's presets,
+// the custom-role validator and any module can all read one source.
+// ---------------------------------------------------------------------------
+
+/** Whether a permission is granted by an org role or by a space role. */
+export type PermissionLevel = "org" | "space";
+
+/**
+ * Level of every core resource. `as const` keeps the literal types so
+ * {@link OrgLevelPermission} / {@link SpaceLevelPermission} can be derived
+ * from this table rather than re-listed.
+ */
+export const CORE_RESOURCE_LEVELS = {
+  org: "org",
+  members: "org",
+  roles: "org",
+  spaces: "org",
+  models: "org",
+  "model-provider-credentials": "org",
+  proxies: "org",
+  // `/api/llm-proxy` is not space-scoped — usage is metered per org.
+  "llm-proxy": "org",
+  "space-settings": "space",
+  "space-members": "space",
+  agents: "space",
+  skills: "space",
+  "mcp-servers": "space",
+  runs: "space",
+  files: "space",
+  schedules: "space",
+  persistence: "space",
+  "end-users": "space",
+  // Keys are space-bound (`api_keys.space_id NOT NULL`).
+  "api-keys": "space",
+  "credential-proxy": "space",
+  integrations: "space",
+} as const satisfies Record<CoreResource, PermissionLevel>;
+
+/** Core permission strings granted by org roles. */
+export type OrgLevelPermission = {
+  [R in CoreResource]: (typeof CORE_RESOURCE_LEVELS)[R] extends "org"
+    ? `${R & string}:${CoreResources[R] & string}`
+    : never;
+}[CoreResource];
+
+/** Core permission strings granted by space roles. */
+export type SpaceLevelPermission = {
+  [R in CoreResource]: (typeof CORE_RESOURCE_LEVELS)[R] extends "space"
+    ? `${R & string}:${CoreResources[R] & string}`
+    : never;
+}[CoreResource];
+
+/**
+ * Enumerate the catalog at one level. The cast is what the level table is
+ * for: a resource's level decides which of the two unions its strings belong
+ * to, and the table is exhaustive over `CoreResource`.
+ */
+function corePermissionsAtLevel<P extends CorePermission>(level: PermissionLevel): ReadonlySet<P> {
+  const out = new Set<string>();
+  for (const [resource, actions] of Object.entries(CORE_RESOURCE_ACTIONS)) {
+    if (CORE_RESOURCE_LEVELS[resource as CoreResource] !== level) continue;
+    for (const action of actions as readonly string[]) out.add(`${resource}:${action}`);
+  }
+  return out as ReadonlySet<string> as ReadonlySet<P>;
+}
+
+/** Every core permission string at org level. */
+export const ORG_LEVEL_PERMISSIONS: ReadonlySet<OrgLevelPermission> = corePermissionsAtLevel("org");
+
+/** Every core permission string at space level. */
+export const SPACE_LEVEL_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
+  corePermissionsAtLevel("space");
 
 /**
  * Empty extensible interface that modules augment via TypeScript
@@ -188,11 +308,62 @@ export type ModulePermission = {
 // exhaustive matrix typing make any mismatch a TypeScript error.
 // ---------------------------------------------------------------------------
 
-/** Const tuple of org roles. Drives `OrgRole` and the parity check in shared-types. */
-export const ORG_ROLES = ["owner", "admin", "member", "viewer"] as const;
+/**
+ * Const tuple of org roles. Drives `OrgRole` and the `org_role` pgEnum in
+ * `packages/db/src/schema/enums.ts`.
+ *
+ * `guest` replaced `viewer` in the RBAC space-roles release: read-only-
+ * everywhere is a space concern (preset `viewer`), and an org role that
+ * implicitly reads every space is exactly what space membership exists to
+ * stop.
+ */
+export const ORG_ROLES = ["owner", "admin", "member", "guest"] as const;
 
-/** Org role string union — `"owner" | "admin" | "member" | "viewer"`. */
+/** Org role string union — `"owner" | "admin" | "member" | "guest"`. */
 export type OrgRole = (typeof ORG_ROLES)[number];
+
+/**
+ * Space-role presets shipped by the platform (RBAC spec §3.3). Constants,
+ * not rows: a new space-level permission joins the right preset in the same
+ * commit that adds it, with no data migration.
+ *
+ * Lives in core because modules declare which presets hold their space-level
+ * resources (`ModulePermissionContribution.presets`); the preset → permission
+ * mapping itself is policy and stays in `apps/api/src/lib/permissions.ts`.
+ */
+export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as const;
+
+/** Space-role preset union — `"admin" | "builder" | "operator" | "viewer"`. */
+export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
+
+/**
+ * Space visibility (RBAC spec §3.1). `open` — every org `member` is an
+ * implicit member with the space's `default_role`; `closed` — listed but
+ * enterable only with an explicit `space_members` row; `private` — invisible
+ * without a row (404, not 403).
+ *
+ * Stored as `text` + CHECK rather than a pg enum, like `webhooks.level`:
+ * adding a value is a migration either way and text spares the enum rewrite.
+ */
+export const SPACE_VISIBILITIES = ["open", "closed", "private"] as const;
+
+/** Space visibility union — `"open" | "closed" | "private"`. */
+export type SpaceVisibility = (typeof SPACE_VISIBILITIES)[number];
+
+/**
+ * One space membership an invitation applies when it is accepted (RBAC spec
+ * §5), and the shape `org_invitations.space_assignments` stores.
+ *
+ * Wire-shaped (snake_case) because it is written straight from the validated
+ * invite body and read straight back onto it. Exactly one of `preset_role` /
+ * `custom_role_id` is set — the same either/or the `space_members` row is
+ * built from, validated at invite time rather than by the type.
+ */
+export interface SpaceAssignment {
+  space_id: string;
+  preset_role?: SpaceRolePreset;
+  custom_role_id?: string;
+}
 
 /** Zod validator for the per-org `settings` JSONB shape. */
 export const orgSettingsSchema = z.object({
@@ -223,8 +394,10 @@ export const orgSettingsSchema = z.object({
  * pure `Set.has` calls.
  */
 export interface ModulePermissionsSnapshot {
-  /** Per-role module grants (merged into core role grants by apps/api). */
+  /** Per-org-role module grants (merged into core org grants by apps/api). */
   byRole: Readonly<Record<OrgRole, ReadonlySet<string>>>;
+  /** Per-preset module grants (merged into the core space presets by apps/api). */
+  byPreset: Readonly<Record<SpaceRolePreset, ReadonlySet<string>>>;
   /** Module entries opted in via `apiKeyGrantable: true`. */
   apiKeyAllowed: ReadonlySet<string>;
   /**
@@ -240,6 +413,12 @@ const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
     owner: new Set(),
     admin: new Set(),
     member: new Set(),
+    guest: new Set(),
+  },
+  byPreset: {
+    admin: new Set(),
+    builder: new Set(),
+    operator: new Set(),
     viewer: new Set(),
   },
   apiKeyAllowed: new Set(),
@@ -271,6 +450,14 @@ function moduleSnapshot(): ModulePermissionsSnapshot {
  */
 export function getModuleRoleScopes(role: OrgRole): ReadonlySet<string> {
   return moduleSnapshot().byRole[role];
+}
+
+/**
+ * Module-contributed space-level grants for `preset`. Empty when no module
+ * is loaded (OSS baseline) or when no contribution targets the preset.
+ */
+export function getModulePresetScopes(preset: SpaceRolePreset): ReadonlySet<string> {
+  return moduleSnapshot().byPreset[preset];
 }
 
 /**
@@ -388,6 +575,56 @@ export function requireCorePermission<R extends CoreResource>(
 }
 
 // ---------------------------------------------------------------------------
+// Space context for module routes
+//
+// A module that gates a SPACE-level resource on a route family the platform
+// does not space-scope (`SPACE_SCOPED_PREFIXES` is core-only by design) has to
+// enter the space itself: org-level permissions can never carry a space-level
+// string, so its guard would otherwise be unsatisfiable — fail-closed, and the
+// wrong answer. `enterSpaceContext` is the seam it calls. The platform
+// registers the implementation at boot, exactly as it registers the module
+// permission provider and the denial handler above.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a space for the request and rewrite `permissions` to the caller's
+ * effective set in it. `spaceId` is optional: omitted, the platform resolves
+ * the pinned space, then `X-Space-Id`, then the org's default.
+ */
+type SpaceContextApplier = (c: HonoContextLike, spaceId?: string) => Promise<void>;
+
+let _spaceContextApplier: SpaceContextApplier | null = null;
+
+/**
+ * Register (or clear) the platform's space-context applier. Called once by
+ * apps/api; passing `null` restores the unregistered state.
+ */
+export function setSpaceContextApplier(applier: SpaceContextApplier | null): void {
+  _spaceContextApplier = applier;
+}
+
+/**
+ * Enter a space for this request, so a space-level `requireModulePermission`
+ * downstream reads the caller's set IN that space (RBAC spec §4.3).
+ *
+ * Throws whatever the platform's resolver throws — 403 `not_a_space_member`
+ * for an `open`/`closed` space the caller is not in, 404 for a `private` one.
+ *
+ * @throws Error when no platform registered an applier. Deliberately loud: a
+ *   silent no-op would leave every guarded route in the module 403-ing with no
+ *   indication that the seam was never wired.
+ */
+export async function enterSpaceContext(c: HonoContextLike, spaceId?: string): Promise<void> {
+  if (!_spaceContextApplier) {
+    throw new Error(
+      "enterSpaceContext: no space-context applier registered. The platform wires one at boot; " +
+        "a module cannot resolve a space on its own.",
+    );
+  }
+  await _spaceContextApplier(c, spaceId);
+}
+
+// ---------------------------------------------------------------------------
 // Shared guard + audit-hook
 //
 // `makePermissionGuard` is the single runtime path for every typed RBAC
@@ -453,23 +690,30 @@ export function makePermissionGuard(
     const perms = c.get("permissions") as ReadonlySet<string> | undefined;
     const granted = !!perms && typeof perms.has === "function" && perms.has(required);
     if (!granted) {
-      // Audit is best-effort — a throwing handler must not escalate an
-      // authz denial into a 500 (which would leak timing info and, worse,
-      // mask the 403 in the error-handler's generic path). Catch + swallow
-      // + continue to throw `forbidden` deterministically.
-      if (_denialHandler) {
-        try {
-          _denialHandler({ required, c });
-        } catch {
-          // Deliberately swallowed — we cannot log from core (no logger
-          // wired at this layer) and bubbling would break the fail-closed
-          // contract. Operators see the 403 in request logs either way.
-        }
-      }
+      reportPermissionDenial(c, required);
       throw forbidden(`Insufficient permissions: ${required} required`);
     }
     return next();
   };
+}
+
+/**
+ * Fire the denial audit hook for a refusal decided outside
+ * `makePermissionGuard` — a disjunction ("any of these strings") that a
+ * single guard cannot express. `required` is what the audit records; for a
+ * disjunction pass the alternatives joined with `|`.
+ *
+ * Best-effort: a throwing handler must not escalate an authz denial into a
+ * 500 (which would leak timing info and mask the 403), so it is swallowed —
+ * core has no logger, and operators see the 403 in request logs either way.
+ */
+export function reportPermissionDenial(c: HonoContextLike, required: string): void {
+  if (!_denialHandler) return;
+  try {
+    _denialHandler({ required, c });
+  } catch {
+    // Deliberately swallowed — see above.
+  }
 }
 
 /**

@@ -27,10 +27,9 @@
  * What deliberately did NOT change: dependency resolution stays org-scoped in
  * both catalogs, so a skill that is not installed in the calling space is
  * still exported. That is the rule the RUN path uses (`DraftPackageCatalog` is
- * shared with `RunPackageCatalog`), and narrowing the export to
- * `hasPackageAccess` would make it stricter than the run it mirrors. The skill
- * below is therefore never installed in the space — the fix has to be about SCOPE,
- * not visibility, and the positive controls prove it.
+ * shared with `RunPackageCatalog`). Under private-space RBAC, exporting those
+ * bytes also requires live catalog reachability. Scope tests install the skill
+ * in the caller's space; a separate private-space case verifies visibility.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -43,12 +42,19 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedApiKey } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageVersion,
+  seedApiKey,
+  seedSpace,
+  seedInstalledPackage,
+} from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
-import { packageDistTags } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { packageDistTags, spacePackages } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
@@ -159,8 +165,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     });
 
     // Dependency skill: draft bytes in the package-items bucket + a published
-    // version. Deliberately NOT installed in the space — the export
-    // reaches it exactly like a run does, and must keep doing so.
+    // version. Installed in the caller's space so type-scope tests isolate authorization.
     await seedPackage({
       id: SKILL_ID,
       type: "skill",
@@ -169,6 +174,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       draftManifest: skillManifest("1.0.0"),
       draftContent: SKILL_MD,
     });
+    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
     await uploadPackageFiles("skills", ctx.orgId, SKILL_ID, {
       "manifest.json": enc(JSON.stringify(skillManifest("1.0.0"), null, 2)),
       "SKILL.md": enc(SKILL_MD),
@@ -176,6 +182,20 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     await publish(SKILL_ID, "1.0.0", skillManifest("1.0.0"), {
       "SKILL.md": enc(SKILL_MD),
     });
+  });
+
+  it("hides a dependency confined to a private space in both draft and published exports", async () => {
+    const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
+    await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
+    await seedInstalledPackage(hidden.id, SKILL_ID);
+    const key = await keyWithScopes(ctx, ["agents:read", "skills:read"]);
+    for (const source of ["draft", "published"]) {
+      const response = await app.request(`/api/agents/${AGENT_ID}/bundle?source=${source}`, {
+        headers: bearer(key),
+      });
+      expect(response.status, await response.clone().text()).toBe(404);
+      expect(await response.text()).not.toContain(SKILL_SECRET);
+    }
   });
 
   // ── Negative controls: the principal who could reach the bytes, and now cannot
@@ -216,9 +236,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     expect(res.status).toBe(200);
     const bundle = readBundleFromBuffer(new Uint8Array(await res.arrayBuffer()));
     expect(bundle.packages.size).toBe(2);
-    // The skill is NOT installed in this space and is still exported —
-    // the guard added is about SCOPE, never about narrowing reach to
-    // `hasPackageAccess` (which would break the run this export mirrors).
+    // Reachability and the type read scope both hold for the exported skill.
     const skill = bundle.packages.get(`${SKILL_ID}@1.0.0`);
     expect(skill).toBeDefined();
     expect(new TextDecoder().decode(skill!.files.get("SKILL.md"))).toContain(SKILL_SECRET);
@@ -239,11 +257,13 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // ever loses `skills:read` while keeping `agents:read`, this fails loudly
     // rather than silently 403ing the dashboard's export button.
     //
-    // EVERY role, not just the owner `ctx` was created with: `member` and
-    // `viewer` are the ones whose grant lists could plausibly be trimmed, and
-    // they are exactly the two an owner-only check never reaches. Each gets its
-    // own user — role is a property of the membership row, not of the session.
-    for (const role of ["owner", "admin", "member", "viewer"] as const) {
+    // EVERY role that reaches a space, not just the owner `ctx` was created
+    // with: `member` is the one whose grant list could plausibly be trimmed,
+    // and it is the one an owner-only check never reaches. A `guest` has no
+    // implicit space access at all, which is a different assertion (see the
+    // membership suite). Each gets its own user — role is a property of the
+    // membership row, not of the session.
+    for (const role of ["owner", "admin", "member"] as const) {
       const roleUser = await createTestUser();
       await addOrgMember(ctx.orgId, roleUser.id, role);
       const headers = authHeaders({ ...ctx, cookie: roleUser.cookie });
@@ -284,6 +304,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
   // ── The regression that would hurt most: the run path is untouched
 
   it("still resolves the same draft dependency on the RUN path", async () => {
+    await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
     // `DraftPackageCatalog` is SHARED with the run path (`RunPackageCatalog`
     // routes a `"draft"` dependency override to it), so the fix stayed out of
     // its query on purpose. This pins the behaviour that tightening it would

@@ -119,7 +119,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     orgSlug: row.orgSlug,
     spaceId: row.spaceId,
     scopes: row.scopes,
-    creatorRole: row.creatorRole as OrgRole,
+    creatorRole: row.creatorRole,
   };
 }
 

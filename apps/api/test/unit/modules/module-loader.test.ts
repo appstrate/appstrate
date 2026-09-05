@@ -24,6 +24,7 @@ import {
   getModuleAuthStrategies,
   getModuleContributions,
   getModuleModelProviders,
+  collectModulePermissions,
 } from "../../../src/lib/modules/module-loader.ts";
 import type {
   AppstrateModule,
@@ -79,7 +80,8 @@ function mockCtx(): ModuleInitContext {
     redisUrl: null,
     appUrl: "http://localhost:3000",
     getSendMail: async () => () => {},
-    getOrgAdminEmails: async () => [],
+    getOrgOwnerEmails: async () => [],
+    getOrgMembers: async () => [],
     getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };
@@ -413,6 +415,49 @@ describe("module-loader", () => {
     });
   });
 
+  describe("space-preset grants are upward-closed", () => {
+    /** One module contributing `shared:read` at space level to `presets`. */
+    function contributor(presets: readonly ("admin" | "builder" | "operator" | "viewer")[]) {
+      return mockModule("preset-order", {
+        permissionsContribution: () => [
+          { resource: "shared", actions: ["read"], level: "space", presets },
+        ],
+      });
+    }
+
+    it("accepts a closed list and rejects the same list with a stronger preset missing", () => {
+      // Closed: naming `operator` also names everything above it.
+      expect(() =>
+        collectModulePermissions([contributor(["admin", "builder", "operator"])]),
+      ).not.toThrow();
+
+      // The SAME weakest preset, with `builder` dropped — a space admin would
+      // hold less than an operator for this one resource.
+      expect(() => collectModulePermissions([contributor(["admin", "operator"])])).toThrow(
+        /preset-order/,
+      );
+      expect(() => collectModulePermissions([contributor(["admin", "operator"])])).toThrow(
+        /"builder"/,
+      );
+    });
+
+    it("names every missing preset, and lets an empty list through", () => {
+      expect(() => collectModulePermissions([contributor(["viewer"])])).toThrow(
+        /"admin", "builder", "operator"/,
+      );
+      // Declaring the resource without granting it stays legal — an
+      // API-key-only or principal-granted resource looks exactly like this.
+      expect(() => collectModulePermissions([contributor([])])).not.toThrow();
+    });
+
+    it("still grants what a closed list declares", () => {
+      const snapshot = collectModulePermissions([contributor(["admin", "builder"])]);
+      expect(snapshot.byPreset.admin.has("shared:read")).toBe(true);
+      expect(snapshot.byPreset.builder.has("shared:read")).toBe(true);
+      expect(snapshot.byPreset.operator.has("shared:read")).toBe(false);
+    });
+  });
+
   describe("topological sort", () => {
     it("sorts by dependencies — B before A when A depends on B", async () => {
       const order: string[] = [];
@@ -719,11 +764,11 @@ describe("module-loader", () => {
 
   describe("permissionsContribution (module RBAC)", () => {
     // The provider hook is module-loader → permissions, so we exercise the
-    // public observable: resolvePermissions() / getApiKeyAllowedScopes()
-    // returning the merged view after a module loads.
+    // public observable: orgPermissions() / presetPermissions() /
+    // getApiKeyAllowedScopes() returning the merged view after a module loads.
 
-    it("merges module grants into resolvePermissions(role)", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+    it("merges module org grants into orgPermissions(role)", async () => {
+      const { orgPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
           mockModule("tasks", {
@@ -731,6 +776,7 @@ describe("module-loader", () => {
               {
                 resource: "tasks",
                 actions: ["read", "write"],
+                level: "org",
                 grantTo: ["owner", "admin", "member"],
               },
             ],
@@ -738,32 +784,32 @@ describe("module-loader", () => {
         ],
         mockCtx(),
       );
-      const owner = resolvePermissions("owner");
-      const member = resolvePermissions("member");
-      const viewer = resolvePermissions("viewer");
+      const owner = orgPermissions("owner");
+      const member = orgPermissions("member");
+      const guest = orgPermissions("guest");
       expect(owner.has("tasks:read" as never)).toBe(true);
       expect(owner.has("tasks:write" as never)).toBe(true);
       expect(member.has("tasks:read" as never)).toBe(true);
-      expect(viewer.has("tasks:read" as never)).toBe(false);
+      expect(guest.has("tasks:read" as never)).toBe(false);
       // Core grants still present
-      expect(owner.has("agents:run" as never)).toBe(true);
+      expect(owner.has("org:delete" as never)).toBe(true);
     });
 
     it("resets the provider on resetModules() — next resolve sees no module grants", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      const { orgPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
           mockModule("tasks", {
             permissionsContribution: () => [
-              { resource: "tasks", actions: ["read"], grantTo: ["owner"] },
+              { resource: "tasks", actions: ["read"], level: "org", grantTo: ["owner"] },
             ],
           }),
         ],
         mockCtx(),
       );
-      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(true);
+      expect(orgPermissions("owner").has("tasks:read" as never)).toBe(true);
       resetModules();
-      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(false);
+      expect(orgPermissions("owner").has("tasks:read" as never)).toBe(false);
     });
 
     it("apiKeyGrantable=true adds entries to the API-key allowlist; false omits them", async () => {
@@ -775,12 +821,14 @@ describe("module-loader", () => {
               {
                 resource: "tasks",
                 actions: ["read"],
+                level: "org",
                 grantTo: ["owner"],
                 apiKeyGrantable: true,
               },
               {
                 resource: "internal",
                 actions: ["sweep"],
+                level: "org",
                 grantTo: ["owner"],
                 // apiKeyGrantable defaults to false
               },
@@ -803,12 +851,14 @@ describe("module-loader", () => {
               {
                 resource: "tasks",
                 actions: ["read", "write"],
+                level: "org",
                 grantTo: ["owner", "member"],
                 endUserGrantable: true,
               },
               {
                 resource: "internal",
                 actions: ["sweep"],
+                level: "org",
                 grantTo: ["owner"],
                 // endUserGrantable defaults to false — admin surfaces stay closed
               },
@@ -833,6 +883,7 @@ describe("module-loader", () => {
               {
                 resource: "tasks",
                 actions: ["read"],
+                level: "org",
                 grantTo: ["owner"],
                 apiKeyGrantable: true,
                 endUserGrantable: false,
@@ -840,6 +891,7 @@ describe("module-loader", () => {
               {
                 resource: "module-billing",
                 actions: ["view"],
+                level: "org",
                 grantTo: ["owner"],
                 apiKeyGrantable: false,
                 endUserGrantable: true,
@@ -866,6 +918,7 @@ describe("module-loader", () => {
               {
                 resource: "tasks",
                 actions: ["read"],
+                level: "org",
                 grantTo: ["owner"],
                 endUserGrantable: true,
               },
@@ -885,7 +938,7 @@ describe("module-loader", () => {
         // `ModuleResources` and the type already refuses it. The runtime guard
         // must refuse it too, for a module that opted out of the types.
         permissionsContribution: () => [
-          { resource: "agents", actions: ["pwn"], grantTo: ["owner"] } as never,
+          { resource: "agents", actions: ["pwn"], level: "org", grantTo: ["owner"] } as never,
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
@@ -899,12 +952,12 @@ describe("module-loader", () => {
           [
             mockModule("tasks-a", {
               permissionsContribution: () => [
-                { resource: "shared", actions: ["read"], grantTo: ["owner"] },
+                { resource: "shared", actions: ["read"], level: "org", grantTo: ["owner"] },
               ],
             }),
             mockModule("tasks-b", {
               permissionsContribution: () => [
-                { resource: "shared", actions: ["read"], grantTo: ["owner"] },
+                { resource: "shared", actions: ["read"], level: "org", grantTo: ["owner"] },
               ],
             }),
           ],
@@ -917,7 +970,7 @@ describe("module-loader", () => {
       const mod = mockModule("tasks", {
         // Cast: an un-augmented / mis-cased name no longer type-checks.
         permissionsContribution: () => [
-          { resource: "Tasks", actions: ["read"], grantTo: ["owner"] } as never,
+          { resource: "Tasks", actions: ["read"], level: "org", grantTo: ["owner"] } as never,
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
@@ -929,7 +982,7 @@ describe("module-loader", () => {
       const mod = mockModule("tasks", {
         // Cast: `READ` is not one of the actions `tasks` declares.
         permissionsContribution: () => [
-          { resource: "tasks", actions: ["READ" as never], grantTo: ["owner"] },
+          { resource: "tasks", actions: ["READ" as never], level: "org", grantTo: ["owner"] },
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
@@ -939,7 +992,9 @@ describe("module-loader", () => {
 
     it("rejects empty actions array", async () => {
       const mod = mockModule("tasks", {
-        permissionsContribution: () => [{ resource: "tasks", actions: [], grantTo: ["owner"] }],
+        permissionsContribution: () => [
+          { resource: "tasks", actions: [], level: "org", grantTo: ["owner"] },
+        ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(/with no actions/);
     });
@@ -950,42 +1005,104 @@ describe("module-loader", () => {
           {
             resource: "tasks",
             actions: ["read"],
+            level: "org",
             grantTo: ["god" as never],
           },
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /unknown role "god"/,
+        /unknown org role "god"/,
       );
     });
 
     it("supports per-action grants by listing the resource multiple times", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      const { orgPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
           mockModule("tasks", {
             permissionsContribution: () => [
-              { resource: "tasks", actions: ["write"], grantTo: ["owner"] },
-              { resource: "tasks", actions: ["read"], grantTo: ["owner", "member"] },
+              { resource: "tasks", actions: ["write"], level: "org", grantTo: ["owner"] },
+              { resource: "tasks", actions: ["read"], level: "org", grantTo: ["owner", "member"] },
             ],
           }),
         ],
         mockCtx(),
       );
-      const owner = resolvePermissions("owner");
-      const member = resolvePermissions("member");
+      const owner = orgPermissions("owner");
+      const member = orgPermissions("member");
       expect(owner.has("tasks:write" as never)).toBe(true);
       expect(owner.has("tasks:read" as never)).toBe(true);
       expect(member.has("tasks:write" as never)).toBe(false);
       expect(member.has("tasks:read" as never)).toBe(true);
     });
 
-    it("OSS baseline: no module loaded → resolvePermissions returns only core grants", async () => {
-      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+    it("space-level grants reach the presets that named them", async () => {
+      const { presetPermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              {
+                resource: "tasks",
+                actions: ["read"],
+                level: "space",
+                presets: ["admin", "builder", "operator", "viewer"],
+              },
+              {
+                resource: "tasks",
+                actions: ["write"],
+                level: "space",
+                presets: ["admin", "builder"],
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      // Which org role holds which preset is now a per-space question; what
+      // the loader owns is the preset → permission mapping.
+      expect(presetPermissions("admin").has("tasks:write" as never)).toBe(true);
+      expect(presetPermissions("builder").has("tasks:write" as never)).toBe(true);
+      expect(presetPermissions("operator").has("tasks:write" as never)).toBe(false);
+      expect(presetPermissions("operator").has("tasks:read" as never)).toBe(true);
+      expect(presetPermissions("viewer").has("tasks:read" as never)).toBe(true);
+    });
+
+    it("rejects unknown preset in presets", async () => {
+      const mod = mockModule("tasks", {
+        permissionsContribution: () => [
+          {
+            resource: "tasks",
+            actions: ["read"],
+            level: "space",
+            presets: ["superuser" as never],
+          },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /unknown space-role preset "superuser"/,
+      );
+    });
+
+    it("rejects a resource declared at two different levels", async () => {
+      const mod = mockModule("tasks", {
+        permissionsContribution: () => [
+          { resource: "tasks", actions: ["read"], level: "org", grantTo: ["owner"] },
+          { resource: "tasks", actions: ["write"], level: "space", presets: ["admin"] },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /must declare the same level/,
+      );
+    });
+
+    it("OSS baseline: no module loaded → only core grants", async () => {
+      const { orgPermissions, presetPermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances([], mockCtx());
-      const owner = resolvePermissions("owner");
-      expect(owner.has("agents:run" as never)).toBe(true);
-      expect(owner.has("tasks:read" as never)).toBe(false);
+      expect(orgPermissions("owner").has("org:delete" as never)).toBe(true);
+      expect(orgPermissions("owner").has("tasks:read" as never)).toBe(false);
+      expect(presetPermissions("admin").has("agents:run" as never)).toBe(true);
+      expect(presetPermissions("admin").has("tasks:read" as never)).toBe(false);
     });
   });
 

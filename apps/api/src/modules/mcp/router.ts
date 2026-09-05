@@ -29,6 +29,8 @@
  * that lets a tokenless client start the OAuth flow against the right org.
  */
 
+import { authorizeBundlePackages } from "../../lib/package-access.ts";
+import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -40,7 +42,12 @@ import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib
 import { getActor } from "../../lib/actor.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { defaultSpaceForOrg, validateSpaceInOrg } from "../../middleware/space-context.ts";
+import {
+  applySpacePermissions,
+  defaultSpaceForOrg,
+  validateSpaceInOrg,
+  type SpaceContextRow,
+} from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
@@ -190,7 +197,7 @@ function forwardAuthHeaders(src: Headers): Headers {
  * default the in-process sub-dispatch also lands on. This keeps the direct
  * service call in lockstep with what a dispatched REST route would resolve.
  */
-async function resolveMcpSpaceScope(c: Context<AppEnv>, orgId: string): Promise<SpaceScope> {
+async function resolveMcpSpaceRow(c: Context<AppEnv>, orgId: string): Promise<SpaceContextRow> {
   const pinned = c.get("spaceId");
   const headerSpace = c.req.header("X-Space-Id");
   if (pinned && headerSpace && headerSpace !== pinned) {
@@ -200,7 +207,7 @@ async function resolveMcpSpaceScope(c: Context<AppEnv>, orgId: string): Promise<
   if (explicit) {
     const space = await validateSpaceInOrg(explicit, orgId);
     if (!space) throw notFound(`Space '${explicit}' not found in this organization`);
-    return { orgId, spaceId: space.id };
+    return space;
   }
   const active = await defaultSpaceForOrg(orgId);
   if (!active) throw invalidRequest("No space available for this organization.");
@@ -209,7 +216,7 @@ async function resolveMcpSpaceScope(c: Context<AppEnv>, orgId: string): Promise<
   // here. Same reason as the twin fallback in `requireSpaceContext` — an
   // un-migrated `spaces` table would otherwise slip in unnoticed.
   assertSpaceId(active.id);
-  return { orgId, spaceId: active.id };
+  return active;
 }
 
 /**
@@ -317,6 +324,25 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // audience-mismatched token was already rejected. Applied to the per-org
   // POST path.
   app.use(MCP_PATH, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
+
+  // `mcp` is a SPACE-level resource, and `/api/mcp` is not in
+  // `SPACE_SCOPED_PREFIXES` — this endpoint pins an org, not a space. So it
+  // resolves its own space and applies the caller's role in it through the same
+  // helper the middleware uses (RBAC spec §4.3), BEFORE the guard below; org
+  // permissions alone can never carry `mcp:read`, so without this the guard
+  // could not pass for anyone.
+  //
+  // The org resolved by the pipeline is the one used, never the `:org` path
+  // param: the handler's own guard is what rejects a mismatch, and resolving
+  // the caller's own space here leaves that answer unchanged.
+  app.use(MCP_PATH, async (c, next) => {
+    const orgId = c.get("orgId");
+    if (!orgId) return next();
+    const space = await resolveMcpSpaceRow(c, orgId);
+    c.set("space", space);
+    await applySpacePermissions(c, space);
+    return next();
+  });
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
 
   app.post(MCP_PATH, async (c) => {
@@ -348,7 +374,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.
     const actor = getActor(c);
-    const scope = await resolveMcpSpaceScope(c, org);
+    // Set by the space-entry middleware above, which runs on this exact path
+    // and cannot have been skipped: the org guard just proved `orgId` is set,
+    // and that is the middleware's only early return.
+    const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
 
     // Audit + telemetry sink. The tool layer emits plain data; here we decide
     // what to do with it: structured telemetry for every tool call, and a
@@ -405,6 +434,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // dispatches in-process to /api/me/context, which resolves the caller from
     // the forwarded auth headers. The index is scoped to the caller's role.
     const toolCtx = {
+      authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
       origin,
       permissions,
       authHeaders,

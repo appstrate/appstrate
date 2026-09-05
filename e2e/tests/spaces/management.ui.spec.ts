@@ -10,6 +10,7 @@ import { createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, createSpace } from "../../helpers/seed.ts";
 import { SpacesPage } from "../../pages/spaces-page.ts";
 import { AgentsPage } from "../../pages/agents-page.ts";
+import { Sidebar } from "../../pages/sidebar.ts";
 
 test.describe("Space management in UI", () => {
   test("Spaces page lists default space with badge @smoke", async ({ authedPage: page }) => {
@@ -62,5 +63,61 @@ test.describe("Space management in UI", () => {
     // 400 exactly — the default-space rule (`invalidRequest`), not RBAC. See
     // the same assertion in tests/spaces/cascade-deletion.api.spec.ts.
     expect(res.status()).toBe(400);
+  });
+
+  test("Switching cached spaces resets unsaved visibility and default-role edits", async ({
+    authedPage: page,
+    orgOnlyClient,
+  }) => {
+    const source = await createSpace(orgOnlyClient, `Draft source ${Date.now()}`);
+    const target = await createSpace(orgOnlyClient, `Draft target ${Date.now()}`);
+    const configured = await orgOnlyClient.patch(`/spaces/${target.id}`, {
+      visibility: "open",
+      default_role: "viewer",
+    });
+    expect(configured.status()).toBe(200);
+
+    await page.goto("/org-settings/space/general");
+    const sidebar = new Sidebar(page);
+    const switchSpace = async (spaceId: string) => {
+      await sidebar.openSwitcher();
+      await sidebar.spaceSubmenuTrigger.click();
+      await page.getByTestId(`space-item-${spaceId}`).click();
+      await expect(sidebar.dropdownMenu).toHaveCount(0);
+    };
+    const name = page.locator("#space-name");
+    // Prime B's detail cache, then edit A. On the return to B there is no
+    // loading-state unmount to accidentally clear A's draft for us.
+    await switchSpace(target.id);
+    await expect(name).toHaveValue(target.name);
+    await switchSpace(source.id);
+    await expect(name).toHaveValue(source.name);
+
+    await page.locator("#space-default-role").click();
+    await page.getByRole("option", { name: /^(Administrateur|Admin)$/ }).click();
+    await page.locator("#space-visibility-private").click();
+
+    await switchSpace(target.id);
+    await expect(name).toHaveValue(target.name);
+    await expect(page.locator("#space-visibility-open")).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator("#space-default-role")).toContainText(/Lecteur|Viewer/);
+
+    const renamed = `${target.name} renamed`;
+    await name.fill(renamed);
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        response.url().endsWith(`/api/spaces/${target.id}`),
+    );
+    await page.locator('form button[type="submit"]').click();
+    expect((await saved).status()).toBe(200);
+    const persisted = await orgOnlyClient.get(`/spaces/${target.id}`);
+    expect(await persisted.json()).toMatchObject({
+      name: renamed,
+      visibility: "open",
+      default_role: "viewer",
+    });
+    const unchanged = await orgOnlyClient.get(`/spaces/${source.id}`);
+    expect(await unchanged.json()).toMatchObject({ visibility: "open", default_role: "operator" });
   });
 });

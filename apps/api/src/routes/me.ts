@@ -44,6 +44,7 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
+import { listedOrgPermissionsForCaller } from "../lib/principal-permissions.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
@@ -140,13 +141,19 @@ router.get("/orgs", async (c) => {
 
   return c.json(
     listResponse(
-      orgs.map((o) => ({
-        id: o.id,
-        name: o.name,
-        slug: o.slug,
-        role: o.role,
-        createdAt: o.createdAt,
-      })),
+      await Promise.all(
+        orgs.map(async (o) => ({
+          id: o.id,
+          name: o.name,
+          slug: o.slug,
+          role: o.role,
+          // Org-level effective set in THAT org, ceiling-applied — same field and
+          // same helper as `GET /api/orgs` (RBAC spec §6.5). Absent from the
+          // end-user branch above: an end-user holds no org role.
+          permissions: await listedOrgPermissionsForCaller(c, o.id, o.role),
+          createdAt: o.createdAt,
+        })),
+      ),
     ),
   );
 });

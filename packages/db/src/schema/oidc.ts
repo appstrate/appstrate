@@ -25,6 +25,7 @@
 
 import {
   pgTable,
+  jsonb,
   text,
   integer,
   timestamp,
@@ -36,6 +37,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
 import { user, session } from "./auth.ts";
 import { endUsers, spaces } from "./spaces.ts";
 import { organizations } from "./organizations.ts";
@@ -119,7 +121,17 @@ export const oauthClient = pgTable(
       onDelete: "cascade",
     }),
     allowSignup: boolean("allow_signup").default(false).notNull(),
-    signupRole: text("signup_role", { enum: ["admin", "member", "viewer"] })
+    /** Explicit space grants applied only on the first organization signup. */
+    signupSpaceAssignments: jsonb("signup_space_assignments")
+      .$type<ReadonlyArray<SpaceAssignment>>()
+      .notNull()
+      .default([]),
+    /**
+     * Org role assigned on OIDC auto-provisioning — it writes straight into
+     * `org_members.role`, so it shares the org-role vocabulary. The CHECK below
+     * enforces the same three values.
+     */
+    signupRole: text("signup_role", { enum: ["admin", "member", "guest"] })
       .default("member")
       .notNull(),
   },
@@ -131,7 +143,7 @@ export const oauthClient = pgTable(
       "oauth_clients_level_check",
       sql`(level = 'org' AND referenced_org_id IS NOT NULL AND referenced_space_id IS NULL) OR (level = 'space' AND referenced_space_id IS NOT NULL AND referenced_org_id IS NULL) OR (level = 'instance' AND referenced_org_id IS NULL AND referenced_space_id IS NULL)`,
     ),
-    check("oauth_clients_signup_role_check", sql`signup_role IN ('admin', 'member', 'viewer')`),
+    check("oauth_clients_signup_role_check", sql`signup_role IN ('admin', 'member', 'guest')`),
   ],
 );
 

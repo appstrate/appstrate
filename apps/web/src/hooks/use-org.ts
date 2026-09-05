@@ -89,6 +89,5 @@ export function useOrg() {
     orgs,
     switchOrg,
     loading: isLoading,
-    isOrgOwner: currentOrg?.role === "owner",
   };
 }

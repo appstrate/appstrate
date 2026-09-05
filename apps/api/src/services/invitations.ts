@@ -2,6 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { eq, and, lt, gt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
@@ -21,11 +22,13 @@ export async function createInvitation({
   orgId,
   role,
   invitedBy,
+  spaceAssignments,
 }: {
   email: string;
   orgId: string;
   role: AssignableOrgRole;
   invitedBy: string;
+  spaceAssignments: ReadonlyArray<SpaceAssignment>;
 }) {
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -51,6 +54,7 @@ export async function createInvitation({
       orgId,
       role,
       invitedBy,
+      spaceAssignments,
       expiresAt,
     })
     .returning();
@@ -84,6 +88,21 @@ export async function getInvitationByToken(token: string) {
     .where(eq(orgInvitations.token, token))
     .limit(1);
 
+  return row ?? null;
+}
+
+/** One pending invitation of `orgId`, or null. */
+export async function getPendingInvitation(invitationId: string, orgId: string) {
+  const [row] = await db
+    .select()
+    .from(orgInvitations)
+    .where(
+      scopedWhere(orgInvitations, {
+        orgId,
+        extra: [eq(orgInvitations.id, invitationId), eq(orgInvitations.status, "pending")],
+      }),
+    )
+    .limit(1);
   return row ?? null;
 }
 
@@ -143,14 +162,14 @@ export async function cancelInvitation(invitationId: string, orgId: string) {
   return cancelled ?? null;
 }
 
-export async function updateInvitationRole(
+export async function updateInvitation(
   invitationId: string,
   orgId: string,
-  role: AssignableOrgRole,
+  values: { role: AssignableOrgRole; spaceAssignments: ReadonlyArray<SpaceAssignment> },
 ) {
   const [updated] = await db
     .update(orgInvitations)
-    .set({ role })
+    .set(values)
     .where(
       scopedWhere(orgInvitations, {
         orgId,
