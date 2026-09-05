@@ -25,6 +25,7 @@ import { conflict, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { getOrgMember } from "./organizations.ts";
 import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
+import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -111,26 +112,25 @@ function spaceAccess(space: { visibility: string; defaultRole: SpaceRolePreset }
 }
 
 /**
- * Add or re-role a member. `addedBy` is recorded on insert only — a role change
- * keeps the original attribution, which is what the audit log is for.
+ * Add an explicit member, or update an existing row when requested. Creating
+ * never replaces a row: invite authority cannot bypass change-role authority.
+ * A role change keeps the original `addedBy` attribution.
  *
  * @throws 404 when the target is not an org member, or the custom role is not
- *   this org's; 409 when the target is an owner/admin.
+ *   this org's; 409 when the target is an owner/admin or already explicit on
+ *   create; 403 when the role exceeds the actor's permissions.
  */
-export async function upsertSpaceMember(params: {
+export async function saveSpaceMember(params: {
   orgId: string;
   spaceId: string;
   userId: string;
   assignment: SpaceRoleAssignment;
-  /** Null when the attribution is gone — an invitation whose inviter's account was deleted. */
-  addedBy: string | null;
+  actorPermissions: ReadonlySet<string> | undefined;
+  addedBy: string;
   requireExisting?: boolean;
-  /** Open transaction to run in — an invitation accept writes the membership
-   * row and these rows in one. */
-  tx?: DbOrTx;
 }): Promise<void> {
-  const { orgId, spaceId, userId, assignment, addedBy, tx = db } = params;
-  const targetRole = await orgRoleOf(tx, orgId, userId);
+  const { orgId, spaceId, userId, assignment, addedBy } = params;
+  const targetRole = await orgRoleOf(db, orgId, userId);
   if (!targetRole) throw notFound("User is not a member of this organization");
   if (targetRole === "owner" || targetRole === "admin") {
     throw conflict(
@@ -138,19 +138,40 @@ export async function upsertSpaceMember(params: {
       `${targetRole}s already run every space in the organization; an explicit role would grant nothing`,
     );
   }
-  const values = await assignmentColumns(tx, orgId, assignment);
+  const memberFilter = and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId));
+  if (!params.requireExisting) {
+    const [existing] = await db
+      .select({ userId: spaceMembers.userId })
+      .from(spaceMembers)
+      .where(memberFilter)
+      .limit(1);
+    if (existing) throw existingSpaceMember();
+  }
+  const values = await assignmentColumns(orgId, assignment, params.actorPermissions);
 
   if (params.requireExisting) {
-    const updated = await tx
+    const updated = await db
       .update(spaceMembers)
       .set(values)
-      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
+      .where(memberFilter)
       .returning({ userId: spaceMembers.userId });
     if (updated.length === 0) throw notFound("Space member not found");
     return;
   }
 
-  await writeSpaceMemberRow(tx, { spaceId, userId, addedBy, values });
+  const inserted = await db
+    .insert(spaceMembers)
+    .values({ spaceId, userId, addedBy, ...values })
+    .onConflictDoNothing({ target: [spaceMembers.spaceId, spaceMembers.userId] })
+    .returning({ userId: spaceMembers.userId });
+  if (inserted.length === 0) throw existingSpaceMember();
+}
+
+function existingSpaceMember() {
+  return conflict(
+    "space_member_exists",
+    "This user already has an explicit space role; use PATCH to change it",
+  );
 }
 
 /** Columns the two nullable role references occupy — exactly one is set. */
@@ -160,9 +181,8 @@ interface RoleColumns {
 }
 
 /**
- * The write, with every precondition already proved by the caller — org
- * membership, not owner/admin, custom role in the org. {@link upsertSpaceMember}
- * proves them per call, {@link applyInvitationSpaceAssignments} once per batch.
+ * Invitation application runs in its claim transaction, after validating the
+ * org membership and the live assignment targets once for the whole batch.
  */
 async function writeSpaceMemberRow(
   tx: DbOrTx,
@@ -302,18 +322,25 @@ async function orgRoleOf(tx: DbOrTx, orgId: string, userId: string): Promise<Org
 
 /** The FK alone would accept another org's bundle, so the org is checked here. */
 async function assignmentColumns(
-  tx: DbOrTx,
   orgId: string,
   assignment: SpaceRoleAssignment,
+  actorPermissions: ReadonlySet<string> | undefined,
 ): Promise<RoleColumns> {
   if ("preset_role" in assignment) {
+    assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  const [role] = await tx
-    .select({ id: spaceRoles.id })
+  const [role] = await db
+    .select({
+      id: spaceRoles.id,
+      key: spaceRoles.key,
+      name: spaceRoles.name,
+      permissions: spaceRoles.permissions,
+    })
     .from(spaceRoles)
     .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))
     .limit(1);
   if (!role) throw notFound("Space role not found");
+  assertCanGrantSpaceRole(actorPermissions, { kind: "custom", role });
   return { presetRole: null, customRoleId: role.id };
 }

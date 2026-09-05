@@ -181,7 +181,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Update a space",
       description:
-        "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Making the org's default space non-`open` is a 400.",
+        "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -563,7 +563,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Add a space member",
       description:
-        "Grant a user an explicit role in this space. The user must already be an org member (404 otherwise). Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
+        "Grant a user an explicit role in this space, limited to permissions held by the caller. The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -601,7 +601,7 @@ export const spacesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The target is an owner or admin — an explicit space role would grant nothing",
+            "The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -618,7 +618,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Change a space member's role",
       description:
-        "Change the role of an EXISTING explicit membership row (404 when there is none).",
+        "Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -669,7 +669,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Remove a space member",
       description:
-        "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely.",
+        "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

@@ -30,11 +30,7 @@ import {
   spaceSettingsSchema,
 } from "../services/spaces.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import {
-  listSpaceMembers,
-  removeSpaceMember,
-  upsertSpaceMember,
-} from "../services/space-members.ts";
+import { listSpaceMembers, removeSpaceMember, saveSpaceMember } from "../services/space-members.ts";
 import {
   effectivePermissions,
   orgPermissions as orgPermissionsFor,
@@ -66,6 +62,7 @@ import {
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
   assertExplicitModelExists,
@@ -391,6 +388,18 @@ export function createSpacesRouter() {
       const orgId = c.get("orgId");
       const spaceId = c.req.param("id")!;
       const data = await readJsonBody(c, updateSpaceSchema);
+      const current = c.get("space")!;
+      // A stored default can become effective later. Opening also grants the
+      // existing default to every implicit member, even when it is not edited.
+      if (
+        (data.default_role !== undefined && data.default_role !== current.defaultRole) ||
+        (data.visibility === "open" && current.visibility !== "open")
+      ) {
+        assertCanGrantSpaceRole(c.get("permissions"), {
+          kind: "preset",
+          preset: data.default_role ?? current.defaultRole,
+        });
+      }
 
       if (data.settings?.allowedRedirectDomains) {
         const validationError = validateDomainList(data.settings.allowedRedirectDomains);
@@ -466,11 +475,12 @@ export function createSpacesRouter() {
     const data = await readJsonBody(c, addSpaceMemberSchema);
     const assignment = toAssignment(data);
 
-    await upsertSpaceMember({
+    await saveSpaceMember({
       orgId,
       spaceId,
       userId: data.userId,
       assignment,
+      actorPermissions: c.get("permissions"),
       addedBy: c.get("user").id,
     });
     await recordAuditFromContext(c, {
@@ -493,11 +503,12 @@ export function createSpacesRouter() {
       const data = await readJsonBody(c, updateSpaceMemberSchema);
       const assignment = toAssignment(data);
 
-      await upsertSpaceMember({
+      await saveSpaceMember({
         orgId,
         spaceId,
         userId,
         assignment,
+        actorPermissions: c.get("permissions"),
         addedBy: c.get("user").id,
         requireExisting: true,
       });
@@ -520,6 +531,12 @@ export function createSpacesRouter() {
     const space = c.get("space")!;
     const userId = c.req.param("userId")!;
 
+    // Dropping an explicit restriction can grant the open-space default.
+    const member = await getOrgMember(orgId, userId);
+    assertCanGrantSpaceRole(
+      c.get("permissions"),
+      member ? resolveSpaceRole(member.role, space, null) : null,
+    );
     if (!(await removeSpaceMember(space.id, userId))) {
       throw notFound("Space member not found");
     }
@@ -532,7 +549,6 @@ export function createSpacesRouter() {
     // What is left after the row is gone — one PK lookup, one membership row.
     // The row was just deleted, so this can only find one an admin re-added
     // concurrently; the org role is what usually answers.
-    const member = await getOrgMember(orgId, userId);
     const after = member
       ? resolveSpaceRole(member.role, space, await loadSpaceMember(space.id, userId))
       : null;
