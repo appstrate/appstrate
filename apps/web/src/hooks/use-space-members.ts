@@ -11,13 +11,13 @@ export type SpaceMemberObject = components["schemas"]["SpaceMemberObject"];
  * (`source: "org_role"`) and, in an `open` space, every org member
  * (`source: "open_space"`).
  */
-export function useSpaceMembers(spaceId: string) {
+export function useSpaceMembers(spaceId: string, enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/spaces/{id}/members",
     { params: { path: { id: spaceId }, header: scope.header } },
-    { enabled: scope.enabled && !!spaceId, select: (e) => e.data },
+    { enabled: scope.enabled && !!spaceId && enabled, select: (e) => e.data },
   );
 }
 

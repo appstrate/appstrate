@@ -69,7 +69,10 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const { currentOrg } = useOrg();
-  const { data: members, isLoading, error } = useSpaceMembers(spaceId);
+  const canRead = can("space-members:read");
+  const { data, isLoading, error } = useSpaceMembers(spaceId, canRead);
+  // Disabling a query does not remove previously cached rows after a role change.
+  const members = canRead ? data : undefined;
   const { options: roleOptions, roles, rolesKnown } = useSpaceRoleOptions(spaceId);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -120,8 +123,8 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     );
   };
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (canRead && isLoading) return <LoadingState />;
+  if (canRead && error) return <ErrorState message={getErrorMessage(error)} />;
 
   const explicitUserIds = new Set(
     (members ?? []).filter((m) => m.source === "explicit").map((m) => m.userId),
@@ -137,103 +140,104 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
         </div>
       )}
 
-      {!members || members.length === 0 ? (
-        <EmptyState
-          message={t("spaceMembers.empty")}
-          hint={t("spaceMembers.emptyHint")}
-          icon={Users}
-        />
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("spaceMembers.colMember")}</TableHead>
-              <TableHead>{t("spaceMembers.colSource")}</TableHead>
-              <TableHead>{t("spaceMembers.colRole")}</TableHead>
-              <TableHead className="w-px" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {members.map((member) => {
-              // Owners and admins reach every space through their org role;
-              // `space_members` never holds them, so there is nothing to edit.
-              // For everyone else the control writes through two routes with
-              // two guards: an explicit row is PATCHed (`change-role`), an
-              // implicit member gets a row created (`invite`).
-              const currentValue =
-                memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`;
-              const currentOptionMissing = !roleOptions.some(
-                (option) => option.value === currentValue,
-              );
-              const editable =
-                member.source !== "org_role" &&
-                rolesKnown &&
-                (member.source === "explicit" ? canChangeRole : canInvite);
-              return (
-                <TableRow key={member.userId}>
-                  <TableCell>
-                    <span className="font-medium">{memberLabel(member)}</span>
-                    {member.email && member.email !== memberLabel(member) && (
-                      <span className="text-muted-foreground block text-xs">{member.email}</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={SOURCE_VARIANT[member.source]}>
-                      {t(`spaceMembers.source.${member.source}`)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {editable ? (
-                      <Select
-                        value={currentValue}
-                        onValueChange={(v) => changeRole(member, v)}
-                        disabled={updateMember.isPending || addMember.isPending}
-                      >
-                        <SelectTrigger
-                          className="w-[180px]"
-                          aria-label={t("spaceMembers.roleAriaLabel", {
-                            name: memberLabel(member),
-                          })}
+      {canRead &&
+        (!members || members.length === 0 ? (
+          <EmptyState
+            message={t("spaceMembers.empty")}
+            hint={t("spaceMembers.emptyHint")}
+            icon={Users}
+          />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("spaceMembers.colMember")}</TableHead>
+                <TableHead>{t("spaceMembers.colSource")}</TableHead>
+                <TableHead>{t("spaceMembers.colRole")}</TableHead>
+                <TableHead className="w-px" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {members.map((member) => {
+                // Owners and admins reach every space through their org role;
+                // `space_members` never holds them, so there is nothing to edit.
+                // For everyone else the control writes through two routes with
+                // two guards: an explicit row is PATCHed (`change-role`), an
+                // implicit member gets a row created (`invite`).
+                const currentValue =
+                  memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`;
+                const currentOptionMissing = !roleOptions.some(
+                  (option) => option.value === currentValue,
+                );
+                const editable =
+                  member.source !== "org_role" &&
+                  rolesKnown &&
+                  (member.source === "explicit" ? canChangeRole : canInvite);
+                return (
+                  <TableRow key={member.userId}>
+                    <TableCell>
+                      <span className="font-medium">{memberLabel(member)}</span>
+                      {member.email && member.email !== memberLabel(member) && (
+                        <span className="text-muted-foreground block text-xs">{member.email}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={SOURCE_VARIANT[member.source]}>
+                        {t(`spaceMembers.source.${member.source}`)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {editable ? (
+                        <Select
+                          value={currentValue}
+                          onValueChange={(v) => changeRole(member, v)}
+                          disabled={updateMember.isPending || addMember.isPending}
                         >
-                          <SelectValue placeholder={t("spaceMembers.noRole")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {currentOptionMissing && (
-                            <SelectItem value={currentValue} disabled>
-                              {spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
-                            </SelectItem>
-                          )}
-                          {roleOptions.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">
-                        {spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {member.source === "explicit" && canRemove && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => remove(member)}
-                        disabled={removeMember.isPending}
-                      >
-                        {t("btn.remove")}
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      )}
+                          <SelectTrigger
+                            className="w-[180px]"
+                            aria-label={t("spaceMembers.roleAriaLabel", {
+                              name: memberLabel(member),
+                            })}
+                          >
+                            <SelectValue placeholder={t("spaceMembers.noRole")} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {currentOptionMissing && (
+                              <SelectItem value={currentValue} disabled>
+                                {spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
+                              </SelectItem>
+                            )}
+                            {roleOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">
+                          {spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {member.source === "explicit" && canRemove && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => remove(member)}
+                          disabled={removeMember.isPending}
+                        >
+                          {t("btn.remove")}
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ))}
 
       <AddSpaceMemberModal
         key={spaceId}

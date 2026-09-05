@@ -937,7 +937,7 @@ export function App() {
               <Route
                 path="space/members"
                 element={
-                  <RequirePermission permission="space-members:read">
+                  <RequirePermission permission={["space-members:read", "space-members:invite"]}>
                     <OrgSettingsSpaceMembersPage />
                   </RequirePermission>
                 }

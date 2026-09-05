@@ -49,7 +49,7 @@ export function OrgSettingsLayout() {
       to: "/org-settings/space/members",
       icon: Users,
       label: t("spaceMembers.tabTitle"),
-      show: can("space-members:read"),
+      show: can("space-members:read") || can("space-members:invite"),
     },
     {
       to: "/org-settings/space/api-keys",
