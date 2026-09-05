@@ -58,15 +58,16 @@ and [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
   unchanged; align publication of the companion `appstrate/claude-plugins`
   README with the CLI release that includes #1261. An older installed CLI
   continues to generate a skills-only plugin until the user updates it.
-- **Marketplace refresh and browser OAuth** remain end-to-end release checks.
-  Local probes used Claude Code 2.1.261 with `--plugin-dir`, not an interactive
-  marketplace install. Discovery reached OAuth client registration without a
-  browser login or token issuance. After changing the plugin endpoint from A
-  to B, SDK `reload_plugins` reported success but retained the connection to A;
-  starting a new session connected to B. This does not establish how terminal
-  `/reload-plugins` behaves after a marketplace update. The documented switch
-  procedure therefore requires a new session and endpoint verification before
-  operations.
+- **Client validation (Claude Code 2.1.261)**: local command-source marketplace
+  install/update in copy mode passed; changing only `.mcp.json` changed the cache
+  hash. A new session selected endpoint B without sending A's bearer to it.
+  Real CLI OAuth login against a local fixture passed for A and B, including
+  registration, state/PKCE, callback, resource-bound token exchange and authenticated
+  `tools/list`. An isolated credentials file kept the real macOS keychain untouched.
+  SDK `reload_plugins` with `--plugin-dir` retained A after a URL change; marketplace
+  update requested a restart. The documented switch requires a new session.
+  Live Appstrate account/browser login, automatic session refresh and system
+  managed-MCP configuration remain unverified by these local fixture probes.
 - **Keychain access from a non-interactive background process on macOS** —
   untested; the keyring needs the real `HOME`, so no isolated probe exists.
 - **A ledger read under a different `HOME`** (cron, `launchd`, `sudo -E`) is
