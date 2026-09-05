@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db } from "@appstrate/db/client";
-import {
-  orgInvitations,
-  organizations,
-  user,
-  profiles,
-} from "@appstrate/db/schema";
+import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { eq, and, lt, gt, desc } from "drizzle-orm";
