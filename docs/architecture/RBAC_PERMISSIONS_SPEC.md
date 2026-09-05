@@ -336,7 +336,7 @@ Every new route in `apps/api/src/openapi/paths/`, 403 documented on every guarde
 
 ### 6.7 Package catalogs and shared mutations
 
-`GET /api/library` returns accessible spaces only. A package and its installation metadata require type-specific read permission in at least one accessible installation; hidden installations are omitted. System packages remain available with that read permission. Org owners/admins may also manage uninstalled org catalog entries, subject to credential permissions; space-pinned API keys do not gain this org catalog exception.
+`GET /api/spaces/:id/packages` filters installed entries by the caller's type-specific read permissions, with the credential ceiling applied. `GET /api/library` returns accessible spaces only. A package and its installation metadata require type-specific read permission in at least one accessible installation; hidden installations are omitted. System packages remain available with that read permission. Org owners/admins may also manage uninstalled org catalog entries, subject to credential permissions; space-pinned API keys do not gain this org catalog exception.
 
 A package's draft, versions and identity are shared across its installations. Writes, publish, restore, rename, delete and bulk mutations require the matching type-specific permission in **every installed space**. Merely holding builder in one space does not authorize changing a shared package used by a private space. Hidden catalog ids return 404; an accessible package whose other installations exceed the caller's authority returns 403. Bulk requests authorize all targets before modifying any.
 
