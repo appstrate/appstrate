@@ -35,6 +35,7 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
+import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { collectFileRefs } from "../services/input-parser.ts";
 import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
@@ -286,6 +287,7 @@ export function createRunsRemoteRouter() {
         // runs land on a shadow ephemeral package ("Inline" badge in UI);
         // callers who want deterministic attribution use kind=registry.
         const preflight = await runInlinePreflight({
+          authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
           orgId,
           spaceId,
           actor,

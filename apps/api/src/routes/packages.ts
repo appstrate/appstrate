@@ -12,7 +12,6 @@ import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { extractDependencies } from "@appstrate/core/dependencies";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/space-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
@@ -64,13 +63,13 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import {
   assertCatalogPackageAccess,
+  assertPackageDependenciesAccessible,
   assertForkSourceAccess,
   authorizeBundlePackages,
   assertExistingPackageInstallAccess,
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
   packagePermission,
-  packageAccessSpaces,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -203,38 +202,10 @@ async function validateManifestForRoute(
     ]);
   }
 
-  if (direction === "author") await assertNewDependenciesAccessible(c, validated, opts.previous);
+  if (direction === "author")
+    await assertPackageDependenciesAccessible(c, validated, opts.previous);
   await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
   return validated;
-}
-
-/** A newly attached dependency must be readable; unchanged references need no extra scope. */
-async function assertNewDependenciesAccessible(
-  c: Context<AppEnv>,
-  manifest: Record<string, unknown>,
-  previous: Record<string, unknown> = {},
-) {
-  const previousIds = new Set(
-    extractDependencies(previous).map((dep) => `${dep.depScope}/${dep.depName}`),
-  );
-  const added = extractDependencies(manifest).filter(
-    (dep) => !previousIds.has(`${dep.depScope}/${dep.depName}`),
-  );
-  if (!added.length) return;
-  const [accessible, existing] = await Promise.all([
-    packageAccessSpaces(c),
-    db
-      .select({ id: packages.id })
-      .from(packages)
-      .where(
-        inArray(
-          packages.id,
-          added.map((dep) => `${dep.depScope}/${dep.depName}`),
-        ),
-      ),
-  ]);
-  // Drafts may carry unresolved references; existing private dependencies require read access.
-  for (const { id } of existing) await assertCatalogPackageAccess(c, id, accessible);
 }
 
 // ═══════════════════════════════════════════════
@@ -1422,7 +1393,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     // violation writes nothing.
     if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
-    await assertNewDependenciesAccessible(
+    await assertPackageDependenciesAccessible(
       c,
       asRecord(detail.manifest),
       asRecord(existing.manifest),
@@ -2006,7 +1977,11 @@ export function createPackagesRouter() {
       await assertPackageMutationAccess(c, packageId, "write");
       await assertExistingPackageInstallAccess(c, packageId, existing.type);
     }
-    await assertNewDependenciesAccessible(c, asRecord(manifest), asRecord(existing?.draftManifest));
+    await assertPackageDependenciesAccessible(
+      c,
+      asRecord(manifest),
+      asRecord(existing?.draftManifest),
+    );
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
     if (existing) {
       if (existing.orgId !== orgId) {

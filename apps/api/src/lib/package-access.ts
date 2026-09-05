@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, spacePackages, spaces } from "@appstrate/db/schema";
+import { extractDependencies } from "@appstrate/core/dependencies";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard } from "@appstrate/core/permissions";
@@ -182,8 +183,7 @@ export async function assertPackageMutationAccess(
   if (pkg.orgId !== c.get("orgId"))
     throw forbidden("Cannot modify a package not in your organization.");
   const permission = packagePermission(pkg.type, action);
-  if (!c.get("permissions")?.has(permission))
-    throw forbidden(`Insufficient permissions: ${permission}`);
+  await makePermissionGuard(permission)(c, async () => {});
   const allowed = new Set(
     accessible.filter((space) => space.permissions.has(permission)).map((space) => space.id),
   );
@@ -244,4 +244,41 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
       if (identity === bundle.root) await assertExistingPackageInstallAccess(c, packageId, type);
     }
   }
+}
+
+/** Caller-authored references need live source read access; unchanged references need no new scope. */
+export async function assertPackageDependenciesAccessible(
+  c: Context<AppEnv>,
+  manifest: Record<string, unknown>,
+  previous: Record<string, unknown> = {},
+): Promise<void> {
+  const previousIds = new Set(
+    extractDependencies(previous).map(
+      (dependency) => `${dependency.depScope}/${dependency.depName}`,
+    ),
+  );
+  const dependencies = extractDependencies(manifest).filter(
+    (dependency) => !previousIds.has(`${dependency.depScope}/${dependency.depName}`),
+  );
+  if (!dependencies.length) return;
+  const checked = new Set<string>();
+  for (const dependency of dependencies) {
+    if (checked.has(dependency.depType)) continue;
+    checked.add(dependency.depType);
+    await makePermissionGuard(packagePermission(dependency.depType, "read"))(c, async () => {});
+  }
+  const [accessible, existing] = await Promise.all([
+    packageAccessSpaces(c),
+    db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(
+        inArray(
+          packages.id,
+          dependencies.map((dependency) => `${dependency.depScope}/${dependency.depName}`),
+        ),
+      ),
+  ]);
+  // Readiness keeps the existing missing-dependency errors; known but inaccessible sources are hidden.
+  for (const { id } of existing) await assertCatalogPackageAccess(c, id, accessible);
 }
