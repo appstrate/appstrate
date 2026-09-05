@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { packages, spaceMembers } from "@appstrate/db/schema";
+import { packages, spaceMembers, spacePackages } from "@appstrate/db/schema";
 import { zipArtifact } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -155,6 +155,21 @@ describe("library visibility", () => {
       .where(eq(spaceMembers.userId, guestId));
     const restricted = await app.request("/api/library", { headers });
     expect(((await restricted.json()) as Library).packages.skill).toEqual([]);
+  });
+
+  it("filters installed package metadata by the credential's type read scopes", async () => {
+    await installIn(ctx.defaultSpaceId);
+    const path = `/api/spaces/${ctx.defaultSpaceId}/packages`;
+    const restricted = await app.request(path, { headers: await keyHeaders(["spaces:read"]) });
+    expect(restricted.status).toBe(200);
+    expect(((await restricted.json()) as { data: unknown[] }).data).toEqual([]);
+    const readable = await app.request(path, {
+      headers: await keyHeaders(["spaces:read", "skills:read"]),
+    });
+    expect(readable.status).toBe(200);
+    expect(((await readable.json()) as { data: { packageId: string }[] }).data[0]?.packageId).toBe(
+      ID,
+    );
   });
 
   it("retains owner uninstalled catalog access but pins an owner API key to its space", async () => {
@@ -315,6 +330,40 @@ describe("shared package authority", () => {
       headers: authHeaders(ctx),
     });
     expect(response.status).toBe(404);
+  });
+
+  it("uses the stored package type for an existing bundle root's install permission", async () => {
+    await db.update(packages).set({ type: "integration" }).where(eq(packages.id, ID));
+    await installIn(privateId);
+    const role = await seedSpaceRole({
+      orgId: ctx.orgId,
+      permissions: ["skills:write", "integrations:write", "integrations:read"],
+    });
+    await db
+      .update(spaceMembers)
+      .set({ presetRole: null, customRoleId: role.id })
+      .where(eq(spaceMembers.userId, guestId));
+    await seedSpaceMember({
+      spaceId: privateId,
+      userId: guestId,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+    const archive = zipArtifact({
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+      "SKILL.md": new TextEncoder().encode(content),
+    });
+    const form = new FormData();
+    form.append("file", new File([archive], "secret.afps"));
+    const response = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      headers,
+      body: form,
+    });
+    expect(response.status, await response.clone().text()).toBe(403);
+    expect(
+      await db.select().from(spacePackages).where(eq(spacePackages.packageId, ID)),
+    ).toHaveLength(1);
   });
 
   it("rejects a carried hidden package during bundle authorization before any import write", async () => {

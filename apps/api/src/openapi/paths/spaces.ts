@@ -272,7 +272,7 @@ export const spacesPaths = {
       tags: ["Space Packages"],
       summary: "List installed packages",
       description:
-        "List all packages installed in this space, with their model/proxy/version overrides.",
+        "List packages installed in this space, with their model/proxy/version overrides. Returns only package types the caller has permission to read, within the credential scope ceiling.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },

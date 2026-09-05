@@ -56,7 +56,11 @@ import {
   getCatalogPackageType,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
-import { assertCatalogPackageAccess, spacePackagePermission } from "../lib/package-access.ts";
+import {
+  assertCatalogPackageAccess,
+  packagePermission,
+  spacePackagePermission,
+} from "../lib/package-access.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   exactlyOneRole,
@@ -573,7 +577,10 @@ export function createSpacesRouter() {
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
     const rows = await listInstalledPackages({ orgId, spaceId: spaceId }, type);
-    return c.json(listResponse(rows.map((row) => ({ object: "space_package", ...row }))));
+    const readable = rows.filter((row) =>
+      c.get("permissions")?.has(packagePermission(row.package_type, "read")),
+    );
+    return c.json(listResponse(readable.map((row) => ({ object: "space_package", ...row }))));
   });
 
   // POST /api/spaces/:spaceId/packages — install a package

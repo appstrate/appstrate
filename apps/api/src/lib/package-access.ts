@@ -226,7 +226,9 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
     if (!parsed) throw invalidRequest(`Invalid package identity: ${identity}`);
     const packageId = parsed.packageId;
     if (isSystemPackage(packageId)) {
-      await assertCatalogPackageAccess(c, packageId, accessible);
+      const source = await assertCatalogPackageAccess(c, packageId, accessible);
+      if (identity === bundle.root)
+        await assertExistingPackageInstallAccess(c, packageId, source.type);
       continue;
     }
     const type = pkg.manifest.type;
@@ -235,13 +237,14 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
     }
     await makePermissionGuard(packagePermission(type, "write"))(c, async () => {});
     const [existing] = await db
-      .select({ orgId: packages.orgId })
+      .select({ orgId: packages.orgId, type: packages.type })
       .from(packages)
       .where(eq(packages.id, packageId))
       .limit(1);
     if (existing?.orgId === c.get("orgId")) {
       await assertPackageMutationAccess(c, packageId, "write", accessible);
-      if (identity === bundle.root) await assertExistingPackageInstallAccess(c, packageId, type);
+      if (identity === bundle.root)
+        await assertExistingPackageInstallAccess(c, packageId, existing.type);
     }
   }
 }
