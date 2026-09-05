@@ -384,6 +384,8 @@ There are no `isOwner` / `isAdmin` / `isMember` helpers: every gate is a `can(..
 
 Pages: **Org settings → Roles** (presets read-only, custom CRUD when `features.custom_roles`, a permission picker driven by `GET /api/roles/vocabulary`); **Space settings → Members** (§6.4, with the implicit/explicit source column); **Org settings → Members** gains `guest` and the per-invite space assignment. OAuth organization-client create/edit uses the same assignment picker. Role/default selectors load the grantable catalog for the target space, not the globally active space; org guest space admins can add known org users by exact email.
 
+The space Members tab accepts either `space-members:read` or `space-members:invite`. An invite-only custom role can add an existing org user by exact email without fetching or rendering the member list.
+
 The SPA's role strings are display only. `packages/shared-types/src/member-role-policy.ts` keeps the assignable-role logic for the org tab. `ASSIGNABLE_ORG_ROLES = ["guest", "member", "admin"]`.
 
 `features` reaches the SPA as it does for `billing` (`apps/web/src/components/sidebar-billing.tsx`).
