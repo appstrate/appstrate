@@ -3,9 +3,8 @@
 /**
  * Integration test for the OIDC module's auth strategy.
  *
- * Spins up a local HTTP JWKS server, points `APP_URL` at it, then boots
- * a test app with the real OIDC module loaded via `getTestApp({ modules })`.
- * The test mints ES256 JWTs by hand against the local JWKS, hits real
+ * Boots a test app with the real OIDC module loaded via `getTestApp({ modules })`.
+ * The test mints ES256 JWTs against an in-process JWKS resolver, hits real
  * Appstrate routes, and asserts that:
  *   1. A valid JWT with matching `endUserId`/`spaceId` claims resolves
  *      through the strategy, populates `endUser` in request context, and
@@ -25,7 +24,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import * as jose from "jose";
 import { eq } from "drizzle-orm";
-import { _resetCacheForTesting } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { endUsers, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -33,18 +31,12 @@ import { createTestUser, createTestOrg } from "../../../../../../test/helpers/au
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
 import { prefixedId } from "../../../../../lib/ids.ts";
 
-// NOTE: env + JWKS server must be set BEFORE importing anything that
-// touches `getEnv()` cache or the OIDC module. The module itself is
-// imported lazily inside beforeAll so `getTestApp()` sees the final
-// APP_URL value.
-const originalAppUrl = process.env.APP_URL;
-let jwksServer: ReturnType<typeof Bun.serve> | null = null;
 let privateKey: jose.CryptoKey;
 let kid: string;
 let publicJwk: jose.JWK;
 let app: Awaited<ReturnType<typeof import("../../../../../../test/helpers/app.ts").getTestApp>>;
 
-async function startJwksServer() {
+async function createSigningKey() {
   const { publicKey, privateKey: priv } = await jose.generateKeyPair("ES256", {
     extractable: true,
   });
@@ -55,19 +47,6 @@ async function startJwksServer() {
   jwk.alg = "ES256";
   jwk.use = "sig";
   publicJwk = jwk;
-
-  jwksServer = Bun.serve({
-    port: 0,
-    fetch(req) {
-      const url = new URL(req.url);
-      if (url.pathname === "/api/auth/jwks") {
-        return Response.json({ keys: [jwk] });
-      }
-      return new Response("not found", { status: 404 });
-    },
-  });
-  process.env.APP_URL = `http://127.0.0.1:${jwksServer.port}`;
-  _resetCacheForTesting();
 }
 
 async function mintToken(payload: Record<string, unknown>) {
@@ -89,7 +68,7 @@ async function mintToken(payload: Record<string, unknown>) {
 }
 
 beforeAll(async () => {
-  await startJwksServer();
+  await createSigningKey();
   const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
   const { default: oidcModule } = await import("../../../index.ts");
   // Install an in-process JWKS resolver built from the test public key.
@@ -104,14 +83,9 @@ beforeAll(async () => {
   app = getTestApp({ modules: [oidcModule] });
 });
 
-afterAll(() => {
-  jwksServer?.stop(true);
-  if (originalAppUrl === undefined) {
-    delete process.env.APP_URL;
-  } else {
-    process.env.APP_URL = originalAppUrl;
-  }
-  _resetCacheForTesting();
+afterAll(async () => {
+  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
+  overrideJwksResolver(null);
 });
 
 describe("OIDC auth strategy — end-to-end via getTestApp", () => {
@@ -169,6 +143,36 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     // Strategy claimed the request, endUser context set, route reached.
     expect(res.status).toBe(200);
   });
+
+  for (const visibility of ["open", "closed", "private"] as const) {
+    it(`an end-user token reaches its ${visibility} space without organization membership`, async () => {
+      const scopedSpaceId = prefixedId("spc");
+      await db.insert(spaces).values({ id: scopedSpaceId, orgId, name: visibility, visibility });
+      await db.update(endUsers).set({ spaceId: scopedSpaceId }).where(eq(endUsers.id, endUserId));
+      const token = await mintToken({
+        sub: authUserId,
+        actor_type: "end_user",
+        end_user_id: endUserId,
+        space_id: scopedSpaceId,
+        scope: "openid runs:read",
+      });
+      expect(
+        (
+          await app.request("/api/runs", {
+            headers: { Authorization: `Bearer ${token}`, "X-Space-Id": scopedSpaceId },
+          })
+        ).status,
+      ).toBe(200);
+      // Same signed token cannot select another space of the same org.
+      expect(
+        (
+          await app.request("/api/runs", {
+            headers: { Authorization: `Bearer ${token}`, "X-Space-Id": spaceId },
+          })
+        ).status,
+      ).toBe(403);
+    });
+  }
 
   // RFC 9110 §11.4 — the auth-scheme is a case-insensitive token, so the
   // strategy's fast no-match path must not hinge on the exact bytes
@@ -337,10 +341,6 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     // Strategy returned null (mismatch) → fell through → 401.
     expect(res.status).toBe(401);
-
-    // Silence unused-import warnings — spaces import is retained for
-    // anyone extending the test to cross-check app metadata.
-    void spaces;
   });
 
   it("rejects a token when the end-user is suspended", async () => {

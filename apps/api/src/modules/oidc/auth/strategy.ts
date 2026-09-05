@@ -315,9 +315,8 @@ async function resolveEndUser(claims: AccessTokenClaims): Promise<AuthResolution
       name: authUserRow.name ?? claims.name ?? "",
     },
     orgId: endUser.orgId,
-    // End-users are NOT org members — core's strict end-user filter
-    // ignores role-based visibility entirely when `endUser` is in context.
-    orgRole: "member",
+    // End-users have their token's allowlist and pinned space, not an org
+    // membership. A synthetic role would invoke the space-membership resolver.
     authMethod: "oauth2-end-user",
     spaceId: endUser.spaceId,
     permissions,
