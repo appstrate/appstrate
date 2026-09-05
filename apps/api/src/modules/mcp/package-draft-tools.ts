@@ -19,6 +19,7 @@ import { zipArtifact } from "@appstrate/core/zip";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../../lib/scope.ts";
+import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { asString, textResult } from "./tool-results.ts";
 
 export interface PackageDraftToolContext {
@@ -35,6 +36,20 @@ const IGNORED = new Set(["manifest.json", "RECORD"]);
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
+
+/**
+ * The caller's auth plus the trusted self-dispatch marker. A self-service OAuth
+ * token (what `claude mcp add` obtains) is confined to the MCP protected
+ * resource by RFC 8707 audience checks; the marker is what lets an in-process
+ * hop to `/api/packages/*` accept it, exactly as `invoke_operation` does.
+ * Without it every read here answers 401 for an OAuth caller while API keys
+ * sail through — which is why the API-key integration tests could not see it.
+ */
+function authHeaders(ctx: PackageDraftToolContext): Headers {
+  const headers = new Headers(ctx.authHeaders);
+  headers.set(...internalDispatchHeader());
+  return headers;
+}
 
 function writeAccessError(ctx: PackageDraftToolContext): string | undefined {
   if (!ctx.permissions.has("mcp:invoke") || !ctx.permissions.has("agents:write")) {
@@ -61,7 +76,7 @@ async function dispatchJson<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<{ status: number; body: T | null }> {
-  const headers = new Headers(ctx.authHeaders);
+  const headers = authHeaders(ctx);
   if (init.body && typeof init.body === "string") headers.set("content-type", "application/json");
   const res = await ctx.dispatch(new Request(`${ctx.origin}${path}`, { ...init, headers }));
   const text = await res.text();
@@ -120,7 +135,7 @@ async function readSnapshot(
     const res = await ctx.dispatch(
       new Request(
         `${ctx.origin}/api/packages/${encoded}/files/content?path=${encodeURIComponent(entry.path)}${query ? `&${query.slice(1)}` : ""}`,
-        { headers: new Headers(ctx.authHeaders) },
+        { headers: authHeaders(ctx) },
       ),
     );
     if (!res.ok)
@@ -457,7 +472,7 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
       if (args.force === true) params.set("force", "true");
       if (typeof args.lock_version === "number")
         params.set("lock_version", String(args.lock_version));
-      const headers = new Headers(ctx.authHeaders);
+      const headers = authHeaders(ctx);
       const res = await ctx.dispatch(
         new Request(`${ctx.origin}/api/packages/import?${params.toString()}`, {
           method: "POST",
