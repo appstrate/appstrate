@@ -4,19 +4,16 @@ import { db } from "@appstrate/db/client";
 import {
   orgInvitations,
   organizations,
-  spaceRoles,
-  spaces,
   user,
   profiles,
 } from "@appstrate/db/schema";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
-import { eq, and, inArray, lt, gt, desc } from "drizzle-orm";
+import { eq, and, lt, gt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
-import { invalidRequest, notFound } from "../lib/errors.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -187,63 +184,6 @@ export async function updateInvitation(
     .returning();
 
   return updated ?? null;
-}
-
-/**
- * Validate the space assignments an invite body carries, at invite time.
- *
- * The two role rules are refusals about the ROLE, not about the list: an
- * `admin` never holds a `space_members` row (the space-members route answers
- * 409 for the same reason), and a `guest` has no implicit reach anywhere, so
- * inviting one with no space is inviting someone who can see nothing.
- *
- * The existence checks are what stop an invitation from carrying another org's
- * space or role id — the FK would accept the latter and the accept path has no
- * org to check it against by then.
- *
- * @throws 400 on either role rule; 404 naming the space or role that is not
- *   this org's.
- */
-export async function assertSpaceAssignmentsValid(params: {
-  orgId: string;
-  role: AssignableOrgRole;
-  assignments: ReadonlyArray<SpaceAssignment>;
-}): Promise<void> {
-  const { orgId, role, assignments } = params;
-  if (role === "admin" && assignments.length > 0) {
-    throw invalidRequest(
-      "Admins already run every space in the organization; space_assignments must be empty",
-      "space_assignments",
-    );
-  }
-  if (role === "guest" && assignments.length === 0) {
-    throw invalidRequest(
-      "A guest has no implicit space access; space_assignments must name at least one space",
-      "space_assignments",
-    );
-  }
-  if (assignments.length === 0) return;
-
-  const spaceIds = [...new Set(assignments.map((a) => a.space_id))];
-  const liveSpaces = await db
-    .select({ id: spaces.id })
-    .from(spaces)
-    .where(and(eq(spaces.orgId, orgId), inArray(spaces.id, spaceIds)));
-  const found = new Set(liveSpaces.map((row) => row.id));
-  const missingSpace = spaceIds.find((id) => !found.has(id));
-  if (missingSpace) throw notFound(`Space '${missingSpace}' not found in this organization`);
-
-  const roleIds = [
-    ...new Set(assignments.map((a) => a.custom_role_id).filter((id): id is string => Boolean(id))),
-  ];
-  if (roleIds.length === 0) return;
-  const liveRoles = await db
-    .select({ id: spaceRoles.id })
-    .from(spaceRoles)
-    .where(and(eq(spaceRoles.orgId, orgId), inArray(spaceRoles.id, roleIds)));
-  const foundRoles = new Set(liveRoles.map((row) => row.id));
-  const missingRole = roleIds.find((id) => !foundRoles.has(id));
-  if (missingRole) throw notFound(`Space role '${missingRole}' not found in this organization`);
 }
 
 export async function getOrgName(orgId: string): Promise<string> {

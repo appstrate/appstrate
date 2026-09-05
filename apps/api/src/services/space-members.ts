@@ -19,10 +19,9 @@ import {
   spaces,
   user as userTable,
 } from "@appstrate/db/schema";
-import type { OrgRole, SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
+import type { OrgRole, SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
-import { logger } from "../lib/logger.ts";
 import { getOrgMember } from "./organizations.ts";
 import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
@@ -178,109 +177,6 @@ function existingSpaceMember() {
 interface RoleColumns {
   presetRole: SpaceRolePreset | null;
   customRoleId: string | null;
-}
-
-/**
- * Invitation application runs in its claim transaction, after validating the
- * org membership and the live assignment targets once for the whole batch.
- */
-async function writeSpaceMemberRow(
-  tx: DbOrTx,
-  row: { spaceId: string; userId: string; addedBy: string | null; values: RoleColumns },
-): Promise<void> {
-  await tx
-    .insert(spaceMembers)
-    .values({ spaceId: row.spaceId, userId: row.userId, addedBy: row.addedBy, ...row.values })
-    .onConflictDoUpdate({
-      target: [spaceMembers.spaceId, spaceMembers.userId],
-      set: row.values,
-    });
-}
-
-/**
- * Apply an invitation's assignments inside the accept transaction, returning
- * those actually written for the audit payload.
- *
- * A space or custom role deleted between invite and accept is SKIPPED, not
- * fatal: refusing would strand the invitee outside the org with a token already
- * spent. The warn line is the record that a granted role was not applied.
- */
-export async function applyInvitationSpaceAssignments(
-  tx: DbOrTx,
-  params: {
-    orgId: string;
-    userId: string;
-    addedBy: string | null;
-    assignments: ReadonlyArray<SpaceAssignment>;
-  },
-): Promise<SpaceAssignment[]> {
-  const { orgId, userId, addedBy, assignments } = params;
-  if (assignments.length === 0) return [];
-
-  // An idempotent accept keeps the existing membership row, so the invitation's
-  // role is not necessarily the role the user ends up with.
-  const orgRole = await orgRoleOf(tx, orgId, userId);
-  if (orgRole === "owner" || orgRole === "admin") {
-    logger.warn("Invitation space assignments skipped for an org admin", {
-      orgId,
-      userId,
-      orgRole,
-      count: assignments.length,
-    });
-    return [];
-  }
-
-  const namedRoles = [
-    ...new Set(assignments.map((a) => a.custom_role_id).filter((id): id is string => Boolean(id))),
-  ];
-  const [liveSpaces, liveRoles] = await Promise.all([
-    tx
-      .select({ id: spaces.id })
-      .from(spaces)
-      .where(
-        and(
-          eq(spaces.orgId, orgId),
-          inArray(spaces.id, [...new Set(assignments.map((a) => a.space_id))]),
-        ),
-      ),
-    namedRoles.length === 0
-      ? Promise.resolve([] as { id: string }[])
-      : tx
-          .select({ id: spaceRoles.id })
-          .from(spaceRoles)
-          .where(and(eq(spaceRoles.orgId, orgId), inArray(spaceRoles.id, namedRoles))),
-  ]);
-  const spaceIds = new Set(liveSpaces.map((row) => row.id));
-  const roleIds = new Set(liveRoles.map((row) => row.id));
-
-  const applied: SpaceAssignment[] = [];
-  for (const assignment of assignments) {
-    const gone = !spaceIds.has(assignment.space_id)
-      ? "space"
-      : assignment.custom_role_id && !roleIds.has(assignment.custom_role_id)
-        ? "custom role"
-        : null;
-    if (gone) {
-      logger.warn(`Invitation space assignment skipped — ${gone} no longer exists`, {
-        orgId,
-        userId,
-        assignment,
-      });
-      continue;
-    }
-    // Preconditions already proved once for the whole batch above. Re-proving
-    // per assignment would be a third round-trip for an answer in hand.
-    await writeSpaceMemberRow(tx, {
-      spaceId: assignment.space_id,
-      userId,
-      addedBy,
-      values: assignment.preset_role
-        ? { presetRole: assignment.preset_role, customRoleId: null }
-        : { presetRole: null, customRoleId: assignment.custom_role_id! },
-    });
-    applied.push(assignment);
-  }
-  return applied;
 }
 
 /** Remove an explicit row. Returns false when there was none. */

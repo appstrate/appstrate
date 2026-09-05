@@ -13,7 +13,7 @@ import {
   getOrgName,
 } from "../services/invitations.ts";
 import { addMember, getOrgById } from "../services/organizations.ts";
-import { applyInvitationSpaceAssignments } from "../services/space-members.ts";
+import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
@@ -135,7 +135,7 @@ router.post("/:token/accept", async (c) => {
     await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
     // Same transaction as the claim: an invitation that granted spaces must
     // never be spent while leaving the invitee out of them.
-    return applyInvitationSpaceAssignments(tx, {
+    return applySpaceAssignments(tx, {
       orgId: invitation.orgId,
       userId: session.user.id,
       addedBy: invitation.invitedBy,

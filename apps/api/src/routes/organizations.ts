@@ -35,13 +35,13 @@ import {
 import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
-  assertSpaceAssignmentsValid,
   createInvitation,
   getOrgInvitations,
   getPendingInvitation,
   cancelInvitation,
   updateInvitation,
 } from "../services/invitations.ts";
+import { assertSpaceAssignmentsValid } from "../services/space-assignments.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
