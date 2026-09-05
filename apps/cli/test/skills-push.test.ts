@@ -7,12 +7,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   bumpPatch,
   frontmatterVersion,
+  getPushLocksPath,
   skillsPublishCommand,
   skillsPushCommand,
 } from "../src/commands/skills-push.ts";
@@ -29,20 +30,27 @@ import { createSkillServer, skillMd, type SkillServerOptions } from "./helpers/s
 const configHome = useTempConfigHome("appstrate-cli-push-cfg-");
 let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
+const originalDataHome = process.env.XDG_DATA_HOME;
 let work: string;
+let dataHome: string;
 
 beforeEach(async () => {
   await configHome.setup();
   keyring = installFakeKeyring();
   work = await mkdtemp(join(tmpdir(), "appstrate-cli-push-"));
+  dataHome = await mkdtemp(join(tmpdir(), "appstrate-cli-push-data-"));
+  process.env.XDG_DATA_HOME = dataHome;
   await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
 });
 
 afterEach(async () => {
   keyring.restore();
   globalThis.fetch = originalFetch;
+  if (originalDataHome === undefined) delete process.env.XDG_DATA_HOME;
+  else process.env.XDG_DATA_HOME = originalDataHome;
   await configHome.teardown();
   await rm(work, { recursive: true, force: true });
+  await rm(dataHome, { recursive: true, force: true });
 });
 
 const ORGS: SkillServerOptions["orgs"] = [{ id: "org_1", slug: "acme" }];
@@ -141,6 +149,26 @@ describe("skills push", () => {
       keywords: ["pdf"],
     });
     expect(server.imports()[1]?.manifest).toMatchObject({ name: "@tractr/pdf-tools" });
+  });
+
+  it("remembers the lock it received and re-pushes its own work without --force", async () => {
+    // A dirty draft refuses every push that cannot prove it wrote the draft.
+    const server = createSkillServer([], { orgs: ORGS, draftDirty: true });
+    server.install();
+    const dir = await skillFolder("pdf-tools");
+
+    await skillsPushCommand({ dir, force: true }, createMemoryIO().io);
+    const locks = JSON.parse(await readFile(getPushLocksPath("default"), "utf-8")) as Record<
+      string,
+      number
+    >;
+    expect(locks["@acme/pdf-tools"]).toBe(2);
+
+    await writeFile(join(dir, "scripts.sh"), "echo more\n");
+    await skillsPushCommand({ dir }, createMemoryIO().io);
+
+    expect(server.imports()[1]?.query).toEqual({ draft: "true", lock_version: "2" });
+    expect(Object.keys(server.imports()[1]!.files)).toContain("scripts.sh");
   });
 
   it("stops on a dirty draft with the --force remedy, and --force sends force=true", async () => {

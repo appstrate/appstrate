@@ -80,6 +80,7 @@ describe("POST /api/packages/import?draft=true", () => {
       type: "skill",
       draft: true,
       draftVersion: "1.2.0",
+      lock_version: expect.any(Number),
     });
 
     expect(await versionRows()).toHaveLength(0);
@@ -143,6 +144,55 @@ describe("POST /api/packages/import?draft=true", () => {
       "manifest.json",
       "scripts/run.sh",
     ]);
+  });
+
+  it("re-pushes without force when the client names the lock_version it last wrote", async () => {
+    const first = await importZip(ctx, skillZip("Body one."), "?draft=true");
+    expect(first.status).toBe(201);
+    const { lock_version: lock } = (await first.json()) as { lock_version: number };
+    expect(typeof lock).toBe("number");
+
+    const second = await importZip(
+      ctx,
+      skillZip("Body two.", { "scripts/new.sh": "echo two\n" }),
+      `?draft=true&lock_version=${lock}`,
+    );
+    expect(second.status).toBe(201);
+    const { lock_version: next } = (await second.json()) as { lock_version: number };
+    expect(next).toBeGreaterThan(lock);
+    expect(await draftPaths(ctx)).toEqual(["SKILL.md", "manifest.json", "scripts/new.sh"]);
+
+    // The stale lock now names a draft that no longer exists.
+    const stale = await importZip(ctx, skillZip("Body three."), `?draft=true&lock_version=${lock}`);
+    expect(stale.status).toBe(409);
+    expect(((await stale.json()) as { code: string }).code).toBe("draft_overwrite");
+  });
+
+  it("refuses a lock that a chat edit has since moved past", async () => {
+    const first = await importZip(ctx, skillZip("Body one."), "?draft=true");
+    const { lock_version: lock } = (await first.json()) as { lock_version: number };
+
+    // Someone edits the draft in the chat (the PUT route) in between.
+    const edited = await app.request(`/api/packages/skills/${PACKAGE_ID}`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: "---\nname: pdf-tools\ndescription: Work with PDFs.\n---\n\nChat edit.\n",
+        lock_version: lock,
+      }),
+    });
+    expect(edited.status).toBe(200);
+
+    const push = await importZip(ctx, skillZip("Body two."), `?draft=true&lock_version=${lock}`);
+    expect(push.status).toBe(409);
+    expect(((await push.json()) as { code: string; detail: string }).detail).toContain(
+      "edited elsewhere",
+    );
+    // force still wins, as before.
+    expect(
+      (await importZip(ctx, skillZip("Body two."), `?draft=true&lock_version=${lock}&force=true`))
+        .status,
+    ).toBe(201);
   });
 
   it("leaves a published version untouched when a later draft import replaces the files", async () => {

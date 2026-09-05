@@ -8,13 +8,14 @@
  * real test; `publish` then cuts the version everyone else syncs.
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
+import writeFileAtomic from "write-file-atomic";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { apiFetch, apiFetchRaw, ApiError } from "../lib/api.ts";
-import { resolveActiveProfile, type Profile } from "../lib/config.ts";
+import { getDataDir, resolveActiveProfile, type Profile } from "../lib/config.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
@@ -92,7 +93,13 @@ export async function skillsPushCommand(
   const archive = zipArtifact(files);
   const form = new FormData();
   form.append("file", new File([archive], `${meta.name}.afps`, { type: "application/zip" }));
-  const query = `?draft=true${opts.force ? "&force=true" : ""}`;
+  // The lock this machine received from its previous push: with it, re-pushing
+  // one's own work needs no --force, and a 409 means a real edit elsewhere.
+  const locks = await readPushLocks(profileName);
+  const knownLock = locks[packageId];
+  const query =
+    `?draft=true${opts.force ? "&force=true" : ""}` +
+    (knownLock !== undefined ? `&lock_version=${knownLock}` : "");
 
   let res: Response;
   try {
@@ -113,7 +120,11 @@ export async function skillsPushCommand(
 
   // An instance that predates `?draft=true` ignores the flag and publishes:
   // say so, because the author believed nothing left their machine.
-  const outcome = (await res.json().catch(() => ({}))) as { draft?: unknown; version?: unknown };
+  const outcome = (await res.json().catch(() => ({}))) as {
+    draft?: unknown;
+    version?: unknown;
+    lock_version?: unknown;
+  };
   if (outcome.draft !== true) {
     const published = typeof outcome.version === "string" ? `@${outcome.version}` : "";
     io.stderr.write(
@@ -121,6 +132,11 @@ export async function skillsPushCommand(
     );
     io.exit(1);
     return;
+  }
+
+  if (typeof outcome.lock_version === "number") {
+    locks[packageId] = outcome.lock_version;
+    await writePushLocks(profileName, locks);
   }
 
   io.stdout.write(
@@ -268,6 +284,32 @@ async function resolveManifest(
   };
 }
 
+/** `<data dir>/skills-push/<profile>.json`: package id → lock_version of this machine's last push. */
+export function getPushLocksPath(profileName: string): string {
+  return join(getDataDir(), "skills-push", `${profileName}.json`);
+}
+
+async function readPushLocks(profileName: string): Promise<Record<string, number>> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(getPushLocksPath(profileName), "utf-8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, number] => typeof entry[1] === "number",
+      ),
+    );
+  } catch {
+    // Missing or unreadable: the next push simply carries no lock.
+    return {};
+  }
+}
+
+async function writePushLocks(profileName: string, locks: Record<string, number>): Promise<void> {
+  const path = getPushLocksPath(profileName);
+  await mkdir(join(path, ".."), { recursive: true, mode: 0o700 });
+  await writeFileAtomic(path, `${JSON.stringify(locks, null, 2)}\n`, { mode: 0o600 });
+}
+
 async function orgSlug(profileName: string, profile: Profile): Promise<string> {
   const org = (await listOrgs(profileName)).find((o) => o.id === profile.orgId);
   if (!org) {
@@ -316,7 +358,7 @@ async function describeFailure(res: Response, packageId: string): Promise<string
   const head = `Push of ${packageId} failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`;
   switch (body.code) {
     case "draft_overwrite":
-      return `${head}\nThe draft has changes made elsewhere (chat or API). Re-run with --force to replace them.`;
+      return `${head}\nThe draft was edited elsewhere (chat, API, or another machine) since this machine last pushed it. Re-run with --force to replace it.`;
     case "name_collision":
       return `${head}\nPick another id with --id @scope/name.`;
     default:

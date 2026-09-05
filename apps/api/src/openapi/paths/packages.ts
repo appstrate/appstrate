@@ -212,6 +212,14 @@ export const packagesPaths = {
             "Write the upload as the package's draft — SKILL.md, manifest and every other file — without creating a version. The draft overwrite protection still applies. The response carries `draft: true` and no `version`.",
           schema: { type: "boolean" },
         },
+        {
+          name: "lock_version",
+          in: "query",
+          required: false,
+          description:
+            "Draft imports only: the `lock_version` this client received from its previous draft import (or from the package detail). When it matches the package's current lock, the draft is exactly what this client last wrote and the overwrite protection is satisfied without `force`; when it does not, the import answers `409 draft_overwrite` because the draft was edited elsewhere.",
+          schema: { type: "integer" },
+        },
       ],
       requestBody: {
         required: true,
@@ -260,6 +268,12 @@ export const packagesPaths = {
                     type: "string",
                     description:
                       "Draft import only: the version the draft manifest declares, i.e. what a later publish would create.",
+                  },
+                  lock_version: {
+                    type: "integer",
+                    nullable: true,
+                    description:
+                      "Draft import only: the package's optimistic lock after this write. Pass it back as `?lock_version=` on the next draft import to re-push without `force`.",
                   },
                   warnings: {
                     type: "array",

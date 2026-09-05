@@ -6,7 +6,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
@@ -1922,6 +1922,7 @@ export function createPackagesRouter() {
     force: boolean,
     source: "zip" | "github",
     draftOnly = false,
+    expectedLockVersion?: number,
   ) {
     const user = c.get("user");
     const orgId = c.get("orgId");
@@ -1966,8 +1967,23 @@ export function createPackagesRouter() {
           detail: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
         });
       }
-      // Draft overwrite protection
-      if (!force) {
+      // Draft overwrite protection. A draft import that names the
+      // `lock_version` it last wrote proves the draft is exactly what its
+      // author last pushed — the same optimistic lock the PUT route uses — so
+      // a re-push of one's own work needs neither `force` nor a warning; a
+      // stale lock means someone edited the draft in between, and that IS the
+      // case the protection exists for.
+      const lockMatches =
+        draftOnly &&
+        expectedLockVersion !== undefined &&
+        existing.lockVersion === expectedLockVersion;
+      if (!force && draftOnly && expectedLockVersion !== undefined && !lockMatches) {
+        throw conflict(
+          "draft_overwrite",
+          `The draft changed since lock_version ${expectedLockVersion} (now ${existing.lockVersion}): it was edited elsewhere.`,
+        );
+      }
+      if (!force && !lockMatches) {
         const [vCount, latestDate] = await Promise.all([
           getVersionCount(packageId),
           getLatestVersionCreatedAt(packageId),
@@ -2003,10 +2019,17 @@ export function createPackagesRouter() {
         }
       }
 
-      // Update existing package manifest and content
+      // Update existing package manifest and content. The lock moves with the
+      // draft, as it does on PUT, so a later push can tell "my own bytes" from
+      // "someone else's edit".
       await db
         .update(packages)
-        .set({ draftManifest: manifest, draftContent: content, updatedAt: new Date() })
+        .set({
+          draftManifest: manifest,
+          draftContent: content,
+          updatedAt: new Date(),
+          lockVersion: sql`${packages.lockVersion} + 1`,
+        })
         .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
     } else {
       // New package — insert
@@ -2090,6 +2113,8 @@ export function createPackagesRouter() {
     }
 
     logger.info("Package imported", { packageId, type: packageType, orgId, draft: draftOnly });
+    // Read after every write above: the post-install may have moved the lock too.
+    const lockVersion = draftOnly ? ((await getPackageById(packageId))?.lockVersion ?? null) : null;
     const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
     await recordAuditFromContext(c, {
       action: existing ? "package.updated" : "package.created",
@@ -2127,7 +2152,7 @@ export function createPackagesRouter() {
         // WOULD publish as, reported under its own key so nobody reads it as
         // a version that exists.
         ...(draftOnly
-          ? { draft: true, draftVersion: importedVersion }
+          ? { draft: true, draftVersion: importedVersion, lock_version: lockVersion }
           : { version: importedVersion }),
         ...(installWarnings.length > 0 ? { warnings: installWarnings } : {}),
       },
@@ -2208,6 +2233,11 @@ export function createPackagesRouter() {
 
     const { parsed, artifact } = await parseZipWithSkillFallback(upload, c.get("orgSlug"));
 
+    const rawLock = c.req.query("lock_version");
+    const lockVersion = rawLock === undefined ? undefined : Number(rawLock);
+    if (lockVersion !== undefined && !Number.isInteger(lockVersion)) {
+      throw invalidRequest("lock_version must be an integer", "lock_version");
+    }
     return handleImport(
       c,
       parsed,
@@ -2215,6 +2245,7 @@ export function createPackagesRouter() {
       c.req.query("force") === "true",
       "zip",
       c.req.query("draft") === "true",
+      lockVersion,
     );
   });
 

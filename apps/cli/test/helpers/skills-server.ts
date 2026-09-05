@@ -170,6 +170,8 @@ export function createSkillServer(
   let peakInFlight = 0;
   const imports: RecordedImport[] = [];
   const publishes: RecordedPublish[] = [];
+  /** Optimistic lock per package, as the draft import moves it. */
+  const locks = new Map<string, number>();
 
   const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     inFlight += 1;
@@ -224,7 +226,11 @@ export function createSkillServer(
         : null;
       const query = Object.fromEntries(url.searchParams.entries());
       imports.push({ query, filename: file.name, files, manifest });
-      if (options.draftDirty && query.force !== "true") {
+      const packageId = String(manifest?.name ?? "");
+      const currentLock = locks.get(packageId) ?? 1;
+      const lockMatches =
+        query.lock_version !== undefined && Number(query.lock_version) === currentLock;
+      if (options.draftDirty && query.force !== "true" && !lockMatches) {
         return json(
           {
             code: "draft_overwrite",
@@ -234,9 +240,17 @@ export function createSkillServer(
         );
       }
       const version = manifest?.version;
+      const nextLock = currentLock + 1;
+      locks.set(packageId, nextLock);
       return json(
         query.draft === "true" && !options.ignoresDraft
-          ? { packageId: manifest?.name, type: "skill", draft: true, draftVersion: version }
+          ? {
+              packageId: manifest?.name,
+              type: "skill",
+              draft: true,
+              draftVersion: version,
+              lock_version: nextLock,
+            }
           : { packageId: manifest?.name, type: "skill", version },
         201,
       );
