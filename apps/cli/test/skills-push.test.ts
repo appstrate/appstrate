@@ -196,17 +196,19 @@ describe("skills push", () => {
     expect(stderr()).toContain("PUBLISHED @acme/pdf-tools@1.0.0 instead");
   });
 
-  it("uploads nothing under --dry-run and lists the entries", async () => {
+  it("uploads nothing under --dry-run and shows what would change", async () => {
     const server = createSkillServer([], { orgs: ORGS });
     server.install();
     const dir = await skillFolder("pdf-tools", { "scripts/run.sh": "#!/bin/sh\n" });
-    const { io, stdout } = createMemoryIO();
+    const { io, stdout, stderr } = createMemoryIO();
 
     await skillsPushCommand({ dir, dryRun: true }, io);
 
     expect(server.imports()).toHaveLength(0);
     expect(stdout()).toContain("@acme/pdf-tools draft ←");
-    expect(stdout()).toContain("  scripts/run.sh");
+    expect(stdout()).toContain("dry run");
+    expect(stderr()).toContain("not on Appstrate yet");
+    expect(stderr()).toContain("  A scripts/run.sh");
   });
 
   it("refuses a folder without SKILL.md, and a profile without an org", async () => {

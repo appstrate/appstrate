@@ -24,6 +24,7 @@ import {
   type Profile,
 } from "../lib/config.ts";
 import { assertNotInstallDir } from "./skills-pull.ts";
+import { computeStatus, renderStatus } from "./skills-status.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
@@ -95,10 +96,25 @@ export async function skillsPushCommand(
   const packageId = manifest.name as string;
   const version = manifest.version as string;
 
+  // What this push changes, shown before anything leaves the machine. A folder
+  // that matches the draft has nothing to say to the server.
+  let status: Awaited<ReturnType<typeof computeStatus>>;
+  try {
+    status = await computeStatus(profileName, profile!, files, packageId);
+  } catch (err) {
+    io.stderr.write(`${formatError(err)}\n`);
+    io.exit(1);
+    return;
+  }
+  io.stderr.write(renderStatus(status, dir, files, false));
+  if (!status.isNew && status.changes.length === 0) {
+    io.stdout.write(`Nothing to push: ${packageId} matches its draft.\n`);
+    return;
+  }
+
   const paths = Object.keys(files).sort();
   if (opts.dryRun) {
-    io.stdout.write(`${packageId} draft ← ${dir} (would publish as ${version})\n`);
-    for (const path of paths) io.stdout.write(`  ${path}\n`);
+    io.stdout.write(`${packageId} draft ← ${dir} (would publish as ${version}, dry run)\n`);
     return;
   }
 
@@ -219,7 +235,7 @@ function requireOrg(profileName: string, profile: Profile | undefined, io: Comma
  * A path is used as given. A bare name (no separator, not an existing folder)
  * is the skill's working copy in the work dir, the folder `skills pull` fills.
  */
-async function resolveSkillFolder(
+export async function resolveSkillFolder(
   profileName: string,
   profile: Profile,
   target: string,

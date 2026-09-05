@@ -103,6 +103,8 @@ describe("skills pull — the work dir", () => {
     const workDir = join(work, "Appstrate");
     await writeConfig({ ...(await readConfig()), workDir });
     await skillsPullCommand({ skill: "pdf-tools" }, createMemoryIO().io);
+    const copy = join(workDir, "acme", "packages", "skills", "pdf-tools");
+    await writeFile(join(copy, "scripts", "more.sh"), "echo more\n");
 
     await skillsPushCommand({ dir: "pdf-tools" }, createMemoryIO().io);
     expect(server.imports()[0]?.manifest).toMatchObject({ name: "@acme/pdf-tools" });

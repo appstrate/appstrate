@@ -53,6 +53,7 @@ import {
 import { skillsSyncCommand } from "./commands/skills.ts";
 import { skillsPublishCommand, skillsPushCommand } from "./commands/skills-push.ts";
 import { skillsPullCommand } from "./commands/skills-pull.ts";
+import { skillsStatusCommand } from "./commands/skills-status.ts";
 import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
@@ -615,6 +616,17 @@ skillsGroup
       });
     },
   );
+
+skillsGroup
+  .command("status <dir-or-skill>")
+  .description(
+    "What a working folder would push: each file modified, added or removed against the skill's draft on Appstrate, and whether the draft was edited elsewhere since this machine last pulled or pushed it. Computed on demand, nothing runs in the background.",
+  )
+  .option("--diff", "Print a line diff for each modified text file.")
+  .action(async (dir: string, opts: { diff?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await skillsStatusCommand({ profile: globalOpts.profile, dir, diff: opts.diff });
+  });
 
 skillsGroup
   .command("publish <skill>")
