@@ -587,6 +587,8 @@ describe("buildMcpTools contextInjected", () => {
       "get_runtime_capabilities",
       "invoke_operation",
       "list_files",
+      "package_status",
+      "pull_package_files",
       "read_file",
       "run_and_wait",
       "search_operations",

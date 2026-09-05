@@ -57,6 +57,7 @@ import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
+import { buildPackageDraftTools } from "./package-draft-tools.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -71,6 +72,9 @@ export type McpToolName =
   | "read_file"
   | "validate_package_file"
   | "import_package_file"
+  | "pull_package_files"
+  | "package_status"
+  | "push_package_files"
   | "get_runtime_capabilities"
   | "get_me";
 
@@ -1418,6 +1422,7 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
     buildListFilesTool(ctx),
     buildReadFileTool(ctx),
     ...buildPackageFileTools(ctx),
+    ...buildPackageDraftTools(ctx),
   ];
   // get_me dispatches to GET /api/me/context. A consumer that already injects
   // that payload into its own system prompt (the chat module) drops the tool —
