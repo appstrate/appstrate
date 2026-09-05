@@ -108,6 +108,37 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
     expect(json.token_endpoint_auth_method ?? "none").toBe("none");
   });
 
+  it("gives a registrant that names no scope the whole self-service set, not identity alone", async () => {
+    // Claude Code's DCR request carries no `scope`. Defaulting it to identity
+    // scopes only left the client unable to ever be granted the module scopes
+    // (`mcp:read` / `mcp:invoke`): every authorize for the MCP resource ended in
+    // `invalid_scope` before any consent screen. The default must be the same
+    // set a registrant may request — asserted as "identity scopes present, and
+    // identical to what an explicit request for the full allowed set yields".
+    const implicit = await register({
+      client_name: "Claude Code (no scope)",
+      redirect_uris: ["http://localhost:9913/callback"],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    expect([200, 201]).toContain(implicit.status);
+    const granted = String(implicit.json.scope).split(" ").sort();
+    for (const identity of ["openid", "profile", "email", "offline_access"]) {
+      expect(granted).toContain(identity);
+    }
+    const explicit = await register({
+      client_name: "Claude Code (explicit)",
+      redirect_uris: ["http://localhost:9914/callback"],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      scope: granted.join(" "),
+    });
+    expect([200, 201]).toContain(explicit.status);
+    expect(String(explicit.json.scope).split(" ").sort()).toEqual(granted);
+  });
+
   it("rejects a registration requesting a core action scope outside the self-service set", async () => {
     // agents:run is a valid AS scope (advertised in scopes_supported) and is
     // grantable to admin-managed clients, but NOT via self-service DCR —

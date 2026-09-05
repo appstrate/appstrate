@@ -269,7 +269,13 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // routes.ts. The user-consent screen remains the real authorization gate.
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
-      clientRegistrationDefaultScopes: [...OIDC_IDENTITY_SCOPES],
+      // A registrant that names no `scope` — Claude Code's DCR request does not —
+      // gets the whole self-service set, module scopes included. With identity
+      // scopes alone, the client the MCP onboarding just created could never be
+      // granted `mcp:read` / `mcp:invoke`: every authorize for the MCP resource
+      // died on `invalid_scope` and no consent screen ever appeared. The same
+      // ceiling `markClientSelfService` backfills for a scope-less CIMD client.
+      clientRegistrationDefaultScopes: selfServiceScopes,
       clientRegistrationAllowedScopes: selfServiceScopes,
       storeClientSecret: {
         hash: hashSecret,
