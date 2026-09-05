@@ -835,7 +835,20 @@ If you see `OS keyring ... failed ... falling back to ~/.config/appstrate/creden
 
 ## Source + contributing
 
-Source at [`apps/cli/`](../../apps/cli/). Tests at `apps/cli/test/` (unit tests, run with `bun test` from the CLI directory). E2E against a real instance: spin up an Appstrate Tier 0 with `bun run dev`, then `bun run src/cli.ts login --instance http://localhost:3000`.
+Source at [`apps/cli/`](../../apps/cli/). Tests at `apps/cli/test/` (unit tests, run with `bun test` from the CLI directory).
+
+**Real device-flow smoke tests:** the OS keyring namespace is `(appstrate, <profile>)`;
+isolating XDG directories does **not** isolate credentials. Allocate a unique
+`smoke-<id>` profile and pass `--profile smoke-<id>` to every command, including
+`login`, validation commands and `logout` cleanup after success or failure.
+Never use `default`, another existing profile, or change the user's `defaultProfile`.
+Before login, check only the named fixture profile's non-secret metadata; never
+read or log credentials. Keep `XDG_CONFIG_HOME` and `XDG_DATA_HOME` in temporary
+fixture directories. Skill targets need separate isolation: these XDG settings
+do not redirect `~/.agents/skills/` or `~/.claude/skills/`. Do not run real `codex`
+or `claude-user` target writes unless their destinations are isolated too; use
+the existing fake-keyring test fixtures for those checks. Do not repurpose
+`HOME` or `CODEX_HOME` for a real CLI smoke run.
 
 ### Building locally
 
