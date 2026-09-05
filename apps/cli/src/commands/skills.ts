@@ -39,6 +39,7 @@ import {
   type SyncState,
 } from "../lib/skills-sync/state.ts";
 import {
+  pluginFixedFiles,
   pluginTreeMatches,
   removeManagedDir,
   setupPluginFiles,
@@ -129,7 +130,7 @@ export async function skillsSyncCommand(
       }
 
       if (gap) {
-        pluginOk = await bootstrapPlugin(gap, state, source, report);
+        pluginOk = await bootstrapPlugin(gap, state, report);
         return;
       }
 
@@ -149,7 +150,16 @@ export async function skillsSyncCommand(
         reportPlans(plans, io.stdout);
         return;
       }
-      pluginOk = await executePlans(profileName, source, plans, state, catalogue.bySlug, report);
+      const fixedFiles = pluginFixedFiles({ instance: profile!.instance, orgId: profile!.orgId! });
+      pluginOk = await executePlans(
+        profileName,
+        source,
+        plans,
+        state,
+        catalogue.bySlug,
+        fixedFiles,
+        report,
+      );
       if (!printPath) reportPlans(plans, io.stdout);
     });
   } catch (err) {
@@ -189,11 +199,12 @@ function connectionGap(profileName: string, profile: Profile | undefined): Conne
 async function bootstrapPlugin(
   gap: ConnectionGap,
   state: SyncState,
-  source: SkillSource,
   report: Report,
 ): Promise<boolean> {
   const message = `${gap.problem}. Run: ${gap.remedy}`;
-  if (Object.keys(ownedLedger("claude-plugin", state, source).managed).length > 0) {
+  // Connected syncs record a target even with no skills. Setup never records
+  // one: a lost profile must preserve an empty plugin's working MCP server too.
+  if (state.targets["claude-plugin"]?.root === targetRoot("claude-plugin")) {
     report.run(message);
     return false;
   }
@@ -270,6 +281,7 @@ async function executePlans(
   plans: TargetPlan[],
   state: SyncState,
   bySlug: SkillsBySlug,
+  fixedFiles: Record<string, Uint8Array>,
   report: Report,
 ): Promise<boolean> {
   const wanted = new Set(plans.flatMap((plan) => plan.write));
@@ -302,7 +314,7 @@ async function executePlans(
 
       const outcome =
         plan.target === "claude-plugin"
-          ? await applyPluginPlan(plan, fresh, carried, trees, report)
+          ? await applyPluginPlan(plan, fresh, carried, trees, fixedFiles, report)
           : await applySharedPlan(plan, fresh, trees, report);
       pluginOk = pluginOk && outcome.ok;
       for (const slug of outcome.placed) managed.set(slug, ledgerEntry(bySlug.get(slug)!));
@@ -383,10 +395,15 @@ async function applyPluginPlan(
   fresh: string[],
   carried: string[],
   trees: Map<string, SkillTree>,
+  fixedFiles: Record<string, Uint8Array>,
   report: Report,
 ): Promise<ApplyOutcome> {
   const root = targetRoot(plan.target);
-  if (fresh.length === 0 && plan.removed.length === 0 && (await pluginTreeMatches(root, carried))) {
+  if (
+    fresh.length === 0 &&
+    plan.removed.length === 0 &&
+    (await pluginTreeMatches(root, carried, fixedFiles))
+  ) {
     return { placed: new Set(), ok: true };
   }
   try {
@@ -394,6 +411,7 @@ async function applyPluginPlan(
       fresh.map((slug) => trees.get(slug)!),
       carried,
       root,
+      fixedFiles,
     );
     const placed = new Set(fresh);
     for (const failure of failures) {

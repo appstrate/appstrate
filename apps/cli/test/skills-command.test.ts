@@ -85,7 +85,7 @@ const ONE_SKILL: SkillFixture[] = [
 ];
 
 describe("skills sync — claude-plugin target", () => {
-  it("writes a complete plugin: manifest without a version, README, and one skill dir", async () => {
+  it("writes a complete plugin: manifest without a version, MCP config, README, and one skill dir", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io, stdout } = createMemoryIO();
 
@@ -96,6 +96,9 @@ describe("skills sync — claude-plugin target", () => {
     ) as Record<string, unknown>;
     expect(manifest.name).toBe("appstrate");
     expect(manifest).not.toHaveProperty("version");
+    expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(
+      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1"\n    }\n  }\n}\n',
+    );
     expect(await readText(join(pluginRoot(), "README.md"))).toContain("appstrate skills sync");
 
     const skill = await readText(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"));
@@ -137,6 +140,69 @@ describe("skills sync — claude-plugin target", () => {
 
     await skillsSyncCommand({}, io);
     expect(server.downloads()).toBe(1);
+  });
+
+  for (const [changed, profile, url] of [
+    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2"],
+    [
+      "instance",
+      { instance: "https://other.example.com/" },
+      "https://other.example.com/api/mcp/o/org_1",
+    ],
+  ] as const) {
+    it(`updates the MCP ${changed} without re-downloading unchanged skills`, async () => {
+      const server = createSkillServer(ONE_SKILL);
+      server.install();
+      await skillsSyncCommand({}, createMemoryIO().io);
+      const skillPath = join(pluginRoot(), "skills", "pdf-tools", "SKILL.md");
+      const before = await readText(skillPath);
+      await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1", ...profile });
+      const { io, stdout } = createMemoryIO();
+
+      await skillsSyncCommand({ printPath: true }, io);
+
+      expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
+        mcpServers: { appstrate: { type: "http", url } },
+      });
+      expect(await readText(skillPath)).toBe(before);
+      expect(server.downloads()).toBe(1);
+      expect(stdout()).toBe(`${pluginRoot()}\n`);
+    });
+  }
+
+  it("keeps connected plugin bytes unchanged when only the space or login changes", async () => {
+    const server = createSkillServer(ONE_SKILL);
+    server.install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const before = await snapshot(pluginRoot());
+    const mcpStats = await lstat(join(pluginRoot(), ".mcp.json"));
+    await seedLoggedInProfile("default", {
+      orgId: "org_1",
+      spaceId: "spc_2",
+      userId: "usr_other",
+      email: "other@example.com",
+    });
+
+    await skillsSyncCommand({}, createMemoryIO().io);
+
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    expect((await lstat(join(pluginRoot(), ".mcp.json"))).ino).toBe(mcpStats.ino);
+    expect(server.downloads()).toBe(1);
+  });
+
+  it("writes the MCP server even when the connected space has no skills", async () => {
+    const server = createSkillServer([]);
+    server.install();
+    const { io, stdout } = createMemoryIO();
+
+    await skillsSyncCommand({ printPath: true }, io);
+
+    expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
+      mcpServers: { appstrate: { type: "http", url: "https://app.example.com/api/mcp/o/org_1" } },
+    });
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
+    expect(server.downloads()).toBe(0);
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
   });
 
   it("re-downloads when the published version moves", async () => {
@@ -219,6 +285,22 @@ describe("skills sync — --print-path", () => {
 });
 
 describe("skills sync — shared targets", () => {
+  it("leaves client MCP configurations untouched for codex and claude-user", async () => {
+    const codexConfig = join(home, ".codex", "config.toml");
+    const claudeConfig = join(home, ".claude.json");
+    await mkdir(join(home, ".codex"), { recursive: true });
+    await writeFile(codexConfig, '[mcp_servers.personal]\nurl = "https://mcp.example.com"\n');
+    await writeFile(claudeConfig, '{"mcpServers":{"personal":{"url":"https://mcp.example.com"}}}');
+    const before = [await readText(codexConfig), await readText(claudeConfig)];
+    createSkillServer(ONE_SKILL).install();
+
+    await skillsSyncCommand({ target: ["codex", "claude-user"] }, createMemoryIO().io);
+
+    expect([await readText(codexConfig), await readText(claudeConfig)]).toEqual(before);
+    expect(await readdir(codexRoot())).toEqual(["pdf-tools"]);
+    expect(await readdir(join(home, ".claude", "skills"))).toEqual(["pdf-tools"]);
+    expect(await exists(pluginRoot())).toBe(false);
+  });
   it("writes into ~/.agents/skills and leaves a foreign directory alone", async () => {
     const foreign = join(codexRoot(), "my-own-skill");
     await mkdir(foreign, { recursive: true });
@@ -750,6 +832,53 @@ async function seedTwoThenBreakCodexNotes(): Promise<void> {
 }
 
 describe("skills sync — plugin tree hygiene", () => {
+  for (const damage of ["missing", "tampered"] as const) {
+    it(`repairs a ${damage} MCP file without downloading skills again`, async () => {
+      const server = createSkillServer(ONE_SKILL);
+      server.install();
+      await skillsSyncCommand({}, createMemoryIO().io);
+      const before = await snapshot(pluginRoot());
+      const mcpPath = join(pluginRoot(), ".mcp.json");
+      if (damage === "missing") {
+        // A pre-MCP plugin has the same skill ledger and no .mcp.json.
+        await rm(mcpPath);
+      } else {
+        await writeFile(
+          mcpPath,
+          '{"mcpServers":{"appstrate":{"type":"http","url":"https://wrong.example.com"}}}',
+        );
+      }
+
+      await skillsSyncCommand({}, createMemoryIO().io);
+
+      expect(await snapshot(pluginRoot())).toEqual(before);
+      expect(server.downloads()).toBe(1);
+    });
+  }
+
+  it("keeps the previous MCP endpoint and prints no path when its replacement cannot be staged", async () => {
+    const server = createSkillServer(ONE_SKILL);
+    server.install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const before = await snapshot(pluginRoot());
+    const staging = join(getDataDir(), ".appstrate-staging");
+    await writeFile(staging, "blocks the next staging directory");
+    await seedLoggedInProfile("default", { orgId: "org_2", spaceId: "spc_2" });
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stdout()).toBe("");
+    expect(stderr()).toContain("Failed to write claude-plugin");
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    expect(server.downloads()).toBe(1);
+    await rm(staging);
+
+    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    expect(await readText(join(pluginRoot(), ".mcp.json"))).toContain("/api/mcp/o/org_2");
+    expect(server.downloads()).toBe(1);
+  });
+
   it("rebuilds when a foreign directory appears under skills/", async () => {
     const server = createSkillServer(ONE_SKILL);
     server.install();
@@ -890,7 +1019,12 @@ describe("skills sync — the plugin tree is repaired, not just extended", () =>
     await writeFile(join(pluginRoot(), "stray.txt"), "not ours\n");
 
     await skillsSyncCommand({}, io);
-    expect((await readdir(pluginRoot())).sort()).toEqual([".claude-plugin", "README.md", "skills"]);
+    expect((await readdir(pluginRoot())).sort()).toEqual([
+      ".claude-plugin",
+      ".mcp.json",
+      "README.md",
+      "skills",
+    ]);
   });
 
   it("re-materializes everything when the ledger format version moves", async () => {
@@ -959,6 +1093,7 @@ describe("skills sync — fresh install", () => {
     expect(skill).toContain("name: setup");
     expect(skill).toContain("appstrate login --profile nope");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+    expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
     expect(await exists(getStatePath())).toBe(false);
   });
 
@@ -1012,6 +1147,45 @@ describe("skills sync — fresh install", () => {
     expect(await exists(setupSkill())).toBe(false);
   });
 
+  for (const source of ["published", "draft"] as const) {
+    it(`preserves an empty connected plugin on a profile gap with source ${source}`, async () => {
+      createSkillServer([]).install();
+      await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+      const before = await snapshot(pluginRoot());
+      const { io, stdout, stderr } = createMemoryIO();
+
+      await expect(
+        skillsSyncCommand({ profile: "nope", printPath: true, source }, io),
+      ).rejects.toBeInstanceOf(ExitError);
+
+      expect(stdout()).toBe("");
+      expect(stderr()).toContain("Run: appstrate login --profile nope");
+      expect(await snapshot(pluginRoot())).toEqual(before);
+      expect(await exists(setupSkill())).toBe(false);
+    });
+  }
+
+  it("does not print a nonexistent plugin path after a failed empty connected sync", async () => {
+    createSkillServer([]).install();
+    await mkdir(getDataDir(), { recursive: true });
+    const staging = join(getDataDir(), ".appstrate-staging");
+    await writeFile(staging, "blocks staging");
+    await expect(
+      skillsSyncCommand({ printPath: true }, createMemoryIO().io),
+    ).rejects.toBeInstanceOf(ExitError);
+    await rm(staging);
+    const { io, stdout } = createMemoryIO();
+
+    await expect(
+      skillsSyncCommand({ profile: "nope", printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(stdout()).toBe("");
+    expect(await exists(pluginRoot())).toBe(false);
+    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
+  });
+
   it("replaces the setup skill with the real skills once connected", async () => {
     await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
     createSkillServer(ONE_SKILL).install();
@@ -1022,6 +1196,7 @@ describe("skills sync — fresh install", () => {
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
     expect(await exists(join(pluginRoot(), "hooks"))).toBe(false);
+    expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
   });
 });
 
