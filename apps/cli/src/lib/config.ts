@@ -43,6 +43,16 @@ export interface Profile {
 export interface Config {
   defaultProfile: string;
   profiles: Record<string, Profile>;
+  /**
+   * Root of the local working copies `skills pull` writes and `skills push`
+   * reads: `<workDir>/<org slug>/packages/<type>s/<name>`. Default
+   * `~/Appstrate Packages`, a visible folder like the ones sync products create,
+   * as opposed to the hidden, regenerable state under `getDataDir()`. NOT
+   * `~/Appstrate`: that is `appstrate install`'s default instance directory
+   * (`~/appstrate`, the same folder on a case-insensitive disk), and
+   * `uninstall --purge` removes it wholesale.
+   */
+  workDir?: string;
 }
 
 /** Fresh empty config. Always return a NEW object here — callers mutate
@@ -118,6 +128,8 @@ export async function readConfig(): Promise<Config> {
   const parsed = parseToml(raw) as Record<string, unknown>;
   const defaultProfile =
     typeof parsed.defaultProfile === "string" ? parsed.defaultProfile : "default";
+  const workDir =
+    typeof parsed.workDir === "string" && parsed.workDir.length > 0 ? parsed.workDir : undefined;
   const profilesRaw = (parsed.profile ?? {}) as Record<string, unknown>;
   const profiles: Record<string, Profile> = {};
   for (const [name, value] of Object.entries(profilesRaw)) {
@@ -145,8 +157,32 @@ export async function readConfig(): Promise<Config> {
     };
     if (profiles[name]!.syncSpaces === undefined) delete profiles[name]!.syncSpaces;
   }
-  return { defaultProfile, profiles };
+  return workDir ? { defaultProfile, profiles, workDir } : { defaultProfile, profiles };
 }
+
+export const DEFAULT_WORK_DIR_NAME = "Appstrate Packages";
+
+/** `workDir` from the config, `~` expanded; `~/Appstrate` when unset. */
+export function resolveWorkDir(config: Config): string {
+  const raw = config.workDir ?? join("~", DEFAULT_WORK_DIR_NAME);
+  return raw === "~" || raw.startsWith("~/") ? join(homeDir(), raw.slice(1)) : raw;
+}
+
+/** Where one package's working copy lives: `<workDir>/<org slug>/packages/<type>s/<name>`. */
+export function packageWorkDir(
+  config: Config,
+  orgSlug: string,
+  type: "skill" | "agent" | "integration" | "mcp-server",
+  name: string,
+): string {
+  return join(resolveWorkDir(config), orgSlug, "packages", `${type}s`, name);
+}
+
+/**
+ * Marker file `appstrate install` writes at the root of an instance directory.
+ * A work dir there would be wiped by `uninstall --purge`, so it is refused.
+ */
+export const INSTALL_DIR_MARKER = join(".appstrate", "project.json");
 
 /** Overwrite the config file atomically (tmp + rename). */
 export async function writeConfig(config: Config): Promise<void> {
@@ -156,6 +192,7 @@ export async function writeConfig(config: Config): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
   const payload = stringifyToml({
     defaultProfile: config.defaultProfile,
+    ...(config.workDir ? { workDir: config.workDir } : {}),
     profile: config.profiles,
   });
   await writeFile(tmp, payload, { mode: 0o600 });

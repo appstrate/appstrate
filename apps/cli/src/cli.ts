@@ -575,9 +575,9 @@ skillsGroup
   );
 
 skillsGroup
-  .command("push <dir>")
+  .command("push <dir-or-skill>")
   .description(
-    "Send a local skill folder (SKILL.md and every annex file) to the skill's DRAFT on Appstrate, without publishing. Test it with `skills sync --source draft`, then `skills publish`.",
+    "Send a local skill folder (SKILL.md and every annex file) to the skill's DRAFT on Appstrate, without publishing. A bare skill name means its working copy under the work dir (`~/Appstrate Packages/<org>/packages/skills/<name>`, the folder `skills pull` fills). Test with `skills sync --source draft`, then `skills publish`.",
   )
   .option(
     "--id <packageId>",
@@ -599,7 +599,7 @@ skillsGroup
 skillsGroup
   .command("pull <skill> [dir]")
   .description(
-    "Bring a skill's files into a local working folder: its draft by default, or a published version with --version. Records the draft's lock so the next `skills push` from that folder needs no --force.",
+    "Bring a skill's files into a local working folder, `~/Appstrate Packages/<org>/packages/skills/<name>` unless a folder is given (`workDir` in config.toml moves the root): its draft by default, or a published version with --version. Records the draft's lock so the next `skills push` from that folder needs no --force.",
   )
   .option("--version <semver|latest>", "Pull this published version instead of the draft.")
   .option("--force", "Write into a folder that already has files, replacing same-named ones.")

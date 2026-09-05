@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { skillsPullCommand } from "../src/commands/skills-pull.ts";
 import { getPushLocksPath, skillsPushCommand } from "../src/commands/skills-push.ts";
+import { readConfig, writeConfig } from "../src/lib/config.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
@@ -67,6 +68,53 @@ async function listTree(dir: string, prefix = ""): Promise<string[]> {
   }
   return out.sort();
 }
+
+describe("skills pull — the work dir", () => {
+  it("lands in <workDir>/<org slug>/packages/skills/<name> when no folder is given", async () => {
+    createSkillServer([SKILL], { orgs: ORGS }).install();
+    const workDir = join(work, "Appstrate");
+    await writeConfig({ ...(await readConfig()), workDir });
+    const { io, stdout } = createMemoryIO();
+
+    await skillsPullCommand({ skill: "pdf-tools" }, io);
+
+    const expected = join(workDir, "acme", "packages", "skills", "pdf-tools");
+    expect(await listTree(expected)).toContain("SKILL.md");
+    expect(stdout()).toContain(`into ${expected}`);
+  });
+
+  it("refuses a work dir that is an instance directory", async () => {
+    createSkillServer([SKILL], { orgs: ORGS }).install();
+    const workDir = join(work, "Appstrate");
+    await mkdir(join(workDir, ".appstrate"), { recursive: true });
+    await writeFile(join(workDir, ".appstrate", "project.json"), "{}");
+    await writeConfig({ ...(await readConfig()), workDir });
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsPullCommand({ skill: "pdf-tools" }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("is an Appstrate instance directory");
+    expect(stderr()).toContain("uninstall --purge");
+  });
+
+  it("lets push find that working copy by its bare name", async () => {
+    const server = createSkillServer([SKILL], { orgs: ORGS });
+    server.install();
+    const workDir = join(work, "Appstrate");
+    await writeConfig({ ...(await readConfig()), workDir });
+    await skillsPullCommand({ skill: "pdf-tools" }, createMemoryIO().io);
+
+    await skillsPushCommand({ dir: "pdf-tools" }, createMemoryIO().io);
+    expect(server.imports()[0]?.manifest).toMatchObject({ name: "@acme/pdf-tools" });
+
+    const missing = createMemoryIO();
+    await expect(skillsPushCommand({ dir: "nowhere" }, missing.io)).rejects.toBeInstanceOf(
+      ExitError,
+    );
+    expect(missing.stderr()).toContain("No working copy for nowhere at");
+    expect(missing.stderr()).toContain("appstrate skills pull nowhere");
+  });
+});
 
 describe("skills pull", () => {
   it("writes the draft into the folder, manifest included, and records the draft lock", async () => {

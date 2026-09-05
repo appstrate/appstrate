@@ -15,14 +15,25 @@ import { extractSkillMeta } from "@appstrate/core/validation";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { apiFetch, apiFetchRaw, ApiError } from "../lib/api.ts";
-import { getDataDir, resolveActiveProfile, type Profile } from "../lib/config.ts";
+import {
+  getDataDir,
+  packageWorkDir,
+  readConfig,
+  resolveActiveProfile,
+  resolveWorkDir,
+  type Profile,
+} from "../lib/config.ts";
+import { assertNotInstallDir } from "./skills-pull.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
 
 export interface SkillsPushOptions {
   profile?: string;
-  /** Folder holding `SKILL.md`; annex files are taken recursively. */
+  /**
+   * Folder holding `SKILL.md` (annex files are taken recursively), or a bare
+   * skill name resolved in the work dir: `<workDir>/<org slug>/packages/skills/<name>`.
+   */
   dir: string;
   /** `@scope/name` to push as. Default: the folder's `manifest.json`, else `@<org slug>/<frontmatter name>`. */
   id?: string;
@@ -53,9 +64,10 @@ export async function skillsPushCommand(
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
   if (!requireOrg(profileName, profile, io)) return;
 
-  const dir = resolve(opts.dir);
+  let dir: string;
   let files: Record<string, Uint8Array>;
   try {
+    dir = await resolveSkillFolder(profileName, profile!, opts.dir);
     files = await readSkillFolder(dir);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
@@ -201,6 +213,39 @@ function requireOrg(profileName: string, profile: Profile | undefined, io: Comma
     return false;
   }
   return true;
+}
+
+/**
+ * A path is used as given. A bare name (no separator, not an existing folder)
+ * is the skill's working copy in the work dir, the folder `skills pull` fills.
+ */
+async function resolveSkillFolder(
+  profileName: string,
+  profile: Profile,
+  target: string,
+): Promise<string> {
+  const looksLikePath = target.includes("/") || target.startsWith(".") || target.startsWith("~");
+  if (!looksLikePath) {
+    try {
+      if ((await stat(target)).isDirectory()) return resolve(target);
+    } catch {
+      // Not a folder here: fall through to the work dir.
+    }
+    const name = target.startsWith("@") ? parseScopedName(target)?.name : target;
+    if (!name) throw new Error(`Not a skill name: ${target}`);
+    const config = await readConfig();
+    await assertNotInstallDir(resolveWorkDir(config));
+    const dir = packageWorkDir(config, await orgSlug(profileName, profile), "skill", name);
+    try {
+      if ((await stat(dir)).isDirectory()) return dir;
+    } catch {
+      // Reported below with the path that was expected.
+    }
+    throw new Error(
+      `No working copy for ${target} at ${dir}. Run: appstrate skills pull ${target}, or pass a folder path.`,
+    );
+  }
+  return resolve(target.startsWith("~/") ? join(process.env.HOME ?? "", target.slice(2)) : target);
 }
 
 /** Every file under `dir`, keyed by its forward-slash path; `SKILL.md` required. */

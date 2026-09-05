@@ -12,7 +12,14 @@ import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { apiFetch, ApiError } from "../lib/api.ts";
-import { resolveActiveProfile, type Profile } from "../lib/config.ts";
+import {
+  INSTALL_DIR_MARKER,
+  packageWorkDir,
+  readConfig,
+  resolveActiveProfile,
+  resolveWorkDir,
+  type Profile,
+} from "../lib/config.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
@@ -24,7 +31,7 @@ export interface SkillsPullOptions {
   profile?: string;
   /** `@scope/name`, or a bare name resolved under the organization's slug. */
   skill: string;
-  /** Destination folder. Default: `./<name>`. */
+  /** Destination folder. Default: `<workDir>/<org slug>/packages/skills/<name>`. */
   dir?: string;
   /** A published version (`latest` or a semver) instead of the draft. */
   version?: string;
@@ -51,18 +58,21 @@ export async function skillsPullCommand(
   }
 
   let packageId: string;
+  let dir: string;
+  let name: string;
   try {
-    packageId = opts.skill.startsWith("@")
-      ? opts.skill
-      : `@${await orgSlug(profileName, profile)}/${opts.skill}`;
+    const slug = await orgSlug(profileName, profile);
+    packageId = opts.skill.startsWith("@") ? opts.skill : `@${slug}/${opts.skill}`;
     if (!parseScopedName(packageId)) throw new Error(`Not a package id: ${packageId}`);
+    name = parseScopedName(packageId)!.name;
+    const config = await readConfig();
+    if (!opts.dir) await assertNotInstallDir(resolveWorkDir(config));
+    dir = opts.dir ? resolve(opts.dir) : packageWorkDir(config, slug, "skill", name);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
     io.exit(1);
     return;
   }
-  const name = parseScopedName(packageId)!.name;
-  const dir = resolve(opts.dir ?? name);
 
   try {
     await assertWritable(dir, opts.force === true);
@@ -134,7 +144,9 @@ export async function skillsPullCommand(
 
     const what = source === "draft" ? "draft" : `version ${skill.version}`;
     io.stdout.write(`Pulled ${packageId} (${what}, ${paths.length} files) into ${dir}\n`);
-    io.stderr.write(`Edit it there, then: appstrate skills push ${dir}\n`);
+    // In the work dir the bare name is enough; elsewhere the path is the handle.
+    const handle = opts.dir ? dir : name;
+    io.stderr.write(`Edit it there, then: appstrate skills push ${handle}\n`);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
     io.exit(1);
@@ -171,6 +183,18 @@ async function resolveExactVersion(
     }
     throw err;
   }
+}
+
+/** `~/Appstrate` is an instance directory that `uninstall --purge` removes: never a work dir. */
+export async function assertNotInstallDir(workDir: string): Promise<void> {
+  try {
+    await stat(join(workDir, INSTALL_DIR_MARKER));
+  } catch {
+    return;
+  }
+  throw new Error(
+    `${workDir} is an Appstrate instance directory (it has ${INSTALL_DIR_MARKER}); \`appstrate uninstall --purge\` would delete your working copies. Set workDir in config.toml to another folder.`,
+  );
 }
 
 /** Empty or absent, unless `force`: a working folder is not overwritten by accident. */

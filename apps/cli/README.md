@@ -461,8 +461,8 @@ Ownership is recorded per target **together with the root it was written under**
 The sync is one-way, and the directories it writes are overwritten on the next refresh — never edit them. The working copy is the skill's **draft** on Appstrate, and two subcommands close the loop from a local folder:
 
 ```sh
-appstrate skills pull my-skill ./my-skill        # the skill's draft (or --version 1.4.0) → a local working folder
-appstrate skills push ./my-skill                 # folder → the skill's draft, annex files included; publishes nothing
+appstrate skills pull my-skill                   # the skill's draft (or --version 1.4.0) → "~/Appstrate Packages/<org>/packages/skills/my-skill"
+appstrate skills push my-skill                   # that working copy (or any folder path) → the skill's draft, annex files included; publishes nothing
 appstrate skills sync --source draft --target claude-user   # the draft → this machine, for a real test
 appstrate skills publish my-skill                # draft → an immutable version, what every other machine syncs
 ```
@@ -476,6 +476,8 @@ appstrate skills publish my-skill                # draft → an immutable versio
 | `push --dry-run`             | List the entries and the id/version that would be sent; send nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `skills publish <skill>`     | `POST …/versions`: cuts a version from the draft. `<skill>` is `@scope/name` or a bare name under the organization's slug.                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `publish --version <semver>` | Override the draft manifest's version.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+**The work dir.** Working copies live under `~/Appstrate Packages/<org slug>/packages/<type>s/<name>` — a visible folder, like the ones sync products create, as opposed to the hidden, regenerable state under `~/.local/share/appstrate`. Not `~/Appstrate`: that is the instance directory `appstrate install` creates, and `uninstall --purge` removes it wholesale, so a work dir carrying `.appstrate/project.json` is refused. `pull` writes there when no folder is given and `push` accepts the bare skill name to find it; `workDir = "…"` in `config.toml` moves the root. `packages/skills/` leaves room for the other package types to follow the same loop.
 
 The draft import needs an instance that accepts `?draft=true` on `POST /api/packages/import`; an older instance ignores the flag and publishes a version straight away.
 
