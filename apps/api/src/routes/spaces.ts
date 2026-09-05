@@ -31,7 +31,12 @@ import {
   spaceSettingsSchema,
 } from "../services/spaces.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { listSpaceMembers, removeSpaceMember, saveSpaceMember } from "../services/space-members.ts";
+import {
+  listSpaceMembers,
+  removeSpaceMember,
+  resolveOrgMemberEmail,
+  saveSpaceMember,
+} from "../services/space-members.ts";
 import { effectivePermissions, orgPermissions as orgPermissionsFor } from "../lib/permissions.ts";
 import {
   loadSpaceMember,
@@ -60,7 +65,8 @@ import {
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
+import { listSpaceRoles } from "../services/space-roles.ts";
+import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
   assertExplicitModelExists,
@@ -140,10 +146,16 @@ export const updateSpaceSchema = z
   })
   .strict();
 
-/** `{ userId, preset_role }` or `{ userId, custom_role_id }` — never both. */
+/** Exactly one user reference and one role assignment. */
 export const addSpaceMemberSchema = exactlyOneRole(
-  z.object({ userId: z.string().min(1), ...spaceRoleAssignmentShape }),
-);
+  z.object({
+    userId: z.string().min(1).optional(),
+    email: z.string().trim().toLowerCase().pipe(z.email()).optional(),
+    ...spaceRoleAssignmentShape,
+  }),
+).refine((data) => (data.userId !== undefined) !== (data.email !== undefined), {
+  message: "Provide exactly one of userId or email",
+});
 
 export const updateSpaceMemberSchema = exactlyOneRole(z.object({ ...spaceRoleAssignmentShape }));
 
@@ -418,6 +430,32 @@ export function createSpacesRouter() {
   router.use("/:id/members", requireSpaceFromParam("id"));
   router.use("/:id/members/*", requireSpaceFromParam("id"));
 
+  router.get("/:id/roles", requireSpaceFromParam("id"), async (c) => {
+    const permissions = c.get("permissions");
+    const alternatives = [
+      "space-members:invite",
+      "space-members:change-role",
+      "space-settings:write",
+    ];
+    if (!alternatives.some((permission) => permissions?.has(permission))) {
+      reportPermissionDenial(c, alternatives.join("|"));
+      throw forbidden("Insufficient permissions: cannot assign roles in this space");
+    }
+    const roles = await listSpaceRoles(c.get("orgId"));
+    return c.json(
+      listResponse(
+        roles.filter((role) =>
+          canGrantSpaceRole(
+            permissions,
+            role.kind === "preset"
+              ? { kind: "preset", preset: role.key as SpaceRolePreset }
+              : { kind: "custom", role: { ...role, id: role.id! } },
+          ),
+        ),
+      ),
+    );
+  });
+
   // GET /api/spaces/:id/members — who actually has access, not who was added.
   // `space-members:read` opens the list; the IMPLICIT half of it is the org
   // directory seen through a space, so it needs `members:read` on top (RBAC
@@ -435,11 +473,12 @@ export function createSpacesRouter() {
     const spaceId = c.req.param("id")!;
     const data = await readJsonBody(c, addSpaceMemberSchema);
     const assignment = toAssignment(data);
+    const userId = data.userId ?? (await resolveOrgMemberEmail(orgId, data.email!));
 
     await saveSpaceMember({
       orgId,
       spaceId,
-      userId: data.userId,
+      userId,
       assignment,
       actorPermissions: c.get("permissions"),
       addedBy: c.get("user").id,
@@ -447,10 +486,10 @@ export function createSpacesRouter() {
     await recordAuditFromContext(c, {
       action: "space.member_added",
       resourceType: "space_member",
-      resourceId: `${spaceId}:${data.userId}`,
+      resourceId: `${spaceId}:${userId}`,
       after: assignment as unknown as Record<string, unknown>,
     });
-    return c.json({ object: "space_member", userId: data.userId, ...assignment }, 201);
+    return c.json({ object: "space_member", userId, ...assignment }, 201);
   });
 
   // PATCH /api/spaces/:id/members/:userId — change an existing explicit role

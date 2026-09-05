@@ -83,6 +83,7 @@ test.describe("Space management in UI", () => {
       await sidebar.openSwitcher();
       await sidebar.spaceSubmenuTrigger.click();
       await page.getByTestId(`space-item-${spaceId}`).click();
+      await expect(sidebar.dropdownMenu).toHaveCount(0);
     };
     const name = page.locator("#space-name");
     // Prime B's detail cache, then edit A. On the return to B there is no

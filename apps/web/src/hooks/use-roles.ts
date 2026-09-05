@@ -34,7 +34,7 @@ export function useRoleVocabulary(enabled = true) {
 }
 
 /**
- * Three caches move with a role or space-membership write: the roles, the
+ * Role and space-membership writes refresh the catalogs, the
  * spaces' `permissions` (which also carry the caller's own effective set, so a
  * member editing their own row sees it change), and the member lists' role
  * names.
@@ -43,6 +43,7 @@ export function useInvalidateRoles() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/roles"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
   };
@@ -121,21 +122,31 @@ export function memberRoleValue(
   return match?.id ? spaceRoleValue({ custom_role_id: match.id }) : undefined;
 }
 
-/**
- * Without `roles:read` the org's bundles are unreachable and the picker falls
- * back to the four presets, which are constants rather than rows. That fallback
- * can ADD a role but never rename one, so a member currently holding a custom
- * bundle must not be edited through it — `rolesKnown` says whether the list is
- * authoritative.
- */
-export function useSpaceRoleOptions(): {
+/** Space pickers use the caller's grantable catalog; org invitations use the org catalog. */
+export function useSpaceRoleOptions(spaceId?: string): {
   options: SpaceRoleOption[];
   roles?: RoleObject[];
   rolesKnown: boolean;
 } {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
-  const { data: roles } = useRoles(can("roles:read"));
+  const scope = useOrgOnlyScope();
+  const { data: orgRoles } = useRoles(!spaceId && can("roles:read"));
+  const { data: assignableRoles } = $api.useQuery(
+    "get",
+    "/api/spaces/{id}/roles",
+    { params: { path: { id: spaceId ?? "" }, header: scope.header } },
+    {
+      enabled:
+        scope.enabled &&
+        !!spaceId &&
+        (can("space-members:invite") ||
+          can("space-members:change-role") ||
+          can("space-settings:write")),
+      select: (e) => e.data,
+    },
+  );
+  const roles = spaceId ? assignableRoles : orgRoles;
 
   const options = useMemo<SpaceRoleOption[]>(() => {
     if (roles) {
@@ -147,11 +158,12 @@ export function useSpaceRoleOptions(): {
         label: spaceRoleLabel(r, t) ?? r.key,
       }));
     }
+    if (spaceId) return [];
     return SPACE_ROLE_PRESETS.map((preset) => ({
       value: spaceRoleValue({ preset_role: preset }),
       label: t(`settings:roles.preset.${preset}`),
     }));
-  }, [roles, t]);
+  }, [roles, spaceId, t]);
 
   return { options, roles, rolesKnown: !!roles };
 }

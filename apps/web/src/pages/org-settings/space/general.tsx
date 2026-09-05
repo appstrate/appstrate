@@ -18,8 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
-import type { SpaceRolePreset } from "../../../hooks/use-roles";
+import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { useSpaceRoleOptions, type SpaceRolePreset } from "../../../hooks/use-roles";
 import type { components } from "../../../api/client";
 import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
@@ -51,6 +51,8 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const navigate = useNavigate();
+  const { roles } = useSpaceRoleOptions(spaceId);
+  const presets = (roles ?? []).filter((role) => role.kind === "preset");
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
 
@@ -176,9 +178,14 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SPACE_ROLE_PRESETS.map((preset) => (
-                  <SelectItem key={preset} value={preset}>
-                    {t(`roles.preset.${preset}`)}
+                {!presets.some((preset) => preset.key === defaultRole) && (
+                  <SelectItem value={defaultRole} disabled>
+                    {t(`roles.preset.${defaultRole}`)}
+                  </SelectItem>
+                )}
+                {presets.map((preset) => (
+                  <SelectItem key={preset.key} value={preset.key}>
+                    {t(`roles.preset.${preset.key}`)}
                   </SelectItem>
                 ))}
               </SelectContent>

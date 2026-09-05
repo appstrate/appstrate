@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The invite form's space-assignment rules, kept out of the page so they are
+ * The space-assignment form rules, kept out of the page so they are
  * plain functions: one maps the form's draft rows to the wire shape, the other
  * two are the cross-field rules between the org role and those rows.
  *
@@ -10,13 +10,13 @@
  * cleared.
  */
 
-import { spaceRoleAssignment } from "../../hooks/use-roles";
-import type { components } from "../../api/client";
+import { spaceRoleAssignment } from "../hooks/use-roles";
+import type { components } from "../api/client";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 
 type SpaceAssignment = components["schemas"]["SpaceAssignment"];
 
-/** One row of the invite form's space section, before it becomes wire shape. */
+/** One draft row of a space-assignment field, before it becomes wire shape. */
 export interface AssignmentDraft {
   space_id: string;
   /** Encoded role option — see `spaceRoleAssignment`. */

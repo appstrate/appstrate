@@ -35,6 +35,20 @@ export type SpaceMemberWire = SpaceMember;
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
+/** Resolve a known email without exposing the organization's member directory. */
+export async function resolveOrgMemberEmail(orgId: string, email: string): Promise<string> {
+  const [member] = await db
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
+    .where(
+      and(eq(organizationMembers.orgId, orgId), eq(userTable.email, email.trim().toLowerCase())),
+    )
+    .limit(1);
+  if (!member) throw notFound("User is not a member of this organization");
+  return member.userId;
+}
+
 /**
  * Who reaches `spaceId`, not just who was added — otherwise "who has access"
  * reads as a much shorter list than it is.

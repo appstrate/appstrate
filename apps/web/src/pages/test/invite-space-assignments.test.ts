@@ -15,7 +15,7 @@ import {
   assignmentsFor,
   toSpaceAssignments,
   validateSpaceAssignments,
-} from "../org-settings/invite-assignments.ts";
+} from "../../lib/space-assignments.ts";
 
 const MESSAGE = "pick at least one space";
 const ONE = [{ space_id: "spc_1", preset_role: "operator" as const }];

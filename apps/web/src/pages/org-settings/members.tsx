@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Controller, useForm, useWatch } from "react-hook-form";
-import { Plus, Users, X } from "lucide-react";
+import { Users } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import {
   Select,
   SelectContent,
@@ -22,18 +21,14 @@ import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { useSpaces } from "../../hooks/use-spaces";
-import {
-  DEFAULT_SPACE_ROLE_VALUE,
-  spaceRoleValue,
-  useSpaceRoleOptions,
-  type SpaceRoleOption,
-} from "../../hooks/use-roles";
+import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "../../hooks/use-roles";
 import {
   assignmentsFor,
   toSpaceAssignments,
   validateSpaceAssignments,
   type AssignmentDraft,
-} from "./invite-assignments";
+} from "../../lib/space-assignments";
+import { SpaceAssignmentsField } from "../../components/space-assignments-field";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
@@ -64,104 +59,6 @@ function spaceLabel(
   const name = spaces?.find((s) => s.id === assignment.space_id)?.name ?? assignment.space_id;
   const role = roleOptions.find((o) => o.value === spaceRoleValue(assignment))?.label;
   return role ? `${name} — ${role}` : name;
-}
-
-/**
- * Per-invite space memberships.
- *
- * `guest` has no implicit access anywhere, so the API refuses an empty list for
- * it (400) and refuses a non-empty one for `admin`, who already runs every
- * space — this field mirrors both rules rather than letting the user find out
- * on submit.
- */
-function SpaceAssignmentsField({
-  value,
-  onChange,
-  spaces,
-  roleOptions,
-  disabled,
-}: {
-  value: AssignmentDraft[];
-  onChange: (next: AssignmentDraft[]) => void;
-  spaces: { id: string; name: string }[];
-  roleOptions: SpaceRoleOption[];
-  disabled: boolean;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const taken = new Set(value.map((a) => a.space_id));
-  const available = spaces.filter((s) => !taken.has(s.id));
-  const defaultRole = DEFAULT_SPACE_ROLE_VALUE;
-
-  return (
-    <div className="space-y-2">
-      <Label>{t("orgSettings.inviteSpacesLabel")}</Label>
-      <p className="text-muted-foreground text-sm">{t("orgSettings.inviteSpacesHint")}</p>
-      {value.map((assignment, index) => {
-        const space = spaces.find((s) => s.id === assignment.space_id);
-        return (
-          <div key={assignment.space_id} className="flex items-center gap-2">
-            <span className="flex-1 truncate text-sm">{space?.name ?? assignment.space_id}</span>
-            <Select
-              value={assignment.role}
-              disabled={disabled}
-              onValueChange={(role) =>
-                onChange(value.map((a, i) => (i === index ? { ...a, role } : a)))
-              }
-            >
-              <SelectTrigger
-                className="w-[160px]"
-                aria-label={t("orgSettings.inviteSpaceRoleAriaLabel", {
-                  space: space?.name ?? assignment.space_id,
-                })}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {roleOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              disabled={disabled}
-              aria-label={t("orgSettings.inviteSpaceRemove")}
-              onClick={() => onChange(value.filter((_, i) => i !== index))}
-            >
-              <X size={16} />
-            </Button>
-          </div>
-        );
-      })}
-      {available.length > 0 && (
-        <Select
-          value=""
-          disabled={disabled}
-          onValueChange={(spaceId) =>
-            onChange([...value, { space_id: spaceId, role: defaultRole }])
-          }
-        >
-          <SelectTrigger className="w-[220px]" aria-label={t("orgSettings.inviteSpaceAdd")}>
-            <span className="text-muted-foreground flex items-center gap-1.5 text-sm">
-              <Plus size={14} />
-              {t("orgSettings.inviteSpaceAdd")}
-            </span>
-          </SelectTrigger>
-          <SelectContent>
-            {available.map((space) => (
-              <SelectItem key={space.id} value={space.id}>
-                {space.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-    </div>
-  );
 }
 
 export function OrgSettingsMembersPage() {
@@ -330,6 +227,7 @@ export function OrgSettingsMembersPage() {
               showAssignments ? (
                 <div className="space-y-2">
                   <SpaceAssignmentsField
+                    hint={t("orgSettings.inviteSpacesHint")}
                     value={field.value}
                     onChange={field.onChange}
                     spaces={spaces ?? []}

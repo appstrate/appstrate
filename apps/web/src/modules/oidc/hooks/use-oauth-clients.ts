@@ -83,6 +83,7 @@ export function useCreateOAuthClient(level?: "org" | "space") {
       allowSignup?: boolean;
       /** Org-level only — role assigned on auto-join. `owner` forbidden. */
       signupRole?: AssignableOrgRole;
+      signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
     }) => {
       // The level discriminator and pinned reference come from the current
       // org/space context — call sites only provide the client fields.

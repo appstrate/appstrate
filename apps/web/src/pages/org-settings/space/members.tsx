@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Select,
@@ -69,7 +70,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const { can } = usePermissions();
   const { currentOrg } = useOrg();
   const { data: members, isLoading, error } = useSpaceMembers(spaceId);
-  const { options: roleOptions, roles, rolesKnown } = useSpaceRoleOptions();
+  const { options: roleOptions, roles, rolesKnown } = useSpaceRoleOptions(spaceId);
   const [addOpen, setAddOpen] = useState(false);
 
   const addMember = useAddSpaceMember();
@@ -159,14 +160,14 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               // For everyone else the control writes through two routes with
               // two guards: an explicit row is PATCHed (`change-role`), an
               // implicit member gets a row created (`invite`).
-              const currentValue = memberRoleValue(member.role, roles);
-              // A custom role the caller cannot resolve (no `roles:read`) has
-              // no matching option — offering the preset list would silently
-              // downgrade them on the next pick.
-              const unresolvedCustomRole = member.role?.kind === "custom" && !rolesKnown;
+              const currentValue =
+                memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`;
+              const currentOptionMissing = !roleOptions.some(
+                (option) => option.value === currentValue,
+              );
               const editable =
                 member.source !== "org_role" &&
-                !unresolvedCustomRole &&
+                rolesKnown &&
                 (member.source === "explicit" ? canChangeRole : canInvite);
               return (
                 <TableRow key={member.userId}>
@@ -197,6 +198,11 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                           <SelectValue placeholder={t("spaceMembers.noRole")} />
                         </SelectTrigger>
                         <SelectContent>
+                          {currentOptionMissing && (
+                            <SelectItem value={currentValue} disabled>
+                              {spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
+                            </SelectItem>
+                          )}
                           {roleOptions.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
                               {option.label}
@@ -230,6 +236,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       )}
 
       <AddSpaceMemberModal
+        key={spaceId}
         open={addOpen}
         onClose={() => setAddOpen(false)}
         spaceId={spaceId}
@@ -254,8 +261,11 @@ function AddSpaceMemberModal({
   excludedUserIds: Set<string>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { options: roleOptions } = useSpaceRoleOptions();
+  const { options: roleOptions } = useSpaceRoleOptions(spaceId);
   const addMember = useAddSpaceMember();
+  const { can } = usePermissions();
+  const canReadDirectory = can("members:read");
+  const [email, setEmail] = useState("");
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -264,7 +274,7 @@ function AddSpaceMemberModal({
     "get",
     "/api/orgs/{orgId}",
     { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: open && !!orgId },
+    { enabled: open && !!orgId && canReadDirectory },
   );
 
   // Owners and admins already run every space (409 `redundant_space_role`),
@@ -273,19 +283,28 @@ function AddSpaceMemberModal({
     (m) => m.role !== "owner" && m.role !== "admin" && !excludedUserIds.has(m.userId),
   );
 
-  const effectiveRole = role || DEFAULT_SPACE_ROLE_VALUE;
+  const effectiveRole =
+    role ||
+    (roleOptions.some((option) => option.value === DEFAULT_SPACE_ROLE_VALUE)
+      ? DEFAULT_SPACE_ROLE_VALUE
+      : (roleOptions[0]?.value ?? ""));
+  const hasIdentity = canReadDirectory ? !!userId : !!email.trim();
 
   const submit = () => {
-    if (!userId || !effectiveRole) return;
+    if (!hasIdentity || !effectiveRole) return;
     setFormError(null);
     addMember.mutate(
       {
         params: { path: { id: spaceId } },
-        body: { userId, ...spaceRoleAssignment(effectiveRole) },
+        body: {
+          ...(canReadDirectory ? { userId } : { email: email.trim() }),
+          ...spaceRoleAssignment(effectiveRole),
+        },
       },
       {
         onSuccess: () => {
           setUserId("");
+          setEmail("");
           setRole("");
           onClose();
         },
@@ -309,31 +328,45 @@ function AddSpaceMemberModal({
           <Button variant="ghost" onClick={onClose}>
             {t("btn.cancel", { ns: "common" })}
           </Button>
-          <Button onClick={submit} disabled={!userId || addMember.isPending}>
+          <Button onClick={submit} disabled={!hasIdentity || !effectiveRole || addMember.isPending}>
             {addMember.isPending ? <Spinner /> : t("btn.add")}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
-          <Select value={userId} onValueChange={setUserId}>
-            <SelectTrigger id="space-member-user">
-              <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              {candidates.map((m) => (
-                <SelectItem key={m.userId} value={m.userId}>
-                  {m.displayName || m.email || m.userId}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {candidates.length === 0 && (
-            <p className="text-muted-foreground text-sm">{t("spaceMembers.noCandidates")}</p>
-          )}
-        </div>
+        {canReadDirectory ? (
+          <div className="space-y-2">
+            <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
+            <Select value={userId} onValueChange={setUserId}>
+              <SelectTrigger id="space-member-user">
+                <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
+              </SelectTrigger>
+              <SelectContent>
+                {candidates.map((m) => (
+                  <SelectItem key={m.userId} value={m.userId}>
+                    {m.displayName || m.email || m.userId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {candidates.length === 0 && (
+              <p className="text-muted-foreground text-sm">{t("spaceMembers.noCandidates")}</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="space-member-email">{t("spaceMembers.emailLabel")}</Label>
+            <Input
+              id="space-member-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="email@example.com"
+            />
+            <p className="text-muted-foreground text-sm">{t("spaceMembers.emailHint")}</p>
+          </div>
+        )}
 
         <div className="space-y-2">
           <Label htmlFor="space-member-role">{t("spaceMembers.colRole")}</Label>

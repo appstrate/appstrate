@@ -518,6 +518,42 @@ export const spacesPaths = {
       },
     },
   },
+  "/api/spaces/{id}/roles": {
+    get: {
+      operationId: "listAssignableSpaceRoles",
+      tags: ["Spaces"],
+      summary: "List assignable space roles",
+      description:
+        "Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Assignable space roles",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: { $ref: "#/components/schemas/RoleObject" } },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+
   "/api/spaces/{id}/members": {
     get: {
       operationId: "listSpaceMembers",
@@ -563,7 +599,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Add a space member",
       description:
-        "Grant a user an explicit role in this space, limited to permissions held by the caller. The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
+        "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -574,9 +610,10 @@ export const spacesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["userId"],
+              allOf: [{ oneOf: [{ required: ["userId"] }, { required: ["email"] }] }],
               properties: {
                 userId: { type: "string", minLength: 1 },
+                email: { type: "string", format: "email" },
                 preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
                 custom_role_id: { type: "string", minLength: 1 },
               },
