@@ -10,7 +10,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
 import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
-import { usePermissions } from "../hooks/use-permissions";
+import { useSpaces } from "../hooks/use-spaces";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
@@ -87,14 +87,17 @@ function LibraryMatrix({
   type: PackageType;
 }) {
   const { t } = useTranslation();
-  const { can } = usePermissions();
+  const { data: accessibleSpaces } = useSpaces();
   const toggle = useTogglePackageInstall();
-  // Installing into a space is `POST /api/spaces/:spaceId/packages`, guarded
-  // by the SPACE-level string for the package TYPE — not by `spaces:write`,
-  // which is the org-level catalog verb and would hide the checkboxes from
-  // every space admin. One gate per tab is still correct on this cross-space
-  // grid: a tab shows one type, and `can` reads the current space's set.
-  const canInstall = can(PACKAGE_PERMISSIONS[type].install);
+  const permissionsBySpace = new Map(accessibleSpaces?.map((s) => [s.id, s.permissions]));
+  const installPermission = PACKAGE_PERMISSIONS[type].install;
+  const uninstallPermission = type === "integration" ? "integrations:uninstall" : installPermission;
+  // Every column targets a different space. Installation state chooses the
+  // operation; the target space's effective set decides whether it is allowed.
+  const canToggle = (spaceId: string, installed: boolean) =>
+    permissionsBySpace
+      .get(spaceId)
+      ?.includes(installed ? uninstallPermission : installPermission) ?? false;
   // Agents/skills treat a "system" package as globally available (locked on,
   // can't toggle). Integrations are different: they must be activated per
   // space even when system-sourced, so their system rows stay toggleable.
@@ -106,7 +109,7 @@ function LibraryMatrix({
 
   const handleToggle = (pkg: LibraryPackageItem, spaceId: string, installed: boolean) => {
     if (lockSystem && pkg.source === "system") return;
-    if (!canInstall) return;
+    if (!canToggle(spaceId, installed)) return;
     toggle.mutate(
       { spaceId, packageId: pkg.id, installed },
       {
@@ -158,13 +161,14 @@ function LibraryMatrix({
             </TableCell>
             {spaces.map((space) => {
               const installed = pkg.installed_in.includes(space.id);
-              const locked = (lockSystem && pkg.source === "system") || !canInstall;
+              const systemAlwaysActive = lockSystem && pkg.source === "system";
+              const disabled = systemAlwaysActive || !canToggle(space.id, installed);
               return (
                 <TableCell key={space.id} className="text-center">
                   <Checkbox
-                    checked={locked || installed}
-                    disabled={locked}
-                    title={locked ? t("library.systemAlwaysActive") : undefined}
+                    checked={systemAlwaysActive || installed}
+                    disabled={disabled}
+                    title={systemAlwaysActive ? t("library.systemAlwaysActive") : undefined}
                     onCheckedChange={() => handleToggle(pkg, space.id, installed)}
                   />
                 </TableCell>

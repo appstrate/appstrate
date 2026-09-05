@@ -53,8 +53,11 @@ export function sessionsRefetchInterval(query: {
     : SAFETY_NET_REFETCH_MS;
 }
 
-export function useSessions() {
-  const getHeaders = useChatHeaders();
+export function useSessions(headers?: GetHeaders) {
+  const contextHeaders = useChatHeaders();
+  // ChatPage owns the provider below its render, so its own observer receives
+  // the host headers directly. Descendants read the same headers from context.
+  const getHeaders = headers ?? contextHeaders;
   const spaceId = spaceIdFromHeaders(getHeaders);
   return useQuery({
     queryKey: sessionsQueryKey(spaceId),

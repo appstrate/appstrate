@@ -44,7 +44,7 @@ export function OrgSettingsSpaceGeneralPage() {
   if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!space) return <ErrorState />;
 
-  return <GeneralForm spaceId={spaceId} space={space} />;
+  return <GeneralForm key={spaceId} spaceId={spaceId} space={space} />;
 }
 
 function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }) {

@@ -218,7 +218,7 @@ export function ChatPage({
   // server-computed (read-state lives in `chat_sessions`, shared across
   // devices); the list stays fresh via the `chat_session_update` SSE signal.
   // There is no toast — the pill is the only notification.
-  const sessions = useSessions();
+  const sessions = useSessions(getHeaders);
   // The host's current space, off the same headers every request carries. Every
   // chat query is keyed by it (see `sessions.ts`).
   const pageSpaceId = spaceIdFromHeaders(getHeaders);

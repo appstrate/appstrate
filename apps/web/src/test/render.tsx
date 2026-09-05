@@ -34,11 +34,14 @@ import type { FileDto } from "../hooks/use-files.ts";
  * Pass `queryClient` when the test seeds the cache (`qc.setQueryData(...)`)
  * before rendering.
  */
-export function render(node: ReactElement, options: { queryClient?: QueryClient } = {}): string {
+export function render(
+  node: ReactElement,
+  options: { queryClient?: QueryClient; initialEntries?: string[] } = {},
+): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={options.queryClient ?? new QueryClient()}>
       <I18nextProvider i18n={i18n}>
-        <MemoryRouter>{node}</MemoryRouter>
+        <MemoryRouter initialEntries={options.initialEntries}>{node}</MemoryRouter>
       </I18nextProvider>
     </QueryClientProvider>,
   )
