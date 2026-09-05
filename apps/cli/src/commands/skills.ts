@@ -202,7 +202,7 @@ export async function skillsSyncCommand(
  * plus its pinned space. Order is preserved: it decides which space a package
  * installed in several of them is read from.
  */
-async function resolveSpaces(
+export async function resolveSpaces(
   profileName: string,
   profile: Profile,
   requested: string[] | undefined,

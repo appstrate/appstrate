@@ -52,6 +52,7 @@ import {
 } from "./commands/space.ts";
 import { skillsSyncCommand } from "./commands/skills.ts";
 import { skillsPublishCommand, skillsPushCommand } from "./commands/skills-push.ts";
+import { skillsPullCommand } from "./commands/skills-pull.ts";
 import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
@@ -594,6 +595,26 @@ skillsGroup
       dryRun: opts.dryRun,
     });
   });
+
+skillsGroup
+  .command("pull <skill> [dir]")
+  .description(
+    "Bring a skill's files into a local working folder: its draft by default, or a published version with --version. Records the draft's lock so the next `skills push` from that folder needs no --force.",
+  )
+  .option("--version <semver|latest>", "Pull this published version instead of the draft.")
+  .option("--force", "Write into a folder that already has files, replacing same-named ones.")
+  .action(
+    async (skill: string, dir: string | undefined, opts: { version?: string; force?: boolean }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await skillsPullCommand({
+        profile: globalOpts.profile,
+        skill,
+        dir,
+        version: opts.version,
+        force: opts.force,
+      });
+    },
+  );
 
 skillsGroup
   .command("publish <skill>")

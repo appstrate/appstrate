@@ -298,10 +298,15 @@ export function createSkillServer(
       });
     }
 
-    const latest = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)\/versions\/latest$/);
+    const latest = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)\/versions\/([^/]+)$/);
     if (latest) {
       const found = find(latest[1]!, latest[2]!);
-      if (!found || found.fixture.unpublished) {
+      const wantedVersion = decodeURIComponent(latest[3]!);
+      if (
+        !found ||
+        found.fixture.unpublished ||
+        (wantedVersion !== "latest" && wantedVersion !== found.version)
+      ) {
         return json({ code: "not_found", message: "Version not found" }, 404);
       }
       if (found.fixture.resolveError) {

@@ -269,6 +269,11 @@ async function resolveManifest(
     if (typeof manifest.version !== "string") {
       throw new Error(`${MANIFEST}: \`version\` is required.`);
     }
+    // A folder that came from `skills pull` carries the published version's
+    // manifest verbatim; publishing it again as-is would be refused. Move to
+    // the next patch so push → publish works without editing the manifest.
+    const latest = await latestPublished(profileName, manifest.name);
+    if (latest !== null && manifest.version === latest) manifest.version = bumpPatch(latest);
     return manifest;
   }
 
@@ -289,7 +294,7 @@ export function getPushLocksPath(profileName: string): string {
   return join(getDataDir(), "skills-push", `${profileName}.json`);
 }
 
-async function readPushLocks(profileName: string): Promise<Record<string, number>> {
+export async function readPushLocks(profileName: string): Promise<Record<string, number>> {
   try {
     const parsed: unknown = JSON.parse(await readFile(getPushLocksPath(profileName), "utf-8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
@@ -304,7 +309,10 @@ async function readPushLocks(profileName: string): Promise<Record<string, number
   }
 }
 
-async function writePushLocks(profileName: string, locks: Record<string, number>): Promise<void> {
+export async function writePushLocks(
+  profileName: string,
+  locks: Record<string, number>,
+): Promise<void> {
   const path = getPushLocksPath(profileName);
   await mkdir(join(path, ".."), { recursive: true, mode: 0o700 });
   await writeFileAtomic(path, `${JSON.stringify(locks, null, 2)}\n`, { mode: 0o600 });
@@ -329,16 +337,22 @@ export function frontmatterVersion(skillMd: string): string | undefined {
 
 /** Patch bump over the latest published version; `1.0.0` for a new skill. */
 async function nextVersion(profileName: string, packageId: string): Promise<string> {
+  const latest = await latestPublished(profileName, packageId);
+  return latest === null ? "1.0.0" : bumpPatch(latest);
+}
+
+/** The latest published version, or `null` when nothing was ever published. */
+async function latestPublished(profileName: string, packageId: string): Promise<string | null> {
   try {
     const latest = await apiFetch<{ version?: unknown }>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
     );
-    if (typeof latest.version === "string") return bumpPatch(latest.version);
+    return typeof latest.version === "string" ? latest.version : null;
   } catch (err) {
-    if (!(err instanceof ApiError && err.status === 404)) throw err;
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
   }
-  return "1.0.0";
 }
 
 export function bumpPatch(version: string): string {
