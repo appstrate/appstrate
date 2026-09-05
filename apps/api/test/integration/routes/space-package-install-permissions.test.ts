@@ -46,6 +46,10 @@ describe("space package install/config/uninstall — permission is per package t
     visits = await seedSpace({ orgId: owner.orgId, name: "Visits" });
     await seedPackage({ orgId: owner.orgId, id: AGENT, type: "agent" });
     await seedPackage({ orgId: owner.orgId, id: SKILL, type: "skill" });
+    // A local source must be readable before it can be copied to another space.
+    // Both callers can read this open space; only their target install grants differ.
+    await seedInstalledPackage(owner.defaultSpaceId, AGENT);
+    await seedInstalledPackage(owner.defaultSpaceId, SKILL);
 
     const user = await createTestUser();
     await addOrgMember(owner.orgId, user.id, "member");
@@ -77,8 +81,8 @@ describe("space package install/config/uninstall — permission is per package t
 
   it("selects the resource by package type, not one string for all of them", async () => {
     // No preset separates the two — `builder` and above hold both — so the
-    // discriminating caller is a custom role carrying `skills:write` and
-    // nothing else. Same caller, same space, two package types, two answers.
+    // discriminating caller can read both types but only write skills.
+    // Same caller, same space, two package types, two answers.
     const skillsOnly = await seedSpaceRole({
       orgId: owner.orgId,
       key: "skills-only",
