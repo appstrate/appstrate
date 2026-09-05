@@ -55,3 +55,8 @@ export function toAssignment(data: {
     ? { preset_role: data.preset_role }
     : { custom_role_id: data.custom_role_id! };
 }
+
+/** A deferred grant names its space alongside the shared role reference. */
+export const spaceAssignmentSchema = exactlyOneRole(
+  z.object({ space_id: z.string().min(1), ...spaceRoleAssignmentShape }),
+);

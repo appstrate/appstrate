@@ -7593,6 +7593,13 @@
           "notNull": true,
           "default": false
         },
+        "signup_space_assignments": {
+          "name": "signup_space_assignments",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
         "signup_role": {
           "name": "signup_role",
           "type": "text",

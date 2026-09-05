@@ -23,6 +23,7 @@ import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
 import { notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "../../lib/request-body.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
@@ -51,6 +52,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import {
   OrgSignupClosedError,
+  OrgSignupConfigurationError,
   resolveOrCreateOrgMembership,
 } from "./services/orgmember-mapping.ts";
 import {
@@ -149,6 +151,7 @@ const createOrgClientSchema = z
     isFirstParty: z.boolean().optional(),
     allowSignup: z.boolean().optional(),
     signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
+    signupSpaceAssignments: z.array(spaceAssignmentSchema).optional(),
   })
   .strict();
 
@@ -168,6 +171,7 @@ const createSpaceClientSchema = z
     // Passed through to the service so we can reject it with a clear 400
     // (signupRole is only meaningful on org-level clients).
     signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
+    signupSpaceAssignments: z.array(spaceAssignmentSchema).optional(),
   })
   .strict();
 
@@ -219,6 +223,7 @@ export const updateOAuthClientSchema = z
     isFirstParty: z.boolean().optional(),
     allowSignup: z.boolean().optional(),
     signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
+    signupSpaceAssignments: z.array(spaceAssignmentSchema).optional(),
   })
   .strict();
 
@@ -1099,9 +1104,13 @@ export function createOidcRouter() {
             {
               allowSignup: ctx.client.allowSignup,
               signupRole: ctx.client.signupRole,
+              signupSpaceAssignments: ctx.client.signupSpaceAssignments,
             },
           );
         } catch (err) {
+          if (err instanceof OrgSignupConfigurationError) {
+            return renderError(err.message, 403, email);
+          }
           if (err instanceof OrgSignupClosedError) {
             return renderError(
               "Ce compte n'est pas membre de l'organisation et l'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur.",
@@ -1448,9 +1457,13 @@ export function createOidcRouter() {
             {
               allowSignup: ctx.client.allowSignup,
               signupRole: ctx.client.signupRole,
+              signupSpaceAssignments: ctx.client.signupSpaceAssignments,
             },
           );
         } catch (err) {
+          if (err instanceof OrgSignupConfigurationError) {
+            return renderRegError(err.message, 403, email, name);
+          }
           if (err instanceof OrgSignupClosedError) {
             // Should not happen — the GET + POST guards checked already.
             logger.warn("oidc: signup closed after signUpEmail succeeded", {

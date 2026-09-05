@@ -12,42 +12,36 @@ import { getOrgMember } from "./organizations.ts";
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * Validate the space assignments an invite body carries, at invite time.
- *
- * The two role rules are refusals about the ROLE, not about the list: an
- * `admin` never holds a `space_members` row (the space-members route answers
- * 409 for the same reason), and a `guest` has no implicit reach anywhere, so
- * inviting one with no space is inviting someone who can see nothing.
- *
- * The existence checks are what stop an invitation from carrying another org's
- * space or role id — the FK would accept the latter and the accept path has no
- * org to check it against by then.
- *
- * @throws 400 on either role rule; 404 naming the space or role that is not
- *   this org's.
+ * Validate deferred grants before saving an invitation or OAuth signup policy.
+ * Admins need no explicit grants; guests need at least one. All referenced
+ * spaces and custom roles must belong to the organization.
  */
-export async function assertSpaceAssignmentsValid(params: {
-  orgId: string;
-  role: AssignableOrgRole;
-  assignments: ReadonlyArray<SpaceAssignment>;
-}): Promise<void> {
-  const { orgId, role, assignments } = params;
+export async function assertSpaceAssignmentsValid(
+  params: {
+    orgId: string;
+    role: AssignableOrgRole;
+    assignments: ReadonlyArray<SpaceAssignment>;
+    param?: string;
+  },
+  tx: DbOrTx = db,
+): Promise<void> {
+  const { orgId, role, assignments, param = "space_assignments" } = params;
   if (role === "admin" && assignments.length > 0) {
     throw invalidRequest(
-      "Admins already run every space in the organization; space_assignments must be empty",
-      "space_assignments",
+      `Admins already run every space in the organization; ${param} must be empty`,
+      param,
     );
   }
   if (role === "guest" && assignments.length === 0) {
     throw invalidRequest(
-      "A guest has no implicit space access; space_assignments must name at least one space",
-      "space_assignments",
+      `A guest has no implicit space access; ${param} must name at least one space`,
+      param,
     );
   }
   if (assignments.length === 0) return;
 
   const spaceIds = [...new Set(assignments.map((a) => a.space_id))];
-  const liveSpaces = await db
+  const liveSpaces = await tx
     .select({ id: spaces.id })
     .from(spaces)
     .where(and(eq(spaces.orgId, orgId), inArray(spaces.id, spaceIds)));
@@ -59,7 +53,7 @@ export async function assertSpaceAssignmentsValid(params: {
     ...new Set(assignments.map((a) => a.custom_role_id).filter((id): id is string => Boolean(id))),
   ];
   if (roleIds.length === 0) return;
-  const liveRoles = await db
+  const liveRoles = await tx
     .select({ id: spaceRoles.id })
     .from(spaceRoles)
     .where(and(eq(spaceRoles.orgId, orgId), inArray(spaceRoles.id, roleIds)));
@@ -69,12 +63,9 @@ export async function assertSpaceAssignmentsValid(params: {
 }
 
 /**
- * Apply an invitation's assignments inside the accept transaction, returning
- * those actually written for the audit payload.
- *
- * A space or custom role deleted between invite and accept is SKIPPED, not
- * fatal: refusing would strand the invitee outside the org with a token already
- * spent. The warn line is the record that a granted role was not applied.
+ * Apply deferred grants inside the caller's membership transaction, returning
+ * the assignments actually written. Invitations skip deleted targets; OAuth
+ * signup rejects stale policy so a new member never receives partial access.
  */
 export async function applySpaceAssignments(
   tx: DbOrTx,
@@ -83,13 +74,13 @@ export async function applySpaceAssignments(
     userId: string;
     addedBy: string | null;
     assignments: ReadonlyArray<SpaceAssignment>;
+    onMissing: "skip" | "reject";
   },
 ): Promise<SpaceAssignment[]> {
   const { orgId, userId, addedBy, assignments } = params;
   if (assignments.length === 0) return [];
 
-  // An idempotent accept keeps the existing membership row, so the invitation's
-  // role is not necessarily the role the user ends up with.
+  // An existing member may have been promoted since the grants were configured.
   const orgRole = (await getOrgMember(orgId, userId, tx))?.role;
   if (orgRole === "owner" || orgRole === "admin") {
     logger.warn("Invitation space assignments skipped for an org admin", {
@@ -132,6 +123,9 @@ export async function applySpaceAssignments(
         ? "custom role"
         : null;
     if (gone) {
+      if (params.onMissing === "reject") {
+        throw notFound(`Configured space assignment references a ${gone} that no longer exists`);
+      }
       logger.warn(`Invitation space assignment skipped — ${gone} no longer exists`, {
         orgId,
         userId,

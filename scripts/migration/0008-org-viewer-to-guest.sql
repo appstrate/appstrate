@@ -63,6 +63,8 @@ SET LOCAL statement_timeout = '300s';
 -- failed run leaves nothing behind and a re-run starts clean.
 CREATE TEMP TABLE mig0008_viewers ON COMMIT DROP AS
   SELECT org_id, user_id FROM org_members WHERE role = 'viewer';
+CREATE TEMP TABLE mig0008_invitations ON COMMIT DROP AS
+  SELECT id, org_id FROM org_invitations WHERE role = 'viewer' AND status = 'pending';
 
 DO $$
 DECLARE
@@ -106,11 +108,13 @@ UPDATE org_members SET role = 'guest' WHERE role = 'viewer';
 
 -- ═══ 3. Pending invitations ═════════════════════════════════════════════════
 --
--- A pending viewer invite lands as a guest with NO space, because there is no
--- faithful mapping: the invitee has no membership rows to carry over and
--- guessing a set of spaces for them is worse than nothing. The inviter re-adds
--- them; the audit log names the inviter.
-UPDATE org_invitations SET role = 'guest' WHERE role = 'viewer' AND status = 'pending';
+-- Freeze the same space reach for pending invitees. Existing explicit choices
+-- win; spaces created after this migration never join the snapshot.
+UPDATE org_invitations i SET space_assignments = i.space_assignments || COALESCE((
+  SELECT jsonb_agg(jsonb_build_object('space_id', s.id, 'preset_role', 'viewer') ORDER BY s.id)
+  FROM spaces s WHERE s.org_id = i.org_id
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(i.space_assignments) a WHERE a->>'space_id' = s.id)
+), '[]'::jsonb), role = 'guest' WHERE role = 'viewer' AND status = 'pending';
 
 -- ═══ 4. AFTER — and it must discriminate ════════════════════════════════════
 --
@@ -133,6 +137,7 @@ DECLARE
   v_covered     bigint;
   v_uncovered   bigint;
   v_viewer_rows bigint;
+  v_missing_invite_assignments bigint;
 BEGIN
   SELECT count(*) INTO v_viewers FROM org_members WHERE role = 'viewer';
   SELECT count(*) INTO v_pending
@@ -154,6 +159,14 @@ BEGIN
   END IF;
   IF v_uncovered <> 0 THEN
     RAISE EXCEPTION '% of % (user, space) pair(s) got no space_members row — every former viewer would silently lose the spaces they could read — aborting', v_uncovered, v_expected;
+  END IF;
+  SELECT count(*) INTO v_missing_invite_assignments
+    FROM mig0008_invitations original
+    JOIN spaces s ON s.org_id = original.org_id
+    JOIN org_invitations i ON i.id = original.id
+    WHERE NOT i.space_assignments @> jsonb_build_array(jsonb_build_object('space_id', s.id));
+  IF v_missing_invite_assignments <> 0 THEN
+    RAISE EXCEPTION '% pending invitation space assignment(s) missing — aborting', v_missing_invite_assignments;
   END IF;
 END $$;
 

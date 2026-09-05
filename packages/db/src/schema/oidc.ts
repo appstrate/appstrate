@@ -25,6 +25,7 @@
 
 import {
   pgTable,
+  jsonb,
   text,
   integer,
   timestamp,
@@ -36,6 +37,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
 import { user, session } from "./auth.ts";
 import { endUsers, spaces } from "./spaces.ts";
 import { organizations } from "./organizations.ts";
@@ -119,6 +121,11 @@ export const oauthClient = pgTable(
       onDelete: "cascade",
     }),
     allowSignup: boolean("allow_signup").default(false).notNull(),
+    /** Explicit space grants applied only on the first organization signup. */
+    signupSpaceAssignments: jsonb("signup_space_assignments")
+      .$type<ReadonlyArray<SpaceAssignment>>()
+      .notNull()
+      .default([]),
     /**
      * Org role assigned on OIDC auto-provisioning — it writes straight into
      * `org_members.role`, so it shares the org-role vocabulary. The CHECK below

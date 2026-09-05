@@ -22,8 +22,8 @@
  *      won), re-fetch via step 1. The returning row is authoritative.
  *
  * The OAuth client itself stores the mutable policy (`allow_signup`,
- * `signup_role`) in dedicated SQL columns — NOT in the frozen `metadata` JSON
- * column that `@better-auth/oauth-provider` reads at client-registration
+ * `signup_role`, `signup_space_assignments`) in dedicated SQL columns — NOT
+ * in the frozen `metadata` JSON column that `@better-auth/oauth-provider` reads at client-registration
  * time. This lets admins toggle the policy without touching immutable client
  * state; the short-TTL cache in `oauth-admin.ts::getClientCached` propagates
  * changes within 30s (invalidated synchronously on `updateClient`).
@@ -31,13 +31,14 @@
  * ## Race-safety invariant (matches `resolveOrCreateEndUser`)
  *
  * Two concurrent token-mint closures for the same `(authUser.id, orgId)` are
- * race-safe because each step is individually atomic:
+ * race-safe because membership and configured space grants share a transaction:
  *
  *   1. `findMembership` — single SELECT on the PK `(org_id, user_id)`.
  *      Idempotent.
  *   2. Policy check — pure function, no I/O.
  *   3. `INSERT ... ON CONFLICT DO NOTHING RETURNING role` — only one caller
- *      wins; the loser re-runs step 1 and sees the winner's committed row.
+ *      wins and applies grants before committing; the loser re-runs step 1
+ *      and sees the winner's committed row. Invalid grants roll back both.
  *
  * ## Double-call safety
  *
@@ -60,6 +61,12 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import type { OrgRole } from "../../../types/index.ts";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
+import { ApiError } from "../../../lib/errors.ts";
+import {
+  applySpaceAssignments,
+  assertSpaceAssignmentsValid,
+} from "../../../services/space-assignments.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { getClientCached } from "./oauth-admin.ts";
 
@@ -68,6 +75,7 @@ interface OrgSignupPolicy {
   allowSignup: boolean;
   /** Role assigned on auto-join. `owner` is disallowed by the schema. */
   signupRole: Exclude<OrgRole, "owner">;
+  signupSpaceAssignments?: ReadonlyArray<SpaceAssignment>;
 }
 
 interface ResolvedOrgMembership {
@@ -98,6 +106,16 @@ export class OrgSignupClosedError extends Error {
   }
 }
 
+/** A stale client's grants need administrator repair before creating members. */
+export class OrgSignupConfigurationError extends Error {
+  constructor(detail: string) {
+    super(
+      `Invalid signup space assignments: ${detail}. Contact your administrator to update the OAuth client's signup configuration.`,
+    );
+    this.name = "OrgSignupConfigurationError";
+  }
+}
+
 /**
  * Resolve (or create) the org membership for an authenticated Better Auth
  * identity against a specific organization, subject to the provided signup
@@ -120,17 +138,38 @@ export async function resolveOrCreateOrgMembership(
 
   // Step 3: auto-provision. ON CONFLICT DO NOTHING handles the race between
   // two concurrent logins; if we lose, re-read via step 1.
-  const [inserted] = await db
-    .insert(organizationMembers)
-    .values({
-      orgId,
-      userId: authUser.id,
-      role: policy.signupRole,
-    })
-    .onConflictDoNothing({
-      target: [organizationMembers.orgId, organizationMembers.userId],
-    })
-    .returning({ role: organizationMembers.role });
+  const inserted = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(organizationMembers)
+      .values({
+        orgId,
+        userId: authUser.id,
+        role: policy.signupRole,
+      })
+      .onConflictDoNothing({
+        target: [organizationMembers.orgId, organizationMembers.userId],
+      })
+      .returning({ role: organizationMembers.role });
+    if (!created) return null;
+    const assignments = policy.signupSpaceAssignments ?? [];
+    try {
+      await assertSpaceAssignmentsValid(
+        { orgId, role: policy.signupRole, assignments, param: "signupSpaceAssignments" },
+        tx,
+      );
+      await applySpaceAssignments(tx, {
+        orgId,
+        userId: authUser.id,
+        addedBy: null,
+        assignments,
+        onMissing: "reject",
+      });
+    } catch (error) {
+      if (error instanceof ApiError) throw new OrgSignupConfigurationError(error.message);
+      throw error;
+    }
+    return created;
+  });
 
   if (inserted) {
     logger.info("oidc: auto-joined user to organization", {
@@ -197,6 +236,7 @@ interface ClientSignupPolicy {
   /** Set only when `level === "space"`. */
   spaceId: string | null;
   signupRole: Exclude<OrgRole, "owner">;
+  signupSpaceAssignments: ReadonlyArray<SpaceAssignment>;
 }
 
 export async function loadClientSignupPolicy(clientId: string): Promise<ClientSignupPolicy | null> {
@@ -209,5 +249,6 @@ export async function loadClientSignupPolicy(clientId: string): Promise<ClientSi
     orgId: client.level === "org" ? (client.referencedOrgId ?? null) : null,
     spaceId: client.level === "space" ? (client.referencedSpaceId ?? null) : null,
     signupRole: client.signupRole,
+    signupSpaceAssignments: client.signupSpaceAssignments,
   };
 }

@@ -183,7 +183,12 @@ CREATE INDEX IF NOT EXISTS "idx_chat_sessions_space_user" ON "chat_sessions" USI
 -- shares the org-role vocabulary. The rewrite is the precondition of the
 -- narrowed CHECK below, which Postgres validates against every existing row as
 -- it adds it.
-UPDATE oauth_clients SET signup_role = 'guest' WHERE signup_role = 'viewer';--> statement-breakpoint
+ALTER TABLE "oauth_clients" ADD COLUMN IF NOT EXISTS "signup_space_assignments" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+UPDATE oauth_clients c SET signup_space_assignments = c.signup_space_assignments || COALESCE((
+  SELECT jsonb_agg(jsonb_build_object('space_id', s.id, 'preset_role', 'viewer') ORDER BY s.id)
+  FROM spaces s WHERE s.org_id = c.referenced_org_id
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(c.signup_space_assignments) a WHERE a->>'space_id' = s.id)
+), '[]'::jsonb), signup_role = 'guest' WHERE signup_role = 'viewer';--> statement-breakpoint
 ALTER TABLE "oauth_clients" DROP CONSTRAINT IF EXISTS "oauth_clients_signup_role_check";--> statement-breakpoint
 ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_signup_role_check" CHECK (signup_role IN ('admin', 'member', 'guest'));--> statement-breakpoint
 SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint

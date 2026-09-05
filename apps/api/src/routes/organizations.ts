@@ -5,7 +5,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { exactlyOneRole, spaceRoleAssignmentShape } from "../lib/space-role-assignment.ts";
+import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgPermissionsForCaller } from "../lib/principal-permissions.ts";
 import {
   createOrganization,
@@ -69,16 +69,6 @@ export const updateOrgSchema = z
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
   })
   .strict();
-
-/**
- * One space membership an invitation applies on accept: a space plus exactly
- * one role reference. Same either/or shape (and same message) as the
- * `/api/spaces/:id/members` bodies — the two write paths differ only in when
- * the row lands.
- */
-const spaceAssignmentSchema = exactlyOneRole(
-  z.object({ space_id: z.string().min(1), ...spaceRoleAssignmentShape }),
-);
 
 export const addMemberSchema = z
   .object({

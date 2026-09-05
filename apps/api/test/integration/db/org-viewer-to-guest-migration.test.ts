@@ -17,6 +17,8 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
+import { createTestUser } from "../../helpers/auth.ts";
+import { getTestApp } from "../../helpers/app.ts";
 
 const SCRIPT = new URL(
   "../../../../../scripts/migration/0008-org-viewer-to-guest.sql",
@@ -135,6 +137,16 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     expect(await count(`SELECT count(*)::int AS n FROM org_members WHERE role = 'guest'`)).toBe(2);
     expect(await count(`SELECT count(*)::int AS n FROM org_members WHERE role = 'member'`)).toBe(1);
 
+    const invitation = toRows<{ assignments: unknown }>(
+      await db.execute(sql`
+      SELECT space_assignments AS assignments FROM org_invitations WHERE id = 'inv_0008_pending'
+    `),
+    )[0]!;
+    expect(invitation.assignments).toEqual([
+      { space_id: SPACE_DEFAULT, preset_role: "viewer" },
+      { space_id: SPACE_OTHER, preset_role: "viewer" },
+    ]);
+
     // 3. A PENDING viewer invitation lands as a guest; a non-pending one is
     //    left alone (it can never be accepted, and rewriting it would edit
     //    history).
@@ -169,6 +181,84 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     expect(await count(`SELECT count(*)::int AS n FROM org_members WHERE role = 'guest'`)).toBe(
       after.guests,
     );
+  });
+
+  it("a migrated pending viewer invitation accepts with its original space reach", async () => {
+    await execScript(await Bun.file(SCRIPT).text());
+    const invitee = await createTestUser({ email: "p-0008@example.com" });
+    const app = getTestApp();
+    const response = await app.request("/invite/tok_0008_pending/accept", {
+      method: "POST",
+      headers: { Cookie: invitee.cookie },
+    });
+    expect(response.status).toBe(200);
+    const rows = toRows<{ space_id: string; preset_role: string }>(
+      await db.execute(sql`
+      SELECT space_id, preset_role FROM space_members WHERE user_id = ${invitee.id} ORDER BY space_id
+    `),
+    );
+    expect(rows).toEqual([
+      { space_id: SPACE_DEFAULT, preset_role: "viewer" },
+      { space_id: SPACE_OTHER, preset_role: "viewer" },
+    ]);
+  });
+
+  it("0056 snapshots legacy OAuth viewer signups and never adds later spaces on replay", async () => {
+    await execScript(`
+      ALTER TABLE oauth_clients DROP CONSTRAINT oauth_clients_signup_role_check;
+      INSERT INTO oauth_clients (id, client_id, name, level, referenced_org_id, signup_role, redirect_uris)
+      VALUES ('oac_0008','oauth_0008','Legacy viewer','org','${ORG}','viewer','{}');
+    `);
+    const migration = await Bun.file(
+      new URL("../../../../../packages/db/drizzle/0056_space_roles.sql", import.meta.url),
+    ).text();
+    const section = migration.slice(migration.indexOf("-- ═══ G."));
+    await execScript(`BEGIN; ${section} COMMIT;`);
+    const policy = async () =>
+      toRows<{ role: string; assignments: unknown }>(
+        await db.execute(sql`
+      SELECT signup_role AS role, signup_space_assignments AS assignments FROM oauth_clients WHERE id = 'oac_0008'
+    `),
+      )[0]!;
+    const expected = {
+      role: "guest",
+      assignments: [
+        { space_id: SPACE_DEFAULT, preset_role: "viewer" },
+        { space_id: SPACE_OTHER, preset_role: "viewer" },
+      ],
+    };
+    expect(await policy()).toEqual(expected);
+    await execScript(
+      `INSERT INTO spaces (id, org_id, name) VALUES ('spc_d0080000-0000-4000-8000-000000000003','${ORG}','Later')`,
+    );
+    await execScript(`BEGIN; ${section} COMMIT;`);
+    expect(await policy()).toEqual(expected);
+  });
+
+  it("snapshots pending invitations without changing explicit choices or widening on rerun", async () => {
+    await execScript(
+      `UPDATE org_invitations SET space_assignments = '[{"space_id":"${SPACE_OTHER}","preset_role":"builder"}]'::jsonb WHERE id = 'inv_0008_pending'`,
+    );
+    const source = await Bun.file(SCRIPT).text();
+    await execScript(source);
+    const snapshot = async () =>
+      toRows<{ assignments: unknown }>(
+        await db.execute(sql`
+      SELECT space_assignments AS assignments FROM org_invitations WHERE id = 'inv_0008_pending'
+    `),
+      )[0]!.assignments;
+    expect(await snapshot()).toEqual([
+      { space_id: SPACE_OTHER, preset_role: "builder" },
+      { space_id: SPACE_DEFAULT, preset_role: "viewer" },
+    ]);
+    await execScript(
+      `INSERT INTO spaces (id, org_id, name) VALUES ('spc_d0080000-0000-4000-8000-000000000003','${ORG}','Later')`,
+    );
+    await execScript(source);
+    expect(await snapshot()).toEqual([
+      { space_id: SPACE_OTHER, preset_role: "builder" },
+      { space_id: SPACE_DEFAULT, preset_role: "viewer" },
+    ]);
   });
 
   it("leaves a hand-added row alone rather than overwriting its role", async () => {

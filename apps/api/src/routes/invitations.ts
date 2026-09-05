@@ -140,6 +140,7 @@ router.post("/:token/accept", async (c) => {
       userId: session.user.id,
       addedBy: invitation.invitedBy,
       assignments: invitation.spaceAssignments,
+      onMissing: "skip",
     });
   });
 
