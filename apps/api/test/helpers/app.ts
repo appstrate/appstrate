@@ -53,6 +53,7 @@ import { createRunsRouter } from "../../src/routes/runs.ts";
 import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
+import { createLibraryRouter } from "../../src/routes/library.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
@@ -277,6 +278,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
 
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);
+  app.route("/api/library", createLibraryRouter());
   app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());

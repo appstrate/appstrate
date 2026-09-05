@@ -26,7 +26,7 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedInstalledPackage, seedSpace } from "../../helpers/seed.ts";
 import { setPlatformApp } from "../../../src/lib/platform-app.ts";
 import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
@@ -518,7 +518,38 @@ describe("mcp file-backed package workflow", () => {
     resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-    headers = await apiKeyHeaders(ctx, ["agents:write"]);
+    headers = await apiKeyHeaders(ctx, ["mcp-servers:write"]);
+  });
+
+  it("hides private catalog conflicts and rejects importing a package confined to another space", async () => {
+    const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
+    await seedPackage({ id: "@mcppkgdoc/file-server", orgId: ctx.orgId, type: "mcp-server" });
+    await seedInstalledPackage(hidden.id, "@mcppkgdoc/file-server");
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "hidden.afps",
+      "application/zip",
+      packageArchive(true),
+    );
+    for (const name of ["validate_package_file", "import_package_file"]) {
+      const { envelope } = await rpc(headers, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: { file_uri: `appfile://${docId}` } },
+      });
+      const result = toolData(envelope);
+      expect(result.isError).toBe(true);
+      expect(String(result.data.error)).toContain("not found");
+      expect(result.data.conflicts).toBeUndefined();
+    }
+    const rows = await db
+      .select()
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, "@mcppkgdoc/file-server"));
+    expect(rows.map((row) => row.spaceId)).toEqual([hidden.id]);
   });
 
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {

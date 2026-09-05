@@ -225,11 +225,12 @@ router.post("/", async (c) => {
 
 // OrgDetail serializer — shared by GET /:orgId and PUT /:orgId so the update
 // response is the exact same resource shape as the detail read.
-async function buildOrgDetail(orgId: string) {
+async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
+  const permissions = c.get("permissions");
   const [org, members, invitations] = await Promise.all([
     getOrgById(orgId),
-    getOrgMembers(orgId),
-    getOrgInvitations(orgId),
+    permissions?.has("members:read") ? getOrgMembers(orgId) : Promise.resolve([]),
+    permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -287,7 +288,7 @@ router.get("/:orgId", async (c) => {
   // request.
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
-  return c.json(await buildOrgDetail(orgId));
+  return c.json(await buildOrgDetail(c, orgId));
 });
 
 // PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
@@ -320,7 +321,7 @@ router.put("/:orgId", requirePermission("org", "update"), async (c) => {
   });
 
   // Bare updated resource — same OrgDetail serializer as GET /:orgId.
-  return c.json(await buildOrgDetail(orgId));
+  return c.json(await buildOrgDetail(c, orgId));
 });
 
 // DELETE /api/orgs/:orgId — delete organization and all related data (owner only)

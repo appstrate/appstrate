@@ -48,7 +48,12 @@ import {
   buildBundleFromAgentDraft,
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
-import { writeBundleToBuffer, type Bundle } from "@appstrate/afps-runtime/bundle";
+import { assertCatalogPackageAccess, packageAccessSpaces } from "../lib/package-access.ts";
+import {
+  writeBundleToBuffer,
+  parsePackageIdentity,
+  type Bundle,
+} from "@appstrate/afps-runtime/bundle";
 import { toBundleApiError } from "../services/run-launcher/bundle-error-mapping.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -136,23 +141,26 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * Checked against the ASSEMBLED bundle, not the root manifest, so transitive
  * deps and any future widening of `depTypes` are covered by construction.
  *
- * Visibility is deliberately NOT re-derived here. Dependency resolution is
- * org-scoped in every catalog, which is what lets a run reach a skill that is
- * not installed in the current space; re-checking `hasPackageAccess` over
- * the dep set would make the export stricter than the run it mirrors and break
- * `appstrate run @scope/agent` where clicking Run in the dashboard succeeds.
- * Scope, not visibility, is what this route was missing.
+ * Every dependency also needs live catalog reachability. This allows a readable
+ * source in another accessible space while hiding packages confined to private spaces.
+
  */
 async function requireBundleDependencyReadPermissions(
   c: Context<AppEnv>,
   bundle: Bundle,
 ): Promise<void> {
   const checked = new Set<string>();
+  const accessible = await packageAccessSpaces(c);
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const rawType = asRecord(pkg.manifest).type;
     const type = typeof rawType === "string" ? rawType : "";
-    if (checked.has(type)) continue;
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) throw invalidRequest(`Invalid package identity: ${identity}`);
+    if (checked.has(type)) {
+      await assertCatalogPackageAccess(c, parsed.packageId, accessible);
+      continue;
+    }
     checked.add(type);
     const guard = BUNDLE_DEPENDENCY_READ_GUARDS.get(type);
     if (!guard) {
@@ -164,6 +172,7 @@ async function requireBundleDependencyReadPermissions(
     // reuses the same 403 shape, denial audit hook, and fail-closed semantics
     // as every route-level RBAC call site.
     await guard(c, async () => {});
+    await assertCatalogPackageAccess(c, parsed.packageId, accessible);
   }
 }
 

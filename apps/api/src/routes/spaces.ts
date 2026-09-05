@@ -5,10 +5,11 @@ import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
   reportPermissionDenial,
+  makePermissionGuard,
   SPACE_ROLE_PRESETS,
   SPACE_VISIBILITIES,
 } from "@appstrate/core/permissions";
-import type { CoreResource, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
+import type { SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
@@ -31,11 +32,7 @@ import {
 } from "../services/spaces.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { listSpaceMembers, removeSpaceMember, saveSpaceMember } from "../services/space-members.ts";
-import {
-  effectivePermissions,
-  orgPermissions as orgPermissionsFor,
-  type Action,
-} from "../lib/permissions.ts";
+import { effectivePermissions, orgPermissions as orgPermissionsFor } from "../lib/permissions.ts";
 import {
   loadSpaceMember,
   resolveSpaceRole,
@@ -54,6 +51,7 @@ import {
   getCatalogPackageType,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
+import { assertCatalogPackageAccess, spacePackagePermission } from "../lib/package-access.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   exactlyOneRole,
@@ -204,44 +202,6 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
 type SpacePackageOp = "install" | "configure" | "uninstall";
 
 /**
- * A `[resource, action]` pair whose action is checked against THAT resource —
- * `["agents", "write"]` compiles, `["agents", "install"]` does not.
- */
-type CoreGrant = { [R in CoreResource]: readonly [R, Action<R>] }[CoreResource];
-
-const SPACE_PACKAGE_PERMISSION = {
-  agent: {
-    install: ["agents", "configure"],
-    configure: ["agents", "configure"],
-    uninstall: ["agents", "configure"],
-  },
-  skill: {
-    install: ["skills", "write"],
-    configure: ["skills", "write"],
-    uninstall: ["skills", "write"],
-  },
-  "mcp-server": {
-    install: ["mcp-servers", "write"],
-    configure: ["mcp-servers", "write"],
-    uninstall: ["mcp-servers", "write"],
-  },
-  integration: {
-    install: ["integrations", "install"],
-    configure: ["integrations", "install"],
-    uninstall: ["integrations", "uninstall"],
-  },
-} as const satisfies Record<PackageType, Record<SpacePackageOp, CoreGrant>>;
-
-/** Every string that could satisfy `op`, for the coarse gate below. */
-function grantsFor(op: SpacePackageOp): CoreGrant[] {
-  return Object.values(SPACE_PACKAGE_PERMISSION).map((byOp) => byOp[op]);
-}
-
-function guardFor<R extends CoreResource>(grant: readonly [R, Action<R>]) {
-  return requirePermission(grant[0], grant[1]);
-}
-
-/**
  * Gate a space-package write and resolve the package's type, in the order that
  * keeps 403 and 404 independent of each other.
  *
@@ -266,25 +226,26 @@ async function gateSpacePackageWrite(
   op: SpacePackageOp,
 ): Promise<PackageType> {
   const held = c.get("permissions");
-  const alternatives = grantsFor(op).map((grant) => `${grant[0]}:${grant[1]}`);
+  const alternatives = (["agent", "skill", "integration", "mcp-server"] as const).map((type) =>
+    spacePackagePermission(type, op),
+  );
   if (!alternatives.some((perm) => held?.has(perm))) {
     // Audited like a guard denial — the disjunction is what the record names.
     reportPermissionDenial(c, alternatives.join("|"));
     throw forbidden(`Insufficient permissions: cannot ${op} a package in this space`);
   }
 
-  const type = await getCatalogPackageType(orgId, packageId);
+  const type =
+    op === "install"
+      ? (await assertCatalogPackageAccess(c, packageId)).type
+      : await getCatalogPackageType(orgId, packageId);
   if (!type) throw notFound(`Package '${packageId}' not found in organization catalog`);
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every
   // other RBAC call site — the move `requirePackageReadPermission` makes in
   // `routes/packages.ts`. An unmapped type fails CLOSED.
-  const grant = SPACE_PACKAGE_PERMISSION[type]?.[op];
-  if (!grant) {
-    throw forbidden(`Insufficient permissions: no ${op} scope is defined for type '${type}'`);
-  }
-  await guardFor(grant)(c, async () => {});
+  await makePermissionGuard(spacePackagePermission(type, op))(c, async () => {});
   return type;
 }
 

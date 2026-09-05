@@ -411,10 +411,13 @@ export const schemas = {
       members: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgMember" },
+        description: "Empty unless the caller holds members:read.",
       },
       invitations: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgInvitationInfo" },
+        description:
+          "Empty unless the caller holds members:invite, including any credential scope ceiling.",
       },
     },
   },
