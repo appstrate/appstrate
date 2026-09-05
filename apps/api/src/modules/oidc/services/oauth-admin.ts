@@ -431,7 +431,9 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
  * is safely re-stamped. Best-effort cache invalidation so the next mint reads
  * the stamped row.
  */
-export async function markClientSelfService(clientId: string): Promise<void> {
+export async function markClientSelfService(
+  clientId: string,
+): Promise<{ scopes: string[]; metadata: string } | undefined> {
   const [row] = await db
     .select({ metadata: oauthClient.metadata, scopes: oauthClient.scopes })
     .from(oauthClient)
@@ -463,17 +465,17 @@ export async function markClientSelfService(clientId: string): Promise<void> {
   // (identity + module end-user-grantable scopes, e.g. mcp:read/mcp:invoke) so
   // the client may request them. Only fill when empty — never widen a client
   // that deliberately declared a narrower scope set.
-  const update: Record<string, unknown> = {
-    level: "instance",
-    metadata: JSON.stringify(metadata),
-    updatedAt: new Date(),
-  };
-  if (!row.scopes || row.scopes.length === 0) {
-    update.scopes = [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
-  }
+  const scopes = row.scopes?.length
+    ? row.scopes
+    : [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
+  const stamped = { scopes, metadata: JSON.stringify(metadata) };
 
-  await db.update(oauthClient).set(update).where(eq(oauthClient.clientId, clientId));
+  await db
+    .update(oauthClient)
+    .set({ ...stamped, level: "instance", updatedAt: new Date() })
+    .where(eq(oauthClient.clientId, clientId));
   cacheInvalidate(clientId);
+  return stamped;
 }
 
 // ─── Update / delete / rotate ─────────────────────────────────────────────────
