@@ -1,5 +1,5 @@
 -- Space membership becomes a data model (RBAC spec §5): a new enum value, two
--- new tables, four new columns, and two writes that precondition a constraint
+-- new tables, five new columns, and two writes that precondition a constraint
 -- promoted in this same file (sections F and G).
 --
 -- `org_role` keeps its `viewer` value: `ALTER TYPE … DROP VALUE` does not
@@ -25,7 +25,8 @@
 -- FENCES, set once for the whole file, same instrument as 0039/0047/0055.
 -- `lock_timeout` bounds acquisition, `statement_timeout` bounds execution;
 -- neither bounds the hold, which lasts until drizzle commits the batch. The two
--- writes scan one small table each; every other statement is catalog-only or a
+-- writes scan chat sessions and OAuth clients (including their org spaces);
+-- every other statement is catalog-only or a
 -- create-on-empty-table. On expiry the statement errors, the batch aborts, boot
 -- fails its health gate — a failed deploy, not a silent skip.
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint

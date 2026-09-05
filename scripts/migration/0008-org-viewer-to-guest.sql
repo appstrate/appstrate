@@ -27,19 +27,20 @@
 --
 -- ═══ VERIFY — the counts must DISCRIMINATE ═══
 --
--- The script prints them itself, before and after, in one transaction. Three
--- numbers, and all three must move together — a query that returns 0 whether
+-- The script prints counts before and after, in one transaction, and verifies
+-- membership and invitation coverage. A query that returns 0 whether
 -- the work happened or not proves nothing (`verification-must-discriminate`):
 --
 --   before: V viewers, S spaces reachable by them, P pending viewer invitations
---   after:  0 viewers, 0 pending viewer invitations, and EXACTLY the
---           viewer×space product inserted into `space_members`
+--   after:  0 viewers, 0 pending viewer invitations, every former viewer×space
+--           pair covered by a row, and each pending invitation snapshot complete
 --
 -- Coverage is the discriminating half: "0 viewers left" alone is also what a
 -- database with no viewers to begin with prints, and would hide a step 1 that
 -- inserted nothing before step 2 erased the evidence. The script carries the
 -- pre-flip viewer set in a temp table so step 4 can check every (user, space)
--- pair it owed a row, and ABORTS the whole transaction when one is missing.
+-- pair it owed a row, plus the pending invitation set to check every promised
+-- space assignment. It ABORTS the whole transaction when any is missing.
 --
 --   -- Standalone re-check, after the fact:
 --   SELECT
