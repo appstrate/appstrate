@@ -238,6 +238,11 @@ test("mobile organization invitations keep email usable and submit with Enter", 
     name: /Adresse e-mail|Email address/,
   });
   await expect(email).toBeVisible();
+  await dialog
+    .getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ })
+    .click();
+  await expect(page.getByRole("option", { name: /^(Invité|Guest)$/ })).toBeVisible();
+  await page.keyboard.press("Escape");
   expect((await email.boundingBox())!.width).toBeGreaterThan(250);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   const address = `mobile-invite-${uid()}@test.com`;
@@ -360,7 +365,7 @@ test("admin invitations explain all-space access while preserving an optional as
   await assignmentRole.click();
   await page.getByRole("option", { name: /^(Lecteur|Viewer)$/ }).click();
   await role.click();
-  await page.getByRole("option", { name: /^Admin$/ }).click();
+  await page.getByRole("option", { name: /^(Administrateur|Admin)$/ }).click();
   await expect(dialog.getByRole("group", { name: /^Espaces$|^Spaces$/ })).toBeVisible();
   const allSpaces = dialog.getByRole("textbox", { name: /^Espaces$|^Spaces$/ });
   await expect(allSpaces).toBeDisabled();
@@ -373,7 +378,7 @@ test("admin invitations explain all-space access while preserving an optional as
   await expect(assignmentRole).toBeEnabled();
   await expect(assignmentRole).toContainText(/Lecteur|Viewer/);
   await role.click();
-  await page.getByRole("option", { name: /^Admin$/ }).click();
+  await page.getByRole("option", { name: /^(Administrateur|Admin)$/ }).click();
   const submitted = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&

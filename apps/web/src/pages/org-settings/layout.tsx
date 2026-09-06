@@ -145,9 +145,13 @@ export function OrgSettingsLayout() {
     allItems.find((i) => location.pathname.startsWith(i.to + "/"));
   const isSpaceRoute = location.pathname.startsWith("/org-settings/space/");
 
+  // A space page is reached through the org's Spaces list, not through the
+  // organization settings root: the trail names where the page lives.
   const breadcrumbs: BreadcrumbEntry[] = [
     { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-    { label: t("orgSettings.pageTitle"), href: "/org-settings" },
+    isSpaceRoute
+      ? { label: t("spaces.pageTitle"), href: "/org-settings/spaces" }
+      : { label: t("orgSettings.pageTitle"), href: "/org-settings" },
     ...(isSpaceRoute ? [{ label: space?.name ?? "", node: <SpaceSettingsSwitcher /> }] : []),
     ...(activeItem ? [{ label: activeItem.label }] : []),
   ];

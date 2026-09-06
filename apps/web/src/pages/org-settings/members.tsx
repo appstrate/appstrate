@@ -197,7 +197,7 @@ export function OrgSettingsMembersPage() {
           <OrgInvitationForm
             key={orgId}
             orgId={orgId}
-
+            allowGuest
             onSuccess={() => setInvitingOrgId(null)}
             onCancel={() => setInvitingOrgId(null)}
           />

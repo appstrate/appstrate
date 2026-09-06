@@ -7,7 +7,7 @@ import { z } from "zod";
 import { useTranslation } from "react-i18next";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
-import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
@@ -33,21 +33,31 @@ import {
 import { SpaceAssignmentsField } from "./space-assignments-field";
 import { Spinner } from "./spinner";
 
+/** Rising reach first, then the exception: standard user, admin, guest. */
+const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["member", "admin", "guest"];
+
 interface InviteFormValues {
   email: string;
   role: AssignableOrgRole;
   assignments: AssignmentDraft[];
 }
 
-/** The same invitation flow in onboarding and organization settings. Remount on org change. */
+/**
+ * The same invitation flow in onboarding and organization settings. Remount on
+ * org change. `allowGuest` offers the guest role on a NEW invitation (spaces
+ * then required); onboarding leaves it off, an org has no shared spaces yet.
+ * Editing always offers every role.
+ */
 export function OrgInvitationForm({
   orgId,
   invitation,
+  allowGuest = false,
   onSuccess,
   onCancel,
 }: {
   orgId: string;
   invitation?: components["schemas"]["OrgInvitationInfo"];
+  allowGuest?: boolean;
   onSuccess?: () => void;
   onCancel?: () => void;
 }) {
@@ -160,13 +170,13 @@ export function OrgInvitationForm({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                {ASSIGNABLE_ORG_ROLES.filter((option) => !!invitation || option !== "guest").map(
-                  (option) => (
-                    <SelectItem key={option} value={option}>
-                      {t(roleI18nKey(option))}
-                    </SelectItem>
-                  ),
-                )}
+                {ORG_ROLE_DISPLAY_ORDER.filter(
+                  (option) => !!invitation || allowGuest || option !== "guest",
+                ).map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {t(roleI18nKey(option))}
+                  </SelectItem>
+                ))}
               </SelectGroup>
             </SelectContent>
           </Select>

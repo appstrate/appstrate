@@ -94,7 +94,7 @@ test.describe("Space management in UI", () => {
     await expect(name).toHaveValue(source.name);
 
     await page.locator("#space-default-role").click();
-    await page.getByRole("option", { name: /^(Administrateur|Admin)$/ }).click();
+    await page.getByRole("option", { name: /^(Administrateur de l'espace|Space admin)$/ }).click();
     await page.locator("#space-visibility-private").click();
 
     await switchSpace(target.id);

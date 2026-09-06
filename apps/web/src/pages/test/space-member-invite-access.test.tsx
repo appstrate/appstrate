@@ -17,6 +17,7 @@ function pageFor(
   cached = true,
   options: {
     memberOrgRole?: components["schemas"]["SpaceMemberObject"]["org_role"];
+    memberSource?: components["schemas"]["SpaceMemberObject"]["source"];
     visibility?: components["schemas"]["SpaceObject"]["visibility"];
     rolesError?: boolean;
     orgPermissions?: string[];
@@ -109,8 +110,11 @@ function pageFor(
     name: "Private cached member",
     email: "private@example.com",
     org_role: options.memberOrgRole ?? "guest",
-    source: "explicit",
-    role: { kind: "preset", key: "viewer", name: "viewer" },
+    source: options.memberSource ?? "explicit",
+    role:
+      options.memberSource === "org_role"
+        ? { kind: "preset", key: "admin", name: "admin" }
+        : { kind: "preset", key: "viewer", name: "viewer" },
     created_at: null,
   };
   if (cached)
@@ -154,6 +158,7 @@ describe("invite-only space member access", () => {
   it("still loads and renders members for readers, without offering an invite action", () => {
     const result = pageFor(["space-members:read"]);
     expect(result.html).toContain("Private cached member");
+    expect(result.html).toContain("Attribué");
     expect(result.queryEnabled).toBe(true);
     expect(result.html).not.toContain('data-testid="add-space-member-button"');
   });
@@ -178,6 +183,16 @@ describe("invite-only space member access", () => {
       visibility: "closed",
     }).html;
     expect(closed).toContain("Retirer l'accès");
+  });
+
+  it("names an organization role's reach without borrowing the space admin preset label", () => {
+    const html = pageFor(["space-members:read"], true, {
+      memberOrgRole: "owner",
+      memberSource: "org_role",
+    }).html;
+    expect(html).toContain("Propriétaire de l'organisation");
+    expect(html).toContain("Rôle d'organisation");
+    expect(html).not.toContain("Administrateur de l'espace");
   });
 
   it("lists the pending invitations that target this space, and only for organization inviters", () => {

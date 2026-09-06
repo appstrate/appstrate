@@ -32,7 +32,7 @@ import {
 } from "@appstrate/ui/components/table";
 import { $api, ApiError } from "../../../api/client";
 import { useOrg } from "../../../hooks/use-org";
-import { usePermissions } from "../../../hooks/use-permissions";
+import { roleI18nKey, usePermissions } from "../../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
@@ -295,7 +295,11 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                         </Select>
                       ) : (
                         <span className="text-muted-foreground text-sm">
-                          {spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
+                          {member.source === "org_role"
+                            ? t("spaceMembers.orgRoleOf", {
+                                role: t(roleI18nKey(member.org_role)),
+                              })
+                            : (spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole"))}
                         </span>
                       )}
                     </TableCell>

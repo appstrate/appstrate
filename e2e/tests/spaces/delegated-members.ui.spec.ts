@@ -42,7 +42,9 @@ test("Guest space admins assign preset roles by email without an organization di
     await expect(dialog.getByRole("alert")).toBeVisible();
     await email.fill(target.email.toUpperCase());
     await dialog.locator("#space-member-role").click();
-    await expect(page.getByRole("option", { name: /^(Administrateur|Admin)$/ })).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: /^(Administrateur de l'espace|Space admin)$/ }),
+    ).toBeVisible();
     await page.getByRole("option", { name: /^(Lecteur|Viewer)$/ }).click();
     const added = page.waitForResponse(
       (response) =>
