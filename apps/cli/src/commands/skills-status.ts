@@ -10,14 +10,14 @@
  */
 
 import { extractSkillMeta } from "@appstrate/core/validation";
-import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
+import { parseScopedName } from "@appstrate/core/naming";
 import { apiFetch } from "../lib/api.ts";
 import { resolveActiveProfile, type Profile } from "../lib/config.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
-import { fetchSkillFiles, listSyncableSkills, resolveSkill } from "../lib/skills-sync/plan.ts";
-import { resolveSpaces } from "./skills.ts";
+import { fetchSkillFiles, resolveSkill } from "../lib/skills-sync/plan.ts";
+import { locatePackage, packagePath, typeOfFolder, type PackageType } from "../lib/packages.ts";
 import { readPushLocks, readSkillFolder, resolveSkillFolder } from "./skills-push.ts";
 
 export interface SkillsStatusOptions {
@@ -68,7 +68,13 @@ export async function skillsStatusCommand(
   try {
     const dir = await resolveSkillFolder(profileName, profile, opts.dir);
     const files = await readSkillFolder(dir);
-    const status = await computeStatus(profileName, profile, files);
+    const status = await computeStatus(
+      profileName,
+      profile,
+      files,
+      undefined,
+      typeOfFolder(files) ?? "skill",
+    );
     io.stdout.write(renderStatus(status, dir, files, opts.diff === true));
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
@@ -82,14 +88,21 @@ export async function computeStatus(
   profile: Profile,
   files: Record<string, Uint8Array>,
   explicitId?: string,
+  type: PackageType = "skill",
 ): Promise<SkillStatus> {
   const packageId = explicitId ?? (await packageIdOf(profileName, profile, files));
   const local = Object.fromEntries(Object.entries(files).filter(([path]) => !IGNORED.has(path)));
 
-  const spaceIds = await resolveSpaces(profileName, profile, undefined);
-  const listed = (await listSyncableSkills(profileName, spaceIds)).find(
-    (entry) => entry.packageId === packageId,
-  );
+  const located = await locatePackage(profileName, profile, packageId);
+  if (located && located.type !== type) {
+    throw new Error(
+      `${packageId} is a ${located.type} on Appstrate, but this folder looks like a ${type}.`,
+    );
+  }
+  const listed =
+    located && located.spaceId
+      ? { packageId, spaceId: located.spaceId, type: located.type }
+      : undefined;
   const draft = listed ? await resolveSkill(profileName, listed, "draft") : null;
   if (!listed || !draft) {
     return {
@@ -122,7 +135,7 @@ export async function computeStatus(
   // will send, so status and push cannot disagree about "moved elsewhere".
   const detail = await apiFetch<{ lock_version?: unknown; manifest?: { version?: unknown } }>(
     profileName,
-    `/api/packages/skills/${encodePackageIdPath(packageId)}`,
+    packagePath(listed.type, packageId),
     { headers: { "X-Space-Id": listed.spaceId } },
   );
   const remoteVersion =
@@ -189,7 +202,9 @@ async function packageIdOf(
       // Not usable: fall back to the frontmatter.
     }
   }
-  const meta = extractSkillMeta(decoder.decode(files["SKILL.md"]!));
+  if (!files["SKILL.md"])
+    throw new Error("manifest.json must carry a `name` of the form @scope/name.");
+  const meta = extractSkillMeta(decoder.decode(files["SKILL.md"]));
   if (!meta.name) throw new Error("SKILL.md: frontmatter has no `name`.");
   const org = (await listOrgs(profileName)).find((o) => o.id === profile.orgId);
   if (!org) throw new Error(`Organization ${profile.orgId} is not one this profile belongs to.`);

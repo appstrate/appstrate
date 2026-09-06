@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate skills push <dir>` and `appstrate skills publish <skill>` — the
- * write half of `skills sync`. `push` sends a local folder (SKILL.md and every
- * annex file) to the skill's DRAFT through `POST /api/packages/import?draft=true`,
- * so `skills sync --source draft` hands it back to the author's machine for a
- * real test; `publish` then cuts the version everyone else syncs.
+ * `appstrate packages push <dir>` and `appstrate packages publish <package>` —
+ * the write half of the authoring loop, for every package type. `push` sends
+ * a local folder (its manifest, its content file and every annex) to the
+ * package's DRAFT through `POST /api/packages/import?draft=true`; for a skill,
+ * `skills sync --source draft` then hands it back to the author's machine for a
+ * real test. `publish` cuts the version everyone else resolves.
  */
 
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import { extractSkillMeta } from "@appstrate/core/validation";
-import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
+import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { apiFetch, apiFetchRaw, ApiError } from "../lib/api.ts";
 import {
@@ -25,6 +26,14 @@ import {
 } from "../lib/config.ts";
 import { assertNotInstallDir } from "./skills-pull.ts";
 import { computeStatus, renderStatus } from "./skills-status.ts";
+import {
+  CONTENT_ENTRY,
+  locatePackage,
+  packagePath,
+  PACKAGE_TYPES,
+  typeOfFolder,
+  type PackageType,
+} from "../lib/packages.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
@@ -76,17 +85,31 @@ export async function skillsPushCommand(
     return;
   }
 
-  const skillMd = new TextDecoder().decode(files[SKILL_ENTRY]!);
-  const meta = extractSkillMeta(skillMd);
-  if (!meta.name) {
+  const type = typeOfFolder(files);
+  if (!type) {
+    io.stderr.write(
+      `${dir}: no manifest.json and no SKILL.md — an agent, integration or MCP server folder needs its manifest.json; a skill folder needs at least SKILL.md.\n`,
+    );
+    io.exit(1);
+    return;
+  }
+  const skillMd = files[SKILL_ENTRY] ? new TextDecoder().decode(files[SKILL_ENTRY]) : "";
+  const meta = type === "skill" ? extractSkillMeta(skillMd) : { name: "", description: "" };
+  if (type === "skill" && !meta.name) {
     io.stderr.write(`${join(dir, SKILL_ENTRY)}: frontmatter has no \`name\`.\n`);
+    io.exit(1);
+    return;
+  }
+  const entry = CONTENT_ENTRY[type];
+  if (entry && !files[entry] && type !== "integration") {
+    io.stderr.write(`${dir}: a ${type} folder needs ${entry}.\n`);
     io.exit(1);
     return;
   }
 
   let manifest: Record<string, unknown>;
   try {
-    manifest = await resolveManifest(profileName, profile, files, meta, skillMd, opts.id);
+    manifest = await resolveManifest(profileName, profile, files, meta, skillMd, opts.id, type);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
     io.exit(1);
@@ -100,7 +123,7 @@ export async function skillsPushCommand(
   // that matches the draft has nothing to say to the server.
   let status: Awaited<ReturnType<typeof computeStatus>>;
   try {
-    status = await computeStatus(profileName, profile!, files, packageId);
+    status = await computeStatus(profileName, profile!, files, packageId, type);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
     io.exit(1);
@@ -128,7 +151,8 @@ export async function skillsPushCommand(
 
   const archive = zipArtifact(files);
   const form = new FormData();
-  form.append("file", new File([archive], `${meta.name}.afps`, { type: "application/zip" }));
+  const fileName = `${parseScopedName(packageId)!.name}.afps`;
+  form.append("file", new File([archive], fileName, { type: "application/zip" }));
   // The lock this machine received from its previous push: with it, re-pushing
   // one's own work needs no --force, and a 409 means a real edit elsewhere.
   const locks = await readPushLocks(profileName);
@@ -173,10 +197,12 @@ export async function skillsPushCommand(
   }
 
   io.stdout.write(
-    `Pushed ${packageId} to its draft (${paths.length} files, would publish as ${version}).\n`,
+    `Pushed ${packageId} to its draft (${type}, ${paths.length} files, would publish as ${version}).\n`,
   );
   io.stderr.write(
-    `Next: appstrate skills sync --source draft (test it here), then appstrate skills publish ${packageId}\n`,
+    type === "skill"
+      ? `Next: appstrate skills sync --source draft (test it here), then appstrate packages publish ${packageId}\n`
+      : `Next: test the draft on Appstrate, then appstrate packages publish ${packageId}\n`,
   );
 }
 
@@ -200,14 +226,20 @@ export async function skillsPublishCommand(
   }
 
   try {
+    const located = await locatePackage(profileName, profile!, packageId);
+    if (!located) throw new Error(`${packageId} is not a package of this organization.`);
     const created = await apiFetch<{ version?: unknown }>(
       profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions`,
+      `${packagePath(located.type, packageId)}/versions`,
       { method: "POST", body: JSON.stringify(opts.version ? { version: opts.version } : {}) },
     );
     const version = typeof created.version === "string" ? created.version : "?";
-    io.stdout.write(`Published ${packageId}@${version}.\n`);
-    io.stderr.write(`Every machine syncing published skills picks it up on its next sync.\n`);
+    io.stdout.write(`Published ${packageId}@${version} (${located.type}).\n`);
+    io.stderr.write(
+      located.type === "skill"
+        ? `Every machine syncing published skills picks it up on its next sync.\n`
+        : `Agents and spaces that depend on it resolve the new version on their next run.\n`,
+    );
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
       io.stderr.write(
@@ -289,17 +321,20 @@ export async function resolveSkillFolder(
       // Not a folder here: fall through to the work dir.
     }
     const name = target.startsWith("@") ? parseScopedName(target)?.name : target;
-    if (!name) throw new Error(`Not a skill name: ${target}`);
+    if (!name) throw new Error(`Not a package name: ${target}`);
     const config = await readConfig();
     await assertNotInstallDir(resolveWorkDir(config));
-    const dir = packageWorkDir(config, await orgSlug(profileName, profile), "skill", name);
-    try {
-      if ((await stat(dir)).isDirectory()) return dir;
-    } catch {
-      // Reported below with the path that was expected.
+    const slug = await orgSlug(profileName, profile);
+    const candidates = PACKAGE_TYPES.map((type) => packageWorkDir(config, slug, type, name));
+    for (const dir of candidates) {
+      try {
+        if ((await stat(dir)).isDirectory()) return dir;
+      } catch {
+        // Try the next type's folder.
+      }
     }
     throw new Error(
-      `No working copy for ${target} at ${dir}. Run: appstrate skills pull ${target}, or pass a folder path.`,
+      `No working copy for ${target} under ${packageWorkDir(config, slug, "skill", "")}… Run: appstrate packages pull ${target}, or pass a folder path.`,
     );
   }
   return resolve(target.startsWith("~/") ? join(process.env.HOME ?? "", target.slice(2)) : target);
@@ -328,8 +363,10 @@ export async function readSkillFolder(dir: string): Promise<Record<string, Uint8
   };
   await walk(dir);
 
-  if (!files[SKILL_ENTRY]) {
-    throw new Error(`${dir}: no ${SKILL_ENTRY} at the top level — a skill folder starts with one.`);
+  if (!files[SKILL_ENTRY] && !files[MANIFEST]) {
+    throw new Error(
+      `${dir}: neither ${SKILL_ENTRY} nor ${MANIFEST} at the top level — a package folder starts with one of them.`,
+    );
   }
   return files;
 }
@@ -348,6 +385,7 @@ async function resolveManifest(
   meta: { name: string; description: string },
   skillMd: string,
   explicitId: string | undefined,
+  type: PackageType,
 ): Promise<Record<string, unknown>> {
   if (explicitId && !parseScopedName(explicitId)) {
     throw new Error(`--id must be @scope/name, got "${explicitId}".`);
@@ -374,7 +412,7 @@ async function resolveManifest(
     // A folder that came from `skills pull` carries the published version's
     // manifest verbatim; publishing it again as-is would be refused. Move to
     // the next patch so push → publish works without editing the manifest.
-    const latest = await latestPublished(profileName, manifest.name);
+    const latest = await latestPublished(profileName, manifest.name, type);
     if (latest !== null && manifest.version === latest) manifest.version = bumpPatch(latest);
     return manifest;
   }
@@ -383,7 +421,7 @@ async function resolveManifest(
   // A `version:` pinned in the frontmatter is the author's, unless it is the
   // version already published: then it is simply stale, and publishing it
   // again would be refused — move to the next patch, as for a pulled manifest.
-  const latest = await latestPublished(profileName, packageId);
+  const latest = await latestPublished(profileName, packageId, "skill");
   const pinned = frontmatterVersion(skillMd);
   const version =
     pinned === undefined
@@ -450,11 +488,15 @@ export function frontmatterVersion(skillMd: string): string | undefined {
 }
 
 /** The latest published version, or `null` when nothing was ever published. */
-async function latestPublished(profileName: string, packageId: string): Promise<string | null> {
+async function latestPublished(
+  profileName: string,
+  packageId: string,
+  type: PackageType,
+): Promise<string | null> {
   try {
     const latest = await apiFetch<{ version?: unknown }>(
       profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+      `${packagePath(type, packageId)}/versions/latest`,
     );
     return typeof latest.version === "string" ? latest.version : null;
   } catch (err) {

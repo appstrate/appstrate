@@ -456,12 +456,15 @@ There is no automatic rename: remove or rename the directory yourself and re-run
 
 Ownership is recorded per target **together with the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten.
 
-#### Writing a skill locally: `push`, then `publish`
+#### Writing a package locally: `pull`, `push`, then `publish`
+
+`appstrate packages pull | status | push | publish` run the same loop for every package type — skills, agents, integrations, MCP servers. `appstrate skills pull | status | push | publish` are the same commands under the skill-shaped name. The type comes from `/api/library` on pull, status and publish, and from the folder's `manifest.json` on push (a folder with only a `SKILL.md` is a skill; any other type needs its manifest). Working copies land under `~/Appstrate Packages/<org>/packages/<type>s/<name>`.
 
 The sync is one-way, and the directories it writes are overwritten on the next refresh — never edit them. The working copy is the skill's **draft** on Appstrate, and two subcommands close the loop from a local folder:
 
 ```sh
-appstrate skills pull my-skill                   # the skill's draft (or --version 1.4.0) → "~/Appstrate Packages/<org>/packages/skills/my-skill"
+appstrate packages pull my-skill                 # the skill's draft (or --version 1.4.0) → "~/Appstrate Packages/<org>/packages/skills/my-skill"
+appstrate packages pull @acme/fathom-sync        # an agent: manifest.json + prompt.md + annexes → …/packages/agents/fathom-sync
 appstrate skills push my-skill                   # that working copy (or any folder path) → the skill's draft, annex files included; publishes nothing
 appstrate skills sync --source draft --target claude-user   # the draft → this machine, for a real test
 appstrate skills publish my-skill                # draft → an immutable version, what every other machine syncs

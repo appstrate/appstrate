@@ -85,6 +85,19 @@ export interface PlannedSkill extends ResolvedSkill {
 export interface ListedSkill {
   packageId: string;
   spaceId: string;
+  /** Route family; the sync only lists skills, the authoring loop passes any type. */
+  type?: "skill" | "agent" | "integration" | "mcp-server";
+}
+
+const TYPE_ROUTE = {
+  skill: "skills",
+  agent: "agents",
+  integration: "integrations",
+  "mcp-server": "mcp-servers",
+} as const;
+
+function typeRoute(listed: ListedSkill): string {
+  return TYPE_ROUTE[listed.type ?? "skill"];
 }
 
 /** The request header that scopes the package routes to one space. */
@@ -128,8 +141,9 @@ export async function resolveSkill(
 
 async function resolvePublished(
   profileName: string,
-  { packageId, spaceId }: ListedSkill,
+  listed: ListedSkill,
 ): Promise<ResolvedSkill | null> {
+  const { packageId, spaceId } = listed;
   interface VersionDetail {
     version?: unknown;
     integrity?: unknown;
@@ -139,7 +153,7 @@ async function resolvePublished(
   try {
     detail = await apiFetch<VersionDetail>(
       profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+      `/api/packages/${typeRoute(listed)}/${encodePackageIdPath(packageId)}/versions/latest`,
       { headers: spaceHeaders(spaceId) },
     );
   } catch (err) {
@@ -163,8 +177,9 @@ async function resolvePublished(
 
 async function resolveDraft(
   profileName: string,
-  { packageId, spaceId }: ListedSkill,
+  listed: ListedSkill,
 ): Promise<ResolvedSkill | null> {
+  const { packageId, spaceId } = listed;
   interface DraftDetail {
     content?: unknown;
     lock_version?: unknown;
@@ -173,7 +188,7 @@ async function resolveDraft(
   try {
     detail = await apiFetch<DraftDetail>(
       profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}`,
+      `/api/packages/${typeRoute(listed)}/${encodePackageIdPath(packageId)}`,
       { headers: spaceHeaders(spaceId) },
     );
   } catch (err) {

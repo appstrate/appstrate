@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate skills pull <skill> [dir]` — a skill's files into a local working
- * folder: the draft by default (what `skills push` writes), or a published
- * version. The folder is a working copy, never a source; the lock the draft
- * carried at pull time is recorded so the next `skills push` from it needs no
- * `--force` unless the draft moved in between.
+ * `appstrate packages pull <package> [dir]` — a package's files (skill, agent,
+ * integration or MCP server) into a local working folder: the draft by default
+ * (what `packages push` writes), or a published version. The folder is a
+ * working copy, never a source; the lock the draft carried at pull time is
+ * recorded so the next push from it needs no `--force` unless the draft moved.
  */
 
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
+import { parseScopedName } from "@appstrate/core/naming";
 import { apiFetch, ApiError } from "../lib/api.ts";
 import {
   INSTALL_DIR_MARKER,
@@ -23,8 +23,8 @@ import {
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
-import { fetchSkillFiles, listSyncableSkills, resolveSkill } from "../lib/skills-sync/plan.ts";
-import { resolveSpaces } from "./skills.ts";
+import { fetchSkillFiles, resolveSkill } from "../lib/skills-sync/plan.ts";
+import { locatePackage, packagePath, type PackageType } from "../lib/packages.ts";
 import { readPushLocks, writePushLocks } from "./skills-push.ts";
 
 export interface SkillsPullOptions {
@@ -60,14 +60,25 @@ export async function skillsPullCommand(
   let packageId: string;
   let dir: string;
   let name: string;
+  let type: PackageType;
+  let spaceId: string;
   try {
     const slug = await orgSlug(profileName, profile);
     packageId = opts.skill.startsWith("@") ? opts.skill : `@${slug}/${opts.skill}`;
     if (!parseScopedName(packageId)) throw new Error(`Not a package id: ${packageId}`);
     name = parseScopedName(packageId)!.name;
+    const located = await locatePackage(profileName, profile, packageId);
+    if (!located) throw new Error(`${packageId} is not a package of this organization.`);
+    if (!located.spaceId) {
+      throw new Error(
+        `${packageId} is installed in no space, so its files cannot be read. Install it in a space first.`,
+      );
+    }
+    type = located.type;
+    spaceId = located.spaceId;
     const config = await readConfig();
     if (!opts.dir) await assertNotInstallDir(resolveWorkDir(config));
-    dir = opts.dir ? resolve(opts.dir) : packageWorkDir(config, slug, "skill", name);
+    dir = opts.dir ? resolve(opts.dir) : packageWorkDir(config, slug, type, name);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
     io.exit(1);
@@ -83,21 +94,12 @@ export async function skillsPullCommand(
   }
 
   try {
-    // The package routes only answer for a space the skill is installed in.
-    const spaceIds = await resolveSpaces(profileName, profile, undefined);
-    const listed = (await listSyncableSkills(profileName, spaceIds)).find(
-      (entry) => entry.packageId === packageId,
-    );
-    if (!listed) {
-      throw new Error(
-        `${packageId} is not installed in the space(s) this profile syncs (${spaceIds.join(", ")}). Install it there, or pin another space.`,
-      );
-    }
-
+    // The package routes only answer for a space the package is installed in.
+    const listed = { packageId, spaceId, type };
     const source = opts.version ? "published" : "draft";
     const skill =
       opts.version && opts.version !== "latest"
-        ? await resolveExactVersion(profileName, listed.packageId, listed.spaceId, opts.version)
+        ? await resolveExactVersion(profileName, listed, opts.version)
         : await resolveSkill(profileName, listed, source);
     if (!skill) {
       throw new Error(
@@ -112,8 +114,8 @@ export async function skillsPullCommand(
     // time, which the next push must name to prove nobody edited the draft since.
     const detail = await apiFetch<{ lock_version?: unknown; manifest?: unknown }>(
       profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}`,
-      { headers: { "X-Space-Id": listed.spaceId } },
+      packagePath(type, packageId),
+      { headers: { "X-Space-Id": spaceId } },
     ).catch(() => ({}) as { lock_version?: unknown; manifest?: unknown });
 
     const files = await fetchSkillFiles(profileName, skill, source);
@@ -143,10 +145,10 @@ export async function skillsPullCommand(
     }
 
     const what = source === "draft" ? "draft" : `version ${skill.version}`;
-    io.stdout.write(`Pulled ${packageId} (${what}, ${paths.length} files) into ${dir}\n`);
+    io.stdout.write(`Pulled ${packageId} (${type}, ${what}, ${paths.length} files) into ${dir}\n`);
     // In the work dir the bare name is enough; elsewhere the path is the handle.
     const handle = opts.dir ? dir : name;
-    io.stderr.write(`Edit it there, then: appstrate skills push ${handle}\n`);
+    io.stderr.write(`Edit it there, then: appstrate packages push ${handle}\n`);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
     io.exit(1);
@@ -155,14 +157,14 @@ export async function skillsPullCommand(
 
 async function resolveExactVersion(
   profileName: string,
-  packageId: string,
-  spaceId: string,
+  listed: { packageId: string; spaceId: string; type: PackageType },
   version: string,
 ) {
+  const { packageId, spaceId, type } = listed;
   try {
     const detail = await apiFetch<{ version?: unknown; integrity?: unknown; content?: unknown }>(
       profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/${encodeURIComponent(version)}`,
+      `${packagePath(type, packageId)}/versions/${encodeURIComponent(version)}`,
       { headers: { "X-Space-Id": spaceId } },
     );
     if (typeof detail.version !== "string" || typeof detail.integrity !== "string") {
@@ -173,6 +175,7 @@ async function resolveExactVersion(
     return {
       packageId,
       spaceId,
+      type,
       version: detail.version,
       integrity: detail.integrity,
       frontmatterName: "",

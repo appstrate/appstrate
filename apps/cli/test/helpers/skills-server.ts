@@ -42,6 +42,8 @@ export interface DraftFixture {
 export interface SkillFixture {
   /** `@scope/name`. */
   id: string;
+  /** Package type; a fixture is a skill unless said otherwise. */
+  type?: "skill" | "agent" | "integration" | "mcp-server";
   /** Full `SKILL.md` text, frontmatter included. */
   skillMd: string;
   /** Published version label. */
@@ -132,13 +134,15 @@ function prepare(fixture: SkillFixture): Prepared {
     "manifest.json": encoder.encode(
       JSON.stringify({
         afps_version: "0.2",
-        type: "skill",
+        type: fixture.type ?? "skill",
         name: fixture.id,
         version: fixture.version ?? "1.0.0",
         description: MANIFEST_DESCRIPTION,
       }),
     ),
-    "SKILL.md": encoder.encode(fixture.skillMd),
+    [(fixture.type ?? "skill") === "agent" ? "prompt.md" : "SKILL.md"]: encoder.encode(
+      fixture.skillMd,
+    ),
   };
   for (const [path, text] of Object.entries(fixture.extraFiles ?? {})) {
     entries[path] = encoder.encode(text);
@@ -203,6 +207,27 @@ export function createSkillServer(
       return p && visible(p, space) ? p : undefined;
     };
 
+    if (path === "/api/library") {
+      const packages: Record<string, unknown[]> = {
+        skill: [],
+        agent: [],
+        integration: [],
+        "mcp-server": [],
+      };
+      for (const p of prepared) {
+        if (p.fixture.source === "system") continue;
+        packages[p.fixture.type ?? "skill"]!.push({
+          id: p.fixture.id,
+          type: p.fixture.type ?? "skill",
+          source: "local",
+          name: p.name,
+          description: MANIFEST_DESCRIPTION,
+          installed_in: p.fixture.spaces ?? ["spc_1"],
+        });
+      }
+      return json({ object: "library", spaces: options.spaces ?? [], packages });
+    }
+
     if (path === "/api/orgs") {
       return json({
         object: "list",
@@ -255,17 +280,19 @@ export function createSkillServer(
         query.draft === "true" && !options.ignoresDraft
           ? {
               packageId: manifest?.name,
-              type: "skill",
+              type: manifest?.type ?? "skill",
               draft: true,
               draftVersion: version,
               lock_version: nextLock,
             }
-          : { packageId: manifest?.name, type: "skill", version },
+          : { packageId: manifest?.name, type: manifest?.type ?? "skill", version },
         201,
       );
     }
 
-    const publish = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)\/versions$/);
+    const publish = path.match(
+      /^\/api\/packages\/(?:skills|agents|integrations|mcp-servers)\/(@[^/]+)\/([^/]+)\/versions$/,
+    );
     if (publish && init?.method === "POST") {
       const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
       const packageId = `${publish[1]}/${publish[2]}`;
@@ -307,7 +334,9 @@ export function createSkillServer(
       });
     }
 
-    const latest = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)\/versions\/([^/]+)$/);
+    const latest = path.match(
+      /^\/api\/packages\/(?:skills|agents|integrations|mcp-servers)\/(@[^/]+)\/([^/]+)\/versions\/([^/]+)$/,
+    );
     if (latest) {
       const found = find(latest[1]!, latest[2]!);
       const wantedVersion = decodeURIComponent(latest[3]!);
@@ -329,7 +358,7 @@ export function createSkillServer(
         version: found.version,
         manifest: {
           afps_version: "0.2",
-          type: "skill",
+          type: found.fixture.type ?? "skill",
           name: found.fixture.id,
           version: found.version,
           description: MANIFEST_DESCRIPTION,
@@ -359,7 +388,9 @@ export function createSkillServer(
 
     // --- draft side -------------------------------------------------------
 
-    const detail = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)$/);
+    const detail = path.match(
+      /^\/api\/packages\/(?:skills|agents|integrations|mcp-servers)\/(@[^/]+)\/([^/]+)$/,
+    );
     if (detail) {
       const found = find(detail[1]!, detail[2]!);
       if (!found?.fixture.draft) {
@@ -374,7 +405,7 @@ export function createSkillServer(
         version: found.version,
         manifest: {
           afps_version: "0.2",
-          type: "skill",
+          type: found.fixture.type ?? "skill",
           name: found.fixture.id,
           version: found.fixture.draft.version ?? found.version,
           description: MANIFEST_DESCRIPTION,
@@ -445,14 +476,17 @@ function draftEntries(p: Prepared): Record<string, { text: string; inline: boole
     "manifest.json": {
       text: JSON.stringify({
         afps_version: "0.2",
-        type: "skill",
+        type: p.fixture.type ?? "skill",
         name: p.fixture.id,
         version: p.version,
         description: MANIFEST_DESCRIPTION,
       }),
       inline: true,
     },
-    "SKILL.md": { text: draftSkillMd(p), inline: true },
+    [(p.fixture.type ?? "skill") === "agent" ? "prompt.md" : "SKILL.md"]: {
+      text: draftSkillMd(p),
+      inline: true,
+    },
   };
   for (const [path, text] of Object.entries(draft.inlineFiles ?? {})) {
     out[path] = { text, inline: true };

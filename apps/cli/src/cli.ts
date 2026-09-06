@@ -575,69 +575,86 @@ skillsGroup
     },
   );
 
-skillsGroup
-  .command("push <dir-or-skill>")
+// The authoring loop, for every package type. `skills …` keeps the same four
+// commands as aliases, since a skill is the common case on a machine.
+const packagesGroup = program
+  .command("packages")
   .description(
-    "Send a local skill folder (SKILL.md and every annex file) to the skill's DRAFT on Appstrate, without publishing. A bare skill name means its working copy under the work dir (`~/Appstrate Packages/<org>/packages/skills/<name>`, the folder `skills pull` fills). Test with `skills sync --source draft`, then `skills publish`.",
-  )
-  .option(
-    "--id <packageId>",
-    "Push as this @scope/name. Default: the folder's manifest.json, else @<org slug>/<frontmatter name>.",
-  )
-  .option("--force", "Replace a draft that has unpublished changes made elsewhere.")
-  .option("--dry-run", "List what would be sent and send nothing.")
-  .action(async (dir: string, opts: { id?: string; force?: boolean; dryRun?: boolean }) => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await skillsPushCommand({
-      profile: globalOpts.profile,
-      dir,
-      id: opts.id,
-      force: opts.force,
-      dryRun: opts.dryRun,
-    });
-  });
-
-skillsGroup
-  .command("pull <skill> [dir]")
-  .description(
-    "Bring a skill's files into a local working folder, `~/Appstrate Packages/<org>/packages/skills/<name>` unless a folder is given (`workDir` in config.toml moves the root): its draft by default, or a published version with --version. Records the draft's lock so the next `skills push` from that folder needs no --force.",
-  )
-  .option("--version <semver|latest>", "Pull this published version instead of the draft.")
-  .option("--force", "Write into a folder that already has files, replacing same-named ones.")
-  .action(
-    async (skill: string, dir: string | undefined, opts: { version?: string; force?: boolean }) => {
-      const globalOpts = program.opts<{ profile?: string }>();
-      await skillsPullCommand({
-        profile: globalOpts.profile,
-        skill,
-        dir,
-        version: opts.version,
-        force: opts.force,
-      });
-    },
+    "Author any package (skill, agent, integration, MCP server): pull, status, push, publish",
   );
 
-skillsGroup
-  .command("status <dir-or-skill>")
-  .description(
-    "What a working folder would push: each file modified, added or removed against the skill's draft on Appstrate, and whether the draft was edited elsewhere since this machine last pulled or pushed it. Computed on demand, nothing runs in the background.",
-  )
-  .option("--diff", "Print a line diff for each modified text file.")
-  .action(async (dir: string, opts: { diff?: boolean }) => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await skillsStatusCommand({ profile: globalOpts.profile, dir, diff: opts.diff });
-  });
+function registerAuthoringCommands(group: Command, noun: string): void {
+  group
+    .command("pull <package> [dir]")
+    .description(
+      `Bring a ${noun}'s files into a local working folder, \`~/Appstrate Packages/<org>/packages/<type>s/<name>\` unless a folder is given (\`workDir\` in config.toml moves the root): its draft by default, or a published version with --version. Records the draft's lock so the next push from that folder needs no --force.`,
+    )
+    .option("--version <semver|latest>", "Pull this published version instead of the draft.")
+    .option("--force", "Write into a folder that already has files, replacing same-named ones.")
+    .action(
+      async (
+        skill: string,
+        dir: string | undefined,
+        opts: { version?: string; force?: boolean },
+      ) => {
+        const globalOpts = program.opts<{ profile?: string }>();
+        await skillsPullCommand({
+          profile: globalOpts.profile,
+          skill,
+          dir,
+          version: opts.version,
+          force: opts.force,
+        });
+      },
+    );
 
-skillsGroup
-  .command("publish <skill>")
-  .description(
-    "Cut an immutable version from a skill's draft. <skill> is @scope/name, or a bare name under the organization's slug.",
-  )
-  .option("--version <semver>", "Version to create. Default: the draft manifest's `version`.")
-  .action(async (skill: string, opts: { version?: string }) => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await skillsPublishCommand({ profile: globalOpts.profile, skill, version: opts.version });
-  });
+  group
+    .command("push <dir-or-package>")
+    .description(
+      `Send a local ${noun} folder (its manifest, content file and every annex file) to its DRAFT on Appstrate, without publishing. A bare name means its working copy under the work dir. A skill folder needs only SKILL.md; any other type needs its manifest.json.`,
+    )
+    .option(
+      "--id <packageId>",
+      "Push as this @scope/name. Default: the folder's manifest.json, else @<org slug>/<frontmatter name>.",
+    )
+    .option("--force", "Replace a draft that has unpublished changes made elsewhere.")
+    .option("--dry-run", "Show what would change and send nothing.")
+    .action(async (dir: string, opts: { id?: string; force?: boolean; dryRun?: boolean }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await skillsPushCommand({
+        profile: globalOpts.profile,
+        dir,
+        id: opts.id,
+        force: opts.force,
+        dryRun: opts.dryRun,
+      });
+    });
+
+  group
+    .command("status <dir-or-package>")
+    .description(
+      `What a working folder would push: each file modified, added or removed against the ${noun}'s draft on Appstrate, and whether the draft was edited elsewhere since this machine last pulled or pushed it. Computed on demand, nothing runs in the background.`,
+    )
+    .option("--diff", "Print a line diff for each modified text file.")
+    .action(async (dir: string, opts: { diff?: boolean }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await skillsStatusCommand({ profile: globalOpts.profile, dir, diff: opts.diff });
+    });
+
+  group
+    .command("publish <package>")
+    .description(
+      `Cut an immutable version from a ${noun}'s draft. <package> is @scope/name, or a bare name under the organization's slug.`,
+    )
+    .option("--version <semver>", "Version to create. Default: the draft manifest's `version`.")
+    .action(async (skill: string, opts: { version?: string }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await skillsPublishCommand({ profile: globalOpts.profile, skill, version: opts.version });
+    });
+}
+
+registerAuthoringCommands(packagesGroup, "package");
+registerAuthoringCommands(skillsGroup, "skill");
 
 // ─── `appstrate models …` — discover model presets on the instance ────
 

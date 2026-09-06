@@ -7,7 +7,11 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { skillsPullCommand } from "../src/commands/skills-pull.ts";
-import { getPushLocksPath, skillsPushCommand } from "../src/commands/skills-push.ts";
+import {
+  getPushLocksPath,
+  skillsPublishCommand,
+  skillsPushCommand,
+} from "../src/commands/skills-push.ts";
 import { readConfig, writeConfig } from "../src/lib/config.ts";
 import {
   installFakeKeyring,
@@ -69,6 +73,63 @@ async function listTree(dir: string, prefix = ""): Promise<string[]> {
   return out.sort();
 }
 
+describe("packages pull/push — an agent, not a skill", () => {
+  const AGENT: SkillFixture = {
+    id: "@acme/fathom-sync",
+    type: "agent",
+    skillMd: "# Fathom sync\n\nMove transcripts to Drive.\n",
+    version: "0.14.0",
+    draft: { lockVersion: 9, inlineFiles: { "references/rules.md": "# Rules\n" } },
+  };
+
+  it("pulls the agent into packages/agents and pushes it back with its manifest", async () => {
+    const server = createSkillServer([AGENT], { orgs: ORGS });
+    server.install();
+    const workDir = join(work, "Appstrate Packages");
+    await writeConfig({ ...(await readConfig()), workDir });
+    const { io, stdout } = createMemoryIO();
+
+    await skillsPullCommand({ skill: "fathom-sync" }, io);
+
+    const dir = join(workDir, "acme", "packages", "agents", "fathom-sync");
+    expect(await listTree(dir)).toEqual(["manifest.json", "prompt.md", "references/rules.md"]);
+    expect(stdout()).toContain("(agent, draft, 3 files)");
+
+    await writeFile(
+      join(dir, "prompt.md"),
+      "# Fathom sync\n\nMove transcripts to Drive, carefully.\n",
+    );
+    await skillsPushCommand({ dir: "fathom-sync" }, createMemoryIO().io);
+
+    const [sent] = server.imports();
+    expect(sent?.query).toEqual({ draft: "true", lock_version: "9" });
+    expect(sent?.manifest).toMatchObject({
+      name: "@acme/fathom-sync",
+      type: "agent",
+      version: "0.14.1",
+    });
+    expect(Object.keys(sent!.files).sort()).toEqual([
+      "manifest.json",
+      "prompt.md",
+      "references/rules.md",
+    ]);
+
+    await skillsPublishCommand({ skill: "fathom-sync" }, createMemoryIO().io);
+    expect(server.publishes()[0]?.packageId).toBe("@acme/fathom-sync");
+  });
+
+  it("refuses a folder that is neither a skill nor carries a manifest", async () => {
+    createSkillServer([], { orgs: ORGS }).install();
+    const dir = join(work, "bare");
+    await mkdir(dir);
+    await writeFile(join(dir, "prompt.md"), "hi\n");
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("neither SKILL.md nor manifest.json");
+  });
+});
+
 describe("skills pull — the work dir", () => {
   it("lands in <workDir>/<org slug>/packages/skills/<name> when no folder is given", async () => {
     createSkillServer([SKILL], { orgs: ORGS }).install();
@@ -113,8 +174,8 @@ describe("skills pull — the work dir", () => {
     await expect(skillsPushCommand({ dir: "nowhere" }, missing.io)).rejects.toBeInstanceOf(
       ExitError,
     );
-    expect(missing.stderr()).toContain("No working copy for nowhere at");
-    expect(missing.stderr()).toContain("appstrate skills pull nowhere");
+    expect(missing.stderr()).toContain("No working copy for nowhere under");
+    expect(missing.stderr()).toContain("appstrate packages pull nowhere");
   });
 });
 
@@ -132,7 +193,7 @@ describe("skills pull", () => {
       "references/guide.md",
       "scripts/run.sh",
     ]);
-    expect(stdout()).toContain("Pulled @acme/pdf-tools (draft, 4 files)");
+    expect(stdout()).toContain("Pulled @acme/pdf-tools (skill, draft, 4 files)");
     const locks = JSON.parse(await readFile(getPushLocksPath("default"), "utf-8")) as Record<
       string,
       number

@@ -105,7 +105,7 @@ describe("skills push", () => {
       description: "Work with PDFs.",
     });
     expect(stdout()).toContain(
-      "Pushed @acme/pdf-tools to its draft (4 files, would publish as 1.2.1)",
+      "Pushed @acme/pdf-tools to its draft (skill, 4 files, would publish as 1.2.1)",
     );
     expect(stderr()).toContain("appstrate skills sync --source draft");
   });
@@ -249,7 +249,7 @@ describe("skills push", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(skillsPushCommand({ dir: empty }, io)).rejects.toBeInstanceOf(ExitError);
-    expect(stderr()).toContain("no SKILL.md at the top level");
+    expect(stderr()).toContain("neither SKILL.md nor manifest.json");
 
     await seedLoggedInProfile("bare", {});
     const second = createMemoryIO();
@@ -272,11 +272,14 @@ describe("skills publish", () => {
     await skillsPublishCommand({ skill: "pdf-tools" }, io);
 
     expect(server.publishes()).toEqual([{ packageId: "@acme/pdf-tools", body: {} }]);
-    expect(stdout()).toBe("Published @acme/pdf-tools@1.2.1.\n");
+    expect(stdout()).toBe("Published @acme/pdf-tools@1.2.1 (skill).\n");
   });
 
   it("passes --version through and explains a 409", async () => {
-    const server = createSkillServer([], { orgs: ORGS, versionExists: true });
+    const server = createSkillServer(
+      [{ id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools"), version: "1.2.0" }],
+      { orgs: ORGS, versionExists: true },
+    );
     server.install();
     const { io, stderr } = createMemoryIO();
 
