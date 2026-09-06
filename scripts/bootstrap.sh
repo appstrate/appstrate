@@ -145,9 +145,10 @@ _appstrate_bootstrap() {
   resolve_latest_platform_release() {
     local page fields tag
     for page in 1 2 3 4 5; do
-      fields=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
-        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" \
-        | grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
+      # shellcheck disable=SC2086 # CURL_OPTS is word-split on purpose (see its definition)
+      fields=$(curl $CURL_OPTS -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" |
+        grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
       [ -z "$fields" ] && return 1
       tag=$(printf '%s\n' "$fields" | awk -F': *' '
           $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
