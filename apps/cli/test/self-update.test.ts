@@ -56,19 +56,6 @@ describe("assetName + releaseUrls", () => {
     expect(assetName({ platform: "darwin", arch: "x64" })).toBe("appstrate-darwin-x64");
   });
 
-  it("builds /latest/download URLs when target is 'latest'", () => {
-    const urls = releaseUrls("latest", { platform: "linux", arch: "x64" });
-    expect(urls.binary).toBe(
-      "https://github.com/appstrate/appstrate/releases/latest/download/appstrate-linux-x64",
-    );
-    expect(urls.checksums).toBe(
-      "https://github.com/appstrate/appstrate/releases/latest/download/checksums.txt",
-    );
-    expect(urls.checksumsSig).toBe(
-      "https://github.com/appstrate/appstrate/releases/latest/download/checksums.txt.minisig",
-    );
-  });
-
   it("builds /download/v<version>/ URLs for a pinned version", () => {
     const urls = releaseUrls("1.2.3", { platform: "darwin", arch: "arm64" });
     expect(urls.binary).toBe(
@@ -183,24 +170,59 @@ describe("resolveTargetVersion", () => {
     ).rejects.toThrow(/Invalid version/);
   });
 
-  it("queries GitHub when no version is requested", async () => {
+  it("lists GitHub releases when no version is requested", async () => {
     const calls: string[] = [];
     const out = await resolveTargetVersion(undefined, {
       fetchText: async (url) => {
         calls.push(url);
-        return JSON.stringify({ tag_name: "v2.5.0" });
+        return JSON.stringify([{ tag_name: "v2.5.0", draft: false, prerelease: false }]);
       },
     });
     expect(out).toBe("2.5.0");
-    expect(calls).toEqual(["https://api.github.com/repos/appstrate/appstrate/releases/latest"]);
+    expect(calls).toEqual([
+      "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30",
+    ]);
   });
 
-  it("names a non-platform latest release instead of building a v-prefixed URL", async () => {
+  it("skips newer npm-package releases and picks the newest platform v* release", async () => {
+    // The exact shape of the "latest" hijack: a `cli@` Release created after
+    // the platform one. `releases/latest` would return it; the list does not.
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: async () =>
+        JSON.stringify([
+          { tag_name: "cli@1.0.0-beta.56", draft: false, prerelease: false },
+          { tag_name: "core@9.0.0", draft: false, prerelease: false },
+          { tag_name: "v1.0.0-beta.56", draft: false, prerelease: false },
+          { tag_name: "v1.0.0-beta.55", draft: false, prerelease: false },
+        ]),
+    });
+    expect(out).toBe("1.0.0-beta.56");
+  });
+
+  it("skips draft and prerelease v* releases like releases/latest does", async () => {
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: async () =>
+        JSON.stringify([
+          { tag_name: "v3.0.0", draft: true, prerelease: false },
+          { tag_name: "v2.9.0-rc.1", draft: false, prerelease: true },
+          { tag_name: "v2.8.0", draft: false, prerelease: false },
+        ]),
+    });
+    expect(out).toBe("2.8.0");
+  });
+
+  it("names the releases it saw when none is a platform v* release", async () => {
     await expect(
       resolveTargetVersion(undefined, {
-        fetchText: async () => JSON.stringify({ tag_name: "cli@1.0.0-beta.56" }),
+        fetchText: async () =>
+          JSON.stringify([
+            { tag_name: "cli@1.0.0-beta.56", draft: false, prerelease: false },
+            { tag_name: "core@9.0.0", draft: false, prerelease: false },
+          ]),
       }),
-    ).rejects.toThrow(/"cli@1\.0\.0-beta\.56", not a platform v\* release/);
+    ).rejects.toThrow(
+      /No platform v\* release among the newest 2 .*cli@1\.0\.0-beta\.56, core@9\.0\.0/,
+    );
   });
 
   it("throws on malformed GitHub response", async () => {
@@ -208,7 +230,10 @@ describe("resolveTargetVersion", () => {
       resolveTargetVersion(undefined, { fetchText: async () => "not json" }),
     ).rejects.toThrow(/non-JSON/);
     await expect(resolveTargetVersion(undefined, { fetchText: async () => "{}" })).rejects.toThrow(
-      /missing tag_name/,
+      /not a release list/,
+    );
+    await expect(resolveTargetVersion(undefined, { fetchText: async () => "[]" })).rejects.toThrow(
+      /No platform v\* release among the newest 0/,
     );
   });
 

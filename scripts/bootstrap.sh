@@ -120,15 +120,6 @@ _appstrate_bootstrap() {
   # Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md.
   APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
-  if [ "$VERSION" = "latest" ]; then
-    URL_BASE="https://github.com/appstrate/appstrate/releases/latest/download"
-  else
-    URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
-  fi
-  URL="${URL_BASE}/${ASSET}"
-  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
-  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
-
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   TMPDIR=$(mktemp -d)
@@ -137,6 +128,42 @@ _appstrate_bootstrap() {
   warn() { printf '\033[0;33m⚠\033[0m  %s\n' "$*" >&2; }
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
+
+  # Newest platform `v<semver>` GitHub Release, resolved by listing — not
+  # `releases/latest`. GitHub's "latest" is whichever non-prerelease Release
+  # was created last, whatever its tag: a `cli@` / `core@` / `afps-shared@`
+  # Release published without `make_latest: false`, or created by hand, would
+  # be handed back and carries no CLI binary (`checksums.txt.minisig` 404).
+  # Only `v*` Releases ship the assets this script downloads. Drafts and
+  # prereleases are skipped, same as `releases/latest`. No jq: the three
+  # fields are grepped in document order (tag_name precedes draft/prerelease
+  # in GitHub's payload) and awk decides once it holds all three.
+  resolve_latest_platform_release() {
+    curl -fsSL -H 'Accept: application/vnd.github+json' \
+      'https://api.github.com/repos/appstrate/appstrate/releases?per_page=30' \
+      | grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)' \
+      | awk -F': *' '
+          $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
+          $1 ~ /"draft"/    { draft = $2 }
+          $1 ~ /prerelease/ { pre = $2 }
+          tag != "" && draft != "" && pre != "" {
+            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
+            tag = ""
+          }'
+  }
+
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_platform_release || true)
+    if [ -z "$VERSION" ]; then
+      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    log "Resolved latest platform release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
+  URL="${URL_BASE}/${ASSET}"
+  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
+  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
 
   # ─── Retired env vars ───────────────────────────────────────────────────────
   #

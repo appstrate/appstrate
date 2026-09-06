@@ -76,16 +76,37 @@ _appstrate_runner_bootstrap() {
   # Same key as scripts/bootstrap.sh — signs every release's checksums.txt.
   APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
-  if [ "$VERSION" = "latest" ]; then
-    URL_BASE="https://github.com/appstrate/appstrate/releases/latest/download"
-  else
-    URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
-  fi
-
   TMPDIR=$(mktemp -d)
   trap 'rm -rf "$TMPDIR"' EXIT
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
+
+  # Same resolver as scripts/bootstrap.sh — see the comment there. Only a
+  # platform `v*` Release carries the CLI binaries; `releases/latest` can name
+  # an npm-package Release instead.
+  resolve_latest_platform_release() {
+    curl -fsSL -H 'Accept: application/vnd.github+json' \
+      'https://api.github.com/repos/appstrate/appstrate/releases?per_page=30' \
+      | grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)' \
+      | awk -F': *' '
+          $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
+          $1 ~ /"draft"/    { draft = $2 }
+          $1 ~ /prerelease/ { pre = $2 }
+          tag != "" && draft != "" && pre != "" {
+            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
+            tag = ""
+          }'
+  }
+
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_platform_release || true)
+    if [ -z "$VERSION" ]; then
+      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    log "Resolved latest platform release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
 
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
   curl -fsSL "${URL_BASE}/${ASSET}" -o "$TMPDIR/$ASSET"
