@@ -362,9 +362,23 @@ for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
 // cast needed at this layer. Subsequent `getTestApp({ modules })` calls
 // reuse this singleton so strategy tests and E2E OAuth flow tests see a
 // coherent auth surface with no double-initialization cost.
-const { collectModuleContributions, emitEvent, loadModulesFromInstances } =
-  await import("../../apps/api/src/lib/modules/module-loader.ts");
+const {
+  collectModuleContributions,
+  collectModulePermissions,
+  emitEvent,
+  loadModulesFromInstances,
+} = await import("../../apps/api/src/lib/modules/module-loader.ts");
+const { setModulePermissionsProvider, setPermissionDenialHandler } =
+  await import("@appstrate/core/permissions");
 const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
+
+// Register module RBAC contributions BEFORE the plugins are built — mirrors
+// boot.ts, where `loadModules()` runs ahead of `createAuth()`. Plugin
+// factories read `getModuleEndUserAllowedScopes()` at construction; phase 3
+// re-sets an identical snapshot.
+const preloadRbacSnapshot = collectModulePermissions(importedModules);
+setModulePermissionsProvider(() => preloadRbacSnapshot);
+
 const contributions = collectModuleContributions(importedModules);
 createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
 
@@ -410,12 +424,10 @@ setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
 // process (see the "Testing" header in CLAUDE.md). Reset after every
 // test so no test needs to remember an `afterEach` of its own.
 //
-// Registering through a dynamic import avoids coupling this preload to
-// the core types at top-level, and lets us tolerate the (already
-// unlikely) case where the module fails to resolve — we log and move on
-// rather than blocking the whole suite.
+// The handler comes from the single dynamic `@appstrate/core/permissions`
+// import above, which keeps this preload uncoupled from the core types at
+// top level.
 const { afterEach } = await import("bun:test");
-const { setPermissionDenialHandler } = await import("@appstrate/core/permissions");
 afterEach(() => {
   setPermissionDenialHandler(null);
 });

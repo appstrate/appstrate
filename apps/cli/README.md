@@ -376,7 +376,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate skills`
 
-Materialize the skills installed in the pinned space as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly.
+Materialize the skills installed in the pinned space as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server.
 
 The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no hook, no daemon, no server-side change.
 
@@ -418,6 +418,38 @@ It must stay byte-stable: changing it stops the background re-runs until the use
 
 **Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. This only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched.
 
+**MCP connection.** A connected sync writes this `.mcp.json` at the plugin root, using the profile's instance, pinned organization and pinned space:
+
+```json
+{
+  "mcpServers": {
+    "appstrate": {
+      "type": "http",
+      "url": "https://app.example.com/api/mcp/o/org_123abc",
+      "headers": {
+        "X-Space-Id": "spc_456def"
+      }
+    }
+  }
+}
+```
+
+It contains no tokens. The setup plugin has no MCP configuration. In Claude Code, open `/mcp`, select `plugin:appstrate:appstrate`, and complete the browser OAuth flow if authentication is needed. This login is separate from `appstrate login`; the CLI's keyring session is never copied into the plugin. Tools use names such as `mcp__plugin_appstrate_appstrate__search_operations`. [Claude Code plugin MCP reference](https://code.claude.com/docs/en/mcp#plugin-provided-mcp-servers).
+
+**Same space as the skills.** The `X-Space-Id` header pins MCP operations to the CLI's pinned space — the space the skills were synced from — so a skill that names an agent or a run executes where that agent lives. The server validates the header against the organization: a pinned space that no longer exists fails every MCP call with `404 Space '<id>' not found in this organization` until `appstrate space switch` re-pins one and the next sync rewrites the file. A connection without the header (a manual `claude mcp add`, see below) lands in the organization's **default space** instead; `appstrate space list` shows which one that is.
+
+**Upgrading or switching organizations or spaces.** The first sync after this CLI upgrade changes the plugin's content hash even if the skills are unchanged. Switching instance, organization or space also rewrites the connection. To apply it immediately:
+
+```sh
+appstrate org switch <id-or-slug>        # when changing organizations
+appstrate space switch <id-or-slug>      # when changing spaces
+claude plugin update appstrate@appstrate # re-runs the default-profile sync
+```
+
+Then exit the active Claude Code session and start a new one, check the endpoint in `/mcp`, and authenticate for the new endpoint if requested before running an operation. Use this restart sequence for the first MCP upgrade too. Do not rely on `/reload-plugins` alone to switch organizations, spaces or instances: the active connection can retain the previous endpoint or header. For a different instance, connect the marketplace's default CLI profile to it with `appstrate login --instance <url>` first. A one-off sync with `--profile` is replaced by the default profile on the next marketplace refresh. The exact prompts depend on Claude Code's version, saved approvals and enterprise settings; a plugin update is not proof that OAuth or the endpoint switch succeeded. [Plugin component lifecycle](https://code.claude.com/docs/en/plugins-reference#plugin-caching-and-file-resolution).
+
+**Existing MCP connections and opt-out.** A manually configured `appstrate` server can coexist with the plugin server and expose another set of tools. Check their endpoints in `/mcp` and disable the connection you do not want; sync never removes your manual configuration. To keep the skills without the plugin's MCP connection, toggle `plugin:appstrate:appstrate` off in `/mcp` for the current project. [Disabling a server](https://code.claude.com/docs/en/mcp#disable-a-server-without-removing-it). Administrators can restrict the endpoint with `allowedMcpServers` / `deniedMcpServers` URL rules, or match the scoped server name `plugin:appstrate:appstrate` rather than the bare `appstrate` key. [Managed MCP configuration](https://code.claude.com/docs/en/managed-mcp).
+
 **What lands in a skill directory.** Every file of the published artifact except `manifest.json` and `RECORD` (Appstrate packaging, not skill content), with one rewrite in `SKILL.md`: the frontmatter `name` is pointed at the directory name when it differs, because the spec requires the two to match. Nothing else is touched — no description is invented, no key is reordered. The output is deterministic — no timestamps, no sync metadata — because a `mode: "copy"` plugin's version _is_ the hash of its contents.
 
 Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills YAML, but artifacts published before that rule existed are still synced exactly as authored. Each one is named once on stderr (`… does not pass the skill frontmatter rule …`): Claude Code and Codex may skip it, and the fix is to republish it from Appstrate.
@@ -455,7 +487,27 @@ Ownership is recorded per target **together with the root it was written under**
 
 #### Codex, and running without a Claude Code plugin
 
-The recorded marketplace command syncs both targets (`--target claude-plugin --target codex`), so if you use Claude Code, every session already refreshes `~/.agents/skills/` and Codex picks the skills up on its next start — Codex rescans that directory per session and has no hook of its own.
+The recorded marketplace command syncs both targets (`--target claude-plugin --target codex`), so if you use Claude Code, every session already refreshes `~/.agents/skills/` and Codex picks the skills up on its next start. This target supplies skills only; it does not configure Codex MCP.
+
+**Connect Codex manually.** Run `appstrate whoami` to read the instance URL, `appstrate org list` to choose an organization, and `appstrate org current` to print its pinned ID. Substitute those values below, removing any trailing slash from the instance URL:
+
+```sh
+codex mcp get appstrate                   # inspect any existing entry first
+# If no entry exists:
+codex mcp add appstrate --url https://app.example.com/api/mcp/o/org_123abc
+codex mcp login appstrate
+```
+
+If `appstrate` already names the intended endpoint, keep its configuration and log in only if needed. If it names something else, use a distinct name such as `appstrate-acme` in both commands to preserve the existing connection. On an organization or instance switch, update only the intended entry's `url` under `[mcp_servers.<name>]` in `~/.codex/config.toml`, preserving its other settings, then run `codex mcp login <name>`, restart Codex and verify `/mcp` before using it. Skill sync does not update this URL or share the CLI's login. This manual connection sends no `X-Space-Id`, so it lands in the organization's default space; to target the pinned space instead, add `http_headers = { "X-Space-Id" = "<spc_id>" }` under the same `[mcp_servers.<name>]` table (`appstrate space current` prints the id). [Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+For Claude Code without the plugin, use the same instance and organization with an explicit user scope, then authenticate through `/mcp`:
+
+```sh
+claude mcp add --transport http --scope user appstrate https://app.example.com/api/mcp/o/org_123abc \
+  --header "X-Space-Id: spc_456def"   # omit to use the organization's default space
+```
+
+Inspect an existing entry with `claude mcp get appstrate` before adding; keep it or choose another name rather than replacing it blindly. [Claude Code installation scopes](https://code.claude.com/docs/en/mcp#user-scope).
 
 Two cases need you to run the sync yourself: you do not use Claude Code at all, or your organization blocks command-sourced plugins (`disableCommandPluginSources`). Then schedule `appstrate skills sync --target codex` (add or swap in `--target claude-user` to feed `~/.claude/skills/`, which Claude Code picks up live).
 
@@ -835,7 +887,20 @@ If you see `OS keyring ... failed ... falling back to ~/.config/appstrate/creden
 
 ## Source + contributing
 
-Source at [`apps/cli/`](../../apps/cli/). Tests at `apps/cli/test/` (unit tests, run with `bun test` from the CLI directory). E2E against a real instance: spin up an Appstrate Tier 0 with `bun run dev`, then `bun run src/cli.ts login --instance http://localhost:3000`.
+Source at [`apps/cli/`](../../apps/cli/). Tests at `apps/cli/test/` (unit tests, run with `bun test` from the CLI directory).
+
+**Real device-flow smoke tests:** the OS keyring namespace is `(appstrate, <profile>)`;
+isolating XDG directories does **not** isolate credentials. Allocate a unique
+`smoke-<id>` profile and pass `--profile smoke-<id>` to every command, including
+`login`, validation commands and `logout` cleanup after success or failure.
+Never use `default`, another existing profile, or change the user's `defaultProfile`.
+Before login, check only the named fixture profile's non-secret metadata; never
+read or log credentials. Keep `XDG_CONFIG_HOME` and `XDG_DATA_HOME` in temporary
+fixture directories. Skill targets need separate isolation: these XDG settings
+do not redirect `~/.agents/skills/` or `~/.claude/skills/`. Do not run real `codex`
+or `claude-user` target writes unless their destinations are isolated too; use
+the existing fake-keyring test fixtures for those checks. Do not repurpose
+`HOME` or `CODEX_HOME` for a real CLI smoke run.
 
 ### Building locally
 

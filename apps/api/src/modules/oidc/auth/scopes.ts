@@ -87,6 +87,14 @@ export const APPSTRATE_BUILTIN_SCOPES: readonly string[] = [
 ];
 
 /**
+ * Scope ceiling for self-service (DCR / CIMD) clients: identity scopes plus
+ * every module end-user-grantable scope. Evaluated per call, fresh array.
+ */
+export function getSelfServiceScopes(): string[] {
+  return [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
+}
+
+/**
  * Full scope vocabulary served by the OIDC module — core built-ins plus any
  * module scopes opted in via `endUserGrantable: true`.
  *

@@ -56,19 +56,6 @@ describe("assetName + releaseUrls", () => {
     expect(assetName({ platform: "darwin", arch: "x64" })).toBe("appstrate-darwin-x64");
   });
 
-  it("builds /latest/download URLs when target is 'latest'", () => {
-    const urls = releaseUrls("latest", { platform: "linux", arch: "x64" });
-    expect(urls.binary).toBe(
-      "https://github.com/appstrate/appstrate/releases/latest/download/appstrate-linux-x64",
-    );
-    expect(urls.checksums).toBe(
-      "https://github.com/appstrate/appstrate/releases/latest/download/checksums.txt",
-    );
-    expect(urls.checksumsSig).toBe(
-      "https://github.com/appstrate/appstrate/releases/latest/download/checksums.txt.minisig",
-    );
-  });
-
   it("builds /download/v<version>/ URLs for a pinned version", () => {
     const urls = releaseUrls("1.2.3", { platform: "darwin", arch: "arm64" });
     expect(urls.binary).toBe(
@@ -183,24 +170,112 @@ describe("resolveTargetVersion", () => {
     ).rejects.toThrow(/Invalid version/);
   });
 
-  it("queries GitHub when no version is requested", async () => {
+  const RELEASES_URL = "https://api.github.com/repos/appstrate/appstrate/releases";
+  const release = (tag_name: string, flags: { draft?: boolean; prerelease?: boolean } = {}) => ({
+    tag_name,
+    draft: flags.draft ?? false,
+    prerelease: flags.prerelease ?? false,
+  });
+  /** Serve `pages[n-1]` for `page=n`, `[]` past the last one, like GitHub. */
+  const paged = (pages: unknown[][], calls?: string[]) => async (url: string) => {
+    calls?.push(url);
+    const page = Number(new URL(url).searchParams.get("page"));
+    return JSON.stringify(pages[page - 1] ?? []);
+  };
+
+  it("lists GitHub releases when no version is requested", async () => {
     const calls: string[] = [];
     const out = await resolveTargetVersion(undefined, {
-      fetchText: async (url) => {
-        calls.push(url);
-        return JSON.stringify({ tag_name: "v2.5.0" });
-      },
+      fetchText: paged([[release("v2.5.0")]], calls),
     });
     expect(out).toBe("2.5.0");
-    expect(calls).toEqual(["https://api.github.com/repos/appstrate/appstrate/releases/latest"]);
+    expect(calls).toEqual([`${RELEASES_URL}?per_page=30&page=1`]);
   });
 
-  it("names a non-platform latest release instead of building a v-prefixed URL", async () => {
+  it("skips newer npm-package releases and picks the newest platform v* release", async () => {
+    // The exact shape of the "latest" hijack: a `cli@` Release created after
+    // the platform one. `releases/latest` would return it; the list does not.
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: paged([
+        [
+          release("cli@1.0.0-beta.56"),
+          release("core@9.0.0"),
+          release("v1.0.0-beta.56"),
+          release("v1.0.0-beta.55"),
+        ],
+      ]),
+    });
+    expect(out).toBe("1.0.0-beta.56");
+  });
+
+  it("picks the highest version on the page, not the most recently created", async () => {
+    // A hotfix for an older line published after a newer release: creation
+    // order (what `releases/latest` uses) would hand back 1.0.1.
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: paged([[release("v1.0.1"), release("v1.1.0"), release("v1.0.0")]]),
+    });
+    expect(out).toBe("1.1.0");
+  });
+
+  it("orders beta builds numerically when picking the highest", async () => {
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: paged([[release("v1.0.0-beta.9"), release("v1.0.0-beta.57")]]),
+    });
+    expect(out).toBe("1.0.0-beta.57");
+  });
+
+  it("skips draft and prerelease v* releases like releases/latest does", async () => {
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: paged([
+        [
+          release("v3.0.0", { draft: true }),
+          release("v2.9.0-rc.1", { prerelease: true }),
+          release("v2.8.0"),
+        ],
+      ]),
+    });
+    expect(out).toBe("2.8.0");
+  });
+
+  it("walks to the next page when the newest one holds only npm-package releases", async () => {
+    const calls: string[] = [];
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: paged(
+        [[release("cli@1.0.0-beta.56"), release("core@9.0.0")], [release("v1.0.0-beta.56")]],
+        calls,
+      ),
+    });
+    expect(out).toBe("1.0.0-beta.56");
+    expect(calls).toEqual([
+      `${RELEASES_URL}?per_page=30&page=1`,
+      `${RELEASES_URL}?per_page=30&page=2`,
+    ]);
+  });
+
+  it("names the releases it saw when none is a platform v* release", async () => {
+    const calls: string[] = [];
     await expect(
       resolveTargetVersion(undefined, {
-        fetchText: async () => JSON.stringify({ tag_name: "cli@1.0.0-beta.56" }),
+        fetchText: paged([[release("cli@1.0.0-beta.56"), release("core@9.0.0")]], calls),
       }),
-    ).rejects.toThrow(/"cli@1\.0\.0-beta\.56", not a platform v\* release/);
+    ).rejects.toThrow(
+      /No platform v\* release among the newest 2 .*cli@1\.0\.0-beta\.56, core@9\.0\.0/,
+    );
+    // Stopped at the first empty page, not at the page cap.
+    expect(calls).toHaveLength(2);
+  });
+
+  it("stops at the page cap when every page holds only npm-package releases", async () => {
+    const calls: string[] = [];
+    await expect(
+      resolveTargetVersion(undefined, {
+        fetchText: async (url) => {
+          calls.push(url);
+          return JSON.stringify([release("cli@1.0.0-beta.56")]);
+        },
+      }),
+    ).rejects.toThrow(/No platform v\* release among the newest 5 /);
+    expect(calls).toHaveLength(5);
   });
 
   it("throws on malformed GitHub response", async () => {
@@ -208,7 +283,10 @@ describe("resolveTargetVersion", () => {
       resolveTargetVersion(undefined, { fetchText: async () => "not json" }),
     ).rejects.toThrow(/non-JSON/);
     await expect(resolveTargetVersion(undefined, { fetchText: async () => "{}" })).rejects.toThrow(
-      /missing tag_name/,
+      /not a release list/,
+    );
+    await expect(resolveTargetVersion(undefined, { fetchText: async () => "[]" })).rejects.toThrow(
+      /No platform v\* release among the newest 0/,
     );
   });
 

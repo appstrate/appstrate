@@ -59,8 +59,7 @@ import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
-import { getAppstrateScopes, OIDC_IDENTITY_SCOPES } from "./scopes.ts";
-import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
+import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
 import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
 import { mcpValidAudiences, initMcpValidAudiences } from "../../../lib/audiences.ts";
@@ -175,7 +174,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
   // Deliberately EXCLUDES core action scopes (agents:run, llm-proxy:call, …) —
   // those remain for admin-managed first-party clients. The user-consent screen
   // and the caller's own permissions still gate the actual grant on top of this.
-  const selfServiceScopes = [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
+  const selfServiceScopes = getSelfServiceScopes();
   const cachedTrustedClients =
     opts.cachedTrustedClientIds && opts.cachedTrustedClientIds.length > 0
       ? new Set(opts.cachedTrustedClientIds)
@@ -268,9 +267,12 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // self-service scope set (identity + module scopes), PKCE is enforced by
       // the plugin, and the /oauth2/register endpoint is rate-limited in
       // routes.ts. The user-consent screen remains the real authorization gate.
+      // Default and ceiling are the same set so a body without `scope` can
+      // still reach `mcp:*` at authorize; it grants nothing the registrant
+      // could not already request explicitly.
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
-      clientRegistrationDefaultScopes: [...OIDC_IDENTITY_SCOPES],
+      clientRegistrationDefaultScopes: getSelfServiceScopes(),
       clientRegistrationAllowedScopes: selfServiceScopes,
       storeClientSecret: {
         hash: hashSecret,
@@ -368,8 +370,13 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // confinement then restricts to the protected resource it was issued
       // for. Without this the entire CIMD onboarding path mints nothing.
       onClientCreated: async ({ client }) => {
-        const clientId = (client as { clientId?: unknown }).clientId;
-        if (typeof clientId === "string") await markClientSelfService(clientId);
+        const stamped = await markClientSelfService(client.clientId);
+        // CIMD returns this same object to the first authorize request after
+        // the hook. Persisting alone leaves its scopes empty until the retry.
+        if (stamped) {
+          client.scopes = stamped.scopes;
+          client.metadata = stamped.metadata;
+        }
       },
     }),
   ];
