@@ -367,8 +367,13 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // confinement then restricts to the protected resource it was issued
       // for. Without this the entire CIMD onboarding path mints nothing.
       onClientCreated: async ({ client }) => {
-        const clientId = (client as { clientId?: unknown }).clientId;
-        if (typeof clientId === "string") await markClientSelfService(clientId);
+        const stamped = await markClientSelfService(client.clientId);
+        // CIMD returns this same object to the first authorize request after
+        // the hook. Persisting alone leaves its scopes empty until the retry.
+        if (stamped) {
+          client.scopes = stamped.scopes;
+          client.metadata = stamped.metadata;
+        }
       },
     }),
   ];
