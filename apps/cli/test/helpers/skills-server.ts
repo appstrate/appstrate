@@ -81,6 +81,8 @@ export interface SkillServerOptions {
   versionExists?: boolean;
   /** Behave like an instance that predates `?draft=true`: always publish. */
   ignoresDraft?: boolean;
+  /** Answer the first N imports with `429` and a `Retry-After` of one second. */
+  rateLimitFirst?: number;
 }
 
 /** What one `POST /api/packages/import` carried. */
@@ -170,6 +172,7 @@ export function createSkillServer(
   let peakInFlight = 0;
   const imports: RecordedImport[] = [];
   const publishes: RecordedPublish[] = [];
+  let rateLimited = 0;
   /** Optimistic lock per package, as the draft import moves it. */
   const locks = new Map<string, number>();
 
@@ -214,6 +217,12 @@ export function createSkillServer(
     }
 
     if (path === "/api/packages/import" && init?.method === "POST") {
+      if ((options.rateLimitFirst ?? 0) > rateLimited) {
+        rateLimited += 1;
+        return json({ code: "rate_limited", detail: "Too many requests." }, 429, {
+          "Retry-After": "1",
+        });
+      }
       const form = init.body as FormData;
       const file = form.get("file") as File;
       const entries = unzipArtifact(new Uint8Array(await file.arrayBuffer()));

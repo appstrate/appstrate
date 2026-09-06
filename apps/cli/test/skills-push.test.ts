@@ -196,6 +196,20 @@ describe("skills push", () => {
     expect(stderr()).toContain("PUBLISHED @acme/pdf-tools@1.0.0 instead");
   });
 
+  it("waits out a 429 and retries, so a bulk push needs no pacing loop", async () => {
+    const server = createSkillServer([], { orgs: ORGS, rateLimitFirst: 2 });
+    server.install();
+    const dir = await skillFolder("pdf-tools");
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await skillsPushCommand({ dir }, io);
+
+    expect(server.imports()).toHaveLength(1);
+    expect(stderr()).toContain("waiting 1s before retrying (1/3)");
+    expect(stderr()).toContain("(2/3)");
+    expect(stdout()).toContain("Pushed @acme/pdf-tools");
+  });
+
   it("uploads nothing under --dry-run and shows what would change", async () => {
     const server = createSkillServer([], { orgs: ORGS });
     server.install();

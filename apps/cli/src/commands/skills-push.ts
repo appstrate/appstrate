@@ -131,10 +131,7 @@ export async function skillsPushCommand(
 
   let res: Response;
   try {
-    res = await apiFetchRaw(profileName, `/api/packages/import${query}`, {
-      method: "POST",
-      body: form,
-    });
+    res = await importWithBackoff(profileName, query, form, io);
   } catch (err) {
     io.stderr.write(`${formatError(err)}\n`);
     io.exit(1);
@@ -213,6 +210,42 @@ export async function skillsPublishCommand(
     }
     io.exit(1);
   }
+}
+
+/** The import route allows 10 requests a minute; a bulk push is the one caller that hits it. */
+const RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_FALLBACK_SECONDS = 60;
+
+/**
+ * POST the archive, and on `429` wait what the server asks (`Retry-After`, else
+ * a minute) and try again, a bounded number of times. A migration of fifty
+ * skills must not need a hand-written pacing loop around the CLI.
+ */
+async function importWithBackoff(
+  profileName: string,
+  query: string,
+  form: FormData,
+  io: CommandIO,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    const res = await apiFetchRaw(profileName, `/api/packages/import${query}`, {
+      method: "POST",
+      body: form,
+    });
+    if (res.status !== 429 || attempt >= RATE_LIMIT_RETRIES) return res;
+    const header = Number(res.headers.get("retry-after"));
+    const seconds =
+      Number.isFinite(header) && header > 0 ? Math.ceil(header) : RATE_LIMIT_FALLBACK_SECONDS;
+    io.stderr.write(
+      `Rate limited (10 imports a minute): waiting ${seconds}s before retrying (${attempt + 1}/${RATE_LIMIT_RETRIES}).\n`,
+    );
+    await res.body?.cancel().catch(() => {});
+    await sleep(seconds * 1000);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function requireOrg(profileName: string, profile: Profile | undefined, io: CommandIO): boolean {
