@@ -150,7 +150,11 @@ export async function skillsSyncCommand(
         reportPlans(plans, io.stdout);
         return;
       }
-      const fixedFiles = pluginFixedFiles({ instance: profile!.instance, orgId: profile!.orgId! });
+      const fixedFiles = pluginFixedFiles({
+        instance: profile!.instance,
+        orgId: profile!.orgId!,
+        spaceId: profile!.spaceId!,
+      });
       pluginOk = await executePlans(
         profileName,
         source,

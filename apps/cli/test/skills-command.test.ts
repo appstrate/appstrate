@@ -97,7 +97,7 @@ describe("skills sync — claude-plugin target", () => {
     expect(manifest.name).toBe("appstrate");
     expect(manifest).not.toHaveProperty("version");
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(
-      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1"\n    }\n  }\n}\n',
+      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1",\n      "headers": {\n        "X-Space-Id": "spc_1"\n      }\n    }\n  }\n}\n',
     );
     expect(await readText(join(pluginRoot(), "README.md"))).toContain("appstrate skills sync");
 
@@ -142,13 +142,15 @@ describe("skills sync — claude-plugin target", () => {
     expect(server.downloads()).toBe(1);
   });
 
-  for (const [changed, profile, url] of [
-    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2"],
+  for (const [changed, profile, url, spaceId] of [
+    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2", "spc_1"],
     [
       "instance",
       { instance: "https://other.example.com/" },
       "https://other.example.com/api/mcp/o/org_1",
+      "spc_1",
     ],
+    ["space", { spaceId: "spc_2" }, "https://app.example.com/api/mcp/o/org_1", "spc_2"],
   ] as const) {
     it(`updates the MCP ${changed} without re-downloading unchanged skills`, async () => {
       const server = createSkillServer(ONE_SKILL);
@@ -162,7 +164,7 @@ describe("skills sync — claude-plugin target", () => {
       await skillsSyncCommand({ printPath: true }, io);
 
       expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
-        mcpServers: { appstrate: { type: "http", url } },
+        mcpServers: { appstrate: { type: "http", url, headers: { "X-Space-Id": spaceId } } },
       });
       expect(await readText(skillPath)).toBe(before);
       expect(server.downloads()).toBe(1);
@@ -170,7 +172,7 @@ describe("skills sync — claude-plugin target", () => {
     });
   }
 
-  it("keeps connected plugin bytes unchanged when only the space or login changes", async () => {
+  it("keeps connected plugin bytes unchanged when only the login changes", async () => {
     const server = createSkillServer(ONE_SKILL);
     server.install();
     await skillsSyncCommand({}, createMemoryIO().io);
@@ -178,7 +180,7 @@ describe("skills sync — claude-plugin target", () => {
     const mcpStats = await lstat(join(pluginRoot(), ".mcp.json"));
     await seedLoggedInProfile("default", {
       orgId: "org_1",
-      spaceId: "spc_2",
+      spaceId: "spc_1",
       userId: "usr_other",
       email: "other@example.com",
     });
@@ -198,7 +200,13 @@ describe("skills sync — claude-plugin target", () => {
     await skillsSyncCommand({ printPath: true }, io);
 
     expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
-      mcpServers: { appstrate: { type: "http", url: "https://app.example.com/api/mcp/o/org_1" } },
+      mcpServers: {
+        appstrate: {
+          type: "http",
+          url: "https://app.example.com/api/mcp/o/org_1",
+          headers: { "X-Space-Id": "spc_1" },
+        },
+      },
     });
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
     expect(server.downloads()).toBe(0);

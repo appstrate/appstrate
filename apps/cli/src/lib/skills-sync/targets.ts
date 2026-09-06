@@ -53,10 +53,16 @@ const PLUGIN_FILES: Readonly<Record<string, string>> = {
 
 const PLUGIN_UPDATE_COMMAND = `claude plugin update ${PLUGIN_NAME}@appstrate`;
 
-/** Only public connection coordinates belong in a plugin, never CLI credentials. */
+/**
+ * Only public connection coordinates belong in a plugin, never CLI credentials.
+ * The pinned space travels as `X-Space-Id` so MCP operations land in the SAME
+ * space the synced skills come from; the server validates it against the org
+ * and falls back to the default space only when the header is absent.
+ */
 export function pluginFixedFiles(connection?: {
   instance: string;
   orgId: string;
+  spaceId: string;
 }): Record<string, Uint8Array> {
   const encoder = new TextEncoder();
   const files = Object.fromEntries(
@@ -68,16 +74,16 @@ export function pluginFixedFiles(connection?: {
         appstrate: {
           type: "http",
           url: `${connection.instance.replace(/\/+$/, "")}/api/mcp/o/${encodeURIComponent(connection.orgId)}`,
+          headers: { "X-Space-Id": connection.spaceId },
         },
       },
     };
     files[".mcp.json"] = encoder.encode(`${JSON.stringify(config, null, 2)}\n`);
     files["README.md"] = encoder.encode(`${PLUGIN_README}
-The plugin also includes your organization's Appstrate MCP server. Open
-\`/mcp\` in Claude Code to connect through OAuth; the CLI login is separate.
-MCP tools use the organization's default space, which may differ from the
-CLI's pinned space used to sync these skills. Switching the CLI space alone
-does not change the MCP server.
+The plugin also includes your organization's Appstrate MCP server, scoped to
+the same pinned space as these skills. Open \`/mcp\` in Claude Code to connect
+through OAuth; the CLI login is separate. Switching the CLI's organization or
+space rewrites this connection on the next sync.
 `);
   }
   return files;
