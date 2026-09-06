@@ -19,11 +19,12 @@ import {
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { ApiError } from "../../api/client";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import {
   spaceRoleDescription,
   spaceRoleLabel,
+  spaceRoleValue,
   useCreateRole,
   useDeleteRole,
   useRoleVocabulary,
@@ -33,6 +34,7 @@ import {
 } from "../../hooks/use-roles";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Modal } from "../../components/modal";
+import { ViewAsDialog } from "../../components/view-as-dialog";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 
@@ -45,6 +47,8 @@ export function OrgSettingsRolesPage() {
 
   const [editing, setEditing] = useState<RoleObject | null>(null);
   const [creating, setCreating] = useState(false);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const canPreview = useCanPreviewRole();
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -106,7 +110,11 @@ export function OrgSettingsRolesPage() {
       </div>
       <div className="mb-8 flex flex-col gap-3">
         {presets.map((role) => (
-          <RoleCard key={role.key} role={role} />
+          <RoleCard
+            key={role.key}
+            role={role}
+            onPreview={canPreview ? () => setPreviewing(previewValue(role)) : undefined}
+          />
         ))}
       </div>
 
@@ -134,6 +142,7 @@ export function OrgSettingsRolesPage() {
             <RoleCard
               key={role.id ?? role.key}
               role={role}
+              onPreview={canPreview ? () => setPreviewing(previewValue(role)) : undefined}
               onEdit={canWrite ? () => setEditing(role) : undefined}
               onDelete={
                 canDelete
@@ -158,6 +167,8 @@ export function OrgSettingsRolesPage() {
         />
       )}
 
+      {previewing && <ViewAsDialog role={previewing} onClose={() => setPreviewing(null)} />}
+
       <ConfirmModal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
@@ -173,12 +184,22 @@ export function OrgSettingsRolesPage() {
   );
 }
 
+/** The one string the header and the pickers both carry for a space role. */
+function previewValue(role: RoleObject): string {
+  return spaceRoleValue({
+    preset_role: role.kind === "preset" ? role.key : null,
+    custom_role_id: role.id,
+  });
+}
+
 function RoleCard({
   role,
+  onPreview,
   onEdit,
   onDelete,
 }: {
   role: RoleObject;
+  onPreview?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
 }) {
@@ -195,6 +216,19 @@ function RoleCard({
           </span>
         </div>
         {role.kind === "preset" && <Badge variant="running">{t("roles.presetBadge")}</Badge>}
+        {onPreview && (
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid={`preview-role-${role.key}`}
+            // Every row's button reads "Prévisualiser"; the label is what tells
+            // a screen reader which role this one previews.
+            aria-label={t("viewAs.previewRole", { role: spaceRoleLabel(role, t) ?? role.key })}
+            onClick={onPreview}
+          >
+            {t("viewAs.trigger")}
+          </Button>
+        )}
         {onEdit && (
           <Button variant="outline" size="sm" onClick={onEdit}>
             {t("btn.edit")}

@@ -144,8 +144,38 @@ export function takeViewAsStopped(): string | null {
 }
 
 /**
- * Enter the preview. Phase 3's entry dialog is the only caller; it supplies
- * the labels it already rendered in its own pickers.
+ * The persona a submitted `view-as-dialog` commits: the space half exists only
+ * when BOTH a space and a role grantable THERE were chosen, which is exactly
+ * the header's "space and role are optional as a pair".
+ *
+ * Here rather than in the dialog so the shape is built beside its definition
+ * and its serializer — and so the no-DOM harness can pin it, which it cannot do
+ * through a portalled dialog.
+ */
+export function toViewAsPersona(
+  orgId: string,
+  orgRole: ViewAsPersona["orgRole"],
+  space: { id: string; name: string } | undefined,
+  roleOption: { value: string; label: string } | undefined,
+): ViewAsPersona {
+  return {
+    orgId,
+    orgRole,
+    space:
+      space && roleOption
+        ? {
+            spaceId: space.id,
+            role: roleOption.value,
+            roleLabel: roleOption.label,
+            spaceName: space.name,
+          }
+        : null,
+  };
+}
+
+/**
+ * Enter the preview. The entry dialog is the only caller; it supplies the
+ * labels it already rendered in its own pickers.
  */
 export function enterViewAs(persona: ViewAsPersona): void {
   viewAsStore.getState().commit(persona, null);

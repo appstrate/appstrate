@@ -31,6 +31,19 @@ export function roleI18nKey(role: OrgRole): string {
 }
 
 /**
+ * Who may preview a role — the server's own eligibility rule (`validateViewAs`).
+ *
+ * A role rather than a permission because that is what the server checks: the
+ * preview is a downgrade of the caller's own authority, and "a preview only
+ * removes" holds only while the previewer outranks every persona. The triggers
+ * hide for anyone else; the server refuses them (`view_as_forbidden`) anyway.
+ */
+export function useCanPreviewRole(): boolean {
+  const { orgRole } = usePermissions();
+  return orgRole === "owner" || orgRole === "admin";
+}
+
+/**
  * Permission gating for the UI.
  *
  * `can` answers over the caller's ORG-level effective set (`GET /api/orgs`)

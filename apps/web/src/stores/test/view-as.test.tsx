@@ -50,6 +50,7 @@ const {
   getViewAsHeader,
   readPersistedPersona,
   takeViewAsStopped,
+  toViewAsPersona,
   STORAGE_KEY,
 } = await import("../view-as-store.ts");
 const { orgStore } = await import("../org-store.ts");
@@ -261,6 +262,19 @@ describe("exit on refusal", () => {
     enterViewAs(PERSONA);
     await noteViewAsRefusal(new Headers(), refusal(403, "view_as_forbidden"));
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
+  });
+
+  it("replaces a running preview rather than stacking a second one", () => {
+    // The entry dialog stays reachable under a preview, so submitting again is
+    // a replacement — no `exitViewAs()` dance at the call site.
+    enterViewAs(PERSONA);
+    enterViewAs(toViewAsPersona("org_a", "guest", undefined, undefined));
+    expect(viewAsStore.getState().persona).toEqual({
+      orgId: "org_a",
+      orgRole: "guest",
+      space: null,
+    });
+    expect(getViewAsHeader()).toBe("org_role=guest");
   });
 
   it("leaves no reason behind when the user simply quits", () => {

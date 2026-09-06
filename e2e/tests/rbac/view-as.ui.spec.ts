@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "View as role" in the browser — the SPA half of the preview.
+ * "View as role" in the browser.
  *
- * The preview is entered here by seeding the persisted persona, the way the
- * entry dialog will (phase 3). What these tests hold is everything downstream
- * of that: the persona reaches the server on every request, the answer it
- * produces is the one the UI renders, the banner says who you are, and the one
- * exit puts the real authority back.
+ * Two halves. The first two tests take the REAL path — the dialog, from each of
+ * its two triggers — because that is the only place the portalled `<Select>`s
+ * and radio options can be exercised at all (the no-DOM web harness renders the
+ * whole dialog as an empty string). The rest seed the persisted persona
+ * directly, which is how a RELOAD and a persona whose space has been deleted
+ * can be reached without re-driving the dialog each time.
  *
- * The Run button is the discriminator: it is gated on `agents:run`, which a
- * `viewer` in the space does not hold and the previewing owner does.
+ * The Run button is the discriminator throughout: it is gated on `agents:run`,
+ * which a `viewer` in the space does not hold and the previewing owner does.
  */
 
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
@@ -36,6 +37,118 @@ const banner = (page: Page) => page.getByTestId("view-as-banner");
 const runButton = (page: Page) => page.getByRole("button", { name: /^(Lancer|Run)$/ });
 
 test.describe("View as role", () => {
+  test("is entered from the Roles page and left from the banner @critical", async ({
+    authedPage: page,
+    apiClient,
+    browserCtx,
+  }) => {
+    const scope = `@${browserCtx.org.orgSlug}`;
+    const agentName = `view-as-entry-${Date.now()}`;
+    await createAgent(apiClient, scope, agentName);
+    const agentUrl = `/agents/${scope}/${agentName}`;
+
+    await page.goto("/org-settings/roles");
+    await page.getByTestId("preview-role-viewer").click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    // Only the two roles a preview can be: previewing owner/admin would remove
+    // nothing, and the server refuses it.
+    await expect(dialog.getByRole("radio", { name: /Utilisateur standard/ })).toBeVisible();
+    await expect(dialog.getByRole("radio", { name: /^Invité/ })).toBeVisible();
+    await expect(dialog.getByRole("radio", { name: /Administrateur/ })).toHaveCount(0);
+    // Space defaults to the one the user is in; the role came from the row.
+    await expect(dialog.locator("#view-as-space")).toContainText("Default");
+    await expect(dialog.locator("#view-as-space-role")).toContainText("Lecteur");
+
+    await dialog.getByTestId("view-as-submit").click();
+
+    await expect(banner(page)).toBeVisible();
+    await expect(banner(page)).toContainText("Lecteur");
+    await page.goto(agentUrl);
+    await expect(runButton(page)).toHaveCount(0);
+
+    await banner(page)
+      .getByRole("button", { name: /^(Quitter|Exit)$/ })
+      .click();
+    await expect(banner(page)).toHaveCount(0);
+    await expect(runButton(page).first()).toBeVisible();
+  });
+
+  test("waits for the role catalog instead of calling it empty", async ({ authedPage: page }) => {
+    // The catalog is what says which roles are grantable HERE; treating "not
+    // answered yet" as "none" told every cold open that no role was previewable.
+    let release = () => {};
+    const stalled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/spaces/*/roles*", async (route) => {
+      await stalled;
+      await route.continue();
+    });
+
+    await page.goto("/org-settings/space/members");
+    await page.getByTestId("view-as-space-button").click();
+    const dialog = page.getByRole("dialog");
+
+    await expect(dialog.getByRole("status")).toBeVisible();
+    await expect(dialog).not.toContainText("Aucun rôle prévisualisable");
+    await expect(dialog.getByTestId("view-as-submit")).toBeDisabled();
+
+    release();
+    await expect(dialog.locator("#view-as-space-role")).toBeVisible();
+    await expect(dialog.getByRole("status")).toHaveCount(0);
+  });
+
+  test("is entered from Space members, as a guest with no space", async ({ authedPage: page }) => {
+    await page.goto("/org-settings/space/members");
+    await page.getByTestId("view-as-space-button").click();
+
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("radio", { name: /^Invité/ }).click();
+    // A guest belongs to no space unless assigned; drop the space half so the
+    // persona is the org role alone.
+    await dialog.locator("#view-as-space").click();
+    await page.getByRole("option", { name: "Aucun espace" }).click();
+    // The SPA's OWN next read of the spaces list, not a hand-built request: what
+    // is under test is that the persona rides the app's transport, is answered
+    // as the persona (the marker), and empties the list a guest with no
+    // assignment sees. Captured through `route` rather than `waitForResponse`
+    // because dropping every space navigates the app away, and a response body
+    // cannot be read after that.
+    let previewed: { header?: string; marker?: string; status: number; body: string } | undefined;
+    await page.route(
+      (url) => url.pathname === "/api/spaces",
+      async (route) => {
+        const response = await route.fetch();
+        const header = route.request().headers()["x-view-as"];
+        if (!previewed && header) {
+          previewed = {
+            header,
+            marker: response.headers()["x-view-as-active"],
+            status: response.status(),
+            body: await response.text(),
+          };
+        }
+        await route.fulfill({ response });
+      },
+    );
+    await dialog.getByTestId("view-as-submit").click();
+
+    await expect.poll(() => previewed?.header).toBe("org_role=guest");
+    expect(previewed?.status).toBe(200);
+    expect(previewed?.marker).toBe("1");
+    expect((JSON.parse(previewed?.body ?? "{}") as { data: unknown[] }).data).toEqual([]);
+
+    await expect(banner(page)).toBeVisible();
+    await expect(banner(page)).toContainText("Invité");
+
+    await banner(page)
+      .getByRole("button", { name: /^(Quitter|Exit)$/ })
+      .click();
+    await expect(banner(page)).toHaveCount(0);
+  });
+
   test("previews a viewer, then gives the owner their authority back @critical", async ({
     authedPage: page,
     apiClient,

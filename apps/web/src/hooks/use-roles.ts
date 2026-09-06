@@ -122,18 +122,26 @@ export function memberRoleValue(
   return match?.id ? spaceRoleValue({ custom_role_id: match.id }) : undefined;
 }
 
-/** Space pickers use the caller's grantable catalog; org invitations use the org catalog. */
-export function useSpaceRoleOptions(spaceId?: string) {
+/**
+ * Space pickers use the caller's grantable catalog; org invitations use the org
+ * catalog.
+ *
+ * `enabled: false` fetches NEITHER — for a picker that is mounted but currently
+ * asking about no space at all, where the org catalog is not the fallback the
+ * caller wants but a request for nothing.
+ */
+export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
   const scope = useOrgOnlyScope();
-  const orgQuery = useRoles(!spaceId && can("roles:read"));
+  const orgQuery = useRoles(enabled && !spaceId && can("roles:read"));
   const spaceQuery = $api.useQuery(
     "get",
     "/api/spaces/{id}/roles",
     { params: { path: { id: spaceId ?? "" }, header: scope.header } },
     {
       enabled:
+        enabled &&
         scope.enabled &&
         !!spaceId &&
         (can("space-members:invite") ||

@@ -999,5 +999,16 @@
   "roles.presetDesc.operator": "Utilise ce qui est construit : lance les agents, gère ses connexions.",
   "roles.presetDesc.viewer": "Consulte : les lectures d'un opérateur, sans écriture.",
   "roles.inUseInvitations_one": "{{count}} invitation en attente l'attribue encore.",
-  "roles.inUseInvitations_other": "{{count}} invitations en attente l'attribuent encore."
+  "roles.inUseInvitations_other": "{{count}} invitations en attente l'attribuent encore.",
+  "viewAs.title": "Prévisualiser un rôle",
+  "viewAs.explain": "Vous verrez cette organisation avec les droits du rôle choisi, dans cette organisation uniquement. Un bandeau permanent rappelle la prévisualisation et permet d'en sortir.",
+  "viewAs.spaceLabel": "Espace",
+  "viewAs.noSpace": "Aucun espace",
+  "viewAs.spaceRoleLabel": "Rôle dans l'espace",
+  "viewAs.spaceRolePlaceholder": "Choisir un rôle",
+  "viewAs.rolesEmpty": "Aucun rôle prévisualisable dans cet espace.",
+  "viewAs.submit": "Prévisualiser",
+  "viewAs.trigger": "Prévisualiser",
+  "viewAs.triggerSpace": "Voir en tant que…",
+  "viewAs.previewRole": "Prévisualiser le rôle {{role}}"
 }

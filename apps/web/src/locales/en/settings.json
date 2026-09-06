@@ -999,5 +999,16 @@
   "roles.presetDesc.operator": "Uses what is built: runs agents, manages their own connections.",
   "roles.presetDesc.viewer": "Looks: an operator's reads, with no writes.",
   "roles.inUseInvitations_one": "{{count}} pending invitation still assigns it.",
-  "roles.inUseInvitations_other": "{{count}} pending invitations still assign it."
+  "roles.inUseInvitations_other": "{{count}} pending invitations still assign it.",
+  "viewAs.title": "Preview a role",
+  "viewAs.explain": "You will see this organization with the chosen role's permissions, in this organization only. A permanent banner shows the preview and offers the way out.",
+  "viewAs.spaceLabel": "Space",
+  "viewAs.noSpace": "No space",
+  "viewAs.spaceRoleLabel": "Space role",
+  "viewAs.spaceRolePlaceholder": "Choose a role",
+  "viewAs.rolesEmpty": "No previewable role in this space.",
+  "viewAs.submit": "Preview",
+  "viewAs.trigger": "Preview",
+  "viewAs.triggerSpace": "View as…",
+  "viewAs.previewRole": "Preview the {{role}} role"
 }

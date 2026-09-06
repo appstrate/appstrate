@@ -13,9 +13,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { $api, type components } from "../api/client";
-import { roleI18nKey } from "../hooks/use-permissions";
+import { OrgRoleOptions } from "./org-role-options";
 import {
   hasUnavailableAssignments,
   assignmentsFor,
@@ -143,44 +142,19 @@ export function OrgInvitationForm({
             </p>
           )}
         </Field>
-        {/* Three roles at most: each option carries its own description, so the
-            choice reads as a legend instead of a closed list plus one hint. */}
-        <fieldset className="flex flex-col gap-3" disabled={isPending}>
-          <legend className="mb-2 text-sm font-medium">
-            {t("orgSettings.inviteRoleAriaLabel")}
-          </legend>
-          <RadioGroup
-            value={role}
-            disabled={isPending}
-            aria-label={t("orgSettings.inviteRoleAriaLabel")}
-            onValueChange={(value) => {
-              form.setValue("role", value as AssignableOrgRole);
-              form.clearErrors("root");
-              if (form.formState.isSubmitted) void form.trigger("assignments");
-            }}
-          >
-            {ORG_ROLE_DISPLAY_ORDER.filter(
-              (option) => !!invitation || allowGuest || option !== "guest",
-            ).map((option) => (
-              <Field key={option} orientation="horizontal" className="items-start">
-                <RadioGroupItem
-                  value={option}
-                  id={`${fieldPrefix}-role-${option}`}
-                  className="mt-1 shrink-0"
-                />
-                <Label
-                  htmlFor={`${fieldPrefix}-role-${option}`}
-                  className="flex min-w-0 flex-col items-start gap-1"
-                >
-                  <span>{t(roleI18nKey(option))}</span>
-                  <span className="text-muted-foreground text-sm leading-relaxed font-normal">
-                    {t(`orgSettings.roleHint.${option}`)}
-                  </span>
-                </Label>
-              </Field>
-            ))}
-          </RadioGroup>
-        </fieldset>
+        <OrgRoleOptions
+          idPrefix={fieldPrefix}
+          disabled={isPending}
+          options={ORG_ROLE_DISPLAY_ORDER.filter(
+            (option) => !!invitation || allowGuest || option !== "guest",
+          )}
+          value={role}
+          onValueChange={(value) => {
+            form.setValue("role", value as AssignableOrgRole);
+            form.clearErrors("root");
+            if (form.formState.isSubmitted) void form.trigger("assignments");
+          }}
+        />
       </FieldGroup>
       <Controller
         control={form.control}

@@ -32,7 +32,7 @@ import {
 } from "@appstrate/ui/components/table";
 import { $api, ApiError } from "../../../api/client";
 import { useOrg } from "../../../hooks/use-org";
-import { roleI18nKey, usePermissions } from "../../../hooks/use-permissions";
+import { roleI18nKey, useCanPreviewRole, usePermissions } from "../../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
@@ -53,6 +53,7 @@ import { useSpace } from "../../../hooks/use-spaces";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { CopyLinkButton } from "../../../components/copy-link-button";
 import { Modal } from "../../../components/modal";
+import { ViewAsDialog } from "../../../components/view-as-dialog";
 import { OrgInvitationsList } from "../../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
@@ -88,6 +89,8 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const { data: space, error: spaceError, refetch: refetchSpace } = useSpace(spaceId);
   const [memberToRemove, setMemberToRemove] = useState<SpaceMemberObject | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const canPreview = useCanPreviewRole();
 
   const addMember = useAddSpaceMember();
   const updateMember = useUpdateSpaceMember();
@@ -200,13 +203,25 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           </AlertDescription>
         </Alert>
       )}
-      {canInvite && (
-        <div className="mb-4 flex justify-end">
-          <Button data-testid="add-space-member-button" onClick={() => setAddOpen(true)}>
-            {t("spaceMembers.add")}
-          </Button>
+      {(canInvite || canPreview) && (
+        <div className="mb-4 flex justify-end gap-2">
+          {canPreview && (
+            <Button
+              variant="outline"
+              data-testid="view-as-space-button"
+              onClick={() => setPreviewing(true)}
+            >
+              {t("viewAs.triggerSpace")}
+            </Button>
+          )}
+          {canInvite && (
+            <Button data-testid="add-space-member-button" onClick={() => setAddOpen(true)}>
+              {t("spaceMembers.add")}
+            </Button>
+          )}
         </div>
       )}
+      {previewing && <ViewAsDialog spaceId={spaceId} onClose={() => setPreviewing(false)} />}
 
       {canRead &&
         (!members || members.length === 0 ? (

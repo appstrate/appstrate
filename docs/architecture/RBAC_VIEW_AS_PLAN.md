@@ -1,6 +1,6 @@
 # View as role — plan
 
-Status: **phases 1 (server contract) and 2 (SPA) implemented**, 2026-09-06. Builds on the RBAC model of PR #1260 (`RBAC_PERMISSIONS_SPEC.md`). §5 and §7 describe shipped code (`apps/api/src/lib/view-as.ts`, `apps/web/src/stores/view-as-store.ts`); §6.2 (entry points) and §8's phase 3 are still proposals.
+Status: **implemented** (phases 1-3), 2026-09-06. Builds on the RBAC model of PR #1260 (`RBAC_PERMISSIONS_SPEC.md`, whose §6.7 is the reference for the contract and §8 for the UI). Every section below describes shipped code; §9 is the only forward-looking part left.
 
 ## 1. Goal and non-goals
 
@@ -185,19 +185,19 @@ Integration (`apps/api/test/integration/…/view-as.test.ts`):
 6. `orgRole` sweep: the test greps `apps/api/src` AND `packages/*/src` for `.get("orgRole")` and holds the file set against an allowlist carrying a one-line justification each, so a new reader fails until it is reviewed against the persona. Paired with behavioural tests for the sites where `orgRole` drives a who-manages-whom policy (org member role change/removal, space create/delete, the package catalog): under persona `member` each is refused or answers as a member would.
 7. Marker: `X-View-As-Active` present exactly when the header validated.
 
-Web (bun test, no DOM): banner renders from the store; `buildScopingHeaders()` emits the header only for the matching org; the roles dialog offers grantable roles only.
+Web (bun test, no DOM — `stores/test/view-as.test.tsx`, `pages/test/view-as-entry-points.test.tsx`): the header grammar and its silence outside the previewed org; the persisted persona's hydration and the refusal of a stale one; the cache reset sparing `["orgs"]` (proven load-bearing by mutation — reverting to `clear()` fails it); the refusal codes, including that a plain `not_found` does NOT end the preview; the banner's copy from the store; who sees a trigger; the exact persona a submit commits.
 
-E2E (`e2e/tests/rbac/view-as.ui.spec.ts`): owner enters preview as `viewer` from the Roles page → the Run button is gone, the agent editor is read-only, the banner shows; "Quitter" restores the Run button; reload keeps the preview; deleting the previewed custom role from another context then reloading ends the preview with the toast.
+**What that harness cannot reach**: the dialog is a Radix `Dialog` whose selects are Radix `Select`s, all portalled, so `renderToStaticMarkup` returns an empty string for it. Its interactive half is covered in the browser instead — which is where a `<Select>` is a real thing anyway.
 
-## 8. Delivery
+E2E (`e2e/tests/rbac/view-as.ui.spec.ts`): the real path — owner opens Org settings → Roles, clicks "Prévisualiser" on `viewer` (the dialog offers `member`/`guest` and no higher role, defaults the space to the current one, lists that space's catalog), confirms → the banner shows, the Run button is gone, `GET /api/spaces` carries `X-View-As-Active: 1`; "Quitter" restores it. Then Space settings → Members, "Voir en tant que…" with `guest` and no space → the space is refused and the banner says Invité. Plus the localStorage-seeded scenarios, which are what cover a reload and a persona whose space has been deleted (banner gone, translated toast).
 
-Three PRs, each shippable:
+## 8. Delivery — what shipped
 
-1. **Server contract** — `view-as.ts`, the three apply sites, listings, audit, OpenAPI, integration tests 1–7. No UI. The CLI can already use it with a flag for scripting checks.
-2. **SPA** — store, header, banner, exit rules, web tests, e2e on presets.
-3. **Entry points** — Roles page and Members page dialogs, custom roles, docs (`RBAC_PERMISSIONS_SPEC.md` §4.2 gains the `viewAs` key in the pipeline table; §6 gains the header and errors).
+Three commits, in the one order that was safe: nothing in 2 or 3 could land before 1, because a client-side preview without the server contract is the Airtable failure.
 
-Order is fixed: nothing in 2 or 3 is safe to merge before 1, because a client-side preview without the server contract is the Airtable failure.
+1. **Server contract** (`1c7dfef7f`) — `apps/api/src/lib/view-as.ts`, the three apply sites, the listings, the audit rows, the SSE and chat-loopback carriers, OpenAPI, 34 integration tests. No UI; the CLI can already send the header.
+2. **SPA** (`7ae8527c5`) — `stores/view-as-store.ts`, the header on `buildScopingHeaders()`, the `view_as` parameter on all four live streams, the banner, the single exit-on-refusal handler, the four wire constants in `@appstrate/core/permissions`.
+3. **Entry points** — `components/view-as-dialog.tsx` and its two triggers (Org settings → Roles, Space settings → Members), gated on `useCanPreviewRole()`; presets and custom roles alike; this document and `RBAC_PERMISSIONS_SPEC.md` §6.7 + §8.
 
 ## 9. Open questions
 
