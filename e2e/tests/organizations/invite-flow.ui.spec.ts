@@ -211,9 +211,8 @@ test("onboarding offers organization roles and submits a standard invitation", a
   await page.goto("/onboarding/members");
   const email = `onboarding-member-${uid()}@test.com`;
   await page.getByRole("textbox", { name: /Adresse e-mail|Email address/ }).fill(email);
-  await page.getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ }).click();
-  await expect(page.getByRole("option", { name: /^(Invité|Guest)$/ })).toHaveCount(0);
-  await page.getByRole("option", { name: /Utilisateur standard|Standard user/ }).click();
+  await expect(page.getByRole("radio", { name: /Invité|Guest/ })).toHaveCount(0);
+  await page.getByRole("radio", { name: /Utilisateur standard|Standard user/ }).check();
   const submitted = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -238,11 +237,7 @@ test("mobile organization invitations keep email usable and submit with Enter", 
     name: /Adresse e-mail|Email address/,
   });
   await expect(email).toBeVisible();
-  await dialog
-    .getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ })
-    .click();
-  await expect(page.getByRole("option", { name: /^(Invité|Guest)$/ })).toBeVisible();
-  await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("radio", { name: /Invité|Guest/ })).toBeVisible();
   expect((await email.boundingBox())!.width).toBeGreaterThan(250);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   const address = `mobile-invite-${uid()}@test.com`;
@@ -308,10 +303,7 @@ test("a pending standard invitation can become a guest invitation with a space a
   await page.goto("/org-settings/members");
   await page.getByRole("button", { name: /^(Modifier|Edit)$/ }).click();
   const dialog = page.getByRole("dialog");
-  await dialog
-    .getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ })
-    .click();
-  await page.getByRole("option", { name: /^(Invité|Guest)$/ }).click();
+  await dialog.getByRole("radio", { name: /Invité|Guest/ }).check();
   await dialog.getByRole("button", { name: /Enregistrer|Save/ }).click();
   await expect(
     dialog.getByRole("alert").filter({ hasText: /au moins un espace|at least one space/i }),
@@ -355,7 +347,7 @@ test("admin invitations explain all-space access while preserving an optional as
   await page.goto("/org-settings/members");
   await page.getByTestId("invite-org-user-button").click();
   const dialog = page.getByRole("dialog");
-  const role = dialog.getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ });
+  const pickRole = (name: RegExp) => dialog.getByRole("radio", { name }).check();
   await dialog
     .getByRole("textbox", { name: /Adresse e-mail|Email address/ })
     .fill(`admin-invite-${uid()}@test.com`);
@@ -364,8 +356,7 @@ test("admin invitations explain all-space access while preserving an optional as
   const assignmentRole = dialog.getByRole("combobox", { name: /Default/ });
   await assignmentRole.click();
   await page.getByRole("option", { name: /^(Lecteur|Viewer)$/ }).click();
-  await role.click();
-  await page.getByRole("option", { name: /^(Administrateur|Admin)$/ }).click();
+  await pickRole(/^(Administrateur|Admin)\b/);
   await expect(dialog.getByRole("group", { name: /^Espaces$|^Spaces$/ })).toBeVisible();
   const allSpaces = dialog.getByRole("textbox", { name: /^Espaces$|^Spaces$/ });
   await expect(allSpaces).toBeDisabled();
@@ -373,12 +364,10 @@ test("admin invitations explain all-space access while preserving an optional as
   await expect(
     dialog.getByText(/Administre l’organisation|Manages the organization/i).last(),
   ).toBeVisible();
-  await role.click();
-  await page.getByRole("option", { name: /Utilisateur standard|Standard user/ }).click();
+  await pickRole(/Utilisateur standard|Standard user/);
   await expect(assignmentRole).toBeEnabled();
   await expect(assignmentRole).toContainText(/Lecteur|Viewer/);
-  await role.click();
-  await page.getByRole("option", { name: /^(Administrateur|Admin)$/ }).click();
+  await pickRole(/^(Administrateur|Admin)\b/);
   const submitted = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
