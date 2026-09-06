@@ -97,7 +97,7 @@ export function OnboardingMembersStep() {
                 required
               />
               <Select value={role} onValueChange={(v) => setRole(v as AssignableOrgRole)}>
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-[200px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

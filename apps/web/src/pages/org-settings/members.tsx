@@ -187,7 +187,7 @@ export function OrgSettingsMembersPage() {
                   onValueChange={(v) => inviteForm.setValue("role", v as AssignableOrgRole)}
                 >
                   <SelectTrigger
-                    className="w-[140px]"
+                    className="w-[200px]"
                     aria-label={t("orgSettings.inviteRoleAriaLabel")}
                   >
                     <SelectValue />
@@ -284,7 +284,7 @@ export function OrgSettingsMembersPage() {
                       onValueChange={(v) => handleRoleChange(member.userId, v as AssignableOrgRole)}
                       disabled={changeRoleMutation.isPending}
                     >
-                      <SelectTrigger className="w-[140px]">
+                      <SelectTrigger className="w-[200px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -366,7 +366,7 @@ export function OrgSettingsMembersPage() {
                       disabled={changeInvitationRoleMutation.isPending}
                     >
                       <SelectTrigger
-                        className="w-[140px]"
+                        className="w-[200px]"
                         aria-label={t("orgSettings.inviteRoleAriaLabel")}
                       >
                         <SelectValue />
