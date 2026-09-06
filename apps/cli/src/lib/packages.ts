@@ -9,7 +9,7 @@
  */
 
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
-import { apiFetch } from "./api.ts";
+import { apiFetch, ApiError } from "./api.ts";
 import type { Profile } from "./config.ts";
 
 export type PackageType = "skill" | "agent" | "integration" | "mcp-server";
@@ -71,10 +71,31 @@ export async function locatePackage(
   packageId: string,
 ): Promise<LocatedPackage | null> {
   if (!parseScopedName(packageId)) throw new Error(`Not a package id: ${packageId}`);
-  const library = await apiFetch<{ packages?: Record<string, LibraryRow[]> }>(
-    profileName,
-    "/api/library",
-  );
+  let library: { packages?: Record<string, LibraryRow[]> };
+  try {
+    library = await apiFetch<{ packages?: Record<string, LibraryRow[]> }>(
+      profileName,
+      "/api/library",
+    );
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 404)) throw err;
+    // No library on this instance: ask each type's detail route in turn, in
+    // the pinned space, which is the only one such an instance can answer for.
+    for (const type of PACKAGE_TYPES) {
+      try {
+        await apiFetch<unknown>(profileName, packagePath(type, packageId));
+        return {
+          packageId,
+          type,
+          spaceId: profile.spaceId,
+          installedIn: profile.spaceId ? [profile.spaceId] : [],
+        };
+      } catch (probe) {
+        if (!(probe instanceof ApiError && probe.status === 404)) throw probe;
+      }
+    }
+    return null;
+  }
   for (const [type, rows] of Object.entries(library.packages ?? {})) {
     if (!isPackageType(type)) continue;
     const row = rows.find((r) => r.id === packageId);

@@ -34,6 +34,51 @@ export interface PackageDraftToolContext {
 /** Packaging, not content: regenerated on push, never part of a comparison. */
 const IGNORED = new Set(["manifest.json", "RECORD"]);
 
+type PackageType = "skill" | "agent" | "integration" | "mcp-server";
+const TYPE_PLURAL: Record<PackageType, string> = {
+  skill: "skills",
+  agent: "agents",
+  integration: "integrations",
+  "mcp-server": "mcp-servers",
+};
+const PACKAGE_TYPES = Object.keys(TYPE_PLURAL) as PackageType[];
+
+function isPackageType(value: unknown): value is PackageType {
+  return typeof value === "string" && (PACKAGE_TYPES as string[]).includes(value);
+}
+
+/**
+ * The type of a package the org owns, from `/api/library` — the per-type list
+ * routes only show what is installed in the current space. `null` when the org
+ * has no such package (a push then creates it).
+ */
+async function locateType(
+  ctx: PackageDraftToolContext,
+  packageId: string,
+  spaceId?: string,
+): Promise<PackageType | null> {
+  const library = await dispatchJson<{ packages?: Record<string, { id?: unknown }[]> }>(
+    ctx,
+    "/api/library",
+  );
+  if (library.status === 200) {
+    for (const [type, rows] of Object.entries(library.body?.packages ?? {})) {
+      if (isPackageType(type) && rows.some((row) => row.id === packageId)) return type;
+    }
+    return null;
+  }
+  // No library on this instance: ask each type's detail route in turn.
+  for (const type of PACKAGE_TYPES) {
+    const probe = await dispatchJson<unknown>(ctx, detailPath(type, packageId), {}, spaceId);
+    if (probe.status === 200) return type;
+  }
+  return null;
+}
+
+function detailPath(type: PackageType, packageId: string): string {
+  return `/api/packages/${TYPE_PLURAL[type]}/${encodePackageIdPath(packageId)}`;
+}
+
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
@@ -128,6 +173,7 @@ async function dispatchJson<T>(
 
 interface DraftSnapshot {
   packageId: string;
+  type: PackageType;
   source: string;
   lockVersion: number | null;
   manifest: Record<string, unknown> | null;
@@ -142,13 +188,19 @@ async function readSnapshot(
   spaceId?: string,
 ): Promise<DraftSnapshot> {
   const encoded = encodePackageIdPath(packageId);
+  const type = await locateType(ctx, packageId, spaceId);
+  if (!type) throw new Error(`${packageId} is not a package of this organization.`);
   const detail = await dispatchJson<{ lock_version?: unknown; manifest?: unknown }>(
     ctx,
-    `/api/packages/skills/${encoded}`,
+    detailPath(type, packageId),
     {},
     spaceId,
   );
-  if (detail.status === 404) throw new Error(`${packageId} is not a skill of this organization.`);
+  if (detail.status === 404) {
+    throw new Error(
+      `${packageId} is not installed in ${spaceId ? "that space" : "the default space"}; its files can only be read from a space it is installed in.`,
+    );
+  }
   if (detail.status >= 400) throw new Error(`Reading ${packageId} failed: HTTP ${detail.status}`);
 
   const query = version ? `?version=${encodeURIComponent(version)}` : "";
@@ -188,6 +240,7 @@ async function readSnapshot(
       : null;
   return {
     packageId,
+    type,
     source: version ?? "draft",
     lockVersion: typeof detail.body?.lock_version === "number" ? detail.body.lock_version : null,
     manifest,
@@ -288,11 +341,12 @@ function bumpPatch(version: string): string {
 async function nextVersion(
   ctx: PackageDraftToolContext,
   packageId: string,
+  type: PackageType,
   spaceId?: string,
 ): Promise<string> {
   const latest = await dispatchJson<{ version?: unknown }>(
     ctx,
-    `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+    `${detailPath(type, packageId)}/versions/latest`,
     {},
     spaceId,
   );
@@ -315,11 +369,12 @@ function buildPullTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "pull_package_files",
     description:
-      "Read every file of a skill — SKILL.md, manifest.json and annex files such as scripts/ — " +
-      "from its draft (default) or from a published version. Returns text files inline, binaries " +
-      "as base64, and the draft's lock_version to pass back to push_package_files so a later push " +
-      "is accepted without force. This is how you take a skill into your working context before " +
-      "editing it; never edit synced copies on a machine.",
+      "Read every file of a package — a skill (SKILL.md and annexes), an agent (manifest.json and " +
+      "prompt.md), an integration or an MCP server — from its draft (default) or from a published " +
+      "version. Returns text files inline, binaries as base64, the package type, and the draft's " +
+      "lock_version to pass back to push_package_files so a later push is accepted without force. " +
+      "This is how you take a package into your working context before editing it; never edit " +
+      "synced copies on a machine.",
     annotations: {
       title: "Pull package files",
       readOnlyHint: true,
@@ -331,7 +386,7 @@ function buildPullTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
       additionalProperties: false,
       required: ["package_id"],
       properties: {
-        package_id: { type: "string", description: "The skill, as @scope/name." },
+        package_id: { type: "string", description: "The package, as @scope/name (any type)." },
         version: {
           type: "string",
           description: "A published version (semver or `latest`) instead of the draft.",
@@ -352,6 +407,7 @@ function buildPullTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
       }
       return textResult({
         package_id: packageId,
+        type: snapshot.type,
         ...(spaceId ? { space_id: spaceId } : {}),
         source: snapshot.source,
         lock_version: snapshot.lockVersion,
@@ -370,9 +426,9 @@ function buildStatusTool(ctx: PackageDraftToolContext): AppstrateToolDefinition 
   const descriptor: Tool = {
     name: "package_status",
     description:
-      "Compare a set of files you hold to the skill's current draft: which are modified, added or " +
-      "removed, and whether the draft was edited elsewhere since the lock_version you hold. Call it " +
-      "before push_package_files when you are not sure what changed.",
+      "Compare a set of files you hold to a package's current draft (any type): which are modified, " +
+      "added or removed, and whether the draft was edited elsewhere since the lock_version you " +
+      "hold. Call it before push_package_files when you are not sure what changed.",
     annotations: {
       title: "Package status",
       readOnlyHint: true,
@@ -415,6 +471,7 @@ function buildStatusTool(ctx: PackageDraftToolContext): AppstrateToolDefinition 
         seen !== undefined && snapshot.lockVersion !== null && seen !== snapshot.lockVersion;
       return textResult({
         package_id: packageId,
+        type: snapshot.type,
         clean: changes.length === 0,
         changes,
         lock_version: snapshot.lockVersion,
@@ -437,13 +494,15 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "push_package_files",
     description:
-      "Write a skill's files — SKILL.md and every annex file — to its DRAFT on Appstrate without " +
-      "publishing, the same way `appstrate skills push` does. Send the COMPLETE set of files (what " +
-      "you omit is removed from the draft) and the lock_version you got from pull_package_files: " +
-      "when it still matches, the push is accepted; when the draft was edited elsewhere it is " +
-      "refused with draft_overwrite unless force is true. A manifest.json is used as sent; without " +
-      "one, a skill manifest is synthesized from the SKILL.md frontmatter. Publish afterwards with " +
-      "the createSkillVersion operation, or pass publish: true to cut a version right away.",
+      "Write a package's files to its DRAFT on Appstrate without publishing, the same way " +
+      "`appstrate packages push` does — a skill (SKILL.md and annexes), an agent (manifest.json " +
+      "and prompt.md), an integration or an MCP server. Send the COMPLETE set of files (what you " +
+      "omit is removed from the draft) and the lock_version you got from pull_package_files: when " +
+      "it still matches, the push is accepted; when the draft was edited elsewhere it is refused " +
+      "with draft_overwrite unless force is true. A manifest.json is used as sent and decides the " +
+      "type; without one, only a skill can be pushed, its manifest synthesized from the SKILL.md " +
+      "frontmatter. Publish afterwards with the create<Type>Version operation (createSkillVersion, " +
+      "createAgentVersion, …), or pass publish: true to cut a version right away.",
     annotations: {
       title: "Push package files",
       readOnlyHint: false,
@@ -460,7 +519,8 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
         files: {
           type: "object",
           additionalProperties: { type: "string" },
-          description: "Every text file, path → content. SKILL.md is required.",
+          description:
+            "Every text file, path → content. manifest.json for any type but a skill; SKILL.md for a skill.",
         },
         binary_files: {
           type: "object",
@@ -495,17 +555,28 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
     if (accessError) return textResult({ error: accessError }, true);
     const packageId = requirePackageId(args.package_id);
     const files = collectFiles(args);
-    if (!files["SKILL.md"]) {
-      throw new McpError(ErrorCode.InvalidParams, "files must include SKILL.md.");
+    let type: PackageType = "skill";
+    if (files["manifest.json"]) {
+      try {
+        const parsed = JSON.parse(decoder.decode(files["manifest.json"])) as { type?: unknown };
+        if (isPackageType(parsed.type)) type = parsed.type;
+      } catch {
+        throw new McpError(ErrorCode.InvalidParams, "manifest.json is not valid JSON.");
+      }
+    } else if (!files["SKILL.md"]) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "files must include manifest.json (agent, integration, mcp-server) or SKILL.md (skill).",
+      );
     }
     try {
       const spaceId = await resolveSpaceArg(ctx, args.space);
       if (!files["manifest.json"]) {
-        const skillMd = decoder.decode(files["SKILL.md"]);
+        const skillMd = decoder.decode(files["SKILL.md"]!);
         const name = parseScopedName(packageId)!.name;
         const manifest: Record<string, unknown> = {
           name: packageId,
-          version: asString(args.version) ?? (await nextVersion(ctx, packageId, spaceId)),
+          version: asString(args.version) ?? (await nextVersion(ctx, packageId, "skill", spaceId)),
           type: "skill",
           schema_version: "0.1",
           display_name: frontmatterName(skillMd) ?? name,
@@ -549,6 +620,7 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
             : undefined;
         return textResult({ status: res.status, ...body, ...(hint ? { hint } : {}) }, true);
       }
+      const publishOp = `create${type === "mcp-server" ? "McpServer" : type[0]!.toUpperCase() + type.slice(1)}Version`;
       return textResult({
         status: res.status,
         ...body,
@@ -556,7 +628,7 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
         next:
           args.publish === true
             ? "Published. Every machine syncing published skills picks it up on its next sync."
-            : "Draft written. Keep this lock_version for your next push. Publish with the createSkillVersion operation when it is ready.",
+            : `Draft written. Keep this lock_version for your next push. Publish with the ${publishOp} operation when it is ready.`,
       });
     } catch (err) {
       if (err instanceof McpError) throw err;

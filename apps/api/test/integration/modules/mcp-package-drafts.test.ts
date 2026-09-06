@@ -139,6 +139,7 @@ describe("MCP package drafts — pull, status, push", () => {
     expect(await versionCount()).toBe(0);
 
     const pulled = await callTool(writer, "pull_package_files", { package_id: PACKAGE_ID });
+    expect(pulled.data.error ?? "").toBe("");
     expect(pulled.isError).toBe(false);
     const files = pulled.data.files as Record<string, string>;
     expect(Object.keys(files).sort()).toEqual(["SKILL.md", "manifest.json", "scripts/run.sh"]);
@@ -294,6 +295,45 @@ describe("MCP package drafts — pull, status, push", () => {
       },
     });
     expect(unknown.error?.message ?? "").toContain("matches no space");
+  });
+
+  it("runs the same loop for an agent: manifest + prompt, pull reports the type", async () => {
+    const AGENT_ID = "@mcporg/hello-agent";
+    const manifest = {
+      name: AGENT_ID,
+      version: "0.1.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Hello agent",
+      prompt: "prompt.md",
+    };
+    const pushed = await callTool(writer, "push_package_files", {
+      package_id: AGENT_ID,
+      files: {
+        "manifest.json": JSON.stringify(manifest),
+        "prompt.md": "# Hello\n\nSay hello.\n",
+        "references/tone.md": "# Tone\n",
+      },
+    });
+    expect(pushed.isError).toBe(false);
+    expect(pushed.data).toMatchObject({ packageId: AGENT_ID, type: "agent", draft: true });
+    expect(String(pushed.data.next)).toContain("createAgentVersion");
+
+    const pulled = await callTool(writer, "pull_package_files", { package_id: AGENT_ID });
+    expect(pulled.isError).toBe(false);
+    expect(pulled.data.type).toBe("agent");
+    const files = pulled.data.files as Record<string, string>;
+    expect(Object.keys(files).sort()).toEqual(["manifest.json", "prompt.md", "references/tone.md"]);
+
+    const status = await callTool(writer, "package_status", {
+      package_id: AGENT_ID,
+      files: { "manifest.json": JSON.stringify(manifest), "prompt.md": "# Hello\n\nSay hi.\n" },
+      lock_version: pushed.data.lock_version,
+    });
+    expect(status.data.changes).toEqual([
+      { path: "prompt.md", change: "modified" },
+      { path: "references/tone.md", change: "removed" },
+    ]);
   });
 
   it("refuses the write tool to a read-only caller and a traversing path to everyone", async () => {
