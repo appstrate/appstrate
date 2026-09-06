@@ -9,6 +9,8 @@ import {
 } from "@appstrate/shared-types";
 import { getCurrentOrgId } from "../stores/org-store";
 import { getCurrentSpaceId } from "./use-current-space";
+import { withViewAsParam } from "../lib/scoping-headers";
+import { useViewAsHeader } from "../stores/view-as-store";
 
 // Re-export so existing consumers (run-detail.tsx) keep importing the metric
 // event type from here; the source of truth is the shared Zod schema.
@@ -37,6 +39,9 @@ function safeJsonParse(text: string): unknown {
  * (`useGlobalRunSync`), which writes the same run cache key.
  */
 export function useRunRealtime(runId: string | null | undefined, handlers: RunRealtimeHandlers) {
+  // A dependency, not a convenience: `EventSource` reads its URL once, so
+  // entering or leaving a preview has to close this stream and open a new one.
+  const viewAs = useViewAsHeader();
   const handlersRef = useRef(handlers);
   useEffect(() => {
     handlersRef.current = handlers;
@@ -55,7 +60,10 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     // of them. `verbose=true` is still required — it is what keeps
     // `run_log.data` in the payload.
     const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_log,run_metric`,
+      withViewAsParam(
+        `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_log,run_metric`,
+        viewAs,
+      ),
       { withCredentials: true },
     );
 
@@ -72,5 +80,5 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     return () => {
       es.close();
     };
-  }, [runId]);
+  }, [runId, viewAs]);
 }

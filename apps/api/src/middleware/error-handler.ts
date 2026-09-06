@@ -8,7 +8,7 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
-import { VIEW_AS_ACTIVE_HEADER } from "../lib/view-as.ts";
+import { VIEW_AS_ACTIVE_HEADER } from "@appstrate/core/permissions";
 import { formatErrorChain } from "@appstrate/core/errors";
 import type { Logger } from "@appstrate/core/logger";
 import { logger } from "../lib/logger.ts";

@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
+import { exitViewAs } from "../stores/view-as-store";
 import { useAutoSelect } from "./use-auto-select";
 import { orgKeys } from "../lib/query-keys";
 
@@ -73,6 +74,9 @@ export function useOrg() {
   const switchOrg = useCallback(
     (orgId: string) => {
       if (orgId === orgStore.getState().id) return;
+      // A persona is validated in ONE organization; carrying it across is not
+      // a preview of anything. No-op unless one is active.
+      exitViewAs();
       orgStore.getState().setId(orgId);
       // Reset space selection when org changes
       spaceStore.getState().setId(null);

@@ -71,7 +71,7 @@
   "validation.emailFormat": "Invalid email address",
   "validation.urlFormat": "Invalid URL",
   "test.failed": "Test failed",
-  "dashboard.welcome": "Welcome, {{name}} \ud83d\udc4b",
+  "dashboard.welcome": "Welcome, {{name}} 👋",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",
   "notifications.empty": "No notifications",
@@ -105,5 +105,13 @@
   "claim.submitting": "Creating account…",
   "claim.docs": "Docs: examples/self-hosting/AUTH_MODES.md",
   "access.denied": "You do not have access to this page.",
-  "access.deniedHint": "Ask an organization administrator to grant you the necessary rights."
+  "access.deniedHint": "Ask an organization administrator to grant you the necessary rights.",
+  "viewAs.banner": "You are viewing the organization as <b>{{role}}</b>",
+  "viewAs.bannerSpace": "You are viewing the organization as <b>{{role}}</b>, <b>{{spaceRole}}</b> in <b>{{space}}</b>",
+  "viewAs.exit": "Exit",
+  "viewAs.stopped.invalid_view_as": "Preview stopped: the saved preview can no longer be read.",
+  "viewAs.stopped.view_as_unsupported": "Preview stopped: this session cannot preview a role.",
+  "viewAs.stopped.view_as_forbidden": "Preview stopped: you may no longer preview this role.",
+  "viewAs.stopped.view_as_not_found": "Preview stopped: the previewed space or role no longer exists.",
+  "viewAs.stopped.generic": "Preview stopped."
 }

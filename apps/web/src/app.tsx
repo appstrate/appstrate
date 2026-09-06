@@ -19,6 +19,7 @@ import { NotificationBell } from "./components/notification-bell";
 import { NavUser } from "./components/nav-user";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
+import { ViewAsBanner } from "./components/view-as-banner";
 
 import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
@@ -229,6 +230,10 @@ function MainLayout() {
             <NavUser />
           </div>
         </header>
+        {/* Above the scroll container: the preview must stay visible on every
+            route, including the settings layouts and the permission-denied
+            pages a persona is precisely there to provoke. */}
+        <ViewAsBanner />
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Outlet />
         </div>

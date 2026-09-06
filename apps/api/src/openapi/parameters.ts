@@ -124,11 +124,17 @@ export const parameters = {
       "carry a persona — only a cookie session and the CLI/instance token, which authenticate the " +
       "user themselves, can), `403 view_as_forbidden` " +
       "(the real org role is not owner/admin, or the role is not one the caller could grant in " +
-      "that space), `404` (the space is not in the org, or the custom role does not exist).\n\n" +
+      "that space, or previewing a custom role where the `custom_roles` feature is off), " +
+      "`404 view_as_not_found` (the space is not in the org, the custom role does not exist, or " +
+      "the organization named alongside the persona is not one the caller belongs to). A 404 " +
+      "carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain " +
+      "`404 not_found` under an active persona is the previewed role's own wall and leaves the " +
+      "preview standing.\n\n" +
       "On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the " +
       "`X-Org-Id` header names the organization the persona applies to; every other row in those " +
       "listings stays the caller's real role. Sending the persona without it is `400 " +
-      "invalid_view_as`, and naming an organization the caller is not a member of is `404`: a " +
+      "invalid_view_as`, and naming an organization the caller is not a member of is " +
+      "`404 view_as_not_found`: a " +
       "listing that answered with real permissions while the client believed it was previewing " +
       "would be the failure this feature exists to prevent.\n\n" +
       "The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` " +

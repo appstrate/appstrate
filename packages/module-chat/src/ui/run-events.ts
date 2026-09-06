@@ -239,26 +239,31 @@ export function buildRunSseUrl(args: {
   runId: string;
   orgId: string | undefined;
   spaceId: string | undefined;
+  /** Role preview, if the host is under one. Realtime routes REFUSE the header. */
+  viewAs?: string | undefined;
 }): string | undefined {
-  const { runId, orgId, spaceId } = args;
+  const { runId, orgId, spaceId, viewAs } = args;
   if (!orgId || !spaceId) return undefined;
   const qs = new URLSearchParams({
     orgId,
     spaceId,
     verbose: "true",
   });
+  if (viewAs) qs.set("view_as", viewAs);
   return `/api/realtime/runs/${encodeURIComponent(runId)}?${qs.toString()}`;
 }
 
-/** Read org/space ids out of the chat host's forwarded headers (case-tolerant). */
+/** Read the scoping context out of the chat host's forwarded headers (case-tolerant). */
 export function orgSpaceFromHeaders(headers: Record<string, string> | undefined): {
   orgId: string | undefined;
   spaceId: string | undefined;
+  viewAs: string | undefined;
 } {
   const h = headers ?? {};
   return {
     orgId: h["X-Org-Id"] ?? h["x-org-id"],
     spaceId: h["X-Space-Id"] ?? h["x-space-id"],
+    viewAs: h["X-View-As"] ?? h["x-view-as"],
   };
 }
 

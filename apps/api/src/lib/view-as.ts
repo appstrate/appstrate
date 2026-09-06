@@ -30,9 +30,14 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spaceRoles } from "@appstrate/db/schema";
-import { reportPermissionDenial, SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+import {
+  reportPermissionDenial,
+  SPACE_ROLE_PRESETS,
+  VIEW_AS_ACTIVE_HEADER,
+  VIEW_AS_HEADER,
+} from "@appstrate/core/permissions";
 import type { OrgRole, SpaceRolePreset } from "@appstrate/core/permissions";
-import { ApiError, notFound } from "./errors.ts";
+import { ApiError } from "./errors.ts";
 import { isSpaceRoleId, SPACE_ID_RE } from "./ids.ts";
 import { effectivePermissions, orgPermissions } from "./permissions.ts";
 import {
@@ -45,17 +50,9 @@ import {
   type SpaceRoleRef,
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
-import { assertCustomRolesFeature } from "../services/space-roles.ts";
+import { getAppConfig } from "./app-config.ts";
 import { validateSpaceInOrg } from "./space-lookup.ts";
 import type { AppEnv } from "../types/index.ts";
-
-const VIEW_AS_HEADER = "X-View-As";
-
-/** Same grammar as the header, for the SSE routes no header can reach. */
-export const VIEW_AS_QUERY = "view_as";
-
-/** Stamped on every response produced under a validated persona, and only then. */
-export const VIEW_AS_ACTIVE_HEADER = "X-View-As-Active";
 
 /** Previewing `owner`/`admin` is refused: it is what makes "a preview only removes" true. */
 const PERSONA_ORG_ROLES = ["member", "guest"] as const;
@@ -144,6 +141,23 @@ function viewAsForbidden(detail: string): ApiError {
 }
 
 /**
+ * A 404 the PERSONA caused — its space, its custom role or its organization is
+ * gone. Its own code rather than the generic `not_found` because that is the
+ * only thing that tells a client "your preview died, drop it" apart from "the
+ * thing you asked for does not exist, which is what the previewed role sees".
+ * Both are 404s on the same routes; the code is the discriminator.
+ */
+function viewAsNotFound(detail: string): ApiError {
+  return new ApiError({
+    status: 404,
+    code: "view_as_not_found",
+    title: "View-As Target Not Found",
+    detail,
+    param: VIEW_AS_HEADER,
+  });
+}
+
+/**
  * Whitespace tolerated (headers get reformatted in transit); an empty segment,
  * a missing `=` or a repeated key is `null` — "last one wins" on a security
  * header is how two readers disagree. Prototype-less, so `toString=x` is not a repeat.
@@ -226,7 +240,7 @@ async function validatePersonaSpace(
   onDenial: (required: string) => void,
 ): Promise<NonNullable<ViewAsPersona["space"]>> {
   const space = await validateSpaceInOrg(requested.spaceId, orgId);
-  if (!space) throw notFound(`Space '${requested.spaceId}' not found in this organization`);
+  if (!space) throw viewAsNotFound(`Space '${requested.spaceId}' not found in this organization`);
   const role = await resolvePersonaSpaceRole(orgId, requested.role);
   // Grantability against what the real caller holds THERE — the same rule that
   // gates handing the role to someone else. Owners and admins never carry a
@@ -245,19 +259,30 @@ async function validatePersonaSpace(
   return { spaceId: space.id, role };
 }
 
-/** Feature gate first: with `custom_roles` off there is no bundle vocabulary to look in. */
+/**
+ * Feature gate first: with `custom_roles` off there is no bundle vocabulary to
+ * look in. Refused as a VIEW-AS refusal (`view_as_forbidden`) rather than the
+ * role routes' `feature_unavailable` — every way a persona can be turned down
+ * has to be a code the client recognizes as "drop the preview".
+ */
 async function resolvePersonaSpaceRole(
   orgId: string,
   ref: PersonaRoleRequest,
 ): Promise<SpaceRoleRef> {
   if (ref.kind === "preset") return { kind: "preset", preset: ref.preset };
-  assertCustomRolesFeature();
+  if (!getAppConfig().features.custom_roles) {
+    throw viewAsForbidden(
+      "Previewing a custom space role requires the `custom_roles` feature, provided by the " +
+        "Appstrate Cloud plan (the `@appstrate/cloud` module). The four built-in presets " +
+        "(admin, builder, operator, viewer) are always previewable.",
+    );
+  }
   const [row] = await db
     .select()
     .from(spaceRoles)
     .where(and(eq(spaceRoles.id, ref.roleId), eq(spaceRoles.orgId, orgId)))
     .limit(1);
-  if (!row) throw notFound(`Role '${ref.roleId}' not found in this organization`);
+  if (!row) throw viewAsNotFound(`Role '${ref.roleId}' not found in this organization`);
   return {
     kind: "custom",
     role: { id: row.id, key: row.key, name: row.name, permissions: row.permissions },
@@ -329,7 +354,7 @@ export async function resolveListingViewAs(
     );
   }
   const row = orgs.find((org) => org.id === orgId);
-  if (!row) throw notFound(`Organization '${orgId}' not found`);
+  if (!row) throw viewAsNotFound(`Organization '${orgId}' not found`);
   await resolveViewAs(c, orgId, row.role);
 }
 

@@ -1,6 +1,6 @@
 # View as role — plan
 
-Status: **phase 1 (server contract) implemented**, 2026-09-06. Builds on the RBAC model of PR #1260 (`RBAC_PERMISSIONS_SPEC.md`). §5 and §7 describe shipped code (`apps/api/src/lib/view-as.ts`); §6 (SPA) and §8's phases 2-3 are still proposals.
+Status: **phases 1 (server contract) and 2 (SPA) implemented**, 2026-09-06. Builds on the RBAC model of PR #1260 (`RBAC_PERMISSIONS_SPEC.md`). §5 and §7 describe shipped code (`apps/api/src/lib/view-as.ts`, `apps/web/src/stores/view-as-store.ts`); §6.2 (entry points) and §8's phase 3 are still proposals.
 
 ## 1. Goal and non-goals
 
@@ -87,12 +87,16 @@ Every response produced under a validated persona carries `X-View-As-Active: 1`.
 
 ### 4.5 Errors
 
-| Code                  | Status | When                                             |
-| --------------------- | ------ | ------------------------------------------------ |
-| `invalid_view_as`     | 400    | Header does not parse                            |
-| `view_as_unsupported` | 400    | Transport is not session-shaped                  |
-| `view_as_forbidden`   | 403    | Real role not owner/admin, or role not grantable |
-| `not_found`           | 404    | Space not in org, custom role not in org         |
+| Code                  | Status | When                                                                                                          |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------- |
+| `invalid_view_as`     | 400    | Header does not parse                                                                                         |
+| `view_as_unsupported` | 400    | Transport is not session-shaped                                                                               |
+| `view_as_forbidden`   | 403    | Real role not owner/admin, role not grantable, or a custom role where `custom_roles` is off                   |
+| `view_as_not_found`   | 404    | Space not in org, custom role not in org, or the organization named alongside the persona is not the caller's |
+
+Those four codes are the complete set that means "the PERSONA was refused, drop the preview" — `VIEW_AS_REFUSAL_CODES` in `@appstrate/core/permissions`, read by both ends. It is deliberately a **code**, not an inference: a plain `404 not_found` under an active persona is the previewed role's own wall (a private space it cannot see), and the client must leave the preview standing for it. The first implementation told the two apart by the absence of `X-View-As-Active`, which is true but indirect — a marker is evidence about the response, not a statement about what failed, and it silently mis-classifies any future refusal thrown before the persona is set for an unrelated reason.
+
+The custom-roles feature gate on the persona path answers `view_as_forbidden` rather than the role routes' `feature_unavailable`, for the same reason: every way a persona can be turned down has to be in that set.
 
 Documented in OpenAPI as a shared `components.parameters.XViewAs` header on every authenticated operation and a shared `ViewAsRefused` response, so the baseline diff is one component plus references.
 
@@ -136,9 +140,15 @@ If, after use, writes under preview turn out to confuse more than they help, the
 
 ### 6.1 State and transport
 
-- `stores/view-as-store.ts`: persisted per org (`appstrate_view_as:<orgId>`), holds the persona plus the labels the banner shows (role name, space name) captured at entry time.
+- `stores/view-as-store.ts`: persisted under ONE key (`appstrate_view_as`) carrying its own `orgId`, holds the persona plus the labels the banner shows (space role name, space name) captured at entry time. Read at module init and never again, so a new tab opens inside an active preview (the banner says so) while a tab that leaves it is not followed by the others — the same shape as tabs holding different organizations.
 - `lib/scoping-headers.ts` `buildScopingHeaders()`: adds `X-View-As` when the store holds a persona for the current org. Every fetch path already goes through it.
-- Entering or leaving the preview calls `queryClient.clear()` (the pattern `nav-user.tsx` uses on sign-out), so no admin-shaped data survives in the cache.
+- Entering or leaving the preview calls `queryClient.clear()` (the pattern `nav-user.tsx` uses on sign-out), so no admin-shaped data survives in the cache. The client is a module value (`lib/query-client.ts`) because the two callers that matter — the store actions and the API middleware — are outside React.
+
+**As built** (what phase 3 codes against):
+
+- `enterViewAs(persona)` takes ONE argument. The banner's two captured labels live inside the persona's space half, `{ spaceId, role, roleLabel, spaceName }`, so the "labels present exactly when a space is named" invariant is structural rather than a second nullable field to keep in step. `role` is the wire string the header carries (`preset:<key>` / `custom:<srl_ id>`); `spaceRoleValue()` in `hooks/use-roles.ts` already produces it. The org-role label is NOT captured — it is a four-value platform enum with existing translations (`roleI18nKey`), so the banner derives it and it follows a language switch.
+- The realtime carrier is `withViewAsParam(url, viewAs)` in `lib/scoping-headers.ts`, applied by both SPA streams and by the chat module's two streams (which read the persona out of the host's forwarded headers). The value is a parameter, not a store read, so an effect can list it in its dependencies — see §6.4.
+- The four wire names live in `@appstrate/core/permissions` (`VIEW_AS_HEADER`, `VIEW_AS_QUERY`, `VIEW_AS_ACTIVE_HEADER`, `VIEW_AS_REFUSAL_CODES`): the preview crosses the platform, the SPA, the chat module and the CLI, and a carrier renamed on one side only must be a compile error rather than a persona silently ignored.
 
 ### 6.2 Entry points
 
@@ -154,6 +164,14 @@ Persistent, above the page header, in both the app shell and settings layouts: "
 
 - "Quitter", org switch, sign-out: clear the store and the query cache.
 - On load with a persisted persona: the first `GET /api/orgs` either succeeds (preview resumes) or fails with a `view_as_*` code (space deleted, role removed, caller demoted); the SPA then drops the persona, clears the cache, and toasts "Prévisualisation arrêtée : …". It never retries without the header silently.
+
+**As built.**
+
+- One handler, `lib/view-as-refusal.ts`, called from the API client's response middleware (and from `use-billing.ts`'s `cloudApi`, the one sanctioned untyped fetch) for every failed request — not per hook and not only on the org listing. It fires only when the request actually carried `X-View-As`, and keys on `VIEW_AS_REFUSAL_CODES` (§4.5) alone.
+- The reason is handed to the store rather than toasted on the spot — the refusal normally lands on the boot org list that `main.tsx` starts before React mounts, and Sonner drops anything published before its `<Toaster/>` subscribes; `view-as-banner.tsx` shows it on its first mount, as `viewAs.stopped.<code>` (translated; the server's `detail` is English prose for an API caller). The take is atomic so StrictMode's second pass raises no second toast.
+- Sign-out is not wired at the button: `clearSession()` in `hooks/use-auth.ts` drops the persona beside the org and space stores, which also covers the OIDC logout (it navigates away before anything after `logout()` runs) and a session lost mid-flight.
+- Entering and leaving reset the cache the way `switchOrg` does — `removeQueries` for everything except `["orgs"]`, then a `refetchQueries` of it. Dropping the org list would flash the boot screen `OrgGate` blocks on; leaving it alone would keep the wrong `role`/`permissions`, which is what every `can()` gate reads.
+- Live streams take the persona as a REACTIVE dependency (`useViewAsHeader()`), not a store read at connect time: an `EventSource` reads its URL once, so without it entering or leaving would leave the open stream on the other authority, refilling the cache the exit just emptied. Four sites: `use-realtime.ts`, `use-global-run-sync.ts`, and in the chat module `use-run-log-stream.ts` + `oauth-connect-card.tsx`, which re-subscribe because the host's `getHeaders` identity now moves with the persona.
 
 ## 7. Tests that discriminate
 

@@ -185,6 +185,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
+  "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
 
 /**

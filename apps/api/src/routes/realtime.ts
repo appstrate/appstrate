@@ -20,15 +20,13 @@ import {
   type SpaceMemberRow,
 } from "../lib/space-role.ts";
 import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
+import { orgHalfFor, personaFor, personaSpaceMember, validateViewAs } from "../lib/view-as.ts";
 import {
-  orgHalfFor,
-  personaFor,
-  personaSpaceMember,
-  validateViewAs,
+  reportPermissionDenial,
   VIEW_AS_ACTIVE_HEADER,
+  VIEW_AS_HEADER,
   VIEW_AS_QUERY,
-} from "../lib/view-as.ts";
-import { reportPermissionDenial } from "@appstrate/core/permissions";
+} from "@appstrate/core/permissions";
 import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
@@ -157,7 +155,7 @@ function resolveSpaceGrants(
  */
 async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null> {
   const viewAsRaw = c.req.query(VIEW_AS_QUERY);
-  if (c.req.header("X-View-As") !== undefined) {
+  if (c.req.header(VIEW_AS_HEADER) !== undefined) {
     // These routes skip the auth pipeline, so the header's own guard never runs
     // for them. Refusing beats ignoring: a client that believes it is previewing
     // must not be handed a stream of the caller's real authority.
@@ -166,7 +164,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       code: "invalid_view_as",
       title: "Invalid View-As Header",
       detail: `Server-Sent-Events routes take the role preview as the \`${VIEW_AS_QUERY}\` query parameter, not as a header.`,
-      param: "X-View-As",
+      param: VIEW_AS_HEADER,
     });
   }
 

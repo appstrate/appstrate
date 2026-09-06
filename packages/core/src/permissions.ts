@@ -365,6 +365,37 @@ export interface SpaceAssignment {
   custom_role_id?: string;
 }
 
+// ---------------------------------------------------------------------------
+// "View as role" wire contract
+//
+// The preview crosses three codebases — the platform validates it, the SPA and
+// the chat module emit it, the CLI can send it — so the four names it is
+// spelled with live here rather than being retyped at each end. A carrier
+// renamed on one side only is then a compile error, not a persona silently
+// ignored, which is the failure this feature exists to prevent.
+// ---------------------------------------------------------------------------
+
+/** HTTP carrier: `org_role=…; space=…; role=preset:…|custom:…`. */
+export const VIEW_AS_HEADER = "X-View-As";
+
+/** Same grammar, as a query parameter — `EventSource` cannot send headers. */
+export const VIEW_AS_QUERY = "view_as";
+
+/** Stamped on every response produced under a validated persona, and only then. */
+export const VIEW_AS_ACTIVE_HEADER = "X-View-As-Active";
+
+/**
+ * Every problem code that means "the PERSONA was refused", as opposed to an
+ * operation the persona correctly could not perform. A client seeing one of
+ * these must drop the preview rather than retry without it.
+ */
+export const VIEW_AS_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "invalid_view_as",
+  "view_as_unsupported",
+  "view_as_forbidden",
+  "view_as_not_found",
+]);
+
 /** Zod validator for the per-org `settings` JSONB shape. */
 export const orgSettingsSchema = z.object({
   api_version: z.string().optional(),

@@ -165,7 +165,7 @@ export function useRunLogStream(
     if (!runId) return;
     let cancelled = false;
     const headers = getHeaders?.() ?? {};
-    const { orgId, spaceId } = orgSpaceFromHeaders(headers);
+    const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(headers);
 
     // Decided up front (not after the fetches) because the one-shot run read
     // below needs to know whether anything else will ever report on this run.
@@ -173,7 +173,7 @@ export function useRunLogStream(
     // `es.onerror` fallback for the case where the connection never lands.
     // A terminal `initialStatus` opts out: nothing more will be emitted, and
     // the one-shot read below then owns the completion signal.
-    const sseUrl = buildRunSseUrl({ runId, orgId, spaceId });
+    const sseUrl = buildRunSseUrl({ runId, orgId, spaceId, viewAs });
     const willTail = shouldOpenLiveTail({
       initialStatus,
       hasSseContext: !!sseUrl && typeof EventSource !== "undefined",
@@ -376,8 +376,12 @@ export function useRunLogStream(
       es.close();
     };
     // initialStatus is read once at subscribe time; runId is the real identity.
+    // `getHeaders` is a dependency, not a convenience: its identity moves with
+    // the host's scoping context (organization, space, role preview), and this
+    // stream reads its URL once at connect. Without it a preview entered while
+    // a run card is open keeps tailing under the previous authority.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
+  }, [runId, getHeaders]);
 
   return {
     logs,

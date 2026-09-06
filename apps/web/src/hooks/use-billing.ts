@@ -4,6 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
 import { toApiError } from "../api/client";
 import { buildScopingHeaders } from "../lib/scoping-headers";
+import { noteViewAsRefusal } from "../lib/view-as-refusal";
 import { useCurrentOrgId } from "./use-org";
 import { billingKeys } from "../lib/query-keys";
 
@@ -12,9 +13,10 @@ import { billingKeys } from "../lib/query-keys";
  * cloud module — they are deliberately ABSENT from the OSS OpenAPI spec
  * (Apache-2.0 core carries no billing vocabulary), so the typed client
  * cannot express them. This file-local fetch REUSES the typed client's
- * middleware pieces — `buildScopingHeaders` for the org/app wire contract and
- * `toApiError` for the RFC 9457 mapping — rather than restating them, and is
- * the single sanctioned untyped call site in the SPA.
+ * middleware pieces — `buildScopingHeaders` for the org/app wire contract,
+ * `noteViewAsRefusal` for a refused role preview and `toApiError` for the
+ * RFC 9457 mapping — rather than restating them, and is the single sanctioned
+ * untyped call site in the SPA.
  *
  * It used to restate both, and had already drifted: `toApiError` grew a sixth
  * argument (`param`, the field name a validation problem points at) and the
@@ -23,16 +25,16 @@ import { billingKeys } from "../lib/query-keys";
  * for those header names; this was the one hand-rolled fetch not consuming it.
  */
 async function cloudApi<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    ...options,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...buildScopingHeaders(),
-      ...options.headers,
-    },
-  });
-  if (!res.ok) throw await toApiError(res);
+  const headers = new Headers({ "Content-Type": "application/json", ...buildScopingHeaders() });
+  for (const [key, value] of new Headers(options.headers)) headers.set(key, value);
+  const res = await fetch(`/api${path}`, { ...options, credentials: "include", headers });
+  if (!res.ok) {
+    // Third middleware piece reused rather than restated: a dead persona has to
+    // end the preview here too, or the billing page is the one surface that
+    // keeps retrying under a header the server has already refused.
+    await noteViewAsRefusal(headers, res);
+    throw await toApiError(res);
+  }
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
 }

@@ -252,8 +252,12 @@ export const responses = {
       "user themselves; every other credential carries a ceiling of its own and no session to " +
       "narrow. The other refusals reuse the " +
       "statuses already documented on this operation: `403 view_as_forbidden` when the real org " +
-      "role is not owner/admin or the role is not grantable by the caller in that space, and `404` " +
-      "when the space is not in the organization or the custom role does not exist. A refused " +
+      "role is not owner/admin, the role is not grantable by the caller in that space, or a " +
+      "custom role is previewed where the `custom_roles` feature is off, and " +
+      "`404 view_as_not_found` when the space is not in the organization, the custom role does " +
+      "not exist, or the organization named alongside the persona is not the caller's. Those four " +
+      'codes are the complete set that means "drop the preview" — a plain `not_found` under an ' +
+      "active persona is the previewed role's own wall, not a refusal of the persona. A refused " +
       "preview is never answered with the caller's real permissions.",
     content: {
       "application/problem+json": {
@@ -267,6 +271,18 @@ export const responses = {
               status: 400,
               detail: "X-View-As could not be parsed: space and role must be provided together",
               code: "invalid_view_as",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+          notFound: {
+            summary: "The persona names something that is gone",
+            value: {
+              type: "https://docs.appstrate.dev/errors/view-as-not-found",
+              title: "View-As Target Not Found",
+              status: 404,
+              detail: "Space 'spc_…' not found in this organization",
+              code: "view_as_not_found",
               param: "X-View-As",
               requestId: "req_abc123",
             },

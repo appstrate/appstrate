@@ -9,6 +9,8 @@ import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
+import { withViewAsParam } from "../lib/scoping-headers";
+import { useViewAsHeader } from "../stores/view-as-store";
 import {
   runKeys,
   runsKeys,
@@ -261,6 +263,9 @@ export function useGlobalRunSync() {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  // Same reason as the org/space ids beside it: this stream is opened once and
+  // would otherwise keep filling the cache with the other authority's rows.
+  const viewAs = useViewAsHeader();
   const qcRef = useRef(qc);
   qcRef.current = qc;
 
@@ -304,7 +309,10 @@ export function useGlobalRunSync() {
         // loop to drop it — and admins/owners got the `debug` level too.
         // `verbose` is deliberately absent: it only affects `run_log`, which
         // we no longer subscribe to.
-        `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=run_update,connection_update,chat_session_update`,
+        withViewAsParam(
+          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=run_update,connection_update,chat_session_update`,
+          viewAs,
+        ),
         {
           credentials: "include",
           signal: controller.signal,
@@ -376,5 +384,5 @@ export function useGlobalRunSync() {
       controller.abort();
       broad.dispose();
     };
-  }, [orgId, spaceId]);
+  }, [orgId, spaceId, viewAs]);
 }

@@ -186,7 +186,13 @@ describe("view as role", () => {
     const openRefusal = await inSpace(owner.defaultSpaceId, view);
     expect(openRefusal.status).toBe(403);
     expect(((await openRefusal.json()) as Problem).code).toBe("not_a_space_member");
-    expect((await inSpace(privateSpace.id, view)).status).toBe(404);
+    const hidden = await inSpace(privateSpace.id, view);
+    expect(hidden.status).toBe(404);
+    // The persona's own wall, answered AS the persona — the generic code and
+    // the active marker. This is what `view_as_not_found` has to be told apart
+    // from, or a client would end the preview every time it 404s.
+    expect(((await hidden.json()) as Problem).code).toBe("not_found");
+    expect(hidden.headers.get(ACTIVE)).toBe("1");
 
     expect((await inSpace(owner.defaultSpaceId)).status).toBe(200);
     expect((await inSpace(privateSpace.id)).status).toBe(200);
@@ -317,6 +323,7 @@ describe("view as role", () => {
         headers: { Cookie: owner.cookie, "X-Org-Id": other.orgId, "X-View-As": view },
       });
       expect(stranger.status).toBe(404);
+      expect(((await stranger.json()) as Problem).code).toBe("view_as_not_found");
 
       // Control: the same header with the caller's own org is answered.
       const placed = await app.request("/api/orgs", {
@@ -340,6 +347,10 @@ describe("view as role", () => {
       const other = await createTestContext({ orgSlug: "view-as-other" });
       const response = await listSpaces(persona("member", "preset:viewer", other.defaultSpaceId));
       expect(response.status).toBe(404);
+      // Its OWN code, not the generic `not_found`: this is the preview dying,
+      // not the previewed role failing to find something. A client cannot tell
+      // "drop the persona" from "this row does not exist for you" otherwise.
+      expect(((await response.json()) as Problem).code).toBe("view_as_not_found");
       expect((await listSpaces()).status).toBe(200);
     });
 
@@ -348,7 +359,9 @@ describe("view as role", () => {
       try {
         const other = await createTestContext({ orgSlug: "view-as-foreign" });
         const foreign = await seedSpaceRole({ orgId: other.orgId, key: "foreign" });
-        expect((await listSpaces(persona("member", `custom:${foreign.id}`))).status).toBe(404);
+        const refused = await listSpaces(persona("member", `custom:${foreign.id}`));
+        expect(refused.status).toBe(404);
+        expect(((await refused.json()) as Problem).code).toBe("view_as_not_found");
         const mine = await seedSpaceRole({ orgId: owner.orgId, key: "mine" });
         expect((await listSpaces(persona("member", `custom:${mine.id}`))).status).toBe(200);
       } finally {
@@ -362,7 +375,9 @@ describe("view as role", () => {
       try {
         const response = await listSpaces(persona("member", `custom:${role.id}`));
         expect(response.status).toBe(403);
-        expect(((await response.json()) as Problem).code).toBe("feature_unavailable");
+        // A view-as refusal, not the role routes' `feature_unavailable`: every
+        // way a persona is turned down must be a code the client drops it on.
+        expect(((await response.json()) as Problem).code).toBe("view_as_forbidden");
         // A preset preview stays available on the same deployment.
         expect((await listSpaces(persona("member", "preset:viewer"))).status).toBe(200);
       } finally {
