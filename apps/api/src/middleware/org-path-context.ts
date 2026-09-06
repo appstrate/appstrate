@@ -17,7 +17,7 @@
 import type { Context, Next } from "hono";
 import { forbidden } from "../lib/errors.ts";
 import { apiKeyOrgScopeGuard } from "./guards.ts";
-import { effectivePermissions, orgPermissions } from "../lib/permissions.ts";
+import { orgHalfFor, resolveViewAs } from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -50,16 +50,15 @@ async function orgPathContext(c: Context<AppEnv>, next: Next) {
   if (!member) return next();
 
   const role = member.role;
-  // The two halves the pipeline unions for a session caller.
-  const org = new Set<string>([...orgPermissions(role), ...(await principalGrants(c, orgId))]);
+  // Same position as the pipeline's permission step on the header-org path:
+  // after the real org role, before the single `permissions` write below.
+  await resolveViewAs(c, orgId, role);
+  // Never space-scoped, so the org half is the whole answer.
+  const { orgPermissions, effective } = orgHalfFor(c, orgId, role, await principalGrants(c, orgId));
   c.set("orgId", orgId);
   c.set("orgRole", role);
-  c.set("orgPermissions", org);
-  // Never space-scoped, so the org half is the whole answer.
-  c.set(
-    "permissions",
-    effectivePermissions({ orgPermissions: org, scopeCeiling: c.get("scopeCeiling") }),
-  );
+  c.set("orgPermissions", orgPermissions);
+  c.set("permissions", effective);
   return next();
 }
 

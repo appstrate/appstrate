@@ -13,8 +13,6 @@ import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { ApiError } from "../lib/errors.ts";
-import { getAppConfig } from "../lib/app-config.ts";
 import { assertSpaceRoleId } from "../lib/ids.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { readJsonBody } from "../lib/request-body.ts";
@@ -22,6 +20,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceLevelVocabulary } from "../lib/permissions.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import {
+  assertCustomRolesFeature,
   createSpaceRole,
   deleteSpaceRole,
   listSpaceRoles,
@@ -54,24 +53,10 @@ export const updateSpaceRoleSchema = z
   })
   .strict();
 
-/**
- * Gate the write routes on `features.custom_roles`. Read per request, not at
- * router construction: modules merge their features into `AppConfig` at boot,
- * and a captured boolean would freeze whatever the flag was before that.
- */
+/** Gate the write routes on `features.custom_roles` (`assertCustomRolesFeature`). */
 function requireCustomRolesFeature() {
   return async (_c: Context<AppEnv>, next: Next) => {
-    if (!getAppConfig().features.custom_roles) {
-      throw new ApiError({
-        status: 403,
-        code: "feature_unavailable",
-        title: "Feature Unavailable",
-        detail:
-          "Defining custom space roles requires the `custom_roles` feature, provided by the " +
-          "Appstrate Cloud plan (the `@appstrate/cloud` module). The four built-in presets " +
-          "(admin, builder, operator, viewer) are always available.",
-      });
-    }
+    assertCustomRolesFeature();
     return next();
   };
 }

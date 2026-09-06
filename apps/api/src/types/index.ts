@@ -63,6 +63,13 @@ export type AppEnv = {
     /** Role the caller holds in `space`, set by `applySpacePermissions`. */
     spaceRole?: import("../lib/space-role.ts").SpaceRoleRef;
     /**
+     * Validated role preview: the persona whose reach answers this request
+     * instead of the caller's own (`lib/view-as.ts`), set before any
+     * `permissions` write. `user` and `orgRole` stay REAL — a persona restricts
+     * what they reach, never who they are.
+     */
+    viewAs?: import("../lib/view-as.ts").ViewAsPersona;
+    /**
      * Auth method that resolved the request. Core values: `"session"`,
      * `"api_key"`. Auth-strategy modules set their own identifier (e.g.
      * `"oidc"`, `"mtls"`).

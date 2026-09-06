@@ -13,7 +13,8 @@ import { db } from "@appstrate/db/client";
 import { orgInvitations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permissions";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
-import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
+import { getAppConfig } from "../lib/app-config.ts";
+import { ApiError, conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { knownSpaceLevelPermissions, presetPermissions } from "../lib/permissions.ts";
 
@@ -39,6 +40,25 @@ export interface SpaceRoleInput {
 }
 
 const PRESET_KEYS: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
+
+/**
+ * Throw unless this deployment has the `custom_roles` feature (RBAC spec §9).
+ * Read per call, not captured: modules merge their features into `AppConfig` at
+ * boot. Shared by the write routes and the role preview (`lib/view-as.ts`), so
+ * defining and previewing a bundle answer alike.
+ */
+export function assertCustomRolesFeature(): void {
+  if (getAppConfig().features.custom_roles) return;
+  throw new ApiError({
+    status: 403,
+    code: "feature_unavailable",
+    title: "Feature Unavailable",
+    detail:
+      "Defining custom space roles requires the `custom_roles` feature, provided by the " +
+      "Appstrate Cloud plan (the `@appstrate/cloud` module). The four built-in presets " +
+      "(admin, builder, operator, viewer) are always available.",
+  });
+}
 
 type SpaceRoleRow = typeof spaceRoles.$inferSelect;
 

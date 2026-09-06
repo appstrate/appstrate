@@ -1,6 +1,6 @@
 # View as role — plan
 
-Status: proposal, 2026-09-06. Builds on the RBAC model of PR #1260 (`RBAC_PERMISSIONS_SPEC.md`). Nothing here is implemented.
+Status: **phase 1 (server contract) implemented**, 2026-09-06. Builds on the RBAC model of PR #1260 (`RBAC_PERMISSIONS_SPEC.md`). §5 and §7 describe shipped code (`apps/api/src/lib/view-as.ts`); §6 (SPA) and §8's phases 2-3 are still proposals.
 
 ## 1. Goal and non-goals
 
@@ -28,7 +28,7 @@ Sources: [WordPress plugin page](https://wordpress.org/plugins/view-admin-as/), 
 
 1. **Persona, not user.** A preview is `{ org_role, space?: { space_id, role } }` where `org_role ∈ { member, guest }` and `role` is a preset or a custom role id. It answers "what does a standard user with `viewer` in Marketing see", which is the question a role editor has. Previewing `admin` or `owner` is refused: nothing to learn, and it keeps the rule "a preview only removes".
 2. **Server-enforced, in the existing pipeline.** The persona is carried by one request header and applied where permissions are already computed: the auth pipeline (org set), `orgPathContext` (the `/api/orgs/:orgId*` family), `applySpacePermissions` (space slice), and the two listings the SPA derives its gates from (`GET /api/orgs`, `GET /api/spaces`). The SPA changes nothing in how it gates: `can()` keeps reading the permissions the server returns.
-3. **Restriction only.** `effective = persona(effective) ∩ real(effective)`. For an owner/admin the intersection is the persona set; the intersection is kept anyway so a future eligibility widening (a space admin previewing a lower space role) cannot elevate.
+3. **Restriction only, and only the ORG half is an intersection.** The org set is `orgPermissions(persona) ∩ real`, because `grantTo` carries no nesting rule: a module may grant an org-level permission to `member` and not to `owner`, and the previewing owner must not gain it. The SPACE slice is `spacePermissions(ref)` with no intersection, because it is a subset of the previewer's by construction — presets are upward-closed (core's table, and `assertPresetsUpwardClosed` holds module contributions to it), eligibility is owner/admin whose real standing in every space is preset `admin`, and a custom bundle is checked grantable at validation. That is a structural guarantee, not a check, and it is exactly what widening eligibility below org admin (§9) breaks: doing so must reintroduce a space-half intersection AND read the previewer's real `space_members` row, since a space admin's standing no longer follows from their org role.
 4. **Eligible callers: session-shaped owners and admins.** Cookie sessions and `deferOrgResolution` strategies (the CLI acting as the user), real org role `owner` or `admin`. API keys, OIDC tokens, MCP bearers and end-user tokens carrying the header get `400 view_as_unsupported`. Anyone else eligible-by-transport but not owner/admin gets `403 view_as_forbidden`. Both are refusals of the request, never a silent fall-back to the real permissions.
 5. **The real identity stays the actor.** `c.get("user")` and `c.get("orgRole")` are untouched; `permissions`, `orgPermissions` and `spaceRole` are the persona's. Audit rows keep `actor_id` = the admin and add the persona (§5.4). Handlers that read `orgRole` for who-manages-whom policies run after a permission guard the persona already narrowed, so they cannot be reached with an authority the persona lacks; a handler that could act on `orgRole` without a guard is a bug this plan's tests must surface (§7).
 6. **Visible and one click from over.** A persistent banner names the persona and the space, offers "Quitter", and the preview is dropped on org switch, on sign-out, and on reload only if the persisted persona is still valid (space still exists, role still grantable) — otherwise it is discarded with a toast, never silently kept.
@@ -47,8 +47,14 @@ X-View-As: org_role=member
 
 - `org_role` required, `member | guest`.
 - `space` and `role` optional but paired; `role` is `preset:<admin|builder|operator|viewer>` or `custom:<id>`.
-- Parsed by a strict Zod schema; anything else is `400 invalid_view_as`. Sent by the SPA through `buildScopingHeaders()` next to `X-Org-Id` / `X-Space-Id`, so SSE streams and uploads carry it too.
+- Parsed by a strict Zod schema; anything else is `400 invalid_view_as`. Both ids are shape-checked there (`spc_`, `srl_`), so a malformed one points at the header rather than at a field the caller never sent.
 - One header, not three: the persona is one value the SPA stores and the server validates as a whole.
+- Sent by the SPA through `buildScopingHeaders()` next to `X-Org-Id` / `X-Space-Id`.
+
+**Two carriers that are not the header**, same grammar and same validation:
+
+- **SSE** (`/api/realtime/*`) takes it as the `view_as` QUERY parameter — and refuses the header there with `400 invalid_view_as`, since a header on a route `EventSource` reaches is a client bug, not a persona to honour. Those routes are exempt from the auth pipeline (`skipAuth`) and their browser client is an `EventSource`, which cannot send headers at all — a header-only contract would have left the whole realtime surface answering with the caller's real authority. Cookie sessions only: `?token=ask_…` with `view_as` is `400 view_as_unsupported`. A stream refused under a persona answers `403 not_a_space_member` / `404` (the persona's wall) rather than the header-less path's `401`.
+- **The chat module's in-process loopback** carries the persona inside its HMAC-signed claims (`packages/module-chat/src/loopback-auth.ts`). The re-entered request has no header of its own, so without this the engine's `/api/mcp/o/:org` tool calls would run with the caller's real authority while the browser showed a preview. The snapshot is ADOPTED, not re-validated (`adoptViewAs`): the claims are as trustworthy as `claims.permissions`, which the strategy already carries verbatim, and the hop's own ceiling is the persona's set — re-checking grantability against it would refuse every persona that is not an admin of its space. The bearer is also minted with the persona's org role, so a snapshot lost in transit fails closed.
 
 ### 4.2 Validation, per request
 
@@ -58,9 +64,13 @@ Order matters; each step is a refusal, never a fall-back.
 2. Real org role `owner | admin`? Otherwise `403 view_as_forbidden`. Audited as a permission denial (`reportPermissionDenial`) so abuse is visible.
 3. `space` belongs to the org (`validateSpaceInOrg`); otherwise `404`.
 4. `role` grantable by the real caller in that space (`canGrantSpaceRole(realPermissions, ref)`); a custom role must exist in the org and be grantable; otherwise `403 view_as_forbidden`.
-5. Custom role while `features.custom_roles` is off: `403`, same answer as assigning it.
+5. Custom role while `features.custom_roles` is off: `403`, same answer as assigning it. Checked BEFORE step 4's existence lookup — where the feature is off the deployment has no bundle vocabulary at all, so "does this id exist" is not a question worth answering.
 
 The parsed persona is written to `c.set("viewAs", persona)` before any permission write.
+
+**A persona belongs to one organization.** It carries the `orgId` it was validated in and the caller's REAL org role there, and every apply site asks for the org it is answering about (`personaFor(c, orgId)`). A request that resolves a SECOND org — forking a package out of another org the caller really belongs to — sees their real role and real `space_members` rows there. Carrying the real role on the persona is also what keeps the `∩ real` narrowing correct across the loopback hop, where the request's own org role IS the persona's.
+
+**The two org listings refuse rather than no-op.** `GET /api/orgs` and `GET /api/me/orgs` are exempt from `requireOrgContext`, so the previewed org is named by `X-Org-Id`: the header with no org id is `400 invalid_view_as`, and an org the caller is not a member of is `404`. Answering those with real permissions while the client believed it was previewing is the failure this feature exists to prevent.
 
 ### 4.3 Resolution
 
@@ -114,11 +124,12 @@ If, after use, writes under preview turn out to confuse more than they help, the
 
 ### 5.4 Audit
 
-`audit_events` gains nothing: `recordAuditFromContext` merges `{ view_as: persona }` into `after` when a persona is set (the column is a free-form jsonb already). The permission-denial audit (`lib/permission-audit.ts`) does the same, so "the persona was refused X" is queryable. No migration.
+`audit_events` gains nothing: `recordAuditFromContext` merges `{ view_as: persona }` into `after` when a persona is set (the column is a free-form jsonb already). The permission-denial audit (`lib/permission-audit.ts`) does the same — beside the REAL `role`, so a trail can still tell an abuse attempt from a preview. No migration.
 
 ### 5.5 What is deliberately not touched
 
-- Run tokens, MCP in-process re-entry, sidecar credentials: a run started under preview runs with the run's own server-minted credentials, unchanged. The preview restricts the admin's session, not the agents they start.
+- Run tokens and sidecar credentials: a run started under preview runs with the run's own server-minted credentials, unchanged. The preview restricts the admin's session, not the agents they start.
+- The MCP in-process re-entry is NOT in this list any more, on either of its two doors. The inbound `/api/mcp/o/:org` endpoint forwards `x-view-as` onto every dispatch (`FORWARDED_AUTH_HEADERS`, `modules/mcp/tools.ts` — and `PROTECTED_HEADERS` is derived from that set, so the model cannot reshape it); the chat engine reaches the same re-entry over the module's loopback bearer, which carries the persona in its signed claims (§4.1). Either way a tool call under preview reaches exactly what the previewed role reaches. What stays untouched is the run the call may launch.
 - `c.get("orgRole")`: stays real. §7 lists the test that proves no unguarded handler acts on it.
 
 ## 6. Web work
@@ -153,7 +164,7 @@ Integration (`apps/api/test/integration/…/view-as.test.ts`):
 3. Persona never elevates: a custom role granting `space-settings:write` previewed by an admin whose real ceiling (OIDC dashboard token, session-shaped) lacks it → the permission is absent.
 4. Refusals: member caller → 403 `view_as_forbidden` and an audit denial row; API key → 400 `view_as_unsupported`; malformed header → 400; role not grantable → 403; space in another org → 404.
 5. Audit: an action under preview writes `after.view_as` with the persona and `actor_id` = the admin.
-6. `orgRole` sweep: for every route that reads `c.get("orgRole")` (18 sites today, listed by grep in the test), a request under persona `member` must be refused or must answer as a member would. The test enumerates the sites so a new unguarded reader fails it.
+6. `orgRole` sweep: the test greps `apps/api/src` AND `packages/*/src` for `.get("orgRole")` and holds the file set against an allowlist carrying a one-line justification each, so a new reader fails until it is reviewed against the persona. Paired with behavioural tests for the sites where `orgRole` drives a who-manages-whom policy (org member role change/removal, space create/delete, the package catalog): under persona `member` each is refused or answers as a member would.
 7. Marker: `X-View-As-Active` present exactly when the header validated.
 
 Web (bun test, no DOM): banner renders from the store; `buildScopingHeaders()` emits the header only for the matching org; the roles dialog offers grantable roles only.

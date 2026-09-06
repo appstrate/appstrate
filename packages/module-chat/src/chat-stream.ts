@@ -218,7 +218,10 @@ export async function handleChatStream(
   // The space the router entered — the session's space, and the scope of every
   // space-scoped read this turn makes.
   const spaceId = c.get("space").id;
-  const orgRole = c.get("orgRole") ?? "member";
+  // While a preview is on, the turn is answered as the persona; the real role
+  // stays on the context for identity and audit.
+  const persona = c.get("viewAs");
+  const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
@@ -568,6 +571,9 @@ export async function handleChatStream(
       orgId,
       orgRole,
       permissions: [...(c.get("permissions") ?? [])],
+      // The re-entered request carries no header, so without this the hop would
+      // answer with the caller's real authority while a preview is on screen.
+      viewAs: persona,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );

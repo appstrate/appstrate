@@ -2,15 +2,21 @@
 
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { eq, and } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { spaces } from "@appstrate/db/schema";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import { assertSpaceId } from "../lib/ids.ts";
+import {
+  defaultSpaceForOrg,
+  validateSpaceInOrg,
+  type SpaceContextRow,
+} from "../lib/space-lookup.ts";
 import { isInternalDispatch } from "../lib/internal-dispatch.ts";
 import { setSpaceContextApplier } from "@appstrate/core/permissions";
 import { effectivePermissions } from "../lib/permissions.ts";
-import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
+import { callerOrgRole, callerSpaceMember } from "../lib/view-as.ts";
+import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
+
+/** Re-exported so existing call sites keep one import; see `lib/space-lookup.ts`. */
+export { defaultSpaceForOrg, validateSpaceInOrg, type SpaceContextRow };
 
 /**
  * Core route prefixes that require a space context (`X-Space-Id`,
@@ -51,76 +57,6 @@ export function isSpaceScopedPath(path: string): boolean {
 }
 
 /**
- * Resolved space row exposed on the Hono context under `c.get("space")`.
- * Carries the fields every space-scoped route currently needs — keep the set
- * tight so downstream services can destructure without re-reading the row.
- */
-export interface SpaceContextRow {
-  id: string;
-  orgId: string;
-  isDefault: boolean;
-  visibility: import("@appstrate/core/permissions").SpaceVisibility;
-  defaultRole: import("@appstrate/core/permissions").SpaceRolePreset;
-}
-
-/** Projection behind {@link SpaceContextRow} — declared once so the two readers cannot drift. */
-const SPACE_CONTEXT_COLUMNS = {
-  id: spaces.id,
-  orgId: spaces.orgId,
-  isDefault: spaces.isDefault,
-  visibility: spaces.visibility,
-  defaultRole: spaces.defaultRole,
-} as const;
-
-/**
- * Validate that a space belongs to the given org.
- * Returns the full `SpaceContextRow` or null if not found.
- * Shared by the space-context middleware, SSE auth and the MCP router — this is
- * where a CLIENT-SUPPLIED space id enters, which is why the id-shape guard
- * lives here rather than at each of those call sites.
- *
- * It is NOT the only entry point, and the guard is not only here. Three paths
- * take a space id from a row instead of from the request and so skip this
- * function entirely; each asserts the shape itself, and each says so at the
- * call site:
- *   - `requireSpaceContext`'s default-space fallback (below)
- *   - `resolveMcpSpaceScope`'s default-space fallback (`modules/mcp/router.ts`)
- *   - `validateSSEAuth`'s API-key branch (`routes/realtime.ts`)
- *
- * The shape check runs BEFORE the SELECT on purpose. A `spc_` id that does not
- * exist is a 404 (`null`); a retired `app_` id is not a missing row, it is
- * un-migrated data or an un-migrated caller, and `assertSpaceId` throws with a
- * message that says so. Without it a half-run migration is silent: header, API
- * key and `spaces` row would all still hold `app_` and agree with each other.
- */
-export async function validateSpaceInOrg(
-  spaceId: string,
-  orgId: string,
-): Promise<SpaceContextRow | null> {
-  assertSpaceId(spaceId);
-  const [space] = await db
-    .select(SPACE_CONTEXT_COLUMNS)
-    .from(spaces)
-    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
-    .limit(1);
-  return space ?? null;
-}
-
-/**
- * The org's default space (`is_default = true`). Used as the last-resort
- * fallback for header-less MCP callers — see `requireSpaceContext` and the MCP
- * router's per-session space-scope resolution.
- */
-export async function defaultSpaceForOrg(orgId: string): Promise<SpaceContextRow | null> {
-  const [space] = await db
-    .select(SPACE_CONTEXT_COLUMNS)
-    .from(spaces)
-    .where(and(eq(spaces.orgId, orgId), eq(spaces.isDefault, true)))
-    .limit(1);
-  return space ?? null;
-}
-
-/**
  * Resolve the caller's role in `space` and rewrite `permissions` to the
  * effective set there (RBAC spec §4.2).
  *
@@ -138,6 +74,8 @@ export async function defaultSpaceForOrg(orgId: string): Promise<SpaceContextRow
  * strategy wrote: an OIDC end-user token carries a fixed allowlist and no org
  * role, and end-users are never space members (§7.2).
  *
+ * Under a preview the persona's overlay replaces the caller's own membership.
+ *
  * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
  *   `private` — a private space does not exist for someone who is not in it.
  */
@@ -145,11 +83,15 @@ export async function applySpacePermissions(
   c: Context<AppEnv>,
   space: SpaceContextRow,
 ): Promise<void> {
-  const orgRole = c.get("orgRole");
-  if (!orgRole) return;
+  if (!c.get("orgRole")) return;
 
-  const memberRow = await loadSpaceMember(space.id, c.get("user").id);
-  const ref = resolveSpaceRole(orgRole, space, memberRow);
+  // Under a preview both halves are the persona's, so the wall it hits is the
+  // wall the previewed role hits.
+  const ref = resolveSpaceRole(
+    callerOrgRole(c, space.orgId),
+    space,
+    await callerSpaceMember(c, space.orgId, space.id),
+  );
   if (!ref) {
     if (space.visibility === "private") {
       throw notFound(`Space '${space.id}' not found in this organization`);

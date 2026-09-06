@@ -83,7 +83,10 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "List spaces",
       description: "List all spaces for the organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XViewAs" },
+      ],
       responses: {
         "200": {
           description: "Space list",
@@ -146,6 +149,7 @@ export const spacesPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -159,6 +163,7 @@ export const spacesPaths = {
       description: "Get a single space by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XViewAs" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -171,6 +176,7 @@ export const spacesPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -527,6 +533,7 @@ export const spacesPaths = {
         "Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XViewAs" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -547,6 +554,7 @@ export const spacesPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -563,6 +571,7 @@ export const spacesPaths = {
         'Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member (`source: "open_space"`).',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XViewAs" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -589,6 +598,7 @@ export const spacesPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

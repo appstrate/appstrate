@@ -13,7 +13,8 @@ import { getOrgMember } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import { effectivePermissions, type Permission } from "./permissions.ts";
-import { loadSpaceMemberships, resolveSpaceRole, spacePermissions } from "./space-role.ts";
+import { callerOrgRole, callerSpaceMemberships } from "./view-as.ts";
+import { resolveSpaceRole, spacePermissions } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { forbidden, notFound, invalidRequest } from "./errors.ts";
 
@@ -61,11 +62,15 @@ export async function assertExistingPackageInstallAccess(
     await makePermissionGuard(spacePackagePermission(type, "install"))(c, async () => {});
 }
 
-/** Resolve once for catalog listings and cross-space package operations. */
+/**
+ * Resolve once for catalog listings and cross-space package operations. The org
+ * role and the memberships are the CALLER's standing, which a preview replaces
+ * — otherwise the catalog answers with the previewing admin's reach.
+ */
 export async function packageAccessSpaces(
   c: Context<AppEnv>,
   orgId = c.get("orgId"),
-  orgRole = c.get("orgRole"),
+  orgRole = callerOrgRole(c, orgId),
 ) {
   const [rows, memberships] = await Promise.all([
     db
@@ -87,7 +92,7 @@ export async function packageAccessSpaces(
       ),
     c.get("endUser") && !c.get("orgRole")
       ? Promise.resolve(new Map())
-      : loadSpaceMemberships(orgId, c.get("user").id),
+      : callerSpaceMemberships(c, orgId),
   ]);
   const pinned = c.get("authMethod") === "api_key" ? c.get("spaceId") : undefined;
   return rows.flatMap((space) => {
@@ -112,7 +117,7 @@ export async function packageAccessSpaces(
   });
 }
 
-export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = c.get("orgRole")) {
+export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerOrgRole(c)) {
   return c.get("authMethod") !== "api_key" && (orgRole === "owner" || orgRole === "admin");
 }
 
@@ -121,7 +126,7 @@ export async function assertCatalogPackageAccess(
   c: Context<AppEnv>,
   packageId: string,
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
-  source = { orgId: c.get("orgId"), orgRole: c.get("orgRole") },
+  source = { orgId: c.get("orgId"), orgRole: callerOrgRole(c, c.get("orgId")) },
 ) {
   const { pkg, accessible, installations } = await loadPackageAccess(
     c,

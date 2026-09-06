@@ -13,7 +13,12 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
-import { loadSpaceMemberships, resolveSpaceRole, type SpaceRoleRef } from "../lib/space-role.ts";
+import {
+  loadSpaceMemberships,
+  resolveSpaceRole,
+  type SpaceMemberRow,
+  type SpaceRoleRef,
+} from "../lib/space-role.ts";
 
 type SpaceRow = InferSelectModel<typeof spaces>;
 
@@ -32,15 +37,19 @@ type SpaceSettings = z.infer<typeof spaceSettingsSchema>;
  * cannot enter (so they know to ask); a `guest` and a `private` space both
  * need an explicit row. The filtering is the listing's, not the resolver's:
  * `resolveSpaceRole` answers "what role", this answers "which spaces".
+ *
+ * `overlay` replaces the caller's own rows wholesale — what a role preview hands
+ * in (`lib/view-as.ts`), so the listing is the persona's.
  */
 export async function listSpacesForPrincipal(
   orgId: string,
   orgRole: OrgRole,
   userId: string,
+  overlay?: ReadonlyMap<string, SpaceMemberRow>,
 ): Promise<Array<{ space: SpaceRow; role: SpaceRoleRef | null }>> {
   const [rows, memberships] = await Promise.all([
     listSpaces(orgId),
-    loadSpaceMemberships(orgId, userId),
+    overlay ?? loadSpaceMemberships(orgId, userId),
   ]);
   const out: Array<{ space: SpaceRow; role: SpaceRoleRef | null }> = [];
   for (const space of rows) {

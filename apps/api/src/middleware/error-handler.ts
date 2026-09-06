@@ -8,6 +8,7 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
+import { VIEW_AS_ACTIVE_HEADER } from "../lib/view-as.ts";
 import { formatErrorChain } from "@appstrate/core/errors";
 import type { Logger } from "@appstrate/core/logger";
 import { logger } from "../lib/logger.ts";
@@ -77,6 +78,10 @@ export function errorHandler(err: Error, c: Context<AppEnv>, log: Logger = logge
     "Content-Type": "application/problem+json",
     "Request-Id": requestId,
   });
+
+  // A refusal under a role preview must read as the persona's. The success path
+  // stamps this in `viewAsTransportGuard`; this one builds a fresh `Response`.
+  if (c.get("viewAs")) headers.set(VIEW_AS_ACTIVE_HEADER, "1");
 
   // Merge custom headers from ApiError (e.g. rate-limit headers on 429).
   if (apiError.headers) {

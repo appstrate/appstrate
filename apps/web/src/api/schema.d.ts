@@ -6083,6 +6083,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse (bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential cannot carry a persona: only a cookie session and the CLI/instance token authenticate the user themselves; every other credential carries a ceiling of its own and no session to narrow. The other refusals reuse the statuses already documented on this operation: `403 view_as_forbidden` when the real org role is not owner/admin or the role is not grantable by the caller in that space, and `404` when the space is not in the organization or the custom role does not exist. A refused preview is never answered with the caller's real permissions. */
+        ViewAsRefused: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Same Idempotency-Key used with a different request body */
         IdempotencyConflict: {
             headers: {
@@ -6123,8 +6132,30 @@ export interface components {
         IdempotencyKey: string;
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
+        /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+        SseViewAs: string;
         /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
         SseToken: string;
+        /**
+         * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+         *
+         *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+         *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+         *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+         *
+         *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+         *
+         *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+         *
+         *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404` (the space is not in the org, or the custom role does not exist).
+         *
+         *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+         *
+         *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+         *
+         *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+         */
+        XViewAs: string;
         /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
         XSpaceId: string;
         /** @description Package scope (e.g. @myorg) */
@@ -12313,7 +12344,28 @@ export interface operations {
     listMyOrgs: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404` (the space is not in the org, or the custom role does not exist).
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12368,7 +12420,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listModelProviderCredentials: {
@@ -14075,7 +14130,28 @@ export interface operations {
     listOrganizations: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404` (the space is not in the org, or the custom role does not exist).
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -14117,7 +14193,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createOrganization: {
@@ -17444,6 +17523,8 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
@@ -17471,8 +17552,10 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     streamAllRuns: {
@@ -17480,6 +17563,8 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
@@ -17504,8 +17589,10 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     streamRun: {
@@ -17513,6 +17600,8 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
@@ -17539,8 +17628,10 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listRoles: {
@@ -19286,6 +19377,26 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404` (the space is not in the org, or the custom role does not exist).
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
             };
             path?: never;
             cookie?: never;
@@ -19365,6 +19476,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -19445,6 +19557,26 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404` (the space is not in the org, or the custom role does not exist).
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
             };
             path: {
                 id: string;
@@ -19464,6 +19596,7 @@ export interface operations {
                     "application/json": components["schemas"]["SpaceObject"];
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -19556,6 +19689,26 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404` (the space is not in the org, or the custom role does not exist).
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
             };
             path: {
                 id: string;
@@ -19581,6 +19734,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -19723,6 +19877,26 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404` (the space is not in the org, or the custom role does not exist).
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
             };
             path: {
                 id: string;
@@ -19747,6 +19921,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

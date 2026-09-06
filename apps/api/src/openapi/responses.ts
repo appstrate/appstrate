@@ -244,6 +244,50 @@ export const responses = {
       },
     },
   },
+  ViewAsRefused: {
+    description:
+      "The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse " +
+      "(bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential " +
+      "cannot carry a persona: only a cookie session and the CLI/instance token authenticate the " +
+      "user themselves; every other credential carries a ceiling of its own and no session to " +
+      "narrow. The other refusals reuse the " +
+      "statuses already documented on this operation: `403 view_as_forbidden` when the real org " +
+      "role is not owner/admin or the role is not grantable by the caller in that space, and `404` " +
+      "when the space is not in the organization or the custom role does not exist. A refused " +
+      "preview is never answered with the caller's real permissions.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        examples: {
+          invalid: {
+            summary: "Header does not parse",
+            value: {
+              type: "https://docs.appstrate.dev/errors/invalid-view-as",
+              title: "Invalid View-As Header",
+              status: 400,
+              detail: "X-View-As could not be parsed: space and role must be provided together",
+              code: "invalid_view_as",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+          unsupported: {
+            summary: "Credential cannot carry a persona",
+            value: {
+              type: "https://docs.appstrate.dev/errors/view-as-unsupported",
+              title: "View-As Not Supported",
+              status: 400,
+              detail:
+                "X-View-As is only supported for interactive user sessions, not for api_key authentication.",
+              code: "view_as_unsupported",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+        },
+      },
+    },
+  },
   IdempotencyConflict: {
     description: "Same Idempotency-Key used with a different request body",
     headers: REQUEST_ID_ONLY_HEADERS,

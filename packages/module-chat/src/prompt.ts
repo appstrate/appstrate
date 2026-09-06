@@ -38,6 +38,13 @@ export type ChatEnv = {
      */
     space: { id: string };
     orgRole?: string;
+    /**
+     * Role preview (`X-View-As`), as the platform resolved it. `orgRole` is the
+     * only field this module reads; the `Record` half is deliberate — the WHOLE
+     * value is copied into the signed loopback claims, so the trust-boundary
+     * payload is wider than what is read here. `orgRole` above stays REAL.
+     */
+    viewAs?: { orgRole: string } & Record<string, unknown>;
     orgName?: string;
     orgSlug?: string;
     /**
@@ -326,7 +333,9 @@ export async function buildCallerContextBlock(
   },
 ): Promise<string> {
   const { origin, headers, spaceId, user, deps, locale } = args;
-  const role = c.get("orgRole");
+  // The persona's while previewing: this block tells the model what the caller
+  // may do, and every operation it names is checked against the persona.
+  const role = c.get("viewAs")?.orgRole ?? c.get("orgRole");
   const orgName = c.get("orgName");
   const orgSlug = c.get("orgSlug");
 

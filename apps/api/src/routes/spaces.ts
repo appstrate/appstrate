@@ -39,6 +39,12 @@ import {
 } from "../services/space-members.ts";
 import { effectivePermissions, orgPermissions as orgPermissionsFor } from "../lib/permissions.ts";
 import {
+  callerOrgRole,
+  callerSpaceMember,
+  personaFor,
+  personaMemberships,
+} from "../lib/view-as.ts";
+import {
   loadSpaceMember,
   resolveSpaceRole,
   spacePermissions,
@@ -105,7 +111,7 @@ function spaceWireForCaller(
     role: toSpaceRoleWire(role),
     permissions: [
       ...effectivePermissions({
-        orgPermissions: c.get("orgPermissions") ?? orgPermissionsFor(c.get("orgRole")),
+        orgPermissions: c.get("orgPermissions") ?? orgPermissionsFor(callerOrgRole(c)),
         spacePermissions: spacePermissions(role),
         scopeCeiling: c.get("scopeCeiling"),
       }),
@@ -274,8 +280,12 @@ export function createSpacesRouter() {
   // GET /api/spaces — list spaces the caller reaches (RBAC spec §6.3)
   router.get("/", requirePermission("spaces", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const orgRole = c.get("orgRole");
-    const entries = await listSpacesForPrincipal(orgId, orgRole, c.get("user").id);
+    const entries = await listSpacesForPrincipal(
+      orgId,
+      callerOrgRole(c),
+      c.get("user").id,
+      personaMemberships(personaFor(c, orgId)),
+    );
     // An API key never enumerates its siblings: it sees the one space it is
     // bound to, whatever its creator reaches.
     const keySpaceId = c.get("spaceId");
@@ -313,7 +323,7 @@ export function createSpacesRouter() {
       // The creator holds org-level `spaces:write`, i.e. owner or admin, so
       // the resolver answers preset `admin` without any row — and no row is
       // written, per RBAC spec §6.3.
-      const role = resolveSpaceRole(c.get("orgRole"), space, null);
+      const role = resolveSpaceRole(callerOrgRole(c), space, null);
       return c.json(spaceWireForCaller(c, space, role), 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -333,14 +343,10 @@ export function createSpacesRouter() {
 
     try {
       const space = await getSpace(orgId, spaceId);
-      const orgRole = c.get("orgRole");
+      const orgRole = callerOrgRole(c);
       // One PK lookup, not the whole membership set: a single-space read has
       // exactly one row to find.
-      const role = resolveSpaceRole(
-        orgRole,
-        space,
-        await loadSpaceMember(space.id, c.get("user").id),
-      );
+      const role = resolveSpaceRole(orgRole, space, await callerSpaceMember(c, orgId, space.id));
       if (!isSpaceVisibleTo(orgRole, space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }

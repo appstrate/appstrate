@@ -24,6 +24,7 @@ import type { PermissionDenialContext } from "@appstrate/core/permissions";
 import { setPermissionDenialHandler } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "./logger.ts";
+import { viewAsWire } from "./view-as.ts";
 
 /**
  * Install the audit handler. Idempotent — subsequent calls replace the
@@ -32,14 +33,18 @@ import { logger } from "./logger.ts";
 export function installPermissionAuditLogger(): void {
   setPermissionDenialHandler((ctx: PermissionDenialContext) => {
     const c = ctx.c as Context<AppEnv>;
+    const persona = c.get("viewAs");
     logger.warn("permission_denied", {
       actorId: c.get("user")?.id,
       orgId: c.get("orgId"),
       authMode: c.get("authMethod"),
       required: ctx.required,
+      // The REAL role, always: a trail that lost it could not tell an abuse
+      // attempt from a preview.
       role: c.get("orgRole"),
       path: `${c.req.method} ${c.req.path}`,
       ...(c.get("apiKeyId") ? { apiKeyId: c.get("apiKeyId") } : {}),
+      ...(persona ? { viewAs: viewAsWire(persona) } : {}),
     });
   });
 }

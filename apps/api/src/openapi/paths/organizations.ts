@@ -20,6 +20,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "List user organizations",
       description: "List organizations the current user is a member of.",
+      parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
         "200": {
           description: "Organization list",
@@ -55,7 +56,10 @@ export const organizationsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     post: {

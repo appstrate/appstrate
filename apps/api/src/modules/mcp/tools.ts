@@ -166,6 +166,10 @@ export const FORWARDED_AUTH_HEADERS = [
   "x-space-id",
   "appstrate-user",
   "appstrate-version",
+  // A role preview narrows what the caller reaches; a dispatch that dropped it
+  // would answer the model with the caller's REAL authority after the catalogue
+  // had already been filtered by the persona.
+  "x-view-as",
 ] as const;
 // Headers the caller may NOT set via the `headers` arg: the auth context is
 // forwarded from the inbound MCP request and must not be reshaped by the

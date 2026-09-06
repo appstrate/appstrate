@@ -6,7 +6,8 @@ import { z } from "zod";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
-import { listedOrgPermissionsForCaller } from "../lib/principal-permissions.ts";
+import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
+import { resolveListingViewAs } from "../lib/view-as.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -125,20 +126,27 @@ router.get("/", async (c) => {
   // creator belongs to.
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
+  // Once for the listing: the persona names one org, and one this listing
+  // cannot place is refused rather than ignored.
+  await resolveListingViewAs(c, orgs);
 
   return c.json(
     listResponse(
       await Promise.all(
-        orgs.map(async (o) => ({
-          id: o.id,
-          name: o.name,
-          slug: o.slug,
-          role: o.role,
-          // The caller's org-level reach in THAT org, ceiling-applied (RBAC spec
-          // §6.5) — the SPA reads it instead of re-deriving anything from `role`.
-          permissions: await listedOrgPermissionsForCaller(c, o.id, o.role),
-          createdAt: o.createdAt,
-        })),
+        orgs.map(async (o) => {
+          // Role and org-level reach in THAT org, ceiling-applied (RBAC spec
+          // §6.5) — the SPA reads the permissions rather than re-deriving them.
+          // Both are the persona's in the org being previewed.
+          const identity = await listedOrgIdentityForCaller(c, o.id, o.role);
+          return {
+            id: o.id,
+            name: o.name,
+            slug: o.slug,
+            role: identity.role,
+            permissions: identity.permissions,
+            createdAt: o.createdAt,
+          };
+        }),
       ),
     ),
   );

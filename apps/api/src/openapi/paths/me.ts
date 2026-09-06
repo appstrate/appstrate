@@ -24,6 +24,7 @@ export const mePaths = {
         "every org the user is a member of. API keys see only their bound org. OIDC end-user " +
         "JWTs see the single org owning their space. " +
         "**Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
+      parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
         "200": {
           description: "Orgs accessible to the caller",
@@ -80,7 +81,10 @@ export const mePaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
