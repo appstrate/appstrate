@@ -51,15 +51,42 @@ const PLUGIN_FILES: Readonly<Record<string, string>> = {
   "README.md": PLUGIN_README,
 };
 
-const PLUGIN_ROOT_ENTRIES = [".claude-plugin", "README.md", "skills"];
-
 const PLUGIN_UPDATE_COMMAND = `claude plugin update ${PLUGIN_NAME}@appstrate`;
 
-function pluginFixedFiles(): Record<string, Uint8Array> {
+/**
+ * Only public connection coordinates belong in a plugin, never CLI credentials.
+ * The pinned space travels as `X-Space-Id` so MCP operations land in the SAME
+ * space the synced skills come from; the server validates it against the org
+ * and falls back to the default space only when the header is absent.
+ */
+export function pluginFixedFiles(connection?: {
+  instance: string;
+  orgId: string;
+  spaceId: string;
+}): Record<string, Uint8Array> {
   const encoder = new TextEncoder();
-  return Object.fromEntries(
+  const files = Object.fromEntries(
     Object.entries(PLUGIN_FILES).map(([path, text]) => [path, encoder.encode(text)]),
   );
+  if (connection) {
+    const config = {
+      mcpServers: {
+        appstrate: {
+          type: "http",
+          url: `${connection.instance.replace(/\/+$/, "")}/api/mcp/o/${encodeURIComponent(connection.orgId)}`,
+          headers: { "X-Space-Id": connection.spaceId },
+        },
+      },
+    };
+    files[".mcp.json"] = encoder.encode(`${JSON.stringify(config, null, 2)}\n`);
+    files["README.md"] = encoder.encode(`${PLUGIN_README}
+The plugin also includes your organization's Appstrate MCP server, scoped to
+the same pinned space as these skills. Open \`/mcp\` in Claude Code to connect
+through OAuth; the CLI login is separate. Switching the CLI's organization or
+space rewrites this connection on the next sync.
+`);
+  }
+  return files;
 }
 
 export interface SkillTree {
@@ -182,11 +209,12 @@ export async function writePluginTree(
   fresh: SkillTree[],
   carryOver: string[],
   root: string,
+  fixedFiles: Record<string, Uint8Array>,
 ): Promise<SkillWriteFailure[]> {
   const failures: SkillWriteFailure[] = [];
   // Beside, not inside: the plugin root is the directory being replaced.
   await withStaging(root, join(dirname(root), STAGING_DIR), async (staging) => {
-    await writeTreeInto(staging, pluginFixedFiles());
+    await writeTreeInto(staging, fixedFiles);
     await mkdir(join(staging, "skills"), { recursive: true });
     for (const slug of [...carryOver].sort()) {
       try {
@@ -212,19 +240,26 @@ export async function writePluginTree(
 }
 
 /**
- * Fixed files are compared BY CONTENT: an upgrade that changes `plugin.json` or
- * the README must reach a tree whose skills all happen to be up to date.
+ * Fixed files are compared BY CONTENT: an upgrade or connection change must
+ * reach a tree whose skills all happen to be up to date.
  */
-export async function pluginTreeMatches(root: string, expectedSlugs: string[]): Promise<boolean> {
-  if (!(await entriesMatch(root, PLUGIN_ROOT_ENTRIES))) return false;
-  for (const [path, contents] of Object.entries(PLUGIN_FILES)) {
-    let actual: string;
+export async function pluginTreeMatches(
+  root: string,
+  expectedSlugs: string[],
+  fixedFiles: Record<string, Uint8Array>,
+): Promise<boolean> {
+  const rootEntries = [
+    ...new Set(["skills", ...Object.keys(fixedFiles).map((p) => p.split("/")[0]!)]),
+  ];
+  if (!(await entriesMatch(root, rootEntries))) return false;
+  for (const [path, contents] of Object.entries(fixedFiles)) {
+    let actual: Awaited<ReturnType<typeof readFile>>;
     try {
-      actual = await readFile(join(root, path), "utf-8");
+      actual = await readFile(join(root, path));
     } catch {
       return false;
     }
-    if (actual !== contents) return false;
+    if (!actual.equals(contents)) return false;
   }
   return entriesMatch(join(root, "skills"), expectedSlugs);
 }
