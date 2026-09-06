@@ -10,9 +10,6 @@
  * `middleware/space-context.ts` they made `lib` import `middleware` and
  * `middleware` import `lib` — a cycle around the one function both halves of
  * space resolution need.
- *
- * `middleware/space-context.ts` re-exports both, so every existing call site
- * keeps its import.
  */
 
 import { and, eq } from "drizzle-orm";

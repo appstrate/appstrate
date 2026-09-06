@@ -10,6 +10,7 @@ import { parseSseFrames } from "@appstrate/core/sse";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
 import { withViewAsParam } from "../lib/scoping-headers";
+import { endPreviewIfRefused } from "../lib/view-as-refusal";
 import { useViewAsHeader } from "../stores/view-as-store";
 import {
   runKeys,
@@ -299,6 +300,11 @@ export function useGlobalRunSync() {
         controller.signal.addEventListener("abort", onAbort, { once: true });
       });
 
+    // A persona this route refuses is not a transient outage: retrying it would
+    // loop an idle tab forever against a preview the server has already
+    // rejected, while the banner still claimed one.
+    let previewRefused = false;
+
     // One connection attempt. Returns when the stream ends or errors; throws
     // only for a non-OK response (handled by the reconnect loop).
     const connectOnce = async () => {
@@ -319,6 +325,7 @@ export function useGlobalRunSync() {
         },
       );
       if (!res.ok || !res.body) {
+        previewRefused = await endPreviewIfRefused(res);
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
@@ -373,7 +380,7 @@ export function useGlobalRunSync() {
         } catch {
           // Failed to connect — fall through to the backoff below.
         }
-        if (controller.signal.aborted) break;
+        if (controller.signal.aborted || previewRefused) break;
         const delay = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
         attempt++;
         await sleep(delay);

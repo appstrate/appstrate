@@ -139,7 +139,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.orgRole !== undefined) c.set("orgRole", resolution.orgRole);
         // Before the permission write below, as on every other path:
         // `applyOrgPermissions` reads the persona to decide what to write.
-        adoptViewAs(c, resolution.extra);
+        adoptViewAs(c, resolution.orgId, resolution.extra);
         // What the strategy computed is the CEILING (a token's scope claim),
         // not the grant. When the strategy also resolved an org role, the grant
         // is the role's org set narrowed by it — and grows by the space slice

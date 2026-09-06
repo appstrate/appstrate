@@ -180,12 +180,12 @@ effective(space) = ceiling( orgPermissions ∪ spacePermissions(resolveSpaceRole
 
 Three context keys replace today's single write of `permissions`:
 
-| Key              | Set by                                            | Value                                                                                                                                                                     |
-| ---------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `orgPermissions` | auth pipeline, once org role is known             | org-level effective set                                                                                                                                                   |
-| `scopeCeiling`   | auth pipeline                                     | API-key `scopes`, OIDC scope claim; `undefined` for sessions                                                                                                              |
-| `permissions`    | auth pipeline **and** `requireSpaceContext`       | `ceiling(orgPermissions)` at first; `ceiling(orgPermissions ∪ spacePermissions)` once the space is resolved                                                               |
-| `viewAs`         | `resolveViewAs`, before every `permissions` write | Validated role preview, or unset. Narrows the two sets above to a lesser persona's; `user` and `orgRole` stay REAL. See §6.7 and `docs/architecture/RBAC_VIEW_AS_PLAN.md` |
+| Key              | Set by                                            | Value                                                                                                                        |
+| ---------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `orgPermissions` | auth pipeline, once org role is known             | org-level effective set                                                                                                      |
+| `scopeCeiling`   | auth pipeline                                     | API-key `scopes`, OIDC scope claim; `undefined` for sessions                                                                 |
+| `permissions`    | auth pipeline **and** `requireSpaceContext`       | `ceiling(orgPermissions)` at first; `ceiling(orgPermissions ∪ spacePermissions)` once the space is resolved                  |
+| `viewAs`         | `resolveViewAs`, before every `permissions` write | Validated role preview, or unset. Narrows the two sets above to a lesser persona's; `user` and `orgRole` stay REAL. See §6.7 |
 
 `makePermissionGuard` keeps reading `permissions` and nothing else. A route outside `SPACE_SCOPED_PREFIXES` sees org-level permissions only; a space-level string can therefore never be satisfied on an org route, which is the property we want (a `builder` cannot `agents:write` through a non-space path, because there is none).
 
@@ -351,11 +351,11 @@ An owner or administrator can have any authenticated request answered as a lesse
 
 Three carriers, one validation, and one vocabulary shared by every end (`@appstrate/core/permissions`):
 
-| Constant                | Value              | Carries                                                                                                                      |
-| ----------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `VIEW_AS_HEADER`        | `X-View-As`        | `org_role=member; space=spc_…; role=preset:viewer` — `space` and `role` optional as a PAIR. Sent by `buildScopingHeaders()`. |
-| `VIEW_AS_QUERY`         | `view_as`          | The same grammar on `/api/realtime/*`, where `EventSource` cannot send headers. The header is REFUSED there, never ignored.  |
-| `VIEW_AS_ACTIVE_HEADER` | `X-View-As-Active` | Response marker, `1`, on every response produced under a validated persona and only then.                                    |
+| Constant                | Value              | Carries                                                                                                                                                                                                   |
+| ----------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VIEW_AS_HEADER`        | `X-View-As`        | `org_role=member; space=spc_…; role=preset:viewer` — `space` and `role` optional as a PAIR; `role` is `preset:<admin\|builder\|operator\|viewer>` or `custom:<srl_ id>`. Sent by `buildScopingHeaders()`. |
+| `VIEW_AS_QUERY`         | `view_as`          | The same grammar on `/api/realtime/*`, where `EventSource` cannot send headers. The header is REFUSED there, never ignored.                                                                               |
+| `VIEW_AS_ACTIVE_HEADER` | `X-View-As-Active` | Response marker, `1`, on every response produced under a validated persona and only then.                                                                                                                 |
 
 The chat module's in-process loopback carries the persona in its signed claims instead, so a tool call the engine makes under a preview reaches exactly what the previewed role reaches.
 
@@ -368,9 +368,17 @@ Eligibility is cookie sessions and the CLI/instance token, real org role owner o
 | `view_as_forbidden`   | 403    | Real role not owner/admin, role not grantable by the caller in that space, or a custom role with `custom_roles` off                                                                     |
 | `view_as_not_found`   | 404    | The space, the custom role or the organization the persona names is not the caller's                                                                                                    |
 
-A plain `404 not_found` answered UNDER an active persona is a different thing — the previewed role's own wall (a private space it cannot see) — and a client must leave the preview standing for it. That is why the discriminator is a code and not the absence of the marker.
+`GET /api/orgs` and `GET /api/me/orgs` are exempt from `requireOrgContext`, so on those two the persona needs `X-Org-Id` to say which organization it applies to: without it `400 invalid_view_as`, and naming an org the caller is not a member of is `404`. Every other row in those listings stays the caller's real role.
 
-Writes are allowed under a persona: blocking them would make "can this role run an agent" untestable, and the persona is a strict downgrade whose audit row (`after.view_as`, beside the real `actor_id`) names it.
+**Client rule: on any of the four codes, drop the persona** — do not retry the request without the header, do not keep previewing. A plain `404 not_found` answered UNDER an active persona is a different thing: the previewed role's own wall (a private space it cannot see), and the preview must be left standing for it. That is why the discriminator is a code and not the absence of the marker.
+
+A persona carries no per-principal (module) grants: a grant a module made to the administrator personally — cloud's billing managers, say — is an attribute of that person, not of the role being previewed.
+
+Writes are allowed under a persona: blocking them would make "can this role run an agent" untestable, and the persona is a strict downgrade whose audit row (`after.view_as`, beside the real `actor_id`) names it. A **run** launched under a preview still executes with the real actor and the run's own server-minted credentials — the run plane carries no persona. The chat module's loopback is the one exception, and it exists because that hop re-enters the API as the caller rather than leaving it.
+
+**Principle: restriction only, never mint.** The persona is computed from the caller's own session and can only remove; no token is minted or swapped for it — the 2018 Facebook "View As" breach was a preview that minted an access token for the viewed profile, and 30M tokens were stolen. The prior art the design follows is [WordPress _View Admin As_](https://wordpress.org/plugins/view-admin-as/) (a non-destructive downgrade of one's own capabilities, with one visible exit) and [Retool](https://docs.retool.com/apps/guides/app-management/share) (preview as a first-class mode of the editor); the counter-example is [Airtable's interface preview](https://support.airtable.com/docs/managing-and-sharing-interfaces), which [reportedly](https://community.airtable.com/interface-designer-12/interface-is-not-allowing-collaborator-to-add-new-item-to-single-select-field-38458) "at times uses the permissions of the actually logged in user" — a preview the server does not enforce is worse than none.
+
+**Not done, deliberately.** Eligibility stops at org owner/admin, so "never elevate" is trivially true; widening it to a space `admin` previewing a lower role in their own space is a change to the eligibility check plus a space-half intersection (§4.2). Previewing a specific USER (`{ user_id }`, reading their real rows) reuses every carrier here but needs a policy of its own — consent, notification, and no writes — and is not built. Previewing a credential is not planned: an API key's reach is already inspectable from its scopes.
 
 ### 6.8 Package catalogs and shared mutations
 

@@ -22,7 +22,7 @@
  * three**: it must reintroduce a space-half intersection AND read the
  * previewer's real `space_members` row.
  *
- * @see docs/architecture/RBAC_VIEW_AS_PLAN.md
+ * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §6.7
  */
 
 import type { Context, Next } from "hono";
@@ -35,8 +35,9 @@ import {
   SPACE_ROLE_PRESETS,
   VIEW_AS_ACTIVE_HEADER,
   VIEW_AS_HEADER,
+  VIEW_AS_ORG_ROLES,
 } from "@appstrate/core/permissions";
-import type { OrgRole, SpaceRolePreset } from "@appstrate/core/permissions";
+import type { OrgRole, SpaceRolePreset, ViewAsOrgRole } from "@appstrate/core/permissions";
 import { ApiError } from "./errors.ts";
 import { isSpaceRoleId, SPACE_ID_RE } from "./ids.ts";
 import { effectivePermissions, orgPermissions } from "./permissions.ts";
@@ -50,19 +51,14 @@ import {
   type SpaceRoleRef,
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
-import { getAppConfig } from "./app-config.ts";
+import { hasCustomRoles } from "../services/space-roles.ts";
 import { validateSpaceInOrg } from "./space-lookup.ts";
 import type { AppEnv } from "../types/index.ts";
-
-/** Previewing `owner`/`admin` is refused: it is what makes "a preview only removes" true. */
-const PERSONA_ORG_ROLES = ["member", "guest"] as const;
-
-type PersonaOrgRole = (typeof PERSONA_ORG_ROLES)[number];
 
 export interface ViewAsPersona {
   /** Org it was validated in; outside it the caller is themselves. */
   orgId: string;
-  orgRole: PersonaOrgRole;
+  orgRole: ViewAsOrgRole;
   space: { spaceId: string; role: SpaceRoleRef } | null;
 }
 
@@ -71,14 +67,14 @@ type PersonaRoleRequest =
   { kind: "preset"; preset: SpaceRolePreset } | { kind: "custom"; roleId: string };
 
 interface ViewAsRequest {
-  orgRole: PersonaOrgRole;
+  orgRole: ViewAsOrgRole;
   space: { spaceId: string; role: PersonaRoleRequest } | null;
 }
 
 /** `.strict()` so a misspelled `space` is a refusal, not a whole-org preview; ids shape-checked here. */
 const viewAsSchema = z
   .object({
-    org_role: z.enum(PERSONA_ORG_ROLES),
+    org_role: z.enum(VIEW_AS_ORG_ROLES),
     space: z.string().refine((v) => SPACE_ID_RE.test(v), {
       message: "space must be a `spc_` id followed by a canonical UUID",
     }),
@@ -100,7 +96,7 @@ const viewAsSchema = z
 /** Shape {@link adoptViewAs} accepts off the loopback bearer. */
 const personaSchema: z.ZodType<ViewAsPersona> = z.object({
   orgId: z.string(),
-  orgRole: z.enum(PERSONA_ORG_ROLES),
+  orgRole: z.enum(VIEW_AS_ORG_ROLES),
   space: z
     .object({
       spaceId: z.string(),
@@ -261,16 +257,16 @@ async function validatePersonaSpace(
 
 /**
  * Feature gate first: with `custom_roles` off there is no bundle vocabulary to
- * look in. Refused as a VIEW-AS refusal (`view_as_forbidden`) rather than the
- * role routes' `feature_unavailable` — every way a persona can be turned down
- * has to be a code the client recognizes as "drop the preview".
+ * look in. Same predicate as the role routes ({@link hasCustomRoles}), a
+ * different refusal — every way a persona can be turned down has to be a code
+ * the client recognizes as "drop the preview".
  */
 async function resolvePersonaSpaceRole(
   orgId: string,
   ref: PersonaRoleRequest,
 ): Promise<SpaceRoleRef> {
   if (ref.kind === "preset") return { kind: "preset", preset: ref.preset };
-  if (!getAppConfig().features.custom_roles) {
+  if (!hasCustomRoles()) {
     throw viewAsForbidden(
       "Previewing a custom space role requires the `custom_roles` feature, provided by the " +
         "Appstrate Cloud plan (the `@appstrate/cloud` module). The four built-in presets " +
@@ -295,6 +291,7 @@ async function resolvePersonaSpaceRole(
  * Eligibility at the earliest point the header can be judged: a key or bearer
  * carries its own ceiling and no session to narrow. The marker goes after the
  * handler; refusals get it from `errorHandler`, which builds a fresh response.
+ * Who reads that marker: {@link VIEW_AS_ACTIVE_HEADER}.
  */
 export function viewAsTransportGuard() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -306,8 +303,8 @@ export function viewAsTransportGuard() {
           code: "view_as_unsupported",
           title: "View-As Not Supported",
           detail:
-            `${VIEW_AS_HEADER} is only supported for interactive user sessions, ` +
-            `not for ${c.get("authMethod") ?? "this"} authentication.`,
+            `${VIEW_AS_HEADER} is only supported for a user session or the CLI/instance ` +
+            `token, not for ${c.get("authMethod") ?? "this"} authentication.`,
           param: VIEW_AS_HEADER,
         });
       }
@@ -366,13 +363,21 @@ export async function resolveListingViewAs(
  * module-chat, so the writer cannot import from here — and a rename that misses
  * one end fails the loopback integration test.
  */
-export function adoptViewAs(c: Context<AppEnv>, extra: Record<string, unknown> | undefined): void {
+export function adoptViewAs(
+  c: Context<AppEnv>,
+  orgId: string | undefined,
+  extra: Record<string, unknown> | undefined,
+): void {
   const raw = extra?.viewAs;
   if (raw === undefined) return;
   const parsed = personaSchema.safeParse(raw);
   if (!parsed.success) {
     throw invalidViewAs("The loopback bearer carries a role preview this server cannot read.");
   }
+  // A persona applies in ONE org. Publishing one minted for another would stamp
+  // `X-View-As-Active` on a response no persona shaped — every accessor here is
+  // already org-keyed, so the set would narrow nothing and only mislead.
+  if (parsed.data.orgId !== orgId) return;
   c.set("viewAs", parsed.data);
 }
 

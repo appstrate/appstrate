@@ -178,7 +178,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
         status: 400,
         code: "view_as_unsupported",
         title: "View-As Not Supported",
-        detail: `${VIEW_AS_QUERY} is only supported for interactive user sessions, not for api_key authentication.`,
+        detail: `${VIEW_AS_QUERY} is only supported for a user session, not for api_key authentication.`,
         param: VIEW_AS_QUERY,
       });
     }

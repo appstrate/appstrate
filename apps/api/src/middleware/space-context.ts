@@ -15,9 +15,6 @@ import { effectivePermissions } from "../lib/permissions.ts";
 import { callerOrgRole, callerSpaceMember } from "../lib/view-as.ts";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 
-/** Re-exported so existing call sites keep one import; see `lib/space-lookup.ts`. */
-export { defaultSpaceForOrg, validateSpaceInOrg, type SpaceContextRow };
-
 /**
  * Core route prefixes that require a space context (`X-Space-Id`,
  * or the API key's own `spaceId`).

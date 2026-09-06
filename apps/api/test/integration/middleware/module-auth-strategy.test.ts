@@ -33,6 +33,22 @@ const stubStrategy: AuthStrategy = {
   id: "stub-test-strategy",
   async authenticate({ headers }) {
     const token = headers.get("x-test-strategy");
+    if (token === "deferred") {
+      // The shape the OIDC instance token has: the full user, no org pinned,
+      // no ceiling — the CLI acting as the person. The pipeline treats it like
+      // a session, which is what makes it eligible for a role preview.
+      if (!currentCtx) throw new Error("currentCtx not seeded — test setup bug");
+      return {
+        user: {
+          id: currentCtx.user.id,
+          email: currentCtx.user.email,
+          name: currentCtx.user.name,
+        },
+        authMethod: "stub-deferred",
+        permissions: [],
+        deferOrgResolution: true,
+      };
+    }
     if (token !== "valid" && token !== "admin") return null;
     if (!currentCtx) {
       throw new Error("currentCtx not seeded — test setup bug");
@@ -170,6 +186,36 @@ describe("module auth strategy pipeline", () => {
         body: JSON.stringify({ email: "escalated@test.com", role: "member" }),
       });
       expect(invite.status).toBe(403);
+    });
+
+    it("a deferOrgResolution strategy may carry a role preview, an inline one may not", async () => {
+      // Eligibility is "did this credential authenticate the person" — a cookie
+      // session or the CLI/instance token — not "is it a cookie".
+      const previewed = await app.request("/api/spaces", {
+        headers: {
+          "X-Test-Strategy": "deferred",
+          "X-Org-Id": currentCtx!.orgId,
+          "X-View-As": `org_role=member; space=${currentCtx!.defaultSpaceId}; role=preset:viewer`,
+        },
+      });
+      expect(previewed.status, await previewed.clone().text()).toBe(200);
+      expect(previewed.headers.get("X-View-As-Active")).toBe("1");
+      const listed = (await previewed.json()) as {
+        data: Array<{ role: { key: string }; permissions: string[] }>;
+      };
+      expect(listed.data[0]?.role.key).toBe("viewer");
+      expect(listed.data[0]?.permissions).not.toContain("agents:write");
+
+      // The same strategy WITHOUT `deferOrgResolution` resolves its own org and
+      // ceiling inline, so it carries no session to narrow.
+      const refused = await app.request("/api/spaces", {
+        headers: {
+          "X-Test-Strategy": "valid",
+          "X-View-As": "org_role=member",
+        },
+      });
+      expect(refused.status).toBe(400);
+      expect(((await refused.json()) as { code: string }).code).toBe("view_as_unsupported");
     });
 
     it("the same owner over a cookie session CAN update the org (control)", async () => {

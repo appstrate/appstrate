@@ -7,7 +7,7 @@ import type { AppEnv, OrgRole } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { resolveListingViewAs } from "../lib/view-as.ts";
+import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -101,13 +101,14 @@ export const updateInvitationSchema = z
   .strict();
 
 /**
- * Org role of the caller in the path org, as resolved by `orgPathContext`
- * (`middleware/org-path-context.ts`). The route's permission guard has already
- * proved the membership row exists; the throw is the fail-closed backstop, not
- * an expected branch.
+ * Org role the who-manages-whom policies below judge against, as resolved by
+ * `orgPathContext` (`middleware/org-path-context.ts`) — the persona's under a
+ * role preview, so the preview cannot manage members the previewed role could
+ * not. The route's permission guard has already proved the membership row
+ * exists; the throw is the fail-closed backstop, not an expected branch.
  */
 function actingOrgRole(c: Context<AppEnv>): OrgRole {
-  const role = c.get("orgRole");
+  const role = callerOrgRole(c, c.req.param("orgId"));
   if (!role) throw forbidden("Not a member of this organization");
   return role;
 }

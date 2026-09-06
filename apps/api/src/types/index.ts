@@ -85,7 +85,7 @@ export type AppEnv = {
      * auth strategies set `spaceId` before the middleware runs, but
      * the `space` row is only loaded once the middleware executes.
      */
-    space?: import("../middleware/space-context.ts").SpaceContextRow;
+    space?: import("../lib/space-lookup.ts").SpaceContextRow;
     requestId: string;
     apiVersion: string;
     /**

@@ -368,12 +368,21 @@ export interface SpaceAssignment {
 // ---------------------------------------------------------------------------
 // "View as role" wire contract
 //
-// The preview crosses three codebases — the platform validates it, the SPA and
-// the chat module emit it, the CLI can send it — so the four names it is
-// spelled with live here rather than being retyped at each end. A carrier
-// renamed on one side only is then a compile error, not a persona silently
-// ignored, which is the failure this feature exists to prevent.
+// The preview crosses three codebases — the API validates it, the SPA and the
+// chat module emit it — so the names it is spelled with live here rather than
+// being retyped at each end. A carrier renamed on one side only is then a
+// compile error, not a persona silently ignored, which is the failure this
+// feature exists to prevent.
 // ---------------------------------------------------------------------------
+
+/**
+ * Org roles a preview may take. `owner`/`admin` are excluded: there is nothing
+ * to learn from previewing them, and excluding them is what makes "a preview
+ * only removes" trivially true.
+ */
+export const VIEW_AS_ORG_ROLES = ["member", "guest"] as const;
+
+export type ViewAsOrgRole = (typeof VIEW_AS_ORG_ROLES)[number];
 
 /** HTTP carrier: `org_role=…; space=…; role=preset:…|custom:…`. */
 export const VIEW_AS_HEADER = "X-View-As";
@@ -381,7 +390,12 @@ export const VIEW_AS_HEADER = "X-View-As";
 /** Same grammar, as a query parameter — `EventSource` cannot send headers. */
 export const VIEW_AS_QUERY = "view_as";
 
-/** Stamped on every response produced under a validated persona, and only then. */
+/**
+ * Stamped on every response produced under a validated persona, and only then.
+ * The SPA does not read it — its banner comes from its own store — so this is
+ * for anyone who cannot see that store: the e2e suite, the CLI, and any
+ * out-of-tree client that needs to tell a persona's 403 from its own.
+ */
 export const VIEW_AS_ACTIVE_HEADER = "X-View-As-Active";
 
 /**

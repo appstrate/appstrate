@@ -196,7 +196,7 @@ describe("trigger visibility", () => {
   it("offers the space-members trigger to an owner and hides it from a member", () => {
     const asOwner = renderAs("owner", <OrgSettingsSpaceMembersPage />);
     expect(asOwner).toContain('data-testid="view-as-space-button"');
-    expect(asOwner).toContain("Voir en tant que");
+    expect(asOwner).toContain("Prévisualiser un rôle");
     // The "Ajouter un membre" action is unaffected — the two live side by side.
     expect(asOwner).toContain('data-testid="add-space-member-button"');
 

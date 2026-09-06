@@ -36,7 +36,7 @@ import { readJsonBody } from "../../lib/request-body.ts";
 import { enterSpaceContext, makePermissionGuard } from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
-import { validateSpaceInOrg } from "../../middleware/space-context.ts";
+import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
 
 /**

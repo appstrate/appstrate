@@ -42,13 +42,22 @@ export interface SpaceRoleInput {
 const PRESET_KEYS: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
 
 /**
- * Throw unless this deployment has the `custom_roles` feature (RBAC spec §9).
- * Read per call, not captured: modules merge their features into `AppConfig` at
- * boot. Shared by the write routes and the role preview (`lib/view-as.ts`), so
- * defining and previewing a bundle answer alike.
+ * Does this deployment define custom space roles at all (RBAC spec §9)? Read
+ * per call, not captured: modules merge their features into `AppConfig` at boot.
+ *
+ * The predicate, not the refusal, is what the two callers share — the write
+ * routes answer `feature_unavailable`, the role preview answers
+ * `view_as_forbidden` (a client must recognise every persona refusal as "drop
+ * the preview"). Sharing the predicate is what keeps "can this deployment do
+ * custom roles" one question with one answer.
  */
+export function hasCustomRoles(): boolean {
+  return getAppConfig().features.custom_roles === true;
+}
+
+/** {@link hasCustomRoles} as the write routes' refusal. */
 export function assertCustomRolesFeature(): void {
-  if (getAppConfig().features.custom_roles) return;
+  if (hasCustomRoles()) return;
   throw new ApiError({
     status: 403,
     code: "feature_unavailable",

@@ -12,7 +12,7 @@
  * on a refused PERSONA without firing on a denial the persona correctly earned.
  */
 
-import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { afterAll, describe, it, expect, beforeEach, spyOn } from "bun:test";
 // Type-only: erased at compile time, so it does not pull the store in before
 // the fake storage below is installed.
 import type { ViewAsPersona } from "../view-as-store.ts";
@@ -40,8 +40,16 @@ class FakeStorage {
   }
 }
 
+const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const fakeStorage = new FakeStorage();
-(globalThis as { localStorage?: Storage }).localStorage = fakeStorage;
+Object.defineProperty(globalThis, "localStorage", { configurable: true, value: fakeStorage });
+
+// Restored so a suite running after this one in the same process still sees the
+// DOM-less environment the harness promises.
+afterAll(() => {
+  if (previousStorage) Object.defineProperty(globalThis, "localStorage", previousStorage);
+  else Reflect.deleteProperty(globalThis, "localStorage");
+});
 
 const {
   viewAsStore,
@@ -56,7 +64,8 @@ const {
 const { orgStore } = await import("../org-store.ts");
 const { queryClient } = await import("../../lib/query-client.ts");
 const { buildScopingHeaders, withViewAsParam } = await import("../../lib/scoping-headers.ts");
-const { isViewAsRefusal, noteViewAsRefusal } = await import("../../lib/view-as-refusal.ts");
+const { endPreviewIfRefused, isViewAsRefusal, noteViewAsRefusal } =
+  await import("../../lib/view-as-refusal.ts");
 const { ViewAsBanner } = await import("../../components/view-as-banner.tsx");
 const { render } = await import("../../test/render.tsx");
 const { i18nReady } = await import("../../i18n.ts");
@@ -264,6 +273,27 @@ describe("exit on refusal", () => {
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
   });
 
+  // The SSE routes carry the persona as a QUERY parameter, so their reader
+  // takes the header-less door. Its answer is what stops the reconnect loop —
+  // a refused preview retried forever is an idle tab hammering a wall.
+  it("reports a refused persona to the caller that must stop retrying", async () => {
+    enterViewAs(PERSONA);
+    expect(await endPreviewIfRefused(refusal(403, "view_as_forbidden"))).toBe(true);
+    expect(viewAsStore.getState().persona).toBeNull();
+  });
+
+  it("reports a transient failure as no refusal, so the caller keeps retrying", async () => {
+    enterViewAs(PERSONA);
+    expect(await endPreviewIfRefused(new Response("gateway down", { status: 502 }))).toBe(false);
+    expect(viewAsStore.getState().persona).toEqual(PERSONA);
+  });
+
+  it("reports nothing when no preview is running", async () => {
+    expect(await endPreviewIfRefused(refusal(403, "view_as_forbidden"))).toBe(false);
+  });
+});
+
+describe("leaving on purpose", () => {
   it("replaces a running preview rather than stacking a second one", () => {
     // The entry dialog stays reachable under a preview, so submitting again is
     // a replacement — no `exitViewAs()` dance at the call site.

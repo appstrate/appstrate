@@ -32,7 +32,8 @@ import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { user, spaces } from "@appstrate/db/schema";
-import { validateSpaceInOrg } from "../../middleware/space-context.ts";
+import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
+import { callerOrgRole } from "../../lib/view-as.ts";
 import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
 import { getOrgSettings } from "../../services/organizations.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
@@ -452,10 +453,13 @@ function stripErrorFromQueryString(search: string): string {
   return kept.length ? `?${kept.join("&")}` : "";
 }
 
-/** Skipping consent is a trust escalation — only admin/owner may set isFirstParty. */
+/**
+ * Skipping consent is a trust escalation — only admin/owner may set
+ * isFirstParty, and under a role preview only if the PREVIEWED role could.
+ */
 function requireAdminForFirstParty(c: Context<AppEnv>, isFirstParty: boolean | undefined) {
   if (isFirstParty) {
-    const orgRole = c.get("orgRole");
+    const orgRole = callerOrgRole(c);
     if (orgRole !== "owner" && orgRole !== "admin") {
       throw forbidden("Only org admins can set isFirstParty");
     }

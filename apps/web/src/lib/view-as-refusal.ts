@@ -15,7 +15,7 @@
  * difference with a code (`VIEW_AS_REFUSAL_CODES`), which is a statement about
  * what failed rather than an inference from the shape of the answer.
  *
- * @see docs/architecture/RBAC_VIEW_AS_PLAN.md §4.5, §6.4
+ * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §6.7
  */
 
 import { VIEW_AS_HEADER, VIEW_AS_REFUSAL_CODES } from "@appstrate/core/permissions";
@@ -27,6 +27,25 @@ export function isViewAsRefusal(code: string | undefined): boolean {
 }
 
 /**
+ * End the preview if this failed response refused the PERSONA, and say whether
+ * it did — a caller that would otherwise retry has to stop.
+ *
+ * The read path for BOTH carriers. The SSE routes take the persona as a query
+ * parameter (`EventSource` sends no headers), so the guard here is "a preview
+ * is running", not "this request carried the header": the URL builder appends
+ * the parameter only while one is.
+ */
+export async function endPreviewIfRefused(response: Response): Promise<boolean> {
+  if (!viewAsStore.getState().persona) return false;
+  const code = await readProblemCode(response);
+  if (!isViewAsRefusal(code)) return false;
+  // The reason is handed to the store, not to a toast: this usually fires on
+  // the boot-time org list, before the `<Toaster/>` exists (`view-as-banner.tsx`).
+  exitViewAs(code);
+  return true;
+}
+
+/**
  * Called from the API client's response middleware for every failed request.
  * Only requests that actually carried the persona can refuse it.
  */
@@ -35,13 +54,7 @@ export async function noteViewAsRefusal(
   response: Response,
 ): Promise<void> {
   if (!requestHeaders.has(VIEW_AS_HEADER)) return;
-  if (!viewAsStore.getState().persona) return;
-
-  const code = await readProblemCode(response);
-  if (!isViewAsRefusal(code)) return;
-  // The reason is handed to the store, not to a toast: this usually fires on
-  // the boot-time org list, before the `<Toaster/>` exists (`view-as-banner.tsx`).
-  exitViewAs(code);
+  await endPreviewIfRefused(response);
 }
 
 async function readProblemCode(response: Response): Promise<string | undefined> {

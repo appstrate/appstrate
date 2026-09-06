@@ -32,7 +32,7 @@ import { db } from "@appstrate/db/client";
 import { endUsers, spaces } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { prefixedId } from "../../../lib/ids.ts";
-import type { SpaceContextRow } from "../../../middleware/space-context.ts";
+import type { SpaceContextRow } from "../../../lib/space-lookup.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
 

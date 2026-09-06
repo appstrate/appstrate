@@ -34,6 +34,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
+import { VIEW_AS_QUERY } from "@appstrate/core/permissions";
 // The correlation rule and the origin check in front of it come from core, not
 // from this module: every connect surface applies the same one, and a copy only
 // this module could import is what let the SPA's connect popup ship with no
@@ -80,7 +81,7 @@ function watchConnectionSse(
       // opens this depends on `getHeaders`, whose identity moves with the
       // persona, so entering or leaving reconnects.
       `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=connection_update${
-        viewAs ? `&view_as=${encodeURIComponent(viewAs)}` : ""
+        viewAs ? `&${VIEW_AS_QUERY}=${encodeURIComponent(viewAs)}` : ""
       }`,
       { withCredentials: true },
     );

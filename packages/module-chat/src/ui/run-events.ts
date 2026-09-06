@@ -26,6 +26,7 @@ import {
   parseFileUri,
   PUBLISHED_FILE_LOG_EVENT,
 } from "@appstrate/core/file-uri";
+import { VIEW_AS_HEADER, VIEW_AS_QUERY } from "@appstrate/core/permissions";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -249,7 +250,7 @@ export function buildRunSseUrl(args: {
     spaceId,
     verbose: "true",
   });
-  if (viewAs) qs.set("view_as", viewAs);
+  if (viewAs) qs.set(VIEW_AS_QUERY, viewAs);
   return `/api/realtime/runs/${encodeURIComponent(runId)}?${qs.toString()}`;
 }
 
@@ -263,7 +264,7 @@ export function orgSpaceFromHeaders(headers: Record<string, string> | undefined)
   return {
     orgId: h["X-Org-Id"] ?? h["x-org-id"],
     spaceId: h["X-Space-Id"] ?? h["x-space-id"],
-    viewAs: h["X-View-As"] ?? h["x-view-as"],
+    viewAs: h[VIEW_AS_HEADER] ?? h[VIEW_AS_HEADER.toLowerCase()],
   };
 }
 

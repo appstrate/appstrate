@@ -3,12 +3,12 @@
 /**
  * "View as role" in the browser.
  *
- * Two halves. The first two tests take the REAL path — the dialog, from each of
- * its two triggers — because that is the only place the portalled `<Select>`s
- * and radio options can be exercised at all (the no-DOM web harness renders the
- * whole dialog as an empty string). The rest seed the persisted persona
- * directly, which is how a RELOAD and a persona whose space has been deleted
- * can be reached without re-driving the dialog each time.
+ * Two halves. The first three tests take the REAL path — the dialog, from each
+ * of its two triggers — because that is the only place the portalled
+ * `<Select>`s and radio options can be exercised at all (the no-DOM web harness
+ * renders the whole dialog as an empty string). The rest seed the persisted
+ * persona directly, which is how a RELOAD and a persona whose space or stream
+ * the server refuses can be reached without re-driving the dialog each time.
  *
  * The Run button is the discriminator throughout: it is gated on `agents:run`,
  * which a `viewer` in the space does not hold and the previewing owner does.
@@ -16,20 +16,24 @@
 
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import type { Page } from "@playwright/test";
+import type { ViewAsOrgRole } from "@appstrate/core/permissions";
+
+/** The key `apps/web/src/stores/view-as-store.ts` persists the persona under. */
+const STORAGE_KEY = "appstrate_view_as";
 import { createAgent, createSpace } from "../../helpers/seed.ts";
 
 /** The shape `stores/view-as-store.ts` persists, under its own key. */
 interface Persona {
   orgId: string;
-  orgRole: "member" | "guest";
+  orgRole: ViewAsOrgRole;
   space: { spaceId: string; role: string; roleLabel: string; spaceName: string } | null;
 }
 
 async function seedPersona(page: Page, persona: Persona) {
-  await page.addInitScript(
-    (value) => localStorage.setItem("appstrate_view_as", value),
+  await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [
+    STORAGE_KEY,
     JSON.stringify(persona),
-  );
+  ] as const);
 }
 
 const banner = (page: Page) => page.getByTestId("view-as-banner");
@@ -217,6 +221,37 @@ test.describe("View as role", () => {
     await page.reload();
     await expect(banner(page)).toBeVisible();
     await expect(runButton(page)).toHaveCount(0);
+  });
+
+  test("ends itself when the realtime stream refuses the persona", async ({
+    authedPage: page,
+    browserCtx,
+  }) => {
+    // The live stream is the one reader that RETRIES: a refused persona there
+    // used to loop against the wall forever, on an idle tab, with the banner
+    // still claiming a preview. Everything else about this persona is valid, so
+    // the stream's answer is the only thing that can end it.
+    await page.route("**/api/realtime/runs?*", (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/problem+json",
+        body: JSON.stringify({ code: "view_as_forbidden", detail: "refused on the stream" }),
+      }),
+    );
+    await seedPersona(page, {
+      orgId: browserCtx.org.orgId,
+      orgRole: "member",
+      space: {
+        spaceId: browserCtx.org.defaultSpaceId,
+        role: "preset:viewer",
+        roleLabel: "Lecteur",
+        spaceName: "Default",
+      },
+    });
+
+    await page.goto("/agents");
+    await expect(page.getByText(/Prévisualisation arrêtée|Preview stopped/)).toBeVisible();
+    await expect(banner(page)).toHaveCount(0);
   });
 
   test("ends itself, with a reason, when the previewed space is gone", async ({

@@ -20,10 +20,11 @@
  * the others. Tabs holding different personas is the same shape as tabs holding
  * different organizations, and the server judges every request on its own.
  *
- * @see docs/architecture/RBAC_VIEW_AS_PLAN.md §6
+ * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §6.7, §8
  */
 
 import { z } from "zod";
+import { VIEW_AS_ORG_ROLES } from "@appstrate/core/permissions";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { queryClient } from "../lib/query-client";
@@ -40,7 +41,7 @@ export const STORAGE_KEY = "appstrate_view_as";
 const personaSchema = z.object({
   orgId: z.string().min(1),
   /** Previewing `owner`/`admin` is refused server-side: a preview only removes. */
-  orgRole: z.enum(["member", "guest"]),
+  orgRole: z.enum(VIEW_AS_ORG_ROLES),
   space: z
     .object({
       spaceId: z.string().min(1),

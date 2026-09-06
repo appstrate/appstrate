@@ -51,7 +51,8 @@ import {
   toSpaceRoleWire,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
-import { applySpacePermissions, validateSpaceInOrg } from "../middleware/space-context.ts";
+import { applySpacePermissions } from "../middleware/space-context.ts";
+import { validateSpaceInOrg } from "../lib/space-lookup.ts";
 import {
   installPackage,
   uninstallPackage,

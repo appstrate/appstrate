@@ -42,12 +42,12 @@ import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib
 import { getActor } from "../../lib/actor.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
+import { applySpacePermissions } from "../../middleware/space-context.ts";
 import {
-  applySpacePermissions,
   defaultSpaceForOrg,
   validateSpaceInOrg,
   type SpaceContextRow,
-} from "../../middleware/space-context.ts";
+} from "../../lib/space-lookup.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";

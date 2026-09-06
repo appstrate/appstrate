@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
@@ -21,11 +22,6 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
 import { useSpaceRoleOptions } from "../hooks/use-roles";
 import { enterViewAs, toViewAsPersona } from "../stores/view-as-store";
-
-/** The two the server accepts: previewing `owner`/`admin` would remove nothing. */
-const PERSONA_ORG_ROLES = ["member", "guest"] as const;
-
-type PersonaOrgRole = (typeof PERSONA_ORG_ROLES)[number];
 
 /** "No space" option. Not the empty string — Radix refuses an empty item value. */
 const NO_SPACE = "none";
@@ -59,7 +55,7 @@ export function ViewAsDialog({ onClose, spaceId, role }: ViewAsDialogProps) {
   const { data: spaces } = useSpaces();
 
   const initialSpaceId = spaceId ?? currentSpaceId ?? NO_SPACE;
-  const [orgRole, setOrgRole] = useState<PersonaOrgRole>("member");
+  const [orgRole, setOrgRole] = useState<ViewAsOrgRole>("member");
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId);
   // A role preselected by the trigger only means something inside a space. With
   // none resolved, the select opens on its placeholder rather than committing a
@@ -110,9 +106,10 @@ export function ViewAsDialog({ onClose, spaceId, role }: ViewAsDialogProps) {
 
         <OrgRoleOptions
           idPrefix="view-as"
-          options={PERSONA_ORG_ROLES}
+          // The two the server accepts: previewing `owner`/`admin` removes nothing.
+          options={VIEW_AS_ORG_ROLES}
           value={orgRole}
-          onValueChange={(value) => setOrgRole(value as PersonaOrgRole)}
+          onValueChange={(value) => setOrgRole(value as ViewAsOrgRole)}
         />
 
         <FieldGroup>

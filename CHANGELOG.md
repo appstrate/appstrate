@@ -8,6 +8,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Two-layer RBAC — an org role, and a role per space.** Organization roles
+  gain **`guest`**: an org identity with no implicit reach into any space, for
+  outside collaborators. Every space now carries a **visibility** (`open`,
+  `closed`, `private`) and a default role, and membership in it is a row of its
+  own: a member holds one of four presets (`admin`, `builder`, `operator`,
+  `viewer`) or an organization-defined **custom role** — a named bundle of
+  space-level permissions, assignable anywhere in the org. An invitation carries
+  its **space assignments** with it, so an invitee lands with the access they
+  were invited for; an email may hold at most one pending invitation per
+  organization, and a second is refused rather than silently replacing the
+  first. Every permission is org-level or space-level, so a space-level grant
+  can never be satisfied outside a space.
+
+- **Role preview — see the product as a role before you assign it.** An owner or
+  administrator can have every request answered as a lesser persona (an org role,
+  optionally with a role in one space) from Org settings → Roles or Space
+  settings → Members. It is enforced by the server, not hidden in the UI: what
+  the previewed role cannot reach, the previewing administrator cannot reach
+  either, on the API, on the realtime streams and inside a chat turn's tool
+  calls. A permanent banner names the persona and carries the only exit, the
+  audit trail keeps the real actor beside the persona, and the preview is
+  dropped rather than silently ignored the moment it stops being valid.
+
 - **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
   out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
   re-imported by `lib/boot.ts`, `services/input-parser.ts` and
