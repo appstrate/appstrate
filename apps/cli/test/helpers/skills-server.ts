@@ -61,7 +61,7 @@ export interface SkillFixture {
   /** When true, the download serves bytes that do not match `X-Integrity`. */
   corruptDownload?: boolean;
   /** Working-copy state for `--source draft`. */
-  draft?: DraftFixture;
+  draft?: DraftFixture & { version?: string };
   /**
    * Spaces the package is installed in. When set, the stub behaves like the
    * platform: the package is listed only under one of these `X-Space-Id`s and
@@ -376,7 +376,7 @@ export function createSkillServer(
           afps_version: "0.2",
           type: "skill",
           name: found.fixture.id,
-          version: found.version,
+          version: found.fixture.draft.version ?? found.version,
           description: MANIFEST_DESCRIPTION,
         },
         lock_version: found.fixture.draft.lockVersion ?? 1,

@@ -100,7 +100,13 @@ describe("skills status", () => {
     expect(stdout()).toContain("edited elsewhere since this machine last saw it (lock 4 → 6)");
   });
 
-  it("makes push show the changes and refuse a clean folder", async () => {
+  it("makes push show the changes, and refuse a clean folder whose version is not published", async () => {
+    // Draft at 1.6.0 (unpublished bump), published 1.5.0, folder identical to
+    // the draft: nothing to send.
+    createSkillServer([{ ...SKILL, draft: { ...SKILL.draft, version: "1.6.0" } }], {
+      orgs: ORGS,
+    }).install();
+    await skillsPullCommand({ skill: "pdf-tools", force: true }, createMemoryIO().io);
     const clean = createMemoryIO();
     await skillsPushCommand({ dir: "pdf-tools" }, clean.io);
     expect(clean.stdout()).toContain("Nothing to push");
@@ -114,6 +120,23 @@ describe("skills status", () => {
     expect(stderr()).toContain("  A scripts/new.sh");
     expect(stdout()).toContain("Pushed @acme/pdf-tools");
     expect(server.imports()).toHaveLength(1);
+  });
+});
+
+describe("push with unchanged files", () => {
+  it("still pushes when the draft's version is already published, to move it on", async () => {
+    // The pulled folder matches the draft; the draft says 1.5.0, which is the
+    // published version. Publishing again would be refused, so push sends the
+    // same files under 1.5.1 instead of stopping at "nothing to push".
+    const server = createSkillServer([SKILL], { orgs: ORGS });
+    server.install();
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await skillsPushCommand({ dir: "pdf-tools" }, io);
+
+    expect(stdout()).toContain("Pushed @acme/pdf-tools");
+    expect(stderr()).toContain("draft declares version 1.5.0, which is already published");
+    expect(server.imports()[0]?.manifest).toMatchObject({ version: "1.5.1" });
   });
 });
 

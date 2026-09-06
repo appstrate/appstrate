@@ -108,8 +108,16 @@ export async function skillsPushCommand(
   }
   io.stderr.write(renderStatus(status, dir, files, false));
   if (!status.isNew && status.changes.length === 0) {
-    io.stdout.write(`Nothing to push: ${packageId} matches its draft.\n`);
-    return;
+    // Same files, but the draft may still declare a version that is already
+    // published: the only thing this push changes is the version it will
+    // publish as, and that is worth sending.
+    if (status.remoteVersion === null || status.remoteVersion === version) {
+      io.stdout.write(`Nothing to push: ${packageId} matches its draft.\n`);
+      return;
+    }
+    io.stderr.write(
+      `Files unchanged; the draft declares version ${status.remoteVersion}, which is already published. Writing it as ${version}.\n`,
+    );
   }
 
   const paths = Object.keys(files).sort();

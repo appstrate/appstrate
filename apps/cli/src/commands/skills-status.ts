@@ -42,6 +42,8 @@ export interface SkillStatus {
   changes: FileChange[];
   /** Set when the draft's lock is not the one this machine last saw. */
   remoteMoved: { seen: number; now: number } | null;
+  /** The draft manifest's `version`, when the draft exists and declares one. */
+  remoteVersion: string | null;
   /** The draft's files, for diffs. Empty when `isNew`. */
   remote: Record<string, Uint8Array>;
 }
@@ -97,6 +99,7 @@ export async function computeStatus(
         .sort()
         .map((path) => ({ path, kind: "added" as const })),
       remoteMoved: null,
+      remoteVersion: null,
       remote: {},
     };
   }
@@ -117,17 +120,19 @@ export async function computeStatus(
 
   // The lock comes from the detail, not the file index: it is the number push
   // will send, so status and push cannot disagree about "moved elsewhere".
-  const detail = await apiFetch<{ lock_version?: unknown }>(
+  const detail = await apiFetch<{ lock_version?: unknown; manifest?: { version?: unknown } }>(
     profileName,
     `/api/packages/skills/${encodePackageIdPath(packageId)}`,
     { headers: { "X-Space-Id": listed.spaceId } },
   );
+  const remoteVersion =
+    typeof detail.manifest?.version === "string" ? detail.manifest.version : null;
   const seen = (await readPushLocks(profileName))[packageId];
   const now = typeof detail.lock_version === "number" ? detail.lock_version : undefined;
   const remoteMoved =
     seen !== undefined && now !== undefined && seen !== now ? { seen, now } : null;
 
-  return { packageId, isNew: false, changes, remoteMoved, remote };
+  return { packageId, isNew: false, changes, remoteMoved, remoteVersion, remote };
 }
 
 export function renderStatus(
