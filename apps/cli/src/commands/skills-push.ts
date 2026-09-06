@@ -372,7 +372,19 @@ async function resolveManifest(
   }
 
   const packageId = explicitId ?? `@${await orgSlug(profileName, profile!)}/${meta.name}`;
-  const version = frontmatterVersion(skillMd) ?? (await nextVersion(profileName, packageId));
+  // A `version:` pinned in the frontmatter is the author's, unless it is the
+  // version already published: then it is simply stale, and publishing it
+  // again would be refused — move to the next patch, as for a pulled manifest.
+  const latest = await latestPublished(profileName, packageId);
+  const pinned = frontmatterVersion(skillMd);
+  const version =
+    pinned === undefined
+      ? latest === null
+        ? "1.0.0"
+        : bumpPatch(latest)
+      : pinned === latest
+        ? bumpPatch(latest)
+        : pinned;
   return {
     name: packageId,
     version,
@@ -427,12 +439,6 @@ export function frontmatterVersion(skillMd: string): string | undefined {
   const block = skillMd.match(/^---[^\S\n]*\n([\s\S]*?)\n---/)?.[1];
   const line = block?.match(/^version:[ \t]*["']?([0-9]+\.[0-9]+\.[0-9]+[^"'\s]*)["']?[ \t]*$/m);
   return line?.[1];
-}
-
-/** Patch bump over the latest published version; `1.0.0` for a new skill. */
-async function nextVersion(profileName: string, packageId: string): Promise<string> {
-  const latest = await latestPublished(profileName, packageId);
-  return latest === null ? "1.0.0" : bumpPatch(latest);
 }
 
 /** The latest published version, or `null` when nothing was ever published. */

@@ -127,6 +127,23 @@ describe("skills push", () => {
     expect(server.imports()[1]?.manifest).toMatchObject({ name: "@acme/pinned", version: "3.4.5" });
   });
 
+  it("moves a frontmatter version that is already published to the next patch", async () => {
+    const server = createSkillServer(
+      [{ id: "@acme/pinned", skillMd: skillMd("pinned"), version: "1.0.0" }],
+      { orgs: ORGS },
+    );
+    server.install();
+    const dir = await skillFolder(
+      "pinned",
+      {},
+      "---\nname: pinned\ndescription: Pinned.\nversion: 1.0.0\n---\n\nBody.\n",
+    );
+
+    await skillsPushCommand({ dir }, createMemoryIO().io);
+
+    expect(server.imports()[0]?.manifest).toMatchObject({ name: "@acme/pinned", version: "1.0.1" });
+  });
+
   it("passes an authored manifest.json through and lets --id rename it", async () => {
     const server = createSkillServer([], { orgs: ORGS });
     server.install();
