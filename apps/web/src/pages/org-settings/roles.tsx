@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useForm } from "react-hook-form";
+import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ShieldCheck } from "lucide-react";
@@ -185,7 +187,7 @@ function RoleCard({
 
   return (
     <div className="border-border bg-card rounded-lg border p-5">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-[0.95rem] font-semibold">{spaceRoleLabel(role, t)}</h3>
           <span className="text-muted-foreground text-sm">
@@ -232,13 +234,22 @@ function RoleCard({
 
 function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: vocabulary, isLoading } = useRoleVocabulary();
+  const { data: vocabulary, isLoading, error: vocabularyError, refetch } = useRoleVocabulary();
   const createRole = useCreateRole();
   const updateRole = useUpdateRole();
 
-  const [key, setKey] = useState(role?.key ?? "");
-  const [name, setName] = useState(role?.name ?? "");
-  const [description, setDescription] = useState(role?.description ?? "");
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm({
+    defaultValues: {
+      key: role?.key ?? "",
+      name: role?.name ?? "",
+      description: role?.description ?? "",
+    },
+  });
+  const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set(role?.permissions ?? []));
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -252,24 +263,19 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       return next;
     });
 
-  const submit = () => {
+  const submit = (data: { key: string; name: string; description: string }) => {
     setFormError(null);
     const permissions = [...selected];
-    const trimmedKey = key.trim();
-    if (!name.trim() || !trimmedKey || permissions.length === 0) {
+    if (isLoading || vocabularyError) return;
+    if (permissions.length === 0) {
       setFormError(t("roles.formIncomplete"));
       return;
     }
-    // Same slug shape the API validates, refused here so the user sees which
-    // rule they broke instead of a generic 400.
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmedKey)) {
-      setFormError(t("roles.keyInvalid"));
-      return;
-    }
+    const trimmedKey = data.key.trim();
     const onError = (err: unknown) => setFormError(getErrorMessage(err));
     const body = {
-      name: name.trim(),
-      description: description.trim() || null,
+      name: data.name.trim(),
+      description: data.description.trim() || null,
       permissions,
     };
     if (role?.id) {
@@ -282,53 +288,124 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
     createRole.mutate({ body: { ...body, key: trimmedKey } }, { onSuccess: onClose, onError });
   };
 
+  const query = search.trim().toLowerCase();
+  const groups = (vocabulary ?? [])
+    .map((group) => ({
+      ...group,
+      permissions: group.permissions.filter((entry) =>
+        entry.permission.toLowerCase().includes(query),
+      ),
+    }))
+    .filter((group) => group.permissions.length > 0);
+
   return (
     <Modal
       open
       onClose={onClose}
       title={role ? t("roles.editTitle") : t("roles.createTitle")}
-      className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
+      className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
       actions={
         <>
           <Button variant="ghost" onClick={onClose}>
             {t("btn.cancel", { ns: "common" })}
           </Button>
-          <Button onClick={submit} disabled={isPending}>
+          <Button
+            type="submit"
+            form="space-role-form"
+            disabled={isPending || isLoading || !!vocabularyError}
+          >
             {isPending ? <Spinner /> : t("btn.save")}
           </Button>
         </>
       }
     >
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="role-name">{t("roles.nameLabel")}</Label>
-          <Input id="role-name" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="role-key">{t("roles.keyLabel")}</Label>
-          <Input
-            id="role-key"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder="support-lead"
-          />
-          <p className="text-muted-foreground text-xs">{t("roles.keyHint")}</p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="role-description">{t("roles.descriptionLabel")}</Label>
-          <Input
-            id="role-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </div>
+      <form
+        id="space-role-form"
+        noValidate
+        onSubmit={handleSubmit(submit)}
+        onChange={() => setFormError(null)}
+        className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
+      >
+        <FieldGroup>
+          <Field data-invalid={!!errors.name}>
+            <Label htmlFor="role-name">{t("roles.nameLabel")}</Label>
+            <Input
+              id="role-name"
+              maxLength={100}
+              disabled={isPending}
+              aria-invalid={!!errors.name}
+              aria-describedby={errors.name ? "role-name-error" : undefined}
+              {...register("name", {
+                required: t("common:validation.required"),
+                setValueAs: (value: string) => value.trim(),
+              })}
+            />
+            {errors.name && (
+              <p id="role-name-error" role="alert" className="text-destructive text-sm">
+                {errors.name.message}
+              </p>
+            )}
+          </Field>
+          <Field data-invalid={!!errors.key}>
+            <Label htmlFor="role-key">{t("roles.keyLabel")}</Label>
+            <Input
+              id="role-key"
+              maxLength={64}
+              disabled={isPending}
+              placeholder="support-lead"
+              aria-invalid={!!errors.key}
+              aria-describedby="role-key-hint role-key-error"
+              {...register("key", {
+                required: t("common:validation.required"),
+                setValueAs: (value: string) => value.trim(),
+              })}
+            />
+            <p id="role-key-hint" className="text-muted-foreground text-xs">
+              {t("roles.keyHint")}
+            </p>
+            {errors.key && (
+              <p id="role-key-error" role="alert" className="text-destructive text-sm">
+                {errors.key.message}
+              </p>
+            )}
+          </Field>
+          <Field>
+            <Label htmlFor="role-description">{t("roles.descriptionLabel")}</Label>
+            <Input
+              id="role-description"
+              maxLength={500}
+              disabled={isPending}
+              {...register("description")}
+            />
+          </Field>
+        </FieldGroup>
 
         <fieldset className="space-y-3">
           <legend className="text-sm font-medium">{t("roles.permissionsLabel")}</legend>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="role-permission-search">{t("roles.searchPermissions")}</Label>
+            <Input
+              id="role-permission-search"
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              disabled={isLoading || !!vocabularyError}
+            />
+            <p className="text-muted-foreground text-xs" aria-live="polite">
+              {t("roles.selectedPermissions", { count: selected.size })}
+            </p>
+          </div>
           {isLoading ? (
             <LoadingState />
+          ) : vocabularyError ? (
+            <div role="alert">
+              <ErrorState message={getErrorMessage(vocabularyError)} />
+              <Button type="button" variant="outline" onClick={() => void refetch()}>
+                {t("common:btn.retry")}
+              </Button>
+            </div>
           ) : (
-            (vocabulary ?? []).map((group) => (
+            groups.map((group) => (
               <div key={group.resource} className="border-border rounded-lg border p-3">
                 <p className="mb-2 font-mono text-xs font-semibold">{group.resource}</p>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -340,6 +417,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
                     >
                       <Checkbox
                         id={`perm-${entry.permission}`}
+                        disabled={isPending}
                         checked={selected.has(entry.permission)}
                         onCheckedChange={() => toggle(entry.permission)}
                         className="mt-0.5"
@@ -360,8 +438,15 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
           )}
         </fieldset>
 
-        {formError && <p className="text-destructive text-sm">{formError}</p>}
-      </div>
+        {!isLoading && !vocabularyError && groups.length === 0 && (
+          <p className="text-muted-foreground text-sm">{t("roles.noMatchingPermissions")}</p>
+        )}
+        {formError && (
+          <p role="alert" className="text-destructive text-sm">
+            {formError}
+          </p>
+        )}
+      </form>
     </Modal>
   );
 }

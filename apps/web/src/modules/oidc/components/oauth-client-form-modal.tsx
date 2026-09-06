@@ -25,6 +25,7 @@ import { SpaceAssignmentsField } from "@/components/space-assignments-field";
 import { useSpaces } from "@/hooks/use-spaces";
 import { spaceRoleValue, useSpaceRoleOptions } from "@/hooks/use-roles";
 import {
+  hasUnavailableAssignments,
   assignmentsFor,
   toSpaceAssignments,
   validateSpaceAssignments,
@@ -77,9 +78,12 @@ function OAuthClientFormBody({
   const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
   const formLevel = effectiveLevel ?? level;
   const isOrgLevel = formLevel === "org";
+  const spacesQuery = useSpaces();
+  const rolesQuery = useSpaceRoleOptions();
+  const spaces = spacesQuery.data ?? [];
+  const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
+  const catalogError = spacesQuery.error || rolesQuery.error;
   const isSpaceLevel = formLevel === "space";
-  const { data: spaces } = useSpaces();
-  const { options: roleOptions } = useSpaceRoleOptions();
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient();
   const { data: availableScopes } = useOAuthScopes();
@@ -115,6 +119,7 @@ function OAuthClientFormBody({
     register,
     handleSubmit,
     setError,
+    clearErrors,
     formState: { errors },
   } = useAppForm<FormData>({
     defaultValues: { name: client?.name ?? "" },
@@ -182,6 +187,22 @@ function OAuthClientFormBody({
 
   function onSubmit(data: FormData) {
     const signupSpaceAssignments = assignmentsFor(signupRole, toSpaceAssignments(assignments));
+    if (isOrgLevel && signupRole !== "admin" && assignments.length) {
+      if (
+        catalogLoading ||
+        catalogError ||
+        hasUnavailableAssignments(assignments, spaces, rolesQuery.options)
+      ) {
+        setError("root", {
+          message: t(
+            catalogLoading || catalogError
+              ? "settings:orgSettings.assignmentsNotReady"
+              : "settings:orgSettings.assignmentsUnavailable",
+          ),
+        });
+        return;
+      }
+    }
     if (isOrgLevel) {
       const validation = validateSpaceAssignments(
         signupRole,
@@ -275,6 +296,7 @@ function OAuthClientFormBody({
       open
       onClose={handleClose}
       title={title}
+      className="flex max-h-[85dvh] flex-col overflow-hidden"
       actions={
         <>
           <Button variant="outline" type="button" onClick={handleClose}>
@@ -286,7 +308,11 @@ function OAuthClientFormBody({
         </>
       }
     >
-      <form id="oauth-client-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form
+        id="oauth-client-form"
+        onSubmit={handleSubmit(onSubmit)}
+        className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
+      >
         <div className="space-y-2">
           <Label htmlFor="oauth-client-name">{t("settings:oauthClients.nameLabel")}</Label>
           <Input
@@ -409,7 +435,10 @@ function OAuthClientFormBody({
                 <select
                   id="oauth-client-signup-role"
                   value={signupRole}
-                  onChange={(e) => setSignupRole(e.target.value as AssignableOrgRole)}
+                  onChange={(e) => {
+                    setSignupRole(e.target.value as AssignableOrgRole);
+                    clearErrors("root");
+                  }}
                   disabled={isPending}
                   className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -420,18 +449,34 @@ function OAuthClientFormBody({
                   ))}
                 </select>
                 <p className="text-muted-foreground text-xs">
+                  {t(`settings:orgSettings.roleHint.${signupRole}`)}
+                  <br />
                   {t("settings:oauthClients.signupRoleHint")}
                 </p>
               </div>
             )}
-            {isOrgLevel && signupRole !== "admin" && (
+            {isOrgLevel && (
               <SpaceAssignmentsField
-                hint={t("settings:oauthClients.signupSpacesHint")}
+                spaces={spaces}
+                roleOptions={rolesQuery.options}
+                loading={catalogLoading}
+                error={catalogError}
+                onRetry={() => {
+                  void spacesQuery.refetch();
+                  void rolesQuery.refetch();
+                }}
+                hint={t(
+                  signupRole === "admin"
+                    ? "settings:orgSettings.roleHint.admin"
+                    : "settings:oauthClients.signupSpacesHint",
+                )}
+                allSpacesAccess={signupRole === "admin"}
                 value={assignments}
-                onChange={setAssignments}
-                spaces={spaces ?? []}
-                roleOptions={roleOptions}
-                disabled={isPending}
+                onChange={(value) => {
+                  setAssignments(value);
+                  clearErrors("root");
+                }}
+                disabled={isPending || signupRole === "admin"}
               />
             )}
           </div>

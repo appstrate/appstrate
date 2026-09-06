@@ -386,13 +386,20 @@ A per-org MCP bearer re-enters space-scoped routes in-process and lands on the d
 `usePermissions()` is rewritten, not extended:
 
 ```ts
-const { can, orgRole, spaceRole } = usePermissions();
+const { can, orgRole } = usePermissions();
 can("agents:write"); // current space's `permissions` ∪ current org's `permissions`
 ```
 
 There are no `isOwner` / `isAdmin` / `isMember` helpers: every gate is a `can(...)` on the permission the server actually checks for that action. The org-settings layout hides a tab when the caller holds none of the tab's permissions; the space switcher lists only `access: "member"` spaces (`closed` ones appear disabled with a "request access" hint, `private` ones do not appear); `RunAgentButton` renders on `agents:run`.
 
-Pages: **Org settings → Roles** (presets read-only, custom CRUD when `features.custom_roles`, a permission picker driven by `GET /api/roles/vocabulary`); **Space settings → Members** (§6.4, with the implicit/explicit source column); **Org settings → Users** gains `guest` and the per-invite space assignment. OAuth organization-client create/edit uses the same assignment picker. Role/default selectors load the grantable catalog for the target space, not the globally active space; org guest space admins can add known org users by exact email.
+The UI separates organization administration from sharing a space:
+
+- **Org settings → Users** is the central list of all organization accounts, including guests. Its invitation button opens a modal for a standard user or administrator. Onboarding uses the same invitation form inline with those two roles. Pending invitations can be edited in a modal, including changing a role to guest and assigning the required spaces; they remain pending until acceptance.
+- **Space settings → Members** shows each user's implicit or explicit access (§6.4). Adding an existing organization user uses the member selector when the caller can read the organization directory, or exact email otherwise. A separate option to invite someone new appears only with the organization permission `members:invite`: it creates a pending guest invitation with the current space and selected space role. The confirmation offers the invitation link and a link to manage pending invitations in the central Users page. The same page lists, under the members, the pending invitations whose assignments include this space — the same rows the Users page shows, never a fake member — with edit, copy-link and cancel. One pending invitation exists per (organization, email): a second invite for a pending address is refused with 409 `invitation_already_pending` (partial unique index `uq_org_invitations_pending`, 0057) and the form points to the existing invitation's editor, so adding a second space extends one invitation instead of silently replacing the first and invalidating its link. A guest space administrator can add existing organization users but cannot create an organization invitation without that organization permission.
+- **Org settings → Roles** displays read-only presets and custom-role administration when `features.custom_roles` is enabled. The custom-role editor loads `GET /api/roles/vocabulary`, supports searching permissions and reports loading failures. Role/default selectors load the grantable catalog for the target space; a failed catalog cannot silently substitute a grantable role.
+- **OAuth organization-client create/edit** uses the shared space-assignment picker for signup policies (§7.2). Selected assignments remain visible when their space or role becomes unavailable, and the form requires repair before saving them. The same validation applies to organization invitations.
+
+The Users page therefore lists guests without making organization-wide invitation the entry point for sharing a space. Organization and space headings use their respective context. Labels, role descriptions, errors and controls remain usable on narrow screens; resetting an explicit role in an open space explains the restored default access before confirmation. Invitation and OAuth signup forms keep the Spaces section visible but disabled for administrators, explaining their full access to all spaces. Switching back restores the draft selections; administrator requests still send no explicit assignments.
 
 The space Members tab accepts either `space-members:read` or `space-members:invite`. An invite-only custom role can add an existing org user by exact email without fetching or rendering the member list.
 

@@ -31,7 +31,11 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
   await expect(
     dialog.getByText(/pick at least one space|au moins un espace/i).last(),
   ).toBeVisible();
-  await dialog.getByRole("combobox", { name: /Ajouter un espace|Add a space/i }).click();
+  await dialog
+    .getByRole("combobox", {
+      name: /Sélectionner un espace|Select a space/i,
+    })
+    .click();
   await page.getByRole("option", { name: space.name, exact: true }).click();
   const role = dialog.getByRole("combobox", { name: new RegExp(space.name) });
   await role.click();
@@ -61,7 +65,9 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
     /Lecteur|Viewer/,
   );
   await dialog.locator("#oauth-client-signup-role").selectOption("admin");
-  await expect(dialog.getByRole("combobox", { name: new RegExp(space.name) })).toHaveCount(0);
+  const allSpaces = dialog.getByRole("textbox", { name: /^Espaces$|^Spaces$/ });
+  await expect(allSpaces).toBeDisabled();
+  await expect(allSpaces).toHaveValue(/Tous les espaces.*tous les droits|All spaces.*full access/i);
   await dialog.locator("#oauth-client-signup-role").selectOption("guest");
   await expect(dialog.getByRole("combobox", { name: new RegExp(space.name) })).toContainText(
     /Lecteur|Viewer/,

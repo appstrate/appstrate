@@ -36,6 +36,7 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,
+  InvitationAlreadyPendingError,
   getOrgInvitations,
   getPendingInvitation,
   cancelInvitation,
@@ -375,6 +376,13 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
 // consent-explicit join path: no silent direct-add of existing users, no
 // magic-link side channel. When SMTP is configured the invitation email is
 // sent; otherwise the admin shares the returned token/link out of band.
+//
+// One pending invitation per (org, email): a second create for an address that
+// already holds a valid pending one is a 409 `invitation_already_pending`
+// carrying `invitation_id`, and the caller edits that invitation (PUT
+// /invitations/:id) to add a space or change the role. The space Members page
+// relies on this — inviting a guest there is the same POST, so without it a
+// second space would silently drop the first assignment and the shared link.
 router.post("/:orgId/members", requirePermission("members", "invite"), async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId")!;
@@ -417,6 +425,16 @@ router.post("/:orgId/members", requirePermission("members", "invite"), async (c)
       201,
     );
   } catch (err) {
+    if (err instanceof InvitationAlreadyPendingError) {
+      throw new ApiError({
+        status: 409,
+        code: "invitation_already_pending",
+        title: "Conflict",
+        detail:
+          "A pending invitation already exists for this email. Edit that invitation to change its role or add a space.",
+        extensions: { invitation_id: err.invitationId },
+      });
+    }
     throw new ApiError({
       status: 500,
       code: "invitation_failed",

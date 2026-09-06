@@ -154,7 +154,7 @@ export function OrgSettingsLayout() {
 
   return (
     <SettingsLayout
-      title={t("orgSettings.pageTitle")}
+      title={t(isSpaceRoute ? "orgSettings.spaceTitle" : "orgSettings.pageTitle")}
       emoji="⚙️"
       breadcrumbs={breadcrumbs}
       sections={sections}

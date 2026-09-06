@@ -203,3 +203,184 @@ test.describe("Organization invitation flow", () => {
     await ctx.close();
   });
 });
+
+test("onboarding offers organization roles and submits a standard invitation", async ({
+  authedPage: page,
+  browserCtx,
+}) => {
+  await page.goto("/onboarding/members");
+  const email = `onboarding-member-${uid()}@test.com`;
+  await page.getByRole("textbox", { name: /Adresse e-mail|Email address/ }).fill(email);
+  await page.getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ }).click();
+  await expect(page.getByRole("option", { name: /^(Invité|Guest)$/ })).toHaveCount(0);
+  await page.getByRole("option", { name: /Utilisateur standard|Standard user/ }).click();
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/api/orgs/${browserCtx.org.orgId}/members`),
+  );
+  await page.getByRole("textbox", { name: /Adresse e-mail|Email address/ }).press("Enter");
+  const response = await submitted;
+  expect(response.status()).toBe(201);
+  expect(await response.json()).toMatchObject({ email, role: "member", space_assignments: [] });
+  await expect(page.getByText(email, { exact: true })).toBeVisible();
+});
+
+test("mobile organization invitations keep email usable and submit with Enter", async ({
+  authedPage: page,
+  browserCtx,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/org-settings/members");
+  await page.getByTestId("invite-org-user-button").click();
+  const dialog = page.getByRole("dialog");
+  const email = dialog.getByRole("textbox", {
+    name: /Adresse e-mail|Email address/,
+  });
+  await expect(email).toBeVisible();
+  expect((await email.boundingBox())!.width).toBeGreaterThan(250);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  const address = `mobile-invite-${uid()}@test.com`;
+  await email.fill(address);
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/api/orgs/${browserCtx.org.orgId}/members`),
+  );
+  await email.press("Enter");
+  expect((await submitted).status()).toBe(201);
+  await expect(page.getByText(address, { exact: true })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await page.getByTestId("invite-org-user-button").click();
+  await expect(email).toHaveValue("");
+});
+
+test("invitation space catalogue failures are visible and recover through retry", async ({
+  authedPage: page,
+}) => {
+  await page.route("**/api/roles", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/problem+json",
+      body: JSON.stringify({
+        title: "Role catalog unavailable",
+        detail: "Role catalog unavailable",
+        status: 503,
+      }),
+    }),
+  );
+  await page.goto("/org-settings/members");
+  await page.getByTestId("invite-org-user-button").click();
+  const alert = page.getByRole("alert").filter({ hasText: "Role catalog unavailable" });
+  await expect(alert).toBeVisible();
+  await expect(
+    page.getByRole("combobox", {
+      name: /Sélectionner un espace|Select a space/i,
+    }),
+  ).toHaveCount(0);
+  await page.unroute("**/api/roles");
+  await alert.getByRole("button", { name: /Réessayer|Retry/i }).click();
+  const add = page.getByRole("combobox", {
+    name: /Sélectionner un espace|Select a space/i,
+  });
+  await expect(add).toBeEnabled();
+  await add.click();
+  await expect(page.getByRole("option", { name: "Default", exact: true })).toBeVisible();
+});
+
+test("a pending standard invitation can become a guest invitation with a space assignment", async ({
+  authedPage: page,
+  browserCtx,
+  orgOnlyClient,
+}) => {
+  const email = `edit-invite-${uid()}@test.com`;
+  const created = await orgOnlyClient.post(`/orgs/${browserCtx.org.orgId}/members`, {
+    email,
+    role: "member",
+  });
+  expect(created.status()).toBe(201);
+  const invitation = await created.json();
+  await page.goto("/org-settings/members");
+  await page.getByRole("button", { name: /^(Modifier|Edit)$/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ })
+    .click();
+  await page.getByRole("option", { name: /^(Invité|Guest)$/ }).click();
+  await dialog.getByRole("button", { name: /Enregistrer|Save/ }).click();
+  await expect(
+    dialog.getByRole("alert").filter({ hasText: /au moins un espace|at least one space/i }),
+  ).toBeVisible();
+  await dialog
+    .getByRole("combobox", {
+      name: /Sélectionner un espace|Select a space/i,
+    })
+    .click();
+  await page.getByRole("option", { name: "Default", exact: true }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: /au moins un espace|at least one space/i }),
+  ).toHaveCount(0);
+  const updated = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().endsWith(`/api/orgs/${browserCtx.org.orgId}/invitations/${invitation.id}`),
+  );
+  await dialog.getByRole("button", { name: /Enregistrer|Save/ }).click();
+  const response = await updated;
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toMatchObject({
+    role: "guest",
+    space_assignments: [{ space_id: browserCtx.org.defaultSpaceId, preset_role: "operator" }],
+  });
+  await expect(dialog).toHaveCount(0);
+  const persisted = await orgOnlyClient.get(`/orgs/${browserCtx.org.orgId}`);
+  expect(
+    (await persisted.json()).invitations.find((item: { id: string }) => item.id === invitation.id),
+  ).toMatchObject({
+    email,
+    role: "guest",
+    space_assignments: [{ space_id: browserCtx.org.defaultSpaceId, preset_role: "operator" }],
+  });
+});
+
+test("admin invitations explain all-space access while preserving an optional assignment draft", async ({
+  authedPage: page,
+  browserCtx,
+}) => {
+  await page.goto("/org-settings/members");
+  await page.getByTestId("invite-org-user-button").click();
+  const dialog = page.getByRole("dialog");
+  const role = dialog.getByRole("combobox", { name: /Rôle dans l'organisation|Organization role/ });
+  await dialog
+    .getByRole("textbox", { name: /Adresse e-mail|Email address/ })
+    .fill(`admin-invite-${uid()}@test.com`);
+  await dialog.getByRole("combobox", { name: /Sélectionner un espace|Select a space/ }).click();
+  await page.getByRole("option", { name: "Default", exact: true }).click();
+  const assignmentRole = dialog.getByRole("combobox", { name: /Default/ });
+  await assignmentRole.click();
+  await page.getByRole("option", { name: /^(Lecteur|Viewer)$/ }).click();
+  await role.click();
+  await page.getByRole("option", { name: /^Admin$/ }).click();
+  await expect(dialog.getByRole("group", { name: /^Espaces$|^Spaces$/ })).toBeVisible();
+  const allSpaces = dialog.getByRole("textbox", { name: /^Espaces$|^Spaces$/ });
+  await expect(allSpaces).toBeDisabled();
+  await expect(allSpaces).toHaveValue(/Tous les espaces.*tous les droits|All spaces.*full access/i);
+  await expect(
+    dialog.getByText(/Administre l’organisation|Manages the organization/i).last(),
+  ).toBeVisible();
+  await role.click();
+  await page.getByRole("option", { name: /Utilisateur standard|Standard user/ }).click();
+  await expect(assignmentRole).toBeEnabled();
+  await expect(assignmentRole).toContainText(/Lecteur|Viewer/);
+  await role.click();
+  await page.getByRole("option", { name: /^Admin$/ }).click();
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/api/orgs/${browserCtx.org.orgId}/members`),
+  );
+  await dialog.getByRole("textbox", { name: /Adresse e-mail|Email address/ }).press("Enter");
+  const response = await submitted;
+  expect(response.status()).toBe(201);
+  expect(await response.json()).toMatchObject({ role: "admin", space_assignments: [] });
+});

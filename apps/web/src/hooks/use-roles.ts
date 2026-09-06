@@ -123,16 +123,12 @@ export function memberRoleValue(
 }
 
 /** Space pickers use the caller's grantable catalog; org invitations use the org catalog. */
-export function useSpaceRoleOptions(spaceId?: string): {
-  options: SpaceRoleOption[];
-  roles?: RoleObject[];
-  rolesKnown: boolean;
-} {
+export function useSpaceRoleOptions(spaceId?: string) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
   const scope = useOrgOnlyScope();
-  const { data: orgRoles } = useRoles(!spaceId && can("roles:read"));
-  const { data: assignableRoles } = $api.useQuery(
+  const orgQuery = useRoles(!spaceId && can("roles:read"));
+  const spaceQuery = $api.useQuery(
     "get",
     "/api/spaces/{id}/roles",
     { params: { path: { id: spaceId ?? "" }, header: scope.header } },
@@ -146,7 +142,8 @@ export function useSpaceRoleOptions(spaceId?: string): {
       select: (e) => e.data,
     },
   );
-  const roles = spaceId ? assignableRoles : orgRoles;
+  const query = spaceId ? spaceQuery : orgQuery;
+  const roles = query.data;
 
   const options = useMemo<SpaceRoleOption[]>(() => {
     if (roles) {
@@ -165,5 +162,12 @@ export function useSpaceRoleOptions(spaceId?: string): {
     }));
   }, [roles, spaceId, t]);
 
-  return { options, roles, rolesKnown: !!roles };
+  return {
+    options,
+    roles,
+    rolesKnown: !!roles,
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+  };
 }

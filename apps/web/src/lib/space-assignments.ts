@@ -58,3 +58,16 @@ export function validateSpaceAssignments(
   if (role !== "guest") return true;
   return assignments.length > 0 ? true : message;
 }
+
+/** A loaded catalog must still contain each selection; never silently drop stale rows. */
+export function hasUnavailableAssignments(
+  drafts: AssignmentDraft[],
+  spaces: { id: string }[],
+  roles: { value: string }[],
+): boolean {
+  return drafts.some(
+    (draft) =>
+      !spaces.some((space) => space.id === draft.space_id) ||
+      !roles.some((role) => role.value === draft.role),
+  );
+}

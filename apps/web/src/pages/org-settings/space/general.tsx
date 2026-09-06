@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus, X } from "lucide-react";
@@ -9,11 +10,14 @@ import { usePermissions } from "../../../hooks/use-permissions";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -51,7 +55,12 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const navigate = useNavigate();
-  const { roles } = useSpaceRoleOptions(spaceId);
+  const {
+    roles,
+    isLoading: rolesLoading,
+    error: rolesError,
+    refetch: refetchRoles,
+  } = useSpaceRoleOptions(spaceId);
   const presets = (roles ?? []).filter((role) => role.kind === "preset");
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
@@ -73,129 +82,193 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
   });
 
   const onSubmit = (data: SettingsFormData) => {
-    updateMutation.mutate({
-      params: { path: { id: spaceId } },
-      body: {
-        name: data.name.trim(),
-        settings: { allowedRedirectDomains: activeDomains },
-        visibility,
-        default_role: defaultRole,
+    updateMutation.mutate(
+      {
+        params: { path: { id: spaceId } },
+        body: {
+          name: data.name.trim(),
+          settings: { allowedRedirectDomains: activeDomains },
+          visibility,
+          default_role: defaultRole,
+        },
       },
-    });
+      { onSuccess: () => toast.success(t("spaces.saved")) },
+    );
   };
 
   return (
     <>
-      <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-6">
-        <div className="space-y-2">
-          <Label htmlFor="space-name">{t("spaces.nameLabel")}</Label>
-          <Input
-            id="space-name"
-            type="text"
-            {...register("name", { required: true })}
-            placeholder={t("spaces.namePlaceholder")}
-          />
-          {showError("name") && (
-            <p className="text-destructive text-sm">{t("validation.required", { ns: "common" })}</p>
-          )}
-        </div>
+      <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl">
+        <FieldGroup>
+          <Field data-invalid={!!showError("name")} data-disabled={updateMutation.isPending}>
+            <Label htmlFor="space-name">{t("spaces.nameLabel")}</Label>
+            <Input
+              id="space-name"
+              type="text"
+              {...register("name", { required: true })}
+              aria-invalid={!!showError("name")}
+              placeholder={t("spaces.namePlaceholder")}
+              disabled={updateMutation.isPending}
+            />
+            {showError("name") && (
+              <FieldDescription role="alert">
+                {t("validation.required", { ns: "common" })}
+              </FieldDescription>
+            )}
+          </Field>
 
-        <div className="space-y-2">
-          <Label>{t("spaces.redirectDomains")}</Label>
-          <p className="text-muted-foreground text-sm">{t("spaces.redirectDomainsHint")}</p>
-          <div className="flex flex-col gap-2">
-            {activeDomains.map((domain, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <Input
-                  type="text"
-                  value={domain}
-                  onChange={(e) =>
-                    setEditedDomains((prev) =>
-                      (prev ?? domains).map((d, i) => (i === index ? e.target.value : d)),
-                    )
-                  }
-                  placeholder="example.com"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    setEditedDomains((prev) => (prev ?? domains).filter((_, i) => i !== index))
-                  }
-                >
-                  <X size={16} />
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setEditedDomains((prev) => [...(prev ?? domains), ""])}
+          <fieldset className="flex flex-col gap-3" disabled={updateMutation.isPending}>
+            <legend className="mb-2 text-sm font-medium">{t("spaces.visibilityLabel")}</legend>
+            <FieldDescription>{t("spaces.visibilityHint")}</FieldDescription>
+            <RadioGroup
+              value={visibility}
+              onValueChange={(value) => setEditedVisibility(value as SpaceVisibility)}
+              disabled={space.isDefault || updateMutation.isPending}
+              aria-label={t("spaces.visibilityLabel")}
             >
-              <Plus size={14} className="mr-1.5" />
-              {t("spaces.addDomain")}
-            </Button>
-          </div>
-        </div>
+              {SPACE_VISIBILITIES.map((value) => (
+                <Field key={value} orientation="horizontal" className="items-start">
+                  <RadioGroupItem
+                    value={value}
+                    id={`space-visibility-${value}`}
+                    className="mt-1 shrink-0"
+                  />
+                  <Label
+                    htmlFor={`space-visibility-${value}`}
+                    className="flex min-w-0 flex-col items-start gap-1"
+                  >
+                    <span>{t(`spaces.visibility.${value}`)}</span>
+                    <span className="text-muted-foreground text-sm leading-relaxed font-normal">
+                      {t(`spaces.visibilityDesc.${value}`)}
+                    </span>
+                  </Label>
+                </Field>
+              ))}
+            </RadioGroup>
+            <FieldDescription>{t("spaces.adminAccessHint")}</FieldDescription>
+            {space.isDefault && (
+              <FieldDescription>{t("spaces.visibilityDefaultLocked")}</FieldDescription>
+            )}
+          </fieldset>
 
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">{t("spaces.visibilityLabel")}</legend>
-          <p className="text-muted-foreground text-sm">{t("spaces.visibilityHint")}</p>
-          <RadioGroup
-            value={visibility}
-            onValueChange={(v) => setEditedVisibility(v as SpaceVisibility)}
-            disabled={space.isDefault}
-            aria-label={t("spaces.visibilityLabel")}
-          >
-            {SPACE_VISIBILITIES.map((value) => (
-              <div key={value} className="flex items-start gap-2">
-                <RadioGroupItem value={value} id={`space-visibility-${value}`} className="mt-1" />
-                <Label htmlFor={`space-visibility-${value}`} className="flex flex-col items-start">
-                  <span>{t(`spaces.visibility.${value}`)}</span>
-                  <span className="text-muted-foreground text-xs font-normal">
-                    {t(`spaces.visibilityDesc.${value}`)}
-                  </span>
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
-          {space.isDefault && (
-            <p className="text-muted-foreground text-sm">{t("spaces.visibilityDefaultLocked")}</p>
-          )}
-        </fieldset>
-
-        {visibility === "open" && (
-          <div className="space-y-2">
-            <Label htmlFor="space-default-role">{t("spaces.defaultRoleLabel")}</Label>
-            <p className="text-muted-foreground text-sm">{t("spaces.defaultRoleHint")}</p>
-            <Select
-              value={defaultRole}
-              onValueChange={(v) => setEditedDefaultRole(v as SpaceRolePreset)}
+          {visibility === "open" && (
+            <Field
+              data-disabled={
+                rolesLoading || !!rolesError || presets.length === 0 || updateMutation.isPending
+              }
             >
-              <SelectTrigger id="space-default-role" className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {!presets.some((preset) => preset.key === defaultRole) && (
-                  <SelectItem value={defaultRole} disabled>
-                    {t(`roles.preset.${defaultRole}`)}
-                  </SelectItem>
-                )}
-                {presets.map((preset) => (
-                  <SelectItem key={preset.key} value={preset.key}>
-                    {t(`roles.preset.${preset.key}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+              <Label htmlFor="space-default-role">{t("spaces.defaultRoleLabel")}</Label>
+              <FieldDescription>{t("spaces.defaultRoleHint")}</FieldDescription>
+              <Select
+                value={defaultRole}
+                onValueChange={(value) => setEditedDefaultRole(value as SpaceRolePreset)}
+                disabled={
+                  rolesLoading || !!rolesError || presets.length === 0 || updateMutation.isPending
+                }
+              >
+                <SelectTrigger id="space-default-role" className="w-full sm:w-[240px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {!presets.some((preset) => preset.key === defaultRole) && (
+                      <SelectItem value={defaultRole} disabled>
+                        {t(`roles.preset.${defaultRole}`)}
+                      </SelectItem>
+                    )}
+                    {presets.map((preset) => (
+                      <SelectItem key={preset.key} value={preset.key}>
+                        {t(`roles.preset.${preset.key}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              {rolesLoading && (
+                <FieldDescription role="status">{t("spaceMembers.rolesLoading")}</FieldDescription>
+              )}
+              {rolesError && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    <p>{t("spaceMembers.rolesLoadError")}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void refetchRoles()}
+                    >
+                      {t("btn.retry", { ns: "common" })}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+              {!rolesLoading && !rolesError && presets.length === 0 && (
+                <FieldDescription>{t("spaces.noAssignablePresets")}</FieldDescription>
+              )}
+              <FieldDescription>{t(`roles.presetDesc.${defaultRole}`)}</FieldDescription>
+              <FieldDescription>{t("spaces.defaultRoleImpact")}</FieldDescription>
+            </Field>
+          )}
 
-        <Button type="submit" disabled={updateMutation.isPending}>
-          {updateMutation.isPending ? <Spinner /> : t("btn.save")}
-        </Button>
+          <Field data-disabled={updateMutation.isPending}>
+            <Label>{t("spaces.redirectDomains")}</Label>
+            <FieldDescription>{t("spaces.redirectDomainsHint")}</FieldDescription>
+            <div className="flex flex-col gap-2">
+              {activeDomains.map((domain, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    value={domain}
+                    disabled={updateMutation.isPending}
+                    aria-label={t("spaces.domainAriaLabel", { index: index + 1 })}
+                    onChange={(event) =>
+                      setEditedDomains((previous) =>
+                        (previous ?? domains).map((item, i) =>
+                          i === index ? event.target.value : item,
+                        ),
+                      )
+                    }
+                    placeholder="example.com"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={updateMutation.isPending}
+                    aria-label={t("spaces.removeDomain")}
+                    onClick={() =>
+                      setEditedDomains((previous) =>
+                        (previous ?? domains).filter((_, i) => i !== index),
+                      )
+                    }
+                  >
+                    <X />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                disabled={updateMutation.isPending}
+                onClick={() => setEditedDomains((previous) => [...(previous ?? domains), ""])}
+              >
+                <Plus data-icon="inline-start" />
+                {t("spaces.addDomain")}
+              </Button>
+            </div>
+          </Field>
+
+          {updateMutation.error && (
+            <Alert variant="destructive">
+              <AlertDescription>{getErrorMessage(updateMutation.error)}</AlertDescription>
+            </Alert>
+          )}
+          <Button type="submit" className="self-start" disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? <Spinner /> : t("btn.save")}
+          </Button>
+        </FieldGroup>
       </form>
 
       {/* Deleting a space is an ORG-level grant (`DELETE /api/spaces/:id`),
@@ -207,7 +280,7 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
             {t("spaces.dangerZone")}
           </div>
           <div className="border-destructive bg-card max-w-xl rounded-lg border p-5">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("spaces.deleteTitle")}</h3>
                 <span className="text-muted-foreground text-sm">{t("spaces.deleteDesc")}</span>
@@ -238,6 +311,7 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
                 setConfirmOpen(false);
                 navigate("/org-settings/spaces");
               },
+              onError: (error) => toast.error(getErrorMessage(error)),
             },
           );
         }}

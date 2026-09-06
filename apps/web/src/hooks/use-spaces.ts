@@ -35,6 +35,8 @@ function useInvalidateSpaces() {
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}"] });
     void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
+    // Visibility and the default role determine implicit member rows and roles.
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
   };
 }
 

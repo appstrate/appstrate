@@ -4,11 +4,11 @@ import { db } from "@appstrate/db/client";
 import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
-import { eq, and, lt, gt, desc } from "drizzle-orm";
+import { eq, and, lt, lte, gt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { isUniqueViolation, scopedWhere } from "../lib/db-helpers.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -17,6 +17,31 @@ function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
 }
 
+/**
+ * The (org, email) pair already has a valid pending invitation. Thrown by
+ * {@link createInvitation}; the route maps it to 409 `invitation_already_pending`
+ * and the UI sends the administrator to the existing invitation's editor —
+ * extending it is how a second space is added, never a second token.
+ */
+export class InvitationAlreadyPendingError extends Error {
+  constructor(readonly invitationId: string) {
+    super("A pending invitation already exists for this email");
+    this.name = "InvitationAlreadyPendingError";
+  }
+}
+
+/**
+ * One row is the whole lifecycle of a person's invitation into an org. A second
+ * create for the same address therefore REFUSES rather than replacing: the old
+ * behaviour (cancel every pending row, insert a fresh one) silently dropped the
+ * first space assignment and invalidated a link already shared. Only an
+ * expired-but-unswept pending row is cancelled here, so a fresh invitation can
+ * follow an expired one without waiting for `expireOldInvitations()`.
+ *
+ * Two creates racing past the pre-check both reach the INSERT; the partial
+ * unique index `uq_org_invitations_pending` (0057) lets exactly one through and
+ * the loser's 23505 is mapped to the same error, so callers see one contract.
+ */
 export async function createInvitation({
   email,
   orgId,
@@ -31,35 +56,55 @@ export async function createInvitation({
   spaceAssignments: ReadonlyArray<SpaceAssignment>;
 }) {
   const normalizedEmail = email.toLowerCase().trim();
-
-  // Cancel any existing pending invitations for this org+email
-  await db
-    .update(orgInvitations)
-    .set({ status: "cancelled" })
-    .where(
-      scopedWhere(orgInvitations, {
-        orgId,
-        extra: [eq(orgInvitations.email, normalizedEmail), eq(orgInvitations.status, "pending")],
-      }),
-    );
-
   const token = generateToken();
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-  const [invitation] = await db
-    .insert(orgInvitations)
-    .values({
-      token,
-      email: normalizedEmail,
-      orgId,
-      role,
-      invitedBy,
-      spaceAssignments,
-      expiresAt,
-    })
-    .returning();
+  const pendingForPair = scopedWhere(orgInvitations, {
+    orgId,
+    extra: [eq(orgInvitations.email, normalizedEmail), eq(orgInvitations.status, "pending")],
+  });
 
-  if (!invitation) throw new Error("Failed to create invitation");
+  const invitation = await db
+    .transaction(async (tx) => {
+      const now = new Date();
+      // Expired but not yet swept: a dead link, cancelled so the pair is free.
+      await tx
+        .update(orgInvitations)
+        .set({ status: "cancelled" })
+        .where(and(pendingForPair, lte(orgInvitations.expiresAt, now)));
+      const [existing] = await tx
+        .select({ id: orgInvitations.id })
+        .from(orgInvitations)
+        .where(and(pendingForPair, gt(orgInvitations.expiresAt, now)))
+        .limit(1);
+      if (existing) throw new InvitationAlreadyPendingError(existing.id);
+
+      const [created] = await tx
+        .insert(orgInvitations)
+        .values({
+          token,
+          email: normalizedEmail,
+          orgId,
+          role,
+          invitedBy,
+          spaceAssignments,
+          expiresAt,
+        })
+        .returning();
+      if (!created) throw new Error("Failed to create invitation");
+      return created;
+    })
+    .catch(async (err: unknown) => {
+      if (!isUniqueViolation(err)) throw err;
+      // Lost the race against a concurrent create for the same pair: report the
+      // row that won, exactly as the pre-check would have.
+      const [winner] = await db
+        .select({ id: orgInvitations.id })
+        .from(orgInvitations)
+        .where(pendingForPair)
+        .limit(1);
+      throw new InvitationAlreadyPendingError(winner?.id ?? "");
+    });
 
   if (getAppConfig().features.smtp) {
     const [orgName, inviterName] = await Promise.all([

@@ -174,6 +174,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
+  "orgSettings.roleHint.", // components/org-invitation-form.tsx + OAuth signup form
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
   "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/space/general.tsx
   "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()

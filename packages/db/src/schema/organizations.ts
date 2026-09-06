@@ -155,6 +155,15 @@ export const orgInvitations = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_org_invitations_invited_by").on(table.invitedBy),
+    // One pending invitation per (org, email): a second invite for the same
+    // address must extend or edit the existing one, never silently replace it
+    // and invalidate a link already shared (0057). `email` is stored
+    // lower-cased and trimmed by `createInvitation`, so the index needs no
+    // expression. Concurrent creates race on this index; the service maps
+    // the unique violation to `invitation_already_pending`.
+    uniqueIndex("uq_org_invitations_pending")
+      .on(table.orgId, table.email)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 
