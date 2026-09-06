@@ -45,8 +45,7 @@ import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
-import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
-import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
+import { getAppstrateScopeSet, getSelfServiceScopes } from "../auth/scopes.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
 // ─── SECURITY: Trust boundary ─────────────────────────────────────────────────
@@ -465,9 +464,7 @@ export async function markClientSelfService(
   // (identity + module end-user-grantable scopes, e.g. mcp:read/mcp:invoke) so
   // the client may request them. Only fill when empty — never widen a client
   // that deliberately declared a narrower scope set.
-  const scopes = row.scopes?.length
-    ? row.scopes
-    : [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
+  const scopes = row.scopes?.length ? row.scopes : getSelfServiceScopes();
   const stamped = { scopes, metadata: JSON.stringify(metadata) };
 
   await db

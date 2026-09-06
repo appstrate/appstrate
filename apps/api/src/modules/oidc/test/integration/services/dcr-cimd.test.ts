@@ -37,6 +37,7 @@ import {
   _resetMcpOrgAudiencesForTesting,
 } from "../../../../../lib/audiences.ts";
 import { getEnv } from "@appstrate/env";
+import { OIDC_IDENTITY_SCOPES } from "../../../auth/scopes.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -211,12 +212,22 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
     resetOidcGuardsLimiters();
   });
 
-  it("registers a public client unauthenticated with identity scopes", async () => {
-    // Identity scopes are always in the self-service set. Module scopes
-    // (mcp:read/mcp:invoke) are added in production via the module-permission
-    // provider (`getModuleEndUserAllowedScopes()`), which boot wires before the
-    // auth instance builds — the test harness doesn't aggregate module
-    // permissions, so they aren't asserted here.
+  async function authorizeClient(clientId: string, redirectUri: string, scope: string) {
+    const query = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope,
+      code_challenge: "a".repeat(43),
+      code_challenge_method: "S256",
+      state: "dcr-authorization",
+    });
+    return app.request(`/api/auth/oauth2/authorize?${query}`);
+  }
+
+  it("honours an explicit identity-only scope", async () => {
+    // Asks for the identity scopes and gets exactly those — the self-service
+    // ceiling never widens an explicit request.
     const { status, json } = await register({
       client_name: "Claude Code (test)",
       redirect_uris: ["http://localhost:9911/callback"],
@@ -227,8 +238,59 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
     });
     expect([200, 201]).toContain(status);
     expect(typeof json.client_id).toBe("string");
+    expect(String(json.scope).split(" ").sort()).toEqual([...OIDC_IDENTITY_SCOPES].sort());
     // Public client (PKCE) — registered with no client authentication method.
     expect(json.token_endpoint_auth_method ?? "none").toBe("none");
+  });
+
+  it("defaults a scope-less registration to the self-service set and authorizes it", async () => {
+    const redirectUri = "http://localhost:9915/callback";
+    const { status, json } = await register({
+      client_name: "MCP client (no scope)",
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    expect([200, 201]).toContain(status);
+    // `mcp` is the only module contributing end-user scopes today, and
+    // `getTestApp({ modules: [oidcModule] })` narrows the live provider — hence
+    // the literals. A superset, so a second module opting in stays green.
+    const scopes = String(json.scope).split(" ");
+    expect(scopes).toEqual(
+      expect.arrayContaining([...OIDC_IDENTITY_SCOPES, "mcp:read", "mcp:invoke"]),
+    );
+    expect(scopes).not.toContain("agents:run");
+
+    const authorized = await authorizeClient(
+      String(json.client_id),
+      redirectUri,
+      "mcp:read mcp:invoke offline_access",
+    );
+    expect(authorized.status).toBe(302);
+    expect(new URL(authorized.headers.get("location")!, "http://localhost").pathname).toBe(
+      "/api/oauth/login",
+    );
+  });
+
+  it("keeps an explicitly narrow registration narrow", async () => {
+    const redirectUri = "http://localhost:9916/callback";
+    const { status, json } = await register({
+      client_name: "Narrow client",
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      scope: "openid",
+    });
+    expect([200, 201]).toContain(status);
+    expect(String(json.scope)).toBe("openid");
+
+    const rejected = await authorizeClient(String(json.client_id), redirectUri, "mcp:read");
+    expect(rejected.status).toBe(302);
+    expect(
+      new URL(rejected.headers.get("location")!, "http://localhost").searchParams.get("error"),
+    ).toBe("invalid_scope");
   });
 
   it("rejects a registration requesting a core action scope outside the self-service set", async () => {

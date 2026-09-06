@@ -362,6 +362,12 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **A Dynamic Client Registration body without `scope` now yields the full
+  self-service scope set (#1267).** An MCP client registering without `scope`
+  got the identity scopes alone, so authorizing for `mcp:read` / `mcp:invoke`
+  was bounced with `invalid_scope`. Narrow registrations stay narrow — and an
+  already-registered scope-less client reads as one, so it must re-register.
+
 - **A killed `appstrate skills sync` no longer locks the next ten minutes of
   sessions out.** Closing a Claude Code session seconds after opening it kills
   the background sync it spawned, and the `mkdir` lock only expired by age —
