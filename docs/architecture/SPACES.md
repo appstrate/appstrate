@@ -4,6 +4,8 @@ The org-scoped container everything else hangs off: a **space** owns the agents,
 
 > **Naming.** This entity was called an _Application_ until the rename. "Application" was a false friend three times over: the codebase already uses it for the platform itself (`app-level security`, `apps/api`, `APP_URL`) and for a third-party OAuth application registered at Google or GitHub (`BYO-app`) — three senses, one word. The rename goes down to the physical layer: the table is `spaces`, the id prefix is `spc_`, the header is `X-Space-Id`, the permission resource is `spaces:*`, the storage-deletion reason is `space_deleted`, the CLI verb is `appstrate space`, and the French UI label is « Espace ». `packages/db/drizzle/0053_applications_to_spaces.sql` is the catalog half; `scripts/migration/0003-application-ids-to-space-ids.sql` is the row-value half, and **the two are one deploy** — see "Deploying the rename".
 
+In the product, **Users / Utilisateurs** names everyone in the organization, including guests; **Members / Membres** names those who can access a space, whether their membership is explicit or implicit. The organization role `member` is displayed as **Standard user / Utilisateur standard**. Technical identifiers such as `org_members` and `space_members` remain unchanged; see the terminology in `RBAC_PERMISSIONS_SPEC.md`.
+
 Core code: `apps/api/src/routes/spaces.ts` (routes), `apps/api/src/services/spaces.ts` (service), `apps/api/src/middleware/space-context.ts` (per-request resolution), `apps/api/src/lib/ids.ts` (id shape), `packages/db/src/schema/spaces.ts` (schema).
 
 ## Model
