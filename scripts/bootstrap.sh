@@ -166,19 +166,6 @@ _appstrate_bootstrap() {
     return 1
   }
 
-  if [ "$VERSION" = "latest" ]; then
-    VERSION=$(resolve_latest_platform_release || true)
-    if [ -z "$VERSION" ]; then
-      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
-      exit 1
-    fi
-    log "Resolved latest platform release: $VERSION"
-  fi
-  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
-  URL="${URL_BASE}/${ASSET}"
-  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
-  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
-
   # ─── Retired env vars ───────────────────────────────────────────────────────
   #
   # APPSTRATE_AUTO_INSTALL=1 selected unattended mode; `--yes` says the same
@@ -581,6 +568,21 @@ _appstrate_bootstrap() {
   fi
 
   # ─── Download + verify ──────────────────────────────────────────────────────
+
+  # Resolved here, past the SOURCE_ONLY return above: a test harness that
+  # sources this script must define the helpers without a network call.
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_platform_release || true)
+    if [ -z "$VERSION" ]; then
+      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    log "Resolved latest platform release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
+  URL="${URL_BASE}/${ASSET}"
+  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
+  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
 
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
   curl $CURL_OPTS "$URL" -o "$TMPDIR/$ASSET"
