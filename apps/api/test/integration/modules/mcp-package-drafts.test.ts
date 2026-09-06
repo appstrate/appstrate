@@ -245,6 +245,57 @@ describe("MCP package drafts — pull, status, push", () => {
     ]);
   });
 
+  it("targets another space by name: the push installs there, and pull reads from there", async () => {
+    const created = await app.request("/api/spaces", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "tastet" }),
+    });
+    expect(created.status).toBe(201);
+    const { id: tastetId } = (await created.json()) as { id: string };
+    // An API key is bound to one space; a user session may address any space of
+    // the org, which is what a Claude Code OAuth caller is.
+    const session = { ...authHeaders(ctx), "X-Org-Id": ctx.orgId };
+
+    const pushed = await callTool(session, "push_package_files", {
+      package_id: PACKAGE_ID,
+      files: { "SKILL.md": SKILL_MD },
+      space: "tastet",
+    });
+    expect(pushed.isError).toBe(false);
+    expect(pushed.data.space_id).toBe(tastetId);
+
+    // Listed in the space it was pushed to, absent from the default one.
+    const inTastet = await app.request("/api/packages/skills", {
+      headers: { ...authHeaders(ctx), "X-Space-Id": tastetId },
+    });
+    expect(((await inTastet.json()) as { data: { id: string }[] }).data.map((r) => r.id)).toContain(
+      PACKAGE_ID,
+    );
+    const inDefault = await app.request("/api/packages/skills", { headers: authHeaders(ctx) });
+    expect(
+      ((await inDefault.json()) as { data: { id: string }[] }).data.map((r) => r.id),
+    ).not.toContain(PACKAGE_ID);
+
+    const pulled = await callTool(session, "pull_package_files", {
+      package_id: PACKAGE_ID,
+      space: tastetId,
+    });
+    expect(pulled.isError).toBe(false);
+    expect(Object.keys(pulled.data.files as Record<string, string>)).toContain("SKILL.md");
+
+    const unknown = await rpc(session, {
+      jsonrpc: "2.0",
+      id: nextId++,
+      method: "tools/call",
+      params: {
+        name: "pull_package_files",
+        arguments: { package_id: PACKAGE_ID, space: "nowhere" },
+      },
+    });
+    expect(unknown.error?.message ?? "").toContain("matches no space");
+  });
+
   it("refuses the write tool to a read-only caller and a traversing path to everyone", async () => {
     const denied = await rpc(reader, {
       jsonrpc: "2.0",

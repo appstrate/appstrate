@@ -45,10 +45,44 @@ const encoder = new TextEncoder();
  * Without it every read here answers 401 for an OAuth caller while API keys
  * sail through — which is why the API-key integration tests could not see it.
  */
-function authHeaders(ctx: PackageDraftToolContext): Headers {
+function authHeaders(ctx: PackageDraftToolContext, spaceId?: string): Headers {
   const headers = new Headers(ctx.authHeaders);
   headers.set(...internalDispatchHeader());
+  // The MCP request is bound to the org's default space; an explicit `space`
+  // argument re-targets this hop, the way operations that take a space id do.
+  if (spaceId) headers.set("x-space-id", spaceId);
   return headers;
+}
+
+const SPACE_ARG = {
+  type: "string",
+  description:
+    "Space to act in, by id (spc_…) or exact name. Default: the org's default space. The package must be installed there to be read; a push installs it there.",
+} as const;
+
+/** `space` argument → space id, or undefined for the default space. */
+async function resolveSpaceArg(
+  ctx: PackageDraftToolContext,
+  value: unknown,
+): Promise<string | undefined> {
+  const ref = asString(value)?.trim();
+  if (!ref) return undefined;
+  const spaces = await dispatchJson<{ data?: { id?: unknown; name?: unknown }[] }>(
+    ctx,
+    "/api/spaces",
+  );
+  const rows = (spaces.body?.data ?? []).filter(
+    (row): row is { id: string; name: string } =>
+      typeof row.id === "string" && typeof row.name === "string",
+  );
+  const byId = rows.find((row) => row.id === ref);
+  if (byId) return byId.id;
+  const byName = rows.filter((row) => row.name.toLowerCase() === ref.toLowerCase());
+  if (byName.length === 1) return byName[0]!.id;
+  throw new McpError(
+    ErrorCode.InvalidParams,
+    `space "${ref}" ${byName.length > 1 ? "matches several spaces" : "matches no space"}. Available: ${rows.map((row) => `${row.name} (${row.id})`).join(", ")}`,
+  );
 }
 
 function writeAccessError(ctx: PackageDraftToolContext): string | undefined {
@@ -75,8 +109,9 @@ async function dispatchJson<T>(
   ctx: PackageDraftToolContext,
   path: string,
   init: RequestInit = {},
+  spaceId?: string,
 ): Promise<{ status: number; body: T | null }> {
-  const headers = authHeaders(ctx);
+  const headers = authHeaders(ctx, spaceId);
   if (init.body && typeof init.body === "string") headers.set("content-type", "application/json");
   const res = await ctx.dispatch(new Request(`${ctx.origin}${path}`, { ...init, headers }));
   const text = await res.text();
@@ -104,11 +139,14 @@ async function readSnapshot(
   ctx: PackageDraftToolContext,
   packageId: string,
   version: string | undefined,
+  spaceId?: string,
 ): Promise<DraftSnapshot> {
   const encoded = encodePackageIdPath(packageId);
   const detail = await dispatchJson<{ lock_version?: unknown; manifest?: unknown }>(
     ctx,
     `/api/packages/skills/${encoded}`,
+    {},
+    spaceId,
   );
   if (detail.status === 404) throw new Error(`${packageId} is not a skill of this organization.`);
   if (detail.status >= 400) throw new Error(`Reading ${packageId} failed: HTTP ${detail.status}`);
@@ -117,6 +155,8 @@ async function readSnapshot(
   const index = await dispatchJson<{ entries?: { path?: unknown; inline?: unknown }[] }>(
     ctx,
     `/api/packages/${encoded}/files${query}`,
+    {},
+    spaceId,
   );
   if (index.status >= 400) {
     throw new Error(
@@ -135,7 +175,7 @@ async function readSnapshot(
     const res = await ctx.dispatch(
       new Request(
         `${ctx.origin}/api/packages/${encoded}/files/content?path=${encodeURIComponent(entry.path)}${query ? `&${query.slice(1)}` : ""}`,
-        { headers: authHeaders(ctx) },
+        { headers: authHeaders(ctx, spaceId) },
       ),
     );
     if (!res.ok)
@@ -245,10 +285,16 @@ function bumpPatch(version: string): string {
 }
 
 /** The version a push should carry: the frontmatter's, else a patch over the latest published, else 1.0.0. */
-async function nextVersion(ctx: PackageDraftToolContext, packageId: string): Promise<string> {
+async function nextVersion(
+  ctx: PackageDraftToolContext,
+  packageId: string,
+  spaceId?: string,
+): Promise<string> {
   const latest = await dispatchJson<{ version?: unknown }>(
     ctx,
     `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+    {},
+    spaceId,
   );
   return latest.status === 200 && typeof latest.body?.version === "string"
     ? bumpPatch(latest.body.version)
@@ -290,6 +336,7 @@ function buildPullTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
           type: "string",
           description: "A published version (semver or `latest`) instead of the draft.",
         },
+        space: SPACE_ARG,
       },
     },
   };
@@ -297,19 +344,22 @@ function buildPullTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
     const packageId = requirePackageId(args.package_id);
     const version = asString(args.version);
     try {
-      const snapshot = await readSnapshot(ctx, packageId, version);
+      const spaceId = await resolveSpaceArg(ctx, args.space);
+      const snapshot = await readSnapshot(ctx, packageId, version, spaceId);
       const presented = presentFiles(snapshot.files);
       if (!presented.files["manifest.json"] && snapshot.manifest && !version) {
         presented.files["manifest.json"] = `${JSON.stringify(snapshot.manifest, null, 2)}\n`;
       }
       return textResult({
         package_id: packageId,
+        ...(spaceId ? { space_id: spaceId } : {}),
         source: snapshot.source,
         lock_version: snapshot.lockVersion,
         ...presented,
         next: "Edit, then call push_package_files with every file and this lock_version.",
       });
     } catch (err) {
+      if (err instanceof McpError) throw err;
       return textResult({ error: getErrorMessage(err) }, true);
     }
   };
@@ -349,6 +399,7 @@ function buildStatusTool(ctx: PackageDraftToolContext): AppstrateToolDefinition 
           type: "integer",
           description: "The lock_version you received from pull_package_files or your last push.",
         },
+        space: SPACE_ARG,
       },
     },
   };
@@ -356,7 +407,8 @@ function buildStatusTool(ctx: PackageDraftToolContext): AppstrateToolDefinition 
     const packageId = requirePackageId(args.package_id);
     const local = collectFiles(args);
     try {
-      const snapshot = await readSnapshot(ctx, packageId, undefined);
+      const spaceId = await resolveSpaceArg(ctx, args.space);
+      const snapshot = await readSnapshot(ctx, packageId, undefined, spaceId);
       const changes = compare(local, snapshot.files);
       const seen = typeof args.lock_version === "number" ? args.lock_version : undefined;
       const moved =
@@ -374,6 +426,7 @@ function buildStatusTool(ctx: PackageDraftToolContext): AppstrateToolDefinition 
           : {}),
       });
     } catch (err) {
+      if (err instanceof McpError) throw err;
       return textResult({ error: getErrorMessage(err) }, true);
     }
   };
@@ -433,6 +486,7 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
           description:
             "Cut an immutable version from these files immediately instead of writing the draft.",
         },
+        space: SPACE_ARG,
       },
     },
   };
@@ -445,12 +499,13 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
       throw new McpError(ErrorCode.InvalidParams, "files must include SKILL.md.");
     }
     try {
+      const spaceId = await resolveSpaceArg(ctx, args.space);
       if (!files["manifest.json"]) {
         const skillMd = decoder.decode(files["SKILL.md"]);
         const name = parseScopedName(packageId)!.name;
         const manifest: Record<string, unknown> = {
           name: packageId,
-          version: asString(args.version) ?? (await nextVersion(ctx, packageId)),
+          version: asString(args.version) ?? (await nextVersion(ctx, packageId, spaceId)),
           type: "skill",
           schema_version: "0.1",
           display_name: frontmatterName(skillMd) ?? name,
@@ -472,7 +527,7 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
       if (args.force === true) params.set("force", "true");
       if (typeof args.lock_version === "number")
         params.set("lock_version", String(args.lock_version));
-      const headers = authHeaders(ctx);
+      const headers = authHeaders(ctx, spaceId);
       const res = await ctx.dispatch(
         new Request(`${ctx.origin}/api/packages/import?${params.toString()}`, {
           method: "POST",
@@ -497,6 +552,7 @@ function buildPushTool(ctx: PackageDraftToolContext): AppstrateToolDefinition {
       return textResult({
         status: res.status,
         ...body,
+        ...(spaceId ? { space_id: spaceId } : {}),
         next:
           args.publish === true
             ? "Published. Every machine syncing published skills picks it up on its next sync."
