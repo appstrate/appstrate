@@ -72,6 +72,23 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **`appstrate self-update`, `scripts/bootstrap.sh` and `scripts/bootstrap-runner.sh`
+  resolve "latest" by listing GitHub Releases and picking the newest platform
+  `v<semver>` one, never through `releases/latest`.** GitHub's "latest" is
+  whichever non-prerelease Release was created last, whatever its tag; the
+  `make_latest: false` on the npm workflows (`cli@`, `core@`, `afps-shared@`)
+  keeps it correct only as long as every future workflow and every hand-made
+  Release remembers the flag. The consumers now filter by tag themselves
+  (drafts and prereleases skipped, as before), so a stray Release can no
+  longer point an update at assets that do not exist. Both walk pages of 30
+  (5 at most) until one holds a `v*` Release; the CLI then takes the highest
+  version on that page rather than the most recently created one, so a hotfix
+  for an older line published after a newer release is not "latest" (the shell
+  scripts keep creation order: no `sort -V` on macOS, and the rendered
+  installer pins its version anyway). The CLI names the releases it skipped
+  when no `v*` one is found; `releaseUrls` no longer has a `latest/download`
+  branch because nothing reaches it any more.
+
 - **BREAKING (wire): WRITING a skill whose `SKILL.md` frontmatter has no
   `description`, or a `name` that breaks the Agent Skills naming rule, is now a 400.** The platform only required the `name` KEY to be present, so a skill
   created with the editor's default skeleton — `name:` and `description:` both
