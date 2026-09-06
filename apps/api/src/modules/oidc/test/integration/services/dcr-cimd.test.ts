@@ -212,11 +212,9 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
   });
 
   it("registers a public client unauthenticated with identity scopes", async () => {
-    // Identity scopes are always in the self-service set. Module scopes
-    // (mcp:read/mcp:invoke) are added in production via the module-permission
-    // provider (`getModuleEndUserAllowedScopes()`), which boot wires before the
-    // auth instance builds — the test harness doesn't aggregate module
-    // permissions, so they aren't asserted here.
+    // An explicit `scope` is honoured verbatim: this registration asks for the
+    // identity scopes only and gets exactly those, whatever else the
+    // self-service ceiling holds.
     const { status, json } = await register({
       client_name: "Claude Code (test)",
       redirect_uris: ["http://localhost:9911/callback"],
