@@ -85,17 +85,26 @@ _appstrate_runner_bootstrap() {
   # platform `v*` Release carries the CLI binaries; `releases/latest` can name
   # an npm-package Release instead.
   resolve_latest_platform_release() {
-    curl -fsSL -H 'Accept: application/vnd.github+json' \
-      'https://api.github.com/repos/appstrate/appstrate/releases?per_page=30' \
-      | grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)' \
-      | awk -F': *' '
+    local page fields tag
+    for page in 1 2 3 4 5; do
+      fields=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" \
+        | grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
+      [ -z "$fields" ] && return 1
+      tag=$(printf '%s\n' "$fields" | awk -F': *' '
           $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
           $1 ~ /"draft"/    { draft = $2 }
           $1 ~ /prerelease/ { pre = $2 }
           tag != "" && draft != "" && pre != "" {
             if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
             tag = ""
-          }'
+          }')
+      if [ -n "$tag" ]; then
+        printf '%s\n' "$tag"
+        return 0
+      fi
+    done
+    return 1
   }
 
   if [ "$VERSION" = "latest" ]; then

@@ -43,8 +43,19 @@ const RELEASE_URL_BASE = "https://github.com/appstrate/appstrate/releases";
  * CLI pick the newest platform `v<semver>` Release itself, so nothing outside
  * `release.yml` can steer an update.
  */
-const RELEASES_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30";
+const RELEASES_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases";
+const RELEASES_PAGE_SIZE = 30;
+/**
+ * Pages scanned before giving up: 150 releases. Every platform cycle creates
+ * one `v*` plus at most three npm Releases, so a `v*` sits inside the first
+ * page in practice; the cap only bounds the API calls when it does not.
+ */
+const RELEASES_MAX_PAGES = 5;
 const PLATFORM_TAG = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+function releasesPageUrl(page: number): string {
+  return `${RELEASES_API_URL}?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
+}
 
 /**
  * Error thrown by the default fetch deps when an HTTP request returns a
@@ -364,9 +375,47 @@ export async function resolveTargetVersion(
     }
     return v;
   }
+  // Newest first, as the API orders them. Only a platform `v<semver>` release
+  // carries the CLI binaries; the npm workflows (`cli@`, `core@`,
+  // `afps-shared@`) publish their own Releases and are skipped by tag, the
+  // same way `releases/latest` skips drafts and prereleases. Within the newest
+  // page that holds any candidate, the HIGHEST version wins, not the newest by
+  // creation date: a hotfix for an older line published after a newer release
+  // must not become "latest".
+  const skipped: string[] = [];
+  for (let page = 1; page <= RELEASES_MAX_PAGES; page++) {
+    const releases = await fetchReleasesPage(deps, page);
+    if (releases.length === 0) break;
+    const candidates: string[] = [];
+    for (const release of releases) {
+      if (!release || typeof release !== "object") continue;
+      const { tag_name, draft, prerelease } = release as {
+        tag_name?: unknown;
+        draft?: unknown;
+        prerelease?: unknown;
+      };
+      if (typeof tag_name !== "string") continue;
+      if (draft === true || prerelease === true) continue;
+      if (PLATFORM_TAG.test(tag_name)) candidates.push(tag_name);
+      else skipped.push(tag_name);
+    }
+    if (candidates.length > 0) {
+      candidates.sort(compareSemver);
+      return normalizeVersion(candidates[candidates.length - 1]!);
+    }
+  }
+  throw new Error(
+    `No platform v* release among the newest ${skipped.length} GitHub Releases` +
+      (skipped.length > 0 ? ` (${skipped.slice(0, 5).join(", ")})` : "") +
+      `. Pin one with --release X.Y.Z.`,
+  );
+}
+
+/** One page of the Releases list, newest first. Empty past the last page. */
+async function fetchReleasesPage(deps: ResolveTargetVersionDeps, page: number): Promise<unknown[]> {
   let body: string;
   try {
-    body = await deps.fetchText(RELEASES_API_URL);
+    body = await deps.fetchText(releasesPageUrl(page));
   } catch (err) {
     // GitHub's unauthenticated API caps at 60 req/h per IP. On shared CI
     // runners this often surfaces as a 403 with X-RateLimit-Remaining: 0;
@@ -394,28 +443,7 @@ export async function resolveTargetVersion(
   if (!Array.isArray(parsed)) {
     throw new Error(`GitHub Releases API response is not a release list.`);
   }
-  // Newest first, as the API orders them. Only a platform `v<semver>` release
-  // carries the CLI binaries; the npm workflows (`cli@`, `core@`,
-  // `afps-shared@`) publish their own Releases and are skipped by tag, the
-  // same way `releases/latest` skips drafts and prereleases.
-  const seen: string[] = [];
-  for (const release of parsed as unknown[]) {
-    if (!release || typeof release !== "object") continue;
-    const { tag_name, draft, prerelease } = release as {
-      tag_name?: unknown;
-      draft?: unknown;
-      prerelease?: unknown;
-    };
-    if (typeof tag_name !== "string") continue;
-    if (draft === true || prerelease === true) continue;
-    if (PLATFORM_TAG.test(tag_name)) return normalizeVersion(tag_name);
-    seen.push(tag_name);
-  }
-  throw new Error(
-    `No platform v* release among the newest ${seen.length} GitHub Releases` +
-      (seen.length > 0 ? ` (${seen.slice(0, 5).join(", ")})` : "") +
-      `. Pin one with --release X.Y.Z.`,
-  );
+  return parsed as unknown[];
 }
 
 interface PerformCurlUpdateOptions {
