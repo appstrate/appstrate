@@ -138,7 +138,7 @@ function writeAccessError(ctx: PackageDraftToolContext): string | undefined {
   return undefined;
 }
 
-export function canWritePackageDrafts(ctx: PackageDraftToolContext): boolean {
+function canWritePackageDrafts(ctx: PackageDraftToolContext): boolean {
   return writeAccessError(ctx) === undefined;
 }
 

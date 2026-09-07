@@ -160,7 +160,7 @@ export async function readConfig(): Promise<Config> {
   return workDir ? { defaultProfile, profiles, workDir } : { defaultProfile, profiles };
 }
 
-export const DEFAULT_WORK_DIR_NAME = "Appstrate Packages";
+const DEFAULT_WORK_DIR_NAME = "Appstrate Packages";
 
 /** `workDir` from the config, `~` expanded; `~/Appstrate` when unset. */
 export function resolveWorkDir(config: Config): string {

@@ -101,7 +101,7 @@ function typeRoute(listed: ListedSkill): string {
 }
 
 /** The request header that scopes the package routes to one space. */
-export function spaceHeaders(spaceId: string): Record<string, string> {
+function spaceHeaders(spaceId: string): Record<string, string> {
   return { "X-Space-Id": spaceId };
 }
 

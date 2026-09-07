@@ -22,7 +22,7 @@ export const PACKAGE_TYPES: readonly PackageType[] = [
 ];
 
 /** Route segment and work-dir folder for each type. */
-export const TYPE_PLURAL: Record<PackageType, string> = {
+const TYPE_PLURAL: Record<PackageType, string> = {
   skill: "skills",
   agent: "agents",
   integration: "integrations",
@@ -37,7 +37,7 @@ export const CONTENT_ENTRY: Record<PackageType, string | null> = {
   "mcp-server": null,
 };
 
-export function isPackageType(value: unknown): value is PackageType {
+function isPackageType(value: unknown): value is PackageType {
   return typeof value === "string" && (PACKAGE_TYPES as readonly string[]).includes(value);
 }
 
