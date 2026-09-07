@@ -20,6 +20,7 @@ import {
   type ModelFormProvider,
 } from "../model-form-payload.ts";
 import { CUSTOM_ENDPOINT_ID } from "../provider-registry-helpers.ts";
+import type { CatalogModelValues } from "../row-overrides-catalog.ts";
 
 const ANTHROPIC: ModelFormProvider = {
   providerId: "anthropic",
@@ -281,6 +282,110 @@ describe("buildModelFormPayload — capabilities", () => {
       maxTokens: null,
       reasoning: null,
     });
+  });
+});
+
+describe("buildModelFormPayload — explicit capabilities on a catalogued model", () => {
+  /** The catalog entry the edit form's fields were prefilled from. */
+  const SONNET = {
+    contextWindow: 200000,
+    maxTokens: 64000,
+    capabilities: ["text", "image", "reasoning"],
+  };
+  /** The form as the edit opens it: RESOLVED values, toggle then ticked. */
+  const PREFILLED = fields({
+    modelId: "claude-sonnet-4-5-20250929",
+    credentialId: "cred_1",
+    capabilitiesExplicit: true,
+    inputText: true,
+    inputImage: true,
+    contextWindow: "200000",
+    maxTokens: "64000",
+    reasoning: true,
+  });
+
+  const edit = (
+    overrides: Partial<ModelFormFields> = {},
+    catalogEntry: CatalogModelValues = SONNET,
+  ) =>
+    build({
+      fields: { ...PREFILLED, ...overrides },
+      capabilities: "explicit",
+      isEdit: true,
+      catalogEntry,
+    });
+
+  it("ships the one modality the operator changed, and clears the three it did not", () => {
+    // Untick "Image" and nothing else: the other three fields still hold the
+    // catalog's own numbers, and sending them back would freeze them as
+    // overrides — the row would stop following the weekly catalog refresh
+    // because of an edit that was about modalities.
+    const result = edit({ inputImage: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toEqual({
+      modelId: "claude-sonnet-4-5-20250929",
+      credentialId: "cred_1",
+      input: ["text"],
+      contextWindow: null,
+      maxTokens: null,
+      reasoning: null,
+    });
+  });
+
+  it("ships the limit that differs, and leaves the rest to the catalog", () => {
+    const result = edit({ contextWindow: "32768" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toMatchObject({
+      contextWindow: 32768,
+      input: null,
+      maxTokens: null,
+      reasoning: null,
+    });
+  });
+
+  it("ships all four for an endpoint no catalog describes", () => {
+    // Same values, no entry to compare them against: every one of them can
+    // only be an answer the operator gave.
+    const result = build({
+      provider: OPENAI_COMPATIBLE,
+      fields: { ...PREFILLED, inlineApiKey: "sk-test", baseUrl: "http://localhost:11434/v1" },
+      capabilities: "explicit",
+      isEdit: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toMatchObject({
+      input: ["text", "image"],
+      contextWindow: 200000,
+      maxTokens: 64000,
+      reasoning: true,
+    });
+  });
+
+  it("omits rather than clears the catalog's own values on a create", () => {
+    const result = build({
+      fields: PREFILLED,
+      capabilities: "explicit",
+      catalogEntry: SONNET,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toEqual({
+      modelId: "claude-sonnet-4-5-20250929",
+      credentialId: "cred_1",
+    });
+  });
+
+  it("reads a catalog entry with no max output as answering nothing for it", () => {
+    // `maxTokens: null` is not a value the field can equal, so a number typed
+    // against it is the operator's — there is nothing to defer to.
+    const result = edit({}, { ...SONNET, maxTokens: null });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.maxTokens).toBe(64000);
+    expect(result.data.contextWindow).toBeNull();
   });
 });
 

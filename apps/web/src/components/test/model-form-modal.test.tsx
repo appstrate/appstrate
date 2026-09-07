@@ -367,6 +367,20 @@ describe("ModelFormBody — editing a subscription row", () => {
   });
 });
 
+describe("ModelFormBody — editing a row whose provider left the registry", () => {
+  const html = form(model({ providerId: "gone", providerName: "Gone" }), [LOCAL_KEY]);
+
+  it("says so, instead of an empty form whose Save reports nothing", () => {
+    // Nothing describes the endpoint and no credential can be matched to it, so
+    // every field is blank and the only refusal the submit can raise lands on
+    // `credentialId` — a field this arrangement never renders.
+    expect(html).toContain(settingsFr["models.form.providerUnavailable"]);
+    expect(html).not.toContain('id="mdl-provider"');
+    expect(html).not.toContain('id="mdl-modelId"');
+    expect(html).not.toContain('id="mdl-capabilities-explicit"');
+  });
+});
+
 /** A Radix checkbox is a `button`, so its state reads off `aria-checked`. */
 function checkedState(html: string, id: string): string | undefined {
   const tag = html.slice(html.lastIndexOf("<button", html.indexOf(`id="${id}"`)));

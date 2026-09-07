@@ -33,8 +33,29 @@ export interface CatalogModelValues {
   capabilities: string[];
 }
 
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
+/** Two modality lists describing the same thing — order is not part of it. */
+export function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v) => b.includes(v));
+}
+
+/**
+ * The four answers the catalog entry gives on its own, in the stored row's
+ * shape. Both readers of this file compare against it: the toggle asks whether
+ * the row already disagrees, the payload asks — field by field — whether what
+ * is on screen is anything but the catalog's own number read back.
+ */
+export function catalogValues(entry: CatalogModelValues): {
+  input: string[];
+  contextWindow: number;
+  maxTokens: number | null;
+  reasoning: boolean;
+} {
+  return {
+    input: catalogModalities(entry.capabilities),
+    contextWindow: entry.contextWindow,
+    maxTokens: entry.maxTokens ?? null,
+    reasoning: entry.capabilities.includes("reasoning"),
+  };
 }
 
 export function rowOverridesCatalog(
@@ -50,10 +71,9 @@ export function rowOverridesCatalog(
       row.reasoning != null
     );
   }
-  if (row.contextWindow != null && row.contextWindow !== entry.contextWindow) return true;
-  if (row.maxTokens != null && row.maxTokens !== (entry.maxTokens ?? null)) return true;
-  if (row.reasoning != null && row.reasoning !== entry.capabilities.includes("reasoning")) {
-    return true;
-  }
-  return !!row.input?.length && !sameSet(row.input, catalogModalities(entry.capabilities));
+  const catalog = catalogValues(entry);
+  if (row.contextWindow != null && row.contextWindow !== catalog.contextWindow) return true;
+  if (row.maxTokens != null && row.maxTokens !== catalog.maxTokens) return true;
+  if (row.reasoning != null && row.reasoning !== catalog.reasoning) return true;
+  return !!row.input?.length && !sameSet(row.input, catalog.input);
 }

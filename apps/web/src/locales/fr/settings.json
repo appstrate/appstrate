@@ -624,6 +624,8 @@
   "models.form.addModels_other": "Ajouter {{count}} modèles",
   "models.form.addFailed": "Impossible d'ajouter : {{ids}}",
   "models.form.selectionRequired": "Sélectionne au moins un modèle.",
+  "models.form.providerUnavailable": "Le provider de ce modèle n'est plus disponible.",
+  "models.form.saveFailed": "Impossible d'enregistrer le modèle. Vérifie les valeurs et réessaie.",
   "models.alert.noModel": "Aucun modèle LLM configuré",
   "models.alert.noModelDescription": "Configurez un modèle dans les paramètres de l'organisation pour pouvoir exécuter cet agent.",
   "billing.tabTitle": "Facturation",

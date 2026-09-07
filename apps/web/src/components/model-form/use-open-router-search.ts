@@ -10,7 +10,7 @@
  * every provider change.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useOpenRouterModels } from "../../hooks/use-models";
 
 export function useOpenRouterSearch(enabled: boolean) {
@@ -24,9 +24,20 @@ export function useOpenRouterSearch(enabled: boolean) {
 
   const query = useOpenRouterModels(enabled ? debounced : undefined);
 
+  /**
+   * Both halves at once. Clearing the box alone leaves `debounced` holding the
+   * old needle for up to 300 ms, so the query the host just abandoned answers
+   * once more into the list it reset.
+   */
+  const reset = useCallback(() => {
+    setSearch("");
+    setDebounced("");
+  }, []);
+
   return {
     search,
     setSearch,
+    reset,
     models: query.data ?? [],
     isLoading: query.isLoading,
   };

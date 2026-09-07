@@ -42,6 +42,36 @@ export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
   }
 }
 
+/** The registry facts the discovery body turns on — an entry fits. */
+export interface DiscoverProvider {
+  providerId: string;
+  baseUrlOverridable: boolean;
+}
+
+/**
+ * `POST /api/model-provider-credentials/discover` takes exactly one of two
+ * forms, never both: a saved credential names its own endpoint and key, and an
+ * inline key has to describe the endpoint it opens. The base URL rides along
+ * only where the provider lets the operator move it — a pinned provider
+ * answers on its own `defaultBaseUrl` and the route refuses the field.
+ */
+export type DiscoverBody =
+  { credential_id: string } | { provider_id: string; api_key: string; base_url_override?: string };
+
+export function buildDiscoverBody(input: {
+  credentialId: string | null;
+  provider: DiscoverProvider;
+  inlineApiKey: string;
+  baseUrl: string;
+}): DiscoverBody {
+  if (input.credentialId) return { credential_id: input.credentialId };
+  return {
+    provider_id: input.provider.providerId,
+    api_key: input.inlineApiKey.trim(),
+    ...(input.provider.baseUrlOverridable ? { base_url_override: input.baseUrl.trim() } : {}),
+  };
+}
+
 export function parsesAsUrl(value: string): boolean {
   try {
     new URL(value.trim());

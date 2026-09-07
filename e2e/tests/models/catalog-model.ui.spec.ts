@@ -148,4 +148,38 @@ test.describe("Catalogued model — UI", () => {
     const renamed = (await listModels(apiClient)).find((m) => m.modelId === MODEL_ID);
     expect(renamed).toMatchObject({ label: NEW_LABEL, contextWindow: 200000 });
   });
+
+  test("answers for one capability without freezing the three it did not touch", async ({
+    authedPage: page,
+  }) => {
+    const addDialog = await addCatalogModel(page);
+    await pickRow(addDialog, MODEL_ID).click();
+    await addDialog.getByRole("button", { name: "Ajouter 1 modèle", exact: true }).click();
+    await expect(addDialog).toBeHidden();
+
+    await page.getByRole("button", { name: "Modifier", exact: true }).first().click();
+    const dialog = page.getByRole("dialog", { name: EDIT_MODEL });
+    await expect(dialog).toBeVisible();
+
+    // Taking the capabilities on prefills the four with what `GET /api/models`
+    // resolved — the catalog's own numbers. Untick "Image" and nothing else.
+    await dialog.locator("#mdl-capabilities-explicit").click();
+    await expect(dialog.locator("#mdl-ctx")).toHaveValue("200000");
+    await dialog.locator("#mdl-input-image").click();
+
+    const saved = page.waitForRequest(
+      (req) => req.method() === "PUT" && /\/api\/models\/[^/]+$/.test(req.url()),
+    );
+    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+
+    const body = JSON.parse((await saved).postData() ?? "{}") as Record<string, unknown>;
+    // The one answer the operator gave — and nothing else. A number here would
+    // be the catalog's own value written back as an override, cutting the row
+    // off from the weekly refresh over an edit about modalities.
+    expect(body.input).toEqual(["text"]);
+    for (const field of ["contextWindow", "maxTokens", "reasoning"] as const) {
+      expect(body[field] ?? null).toBeNull();
+    }
+    await expect(dialog).toBeHidden();
+  });
 });

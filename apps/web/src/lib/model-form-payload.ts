@@ -8,6 +8,7 @@
  */
 
 import type { ModelCost } from "@appstrate/core/module";
+import { catalogValues, sameSet, type CatalogModelValues } from "./row-overrides-catalog";
 
 /** The model form's controlled field values. */
 export interface ModelFormFields {
@@ -134,16 +135,27 @@ export interface ModelFormPayloadInput {
   /**
    * What the capabilities section answered — it is on screen for every manual
    * arrangement, so there is always an answer:
-   * - `explicit` — the operator ticked the toggle: all four values ship, an
-   *   unticked box included.
+   * - `explicit` — the operator ticked the toggle: every value that is the
+   *   operator's own ships, an unticked box included. A blank field, and a
+   *   value still equal to `catalogEntry`'s, is not one of those.
    * - `auto` — the toggle was left off. Nothing to send on a create; on an
    *   edit every field ships as `null`, so a previously stored override is
    *   dropped and the catalog resolves it again (a no-op for a catalogued row
    *   that never overrode anything).
    */
   capabilities: "explicit" | "auto";
-  /** Editing an existing row. Only `auto` reads it — clear vs. omit. */
+  /** Editing an existing row. Decides clear (`null`) vs. omit. */
   isEdit: boolean;
+  /**
+   * What the vendored catalog says about the submitted model id, where it
+   * knows it. `GET /api/models` returns RESOLVED values, so an edit form opens
+   * on the catalog's own numbers: in the `explicit` branch a field still equal
+   * to this entry's is not an answer the operator gave, and shipping it would
+   * freeze it as an override and cut the row off from the weekly catalog
+   * refresh. Absent for a model no catalog describes, where every value on
+   * screen can only be the operator's.
+   */
+  catalogEntry?: CatalogModelValues;
   /** The picked registry entry; undefined until the user picks a provider. */
   provider: ModelFormProvider | undefined;
   /**
@@ -207,34 +219,40 @@ export function resolveCredentialBinding(input: {
 
 /** The capability half of the body — see `ModelFormPayloadInput.capabilities`. */
 function capabilityOverrides(
-  input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit">,
+  input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit" | "catalogEntry">,
 ): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
   const { fields } = input;
   if (input.capabilities === "auto") {
     if (!input.isEdit) return {};
     return { input: null, contextWindow: null, maxTokens: null, reasoning: null };
   }
+  const catalog = input.catalogEntry ? catalogValues(input.catalogEntry) : null;
   const modalities = [fields.inputText && "text", fields.inputImage && "image"].filter(
     Boolean,
   ) as string[];
   const contextWindow = parseInt(fields.contextWindow.trim(), 10);
   const maxTokens = parseInt(fields.maxTokens.trim(), 10);
-  // A blank limit, or neither box ticked (the server refuses an empty array),
-  // is a question left to the catalog and the runtime default: omitted on a
-  // create, and on an edit sent as `null` so a stored override is dropped
-  // rather than silently kept behind the blank the operator just made.
-  const answered: Pick<ModelFormData, "input" | "contextWindow" | "maxTokens"> = {};
-  if (modalities.length > 0) answered.input = modalities;
-  else if (input.isEdit) answered.input = null;
-  if (contextWindow > 0) answered.contextWindow = contextWindow;
-  else if (input.isEdit) answered.contextWindow = null;
-  if (maxTokens > 0) answered.maxTokens = maxTokens;
+  // Two things are left to the catalog and the runtime default rather than
+  // sent. A blank limit, or neither box ticked (the server refuses an empty
+  // array) — the operator emptied the field, and omitting the value would
+  // silently keep the old one. And a value still equal to the catalog's own,
+  // which is what the form was prefilled with: the operator is looking at it,
+  // not answering it. Both are omitted on a create and sent as `null` on an
+  // edit, which drops any stored override and resolves from the catalog again.
+  const answered: Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> = {};
+  if (modalities.length > 0 && !(catalog && sameSet(modalities, catalog.input))) {
+    answered.input = modalities;
+  } else if (input.isEdit) answered.input = null;
+  if (contextWindow > 0 && contextWindow !== catalog?.contextWindow) {
+    answered.contextWindow = contextWindow;
+  } else if (input.isEdit) answered.contextWindow = null;
+  if (maxTokens > 0 && maxTokens !== catalog?.maxTokens) answered.maxTokens = maxTokens;
   else if (input.isEdit) answered.maxTokens = null;
-  return {
-    ...answered,
-    // Booleans have no blank state, so an unticked box IS the answer `false`.
-    reasoning: fields.reasoning,
-  };
+  // A boolean has no blank state, so an unticked box IS the answer `false` —
+  // unless the catalog already says exactly that, and then it stays its answer.
+  if (!catalog || fields.reasoning !== catalog.reasoning) answered.reasoning = fields.reasoning;
+  else if (input.isEdit) answered.reasoning = null;
+  return answered;
 }
 
 export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPayloadResult {

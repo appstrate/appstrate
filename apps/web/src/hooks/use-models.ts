@@ -189,11 +189,12 @@ export function useModelFormHandler(opts: {
   // from the registry's `displayName` and dedupes against existing rows.
   useModelProviderCredentials();
 
-  // Spans the whole sequential batch: the per-mutation flags fall back to false
-  // between two creates, which would re-enable the button mid-run.
-  const [batchPending, setBatchPending] = useState(false);
+  // Spans a whole submission: the per-mutation flags fall back to false between
+  // the credential and the model (and between two creates in a batch), which
+  // would re-enable the button mid-run.
+  const [submitPending, setSubmitPending] = useState(false);
   const isPending =
-    batchPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
+    submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
 
   /**
    * One credential, then one `POST /api/models` per entry — there is no bulk
@@ -201,7 +202,7 @@ export function useModelFormHandler(opts: {
    * rejected id are still worth adding, and the caller re-offers the rest.
    */
   const submitBatch = async (data: ModelFormMultiData): Promise<ModelFormSubmitOutcome> => {
-    setBatchPending(true);
+    setSubmitPending(true);
     try {
       const credentialId = data.newCredential
         ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
@@ -220,49 +221,44 @@ export function useModelFormHandler(opts: {
       // The key itself was refused, so not one model could be created against it.
       return { failedModelIds: data.models.map((m) => m.modelId) };
     } finally {
-      setBatchPending(false);
+      setSubmitPending(false);
     }
   };
 
-  const onSubmit = (data: ModelFormSubmission) => {
-    if ("models" in data) return submitBatch(data);
-
-    const createCredentialAndThen = (onKeyCreated: (keyId: string) => void) => {
-      createCredential.mutate(
-        { body: credentialBody(data.newCredential!) },
-        { onSuccess: (result) => onKeyCreated(result.id) },
-      );
-    };
-
-    if (opts.editModel) {
-      if (data.newCredential) {
-        createCredentialAndThen((keyId) => {
-          const { newCredential: _, ...modelData } = data;
-          updateModel.mutate(
-            {
-              params: { path: { id: opts.editModel!.id } },
-              body: { ...modelData, credentialId: keyId },
-            },
-            { onSuccess: opts.onSuccess },
-          );
+  /**
+   * One model: the credential first where the key was typed inline, then the
+   * create or the update. A refusal is reported back the same way a batch
+   * reports its own — the id is the only one there is, and the form names it
+   * rather than closing on a save that never happened or leaving the operator
+   * in front of a button that answered nothing. A credential the server
+   * refused fails the model with it: there is nothing to bind it to.
+   */
+  const submitOne = async (data: ModelFormData): Promise<ModelFormSubmitOutcome> => {
+    setSubmitPending(true);
+    try {
+      const credentialId = data.newCredential
+        ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
+        : data.credentialId;
+      if (opts.editModel) {
+        const { newCredential: _, ...modelData } = data;
+        await updateModel.mutateAsync({
+          params: { path: { id: opts.editModel.id } },
+          body: { ...modelData, credentialId },
         });
       } else {
-        updateModel.mutate(
-          { params: { path: { id: opts.editModel.id } }, body: data },
-          { onSuccess: opts.onSuccess },
-        );
+        await createModel.mutateAsync({ body: toCreateModelBody(data, credentialId) });
       }
-    } else if (data.newCredential) {
-      createCredentialAndThen((keyId) => {
-        createModel.mutate({ body: toCreateModelBody(data, keyId) }, { onSuccess: opts.onSuccess });
-      });
-    } else {
-      createModel.mutate(
-        { body: toCreateModelBody(data, data.credentialId) },
-        { onSuccess: opts.onSuccess },
-      );
+      opts.onSuccess();
+      return { failedModelIds: [] };
+    } catch {
+      return { failedModelIds: [data.modelId] };
+    } finally {
+      setSubmitPending(false);
     }
   };
+
+  const onSubmit = (data: ModelFormSubmission) =>
+    "models" in data ? submitBatch(data) : submitOne(data);
 
   return { onSubmit, isPending };
 }

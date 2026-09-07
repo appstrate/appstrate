@@ -2,8 +2,9 @@
 
 /**
  * "Capabilities" sub-section of the model form modal — limits and modalities.
- * Only rendered for custom-provider or custom-model paths; preset and
- * OpenRouter selections already carry these values from their source of truth.
+ * It renders in every manual arrangement, a catalogued row's edit form
+ * included: what a row follows is a question about that row, not about which
+ * provider it names.
  *
  * One toggle owns the whole section, because the alternative to filling it in
  * is not "leave the fields blank" but a documented fallback chain the operator

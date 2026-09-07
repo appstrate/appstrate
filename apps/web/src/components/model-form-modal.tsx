@@ -37,7 +37,7 @@ import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { ErrorState, LoadingState } from "./page-states";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getProviderById } from "@/lib/provider-registry-helpers";
-import { parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
+import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
 import {
   buildModelFormPayload,
   type ModelFormFields,
@@ -82,9 +82,16 @@ interface ModelFormBodyProps {
  * before the registry lands would answer that question wrong.
  */
 export function ModelFormBody(props: ModelFormBodyProps) {
+  const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   if (registryQuery.error) return <ErrorState message={getErrorMessage(registryQuery.error)} />;
   if (!registryQuery.data) return <LoadingState />;
+  // A row whose provider left the registry has no endpoint to describe and no
+  // credential to match: the form would render empty and report its refusal on
+  // a field that is not on screen, which is a Save button doing nothing.
+  if (props.model && !getProviderById(props.model.providerId ?? "", registryQuery.data)) {
+    return <ErrorState message={t("models.form.providerUnavailable")} />;
+  }
   return <ModelForm {...props} registry={registryQuery.data} />;
 }
 
@@ -107,6 +114,15 @@ function ModelForm({
   const isOauth = selectedProvider?.authMode === "oauth2";
   const source = modelSource(selectedProvider);
 
+  /**
+   * What the vendored catalog says about a model id, where it knows it. Two
+   * questions read it, and they must read the same entry: whether the edited
+   * row already disagrees with the catalog (the toggle's opening state), and
+   * which of the values on screen are the operator's own (what ships).
+   */
+  const catalogEntry = (id: string | null | undefined) =>
+    id ? selectedProvider?.models.find((m) => m.id === id) : undefined;
+
   const {
     register,
     handleSubmit,
@@ -124,12 +140,7 @@ function ModelForm({
       modelId: model?.modelId ?? "",
       credentialId: model?.credentialId ?? "",
       inlineApiKey: "",
-      capabilitiesExplicit:
-        !!model &&
-        rowOverridesCatalog(
-          model,
-          selectedProvider?.models.find((m) => m.id === model.modelId),
-        ),
+      capabilitiesExplicit: !!model && rowOverridesCatalog(model, catalogEntry(model.modelId)),
       inputText: model?.input?.includes("text") !== false,
       inputImage: model?.input?.includes("image") ?? false,
       contextWindow: model?.contextWindow?.toString() ?? "",
@@ -235,7 +246,12 @@ function ModelForm({
   // state their own waiting or empty inside it. Discovery has to be asked for.
   const listing =
     endpointReady && !model && mode === "list" && (source !== "discover" || allRows.length > 0);
-  /** oauth2 has no manual answer: the seed gate refuses an unserved id. */
+  /**
+   * oauth2 has no typed-in answer. Not because the server refuses one —
+   * `POST /api/models` has no served-id gate, that one is on `/seed` — but
+   * because a subscription only answers for what its plan serves: an id the
+   * plan does not carry saves fine and then fails every run it is picked for.
+   */
   const offersManual = !isOauth;
 
   useEffect(() => {
@@ -252,6 +268,9 @@ function ModelForm({
   const resetModelStep = () => {
     setValue("label", "");
     setValue("modelId", "");
+    // The id it complained about is gone with the step; leaving the message up
+    // would blame the list the operator is about to be handed.
+    clearErrors("modelId");
     setValue("capabilitiesExplicit", false);
     setValue("inputText", true);
     setValue("inputImage", false);
@@ -259,7 +278,7 @@ function ModelForm({
     setValue("maxTokens", "");
     setValue("reasoning", false);
     setModelMode(null);
-    search.setSearch("");
+    search.reset();
     dropListing();
   };
 
@@ -325,13 +344,12 @@ function ModelForm({
     dropListing();
     discoverModels.mutate(
       {
-        body: selectedCredential
-          ? { credential_id: selectedCredential.id }
-          : {
-              provider_id: selectedProvider.providerId,
-              api_key: inlineApiKey.trim(),
-              ...(overridable ? { base_url_override: baseUrl.trim() } : {}),
-            },
+        body: buildDiscoverBody({
+          credentialId: selectedCredential?.id ?? null,
+          provider: selectedProvider,
+          inlineApiKey,
+          baseUrl,
+        }),
       },
       {
         onSuccess: (data) => setDiscovery({ key, outcome: data.outcome, models: data.models }),
@@ -374,12 +392,18 @@ function ModelForm({
       selectedCredentialId: selectedCredential?.id ?? null,
       capabilities: capabilitiesExplicit ? "explicit" : "auto",
       isEdit: !!model,
+      catalogEntry: catalogEntry(data.modelId.trim()),
     });
     if (!result.ok) {
       setError(result.field, { message: t(result.messageKey) });
       return;
     }
-    onSubmit(result.data);
+    // A refused save leaves the dialog open on the values that caused it, so
+    // it has to say so: the host closes on success and reports nothing here.
+    const outcome = await onSubmit(result.data);
+    if (outcome && outcome.failedModelIds.length > 0) {
+      setError("modelId", { message: t("models.form.saveFailed") });
+    }
   });
 
   // Creating, an empty name lets the server derive one. Editing, PUT reads an
@@ -460,19 +484,33 @@ function ModelForm({
             onSelectionChange={handleSelectionChange}
             search={search.search}
             onSearchChange={search.setSearch}
-            isLoading={source === "search" ? search.isLoading : isOauth && served.modelIds === null}
+            isLoading={
+              source === "search"
+                ? search.isLoading
+                : isOauth && served.modelIds === null && !served.failed
+            }
             loadingText={
               source === "search"
                 ? t("models.form.modelSearchLoading")
                 : t("models.form.detectingModels")
             }
+            // A refusal is not an empty plan: saying "this connection serves
+            // nothing" would send the operator to check a subscription that is
+            // fine, when the call simply never landed.
             emptyText={
-              isOauth && !search.search.trim()
-                ? t("models.form.noModelsDetected")
-                : t("models.form.modelSearchEmpty")
+              isOauth && served.failed
+                ? t("models.form.discoverRequestFailed")
+                : isOauth && !search.search.trim()
+                  ? t("models.form.noModelsDetected")
+                  : t("models.form.modelSearchEmpty")
             }
             grouped={source === "catalog"}
           />
+          {isOauth && served.failed && (
+            <Button type="button" variant="outline" onClick={served.retry}>
+              {t("models.form.discoverButton")}
+            </Button>
+          )}
           {modelIdError}
           {failedModelIds.length > 0 && (
             <div className="text-destructive text-sm">

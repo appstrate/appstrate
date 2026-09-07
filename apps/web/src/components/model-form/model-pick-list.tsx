@@ -86,8 +86,10 @@ export function ModelPickList({
   grouped?: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  // The index is the row's place in the whole list, not in its group, so an id
-  // stays stable when a search or a grouping moves it.
+  // The index is the row's place in `rows`, not in its group, so the grouping
+  // below cannot renumber it. A search does: `rows` arrives already filtered,
+  // so `mdl-pick-N` names the Nth row currently shown and nothing more — a
+  // selector written against it holds only while the box is untouched.
   const indexed = rows.map((row, index) => ({ row, index }));
   const featured = grouped ? indexed.filter((r) => r.row.featured) : [];
   const rest = grouped ? indexed.filter((r) => !r.row.featured) : indexed;

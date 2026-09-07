@@ -5,8 +5,11 @@
  *
  * How much of a row ships is decided by the listing it came from, and by one
  * question: can the server resolve the value itself on read?
- *   - `catalog`  — yes, from the vendored catalog by model id. Only the id
- *     ships, so the weekly catalog refresh keeps reaching the row.
+ *   - `catalog`  — only the id ships, and whatever the vendored catalog knows
+ *     about that id answers for the rest, so the weekly catalog refresh keeps
+ *     reaching the row. It may know nothing: a subscription serves ids no
+ *     catalog describes (`idOnlyRow`), and such a row stores nothing and reads
+ *     as "auto" — which is the same answer as not asking, one refresh later.
  *   - `discover` — no catalog stands behind an operator's own endpoint, so
  *     whatever the listing reported is written as an explicit override. What it
  *     did NOT report is left out rather than defaulted: a model nobody
