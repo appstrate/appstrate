@@ -32,7 +32,12 @@ describe("codex module", () => {
 
   it("exposes a non-empty featured catalog", () => {
     const codex = codexModule.modelProviders?.()[0];
-    expect(codex?.featuredModels).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+    expect(codex?.featuredModels).toEqual([
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ]);
   });
 });
 
