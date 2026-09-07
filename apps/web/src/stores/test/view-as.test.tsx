@@ -16,6 +16,8 @@ import { afterAll, describe, it, expect, beforeEach, spyOn } from "bun:test";
 // Type-only: erased at compile time, so it does not pull the store in before
 // the fake storage below is installed.
 import type { ViewAsPersona } from "../view-as-store.ts";
+import { QueryClient } from "@tanstack/react-query";
+import type { components } from "../../api/client.ts";
 
 /** Installed before the dynamic imports below: the stores read it at module init. */
 class FakeStorage {
@@ -62,7 +64,9 @@ const {
   STORAGE_KEY,
 } = await import("../view-as-store.ts");
 const { orgStore } = await import("../org-store.ts");
+const { spaceStore } = await import("../space-store.ts");
 const { queryClient } = await import("../../lib/query-client.ts");
+const { $api } = await import("../../api/client.ts");
 const { buildScopingHeaders, withViewAsParam } = await import("../../lib/scoping-headers.ts");
 const { endPreviewIfRefused, isViewAsRefusal, noteViewAsRefusal } =
   await import("../../lib/view-as-refusal.ts");
@@ -323,8 +327,35 @@ describe("leaving on purpose", () => {
   });
 });
 
+type SpaceObject = components["schemas"]["SpaceObject"];
+
+/** A space as `GET /api/spaces` lists it — answered AS the persona once one runs. */
+function listedSpace(
+  overrides: Partial<SpaceObject> & Pick<SpaceObject, "id" | "name">,
+): SpaceObject {
+  return {
+    object: "space",
+    orgId: "org_a",
+    isDefault: false,
+    settings: {},
+    visibility: "open",
+    default_role: "operator",
+    access: "member",
+    role: { kind: "preset", key: "operator", name: "operator" },
+    permissions: [],
+    created_by: null,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
 /** SSR reads Zustand's hydration snapshot, not its live state. */
-function renderBanner(persona: ViewAsPersona | null, orgId: string): string {
+function renderBanner(
+  persona: ViewAsPersona | null,
+  orgId: string,
+  here: { spaceId: string; spaces: SpaceObject[] } = { spaceId: "spc_1", spaces: [] },
+): string {
   const viewAsSnapshot = spyOn(viewAsStore, "getInitialState").mockReturnValue({
     ...viewAsStore.getInitialState(),
     persona,
@@ -333,11 +364,21 @@ function renderBanner(persona: ViewAsPersona | null, orgId: string): string {
     ...orgStore.getInitialState(),
     id: orgId,
   });
+  const spaceSnapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
+    ...spaceStore.getInitialState(),
+    id: here.spaceId,
+  });
+  const client = new QueryClient();
+  client.setQueryData(
+    $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": orgId } } }).queryKey,
+    { object: "list", data: here.spaces, hasMore: false },
+  );
   try {
-    return render(<ViewAsBanner />);
+    return render(<ViewAsBanner />, { queryClient: client });
   } finally {
     viewAsSnapshot.mockRestore();
     orgSnapshot.mockRestore();
+    spaceSnapshot.mockRestore();
   }
 }
 
@@ -355,6 +396,35 @@ describe("banner", () => {
     const html = renderBanner({ orgId: "org_a", orgRole: "guest", space: null }, "org_a");
     expect(html).toContain("Invité");
     expect(html).not.toContain("Marketing");
+  });
+
+  it("names the role the persona holds in another open space, when the user is there", () => {
+    const spaces = [
+      listedSpace({
+        id: "spc_1",
+        name: "Marketing",
+        role: { kind: "preset", key: "viewer", name: "viewer" },
+      }),
+      listedSpace({ id: "spc_2", name: "Ventes" }),
+    ];
+    const elsewhere = renderBanner(PERSONA, "org_a", { spaceId: "spc_2", spaces });
+    expect(elsewhere).toContain("Lecteur");
+    expect(elsewhere).toContain("Marketing");
+    expect(elsewhere).toContain("Ventes");
+    expect(elsewhere).toContain("Opérateur");
+    expect(elsewhere).toContain("espace ouvert");
+
+    // In the persona's own space the assignment already says it all.
+    const home = renderBanner(PERSONA, "org_a", { spaceId: "spc_1", spaces });
+    expect(home).not.toContain("espace ouvert");
+    expect(home).not.toContain("Opérateur");
+  });
+
+  it("says nothing about a space the persona cannot enter", () => {
+    const closed = listedSpace({ id: "spc_3", name: "Direction", access: "none", role: null });
+    const html = renderBanner(PERSONA, "org_a", { spaceId: "spc_3", spaces: [closed] });
+    expect(html).toContain("Lecteur");
+    expect(html).not.toContain("Direction");
   });
 
   it("renders nothing outside the previewed organization", () => {

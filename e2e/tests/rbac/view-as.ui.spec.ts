@@ -21,6 +21,7 @@ import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 /** The key `apps/web/src/stores/view-as-store.ts` persists the persona under. */
 const STORAGE_KEY = "appstrate_view_as";
 import { createAgent, createSpace } from "../../helpers/seed.ts";
+import { Sidebar } from "../../pages/sidebar.ts";
 
 /** The shape `stores/view-as-store.ts` persists, under its own key. */
 interface Persona {
@@ -51,7 +52,12 @@ test.describe("View as role", () => {
     await createAgent(apiClient, scope, agentName);
     const agentUrl = `/agents/${scope}/${agentName}`;
 
+    // Start in ANOTHER open space: entering a space-scoped preview has to land
+    // where the persona's role applies, not leave the user where they were.
+    const elsewhere = await createSpace(apiClient, `elsewhere-${Date.now()}`);
     await page.goto("/org-settings/roles");
+    await new Sidebar(page).switchSpace(elsewhere.name);
+
     await page.getByTestId("view-as-button").click();
 
     const dialog = page.getByRole("dialog");
@@ -62,7 +68,9 @@ test.describe("View as role", () => {
     await expect(dialog.getByRole("radio", { name: /^Invité/ })).toBeVisible();
     await expect(dialog.getByRole("radio", { name: /Administrateur/ })).toHaveCount(0);
     // Space defaults to the one the user is in; the role is chosen here.
-    await expect(dialog.locator("#view-as-space")).toContainText("Default");
+    await expect(dialog.locator("#view-as-space")).toContainText(elsewhere.name);
+    await dialog.locator("#view-as-space").click();
+    await page.getByRole("option", { name: "Default", exact: true }).click();
     await dialog.locator("#view-as-space-role").click();
     await page.getByRole("option", { name: /^(Lecteur|Viewer)$/ }).click();
     await expect(dialog.locator("#view-as-space-role")).toContainText("Lecteur");
@@ -71,13 +79,27 @@ test.describe("View as role", () => {
 
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText("Lecteur");
+    // Landed in the persona's space.
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("appstrate_current_space")))
+      .toBe(browserCtx.org.defaultSpaceId);
+    await expect(banner(page)).not.toContainText(/espace ouvert|open space/);
+
     await page.goto(agentUrl);
     await expect(runButton(page)).toHaveCount(0);
+
+    // Elsewhere the persona is an implicit member of an open space with its
+    // default role, and the banner says so for the space being looked at.
+    await new Sidebar(page).switchSpace(elsewhere.name);
+    await expect(banner(page)).toContainText(elsewhere.name);
+    await expect(banner(page)).toContainText(/Opérateur|Operator/);
+    await expect(banner(page)).toContainText(/espace ouvert|open space/);
 
     await banner(page)
       .getByRole("button", { name: /^(Quitter|Exit)$/ })
       .click();
     await expect(banner(page)).toHaveCount(0);
+    await page.goto(agentUrl);
     await expect(runButton(page).first()).toBeVisible();
   });
 

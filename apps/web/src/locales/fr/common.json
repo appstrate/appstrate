@@ -108,6 +108,7 @@
   "access.deniedHint": "Demandez à un administrateur de l'organisation de vous accorder les droits nécessaires.",
   "viewAs.banner": "Vous voyez l'organisation en tant que <b>{{role}}</b>",
   "viewAs.bannerSpace": "Vous voyez l'organisation en tant que <b>{{role}}</b>, <b>{{spaceRole}}</b> dans <b>{{space}}</b>",
+  "viewAs.bannerHere": "· dans <b>{{space}}</b> : <b>{{role}}</b> (espace ouvert)",
   "viewAs.exit": "Quitter",
   "viewAs.stopped.invalid_view_as": "Prévisualisation arrêtée : la prévisualisation enregistrée n'est plus lisible.",
   "viewAs.stopped.view_as_unsupported": "Prévisualisation arrêtée : cette session ne peut pas prévisualiser de rôle.",

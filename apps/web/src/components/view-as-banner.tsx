@@ -13,7 +13,10 @@ import {
   useViewAsStopped,
 } from "../stores/view-as-store";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { roleI18nKey } from "../hooks/use-permissions";
+import { spaceRoleLabel } from "../hooks/use-roles";
+import { useSpaces } from "../hooks/use-spaces";
 
 /**
  * The preview's only visible state, and its only exit.
@@ -24,14 +27,21 @@ import { roleI18nKey } from "../hooks/use-permissions";
  * hiding it would leave an admin acting under a downgraded authority with no
  * sign of it.
  *
- * Both labels of the space half were captured when the preview was entered, so
- * this reads nothing the persona might not be allowed to read.
+ * Both labels of the space half were captured when the preview was entered.
+ * The one thing read live is the space listing, which is answered AS the
+ * persona: outside the persona's own space it is only its org role — an
+ * implicit member of open spaces with their default role — and the banner
+ * names that role for the space the user is looking at, so "Lecteur dans
+ * Default" over a page answered for Marketing is not read as a preview that
+ * does not work.
  */
 export function ViewAsBanner() {
   const { t } = useTranslation(["common", "settings"]);
   const persona = useViewAs();
   const stopped = useViewAsStopped();
   const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
+  const { data: spaces } = useSpaces();
 
   // A persona the server refused was dropped before this frame existed — the
   // API client cannot toast it itself, because the refusal typically lands on
@@ -53,6 +63,11 @@ export function ViewAsBanner() {
   if (!persona || persona.orgId !== orgId) return null;
 
   const key = persona.space ? "viewAs.bannerSpace" : "viewAs.banner";
+  const here =
+    persona.space && currentSpaceId !== persona.space.spaceId
+      ? spaces?.find((s) => s.id === currentSpaceId)
+      : undefined;
+  const hereRole = here?.access === "member" ? spaceRoleLabel(here.role, t) : null;
 
   return (
     <Alert
@@ -71,6 +86,17 @@ export function ViewAsBanner() {
           }}
           components={{ b: <strong className="font-semibold" /> }}
         />
+        {here && hereRole && (
+          <>
+            {" "}
+            <Trans
+              t={t}
+              i18nKey="viewAs.bannerHere"
+              values={{ space: here.name, role: hereRole }}
+              components={{ b: <strong className="font-semibold" /> }}
+            />
+          </>
+        )}
       </span>
       <Button variant="outline" size="sm" onClick={() => exitViewAs()}>
         {t("viewAs.exit")}

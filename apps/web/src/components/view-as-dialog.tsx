@@ -18,7 +18,7 @@ import {
 import { Modal } from "./modal";
 import { OrgRoleOptions } from "./org-role-options";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
 import { useSpaceRoleOptions } from "../hooks/use-roles";
 import { enterViewAs, toViewAsPersona } from "../stores/view-as-store";
@@ -50,6 +50,7 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
+  const { switchSpace } = useSpaceSwitcher();
   const { data: spaces } = useSpaces();
 
   const initialSpaceId = spaceId ?? currentSpaceId ?? NO_SPACE;
@@ -77,6 +78,11 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
     // Replaces any preview already running: the store commits one persona and
     // resets the cache either way.
     enterViewAs(toViewAsPersona(orgId, orgRole, space, roleOption));
+    // Land where the persona's role applies. Elsewhere the persona is only its
+    // org role — an implicit member of open spaces — and a banner naming
+    // "Lecteur dans Default" over a page answered for another space reads as
+    // a preview that does not work.
+    if (space && roleOption) switchSpace(space.id);
     onClose();
   };
 

@@ -108,6 +108,7 @@
   "access.deniedHint": "Ask an organization administrator to grant you the necessary rights.",
   "viewAs.banner": "You are viewing the organization as <b>{{role}}</b>",
   "viewAs.bannerSpace": "You are viewing the organization as <b>{{role}}</b>, <b>{{spaceRole}}</b> in <b>{{space}}</b>",
+  "viewAs.bannerHere": "· in <b>{{space}}</b>: <b>{{role}}</b> (open space)",
   "viewAs.exit": "Exit",
   "viewAs.stopped.invalid_view_as": "Preview stopped: the saved preview can no longer be read.",
   "viewAs.stopped.view_as_unsupported": "Preview stopped: this session cannot preview a role.",

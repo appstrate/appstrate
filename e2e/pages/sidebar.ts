@@ -38,11 +38,13 @@ export class Sidebar {
   /** Open the space submenu and click a space by name. */
   async switchSpace(spaceName: string) {
     await this.openSwitcher();
-    // Hover the space submenu trigger to open the sub-content
-    await this.spaceSubmenuTrigger.hover();
-    await expect(this.page.getByText(spaceName)).toBeVisible();
-    await this.page.getByText(spaceName).click();
-    // Wait for the space switch to take effect
-    await this.page.waitForLoadState("domcontentloaded");
+    // Click, not hover: a pointer already resting on the trigger when the menu
+    // opens fires no `pointerenter`, and the sub-content never appears.
+    await this.spaceSubmenuTrigger.click();
+    // The item's accessible name is the space name followed by the role label.
+    const item = this.page.getByRole("menuitem", { name: spaceName });
+    await expect(item).toBeVisible();
+    await item.click();
+    await expect(this.dropdownMenu).toHaveCount(0);
   }
 }
