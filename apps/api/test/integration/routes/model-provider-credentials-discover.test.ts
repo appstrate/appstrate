@@ -53,9 +53,11 @@ function registerPinnedUrlProvider(): void {
 }
 
 /**
- * Stub endpoint. `/v1/models` answers a two-model OpenAI-shaped listing to
- * `Bearer good-key` and 401 to anything else; `/bad/models` answers a body
- * that is JSON but carries no listing.
+ * Stub endpoint, routed by the credential header each wire format sends —
+ * `x-api-key` is the Anthropic listing, `Authorization: Bearer` the OpenAI
+ * one, so both shapes answer on the one `/v1/models` path the platform builds
+ * for them. A wrong key is a 401; `/bad/models` answers a body that is JSON
+ * but carries no listing.
  */
 const stub = Bun.serve({
   hostname: "127.0.0.1",
@@ -66,6 +68,13 @@ const stub = Bun.serve({
       return Response.json({ nope: true });
     }
     if (pathname === "/v1/models") {
+      const anthropicKey = req.headers.get("x-api-key");
+      if (anthropicKey !== null) {
+        if (anthropicKey !== "good-key") {
+          return Response.json({ error: "unauthorized" }, { status: 401 });
+        }
+        return Response.json({ data: [{ id: "claude-x", display_name: "Claude X" }] });
+      }
       if (req.headers.get("authorization") !== "Bearer good-key") {
         return Response.json({ error: "unauthorized" }, { status: 401 });
       }
@@ -77,6 +86,9 @@ const stub = Bun.serve({
 
 const GOOD_BASE_URL = `http://127.0.0.1:${stub.port}/v1`;
 const BAD_BASE_URL = `http://127.0.0.1:${stub.port}/bad`;
+// `anthropic-messages` appends `/v1/models` itself, so its base URL stops at
+// the host.
+const ANTHROPIC_BASE_URL = `http://127.0.0.1:${stub.port}`;
 
 interface DiscoverModel {
   id: string;
@@ -166,6 +178,19 @@ describe("POST /api/model-provider-credentials/discover", () => {
     // A price carried over from the vendor's catalog would land in the usage
     // ledger as fact — the endpoint must never emit one.
     expect(JSON.stringify(body)).not.toContain("cost");
+  });
+
+  it("enumerates an anthropic-messages endpoint over the Anthropic listing shape", async () => {
+    const res = await discover(ctx, {
+      provider_id: "anthropic-compatible",
+      api_key: "good-key",
+      base_url_override: ANTHROPIC_BASE_URL,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.outcome).toBe("ok");
+    expect(body.models.map((m) => m.id)).toEqual(["claude-x"]);
   });
 
   it("reports auth_failed with no models when the endpoint rejects the key", async () => {

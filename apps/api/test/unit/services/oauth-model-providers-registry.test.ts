@@ -2,12 +2,13 @@
 
 /**
  * Cross-module composition contract for the runtime model-provider
- * registry. The three canonical core-providers — openai, anthropic,
- * openai-compatible — are contributed by the `core-providers` module and
- * aggregated into the runtime registry at boot. OAuth-flavoured providers
- * (workspace modules under `packages/module-*`) contribute their own
- * definitions on top via the same path; their identity / wire-shape
- * specifics are covered in each module's own unit suite.
+ * registry. The canonical core-providers — the named presets plus the
+ * custom-endpoint escape hatches — are contributed by the
+ * `core-providers` module and aggregated into the runtime registry at
+ * boot. OAuth-flavoured providers (workspace modules under
+ * `packages/module-*`) contribute their own definitions on top via the
+ * same path; their identity / wire-shape specifics are covered in each
+ * module's own unit suite.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -19,6 +20,7 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { resolveFeaturedModels } from "../../../src/services/model-providers/model-selection.ts";
+import { buildModelTestRequest } from "../../../src/services/org-models.ts";
 import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
@@ -36,6 +38,7 @@ afterAll(() => {
 
 const CORE_PROVIDER_IDS = [
   "anthropic",
+  "anthropic-compatible",
   "cerebras",
   "deepseek",
   "fireworks-ai",
@@ -86,11 +89,26 @@ describe("runtime registry composition", () => {
     }
   });
 
-  it("openai-compatible is the only entry where baseUrlOverridable is true", () => {
-    const overridable = listModelProviders()
-      .filter((p) => p.baseUrlOverridable)
-      .map((p) => p.providerId);
-    expect(overridable).toEqual(["openai-compatible"]);
+  it("every custom-endpoint entry is an api-key endpoint the model form can enumerate", () => {
+    // The contract a `baseUrlOverridable` entry signs up to: the credential
+    // carries the base URL, the SPA lists what that URL serves instead of a
+    // featured catalog, and the listing request is a plain `/models` GET.
+    // Asserted over whatever the module contributes, so a third wire format
+    // needs a definition here and no test edit.
+    const custom = listModelProviders().filter((p) => p.baseUrlOverridable);
+    expect(custom.length).toBeGreaterThan(0);
+    for (const cfg of custom) {
+      expect(cfg.authMode).toBe("api_key");
+      expect(cfg.featuredModels).toEqual([]);
+      expect(() => new URL(cfg.defaultBaseUrl)).not.toThrow();
+      const { url } = buildModelTestRequest({
+        apiShape: cfg.apiShape,
+        baseUrl: cfg.defaultBaseUrl,
+        apiKey: "k",
+        providerId: cfg.providerId,
+      });
+      expect(url.endsWith("/models")).toBe(true);
+    }
   });
 
   it("model ids are unique within each provider", () => {

@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`anthropic-compatible` model provider** — a second custom-endpoint entry in
+  `core-providers`, alongside `openai-compatible`: one escape hatch per wire
+  format. It points a credential's own `base_url_override` at any self-hosted or
+  third-party endpoint speaking the Anthropic Messages API (a LiteLLM proxy, a
+  vendor publishing an Anthropic-compatible endpoint), enumerated through
+  `POST /api/model-provider-credentials/discover` like its OpenAI counterpart.
+
 - **`POST /api/model-provider-credentials/discover`** — asks an endpoint once
   for its model listing (`GET <base_url>/models`) and returns the ids it serves.
   Accepts either an existing `credential_id` or an inline

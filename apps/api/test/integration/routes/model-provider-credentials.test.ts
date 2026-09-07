@@ -151,6 +151,28 @@ describe("Model Provider Keys API", () => {
       }
     });
 
+    it("lists the anthropic-messages custom endpoint with no featured models", async () => {
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          providerId: string;
+          apiShape: string;
+          baseUrlOverridable: boolean;
+          models: unknown[];
+        }[];
+      };
+      const custom = body.data.find((p) => p.providerId === "anthropic-compatible");
+      expect(custom).toBeDefined();
+      expect(custom!.baseUrlOverridable).toBe(true);
+      expect(custom!.apiShape).toBe("anthropic-messages");
+      // No catalog and no featured list: the form enumerates the endpoint
+      // itself via /discover instead of offering a picker.
+      expect(custom!.models).toEqual([]);
+    });
+
     it("projects only requested fields and drops the heavy models catalog", async () => {
       const res = await app.request(
         "/api/model-provider-credentials/registry?fields=providerId,authMode",
