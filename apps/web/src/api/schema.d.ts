@@ -2791,7 +2791,7 @@ export interface paths {
         put?: never;
         /**
          * Import a package from ZIP
-         * @description Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.
+         * @description Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite. With ?draft=true the upload becomes the package's draft (content and files alike) and no version is created; publish it later with the versions endpoint.
          */
         post: operations["importPackage"];
         delete?: never;
@@ -14835,6 +14835,10 @@ export interface operations {
             query?: {
                 /** @description Skip draft overwrite protection. Set to true to overwrite a package with unpublished changes. */
                 force?: boolean;
+                /** @description Write the upload as the package's draft — SKILL.md, manifest and every other file — without creating a version. The draft overwrite protection still applies. The response carries `draft: true` and no `version`. */
+                draft?: boolean;
+                /** @description Draft imports only: the `lock_version` this client received from its previous draft import (or from the package detail). When it matches the package's current lock, the draft is exactly what this client last wrote and the overwrite protection is satisfied without `force`; when it does not, the import answers `409 draft_overwrite` because the draft was edited elsewhere. */
+                lock_version?: number;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -14877,8 +14881,14 @@ export interface operations {
                         packageId: string;
                         /** @description Package type (agent/skill/mcp-server/integration) */
                         type: string;
-                        /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
+                        /** @description Imported manifest version (semver). Omitted when the manifest carries no version field, and always omitted for a draft import. */
                         version?: string;
+                        /** @description Present and true when the import wrote the draft only (?draft=true). */
+                        draft?: boolean;
+                        /** @description Draft import only: the version the draft manifest declares, i.e. what a later publish would create. */
+                        draftVersion?: string;
+                        /** @description Draft import only: the package's optimistic lock after this write. Pass it back as `?lock_version=` on the next draft import to re-push without `force`. */
+                        lock_version?: number | null;
                         /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
@@ -15019,8 +15029,12 @@ export interface operations {
                         packageId: string;
                         /** @description Package type (agent/skill/mcp-server/integration) */
                         type: string;
-                        /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
+                        /** @description Imported manifest version (semver). Omitted when the manifest carries no version field, and always omitted for a draft import. */
                         version?: string;
+                        /** @description Present and true when the import wrote the draft only (?draft=true). */
+                        draft?: boolean;
+                        /** @description Draft import only: the version the draft manifest declares, i.e. what a later publish would create. */
+                        draftVersion?: string;
                         /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
