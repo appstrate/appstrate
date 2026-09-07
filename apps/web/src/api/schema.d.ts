@@ -5013,7 +5013,7 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
+            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
             available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
@@ -12558,7 +12558,7 @@ export interface operations {
                          * @enum {string}
                          */
                         outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
-                        /** @description Number of discovery candidates considered. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none. */
+                        /** @description Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that. */
                         candidate_count: number;
                         available_model_ids: string[] | null;
                     };
