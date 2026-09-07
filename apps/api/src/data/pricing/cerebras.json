@@ -1,4 +1,33 @@
 {
+  "gemma-4-31b": {
+    "label": "Gemma 4 31b",
+    "contextWindow": 131072,
+    "maxTokens": 40960,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.99,
+      "output": 1.49
+    }
+  },
   "gpt-oss-120b": {
     "label": "Gpt Oss 120b",
     "contextWindow": 131072,
