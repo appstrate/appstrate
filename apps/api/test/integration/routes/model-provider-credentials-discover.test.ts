@@ -75,6 +75,14 @@ const stub = Bun.serve({
         }
         return Response.json({ data: [{ id: "claude-x", display_name: "Claude X" }] });
       }
+      // A server that publishes per-entry capability fields (vLLM's
+      // `max_model_len`), routed by its own key so the catalog-only case above
+      // stays untouched.
+      if (req.headers.get("authorization") === "Bearer hints-key") {
+        return Response.json({
+          data: [{ id: "local-llm", max_model_len: 32768 }, { id: "gpt-4o" }],
+        });
+      }
       if (req.headers.get("authorization") !== "Bearer good-key") {
         return Response.json({ error: "unauthorized" }, { status: 401 });
       }
@@ -97,6 +105,7 @@ interface DiscoverModel {
   max_tokens: number | null;
   input: string[] | null;
   reasoning: boolean | null;
+  source: "endpoint" | "catalog" | null;
 }
 
 interface DiscoverBody {
@@ -165,7 +174,10 @@ describe("POST /api/model-provider-credentials/discover", () => {
     expect(known.context_window).toBeGreaterThan(0);
     expect(known.input).toContain("text");
 
-    // `qwen3:8b` is in no catalog — described as unknown, not guessed.
+    expect(known.source).toBe("catalog");
+
+    // `qwen3:8b` is in no catalog and the endpoint published nothing about it
+    // — described as unknown, not guessed.
     expect(body.models[1]).toEqual({
       id: "qwen3:8b",
       label: null,
@@ -173,11 +185,39 @@ describe("POST /api/model-provider-credentials/discover", () => {
       max_tokens: null,
       input: null,
       reasoning: null,
+      source: null,
     });
 
     // A price carried over from the vendor's catalog would land in the usage
     // ledger as fact — the endpoint must never emit one.
     expect(JSON.stringify(body)).not.toContain("cost");
+  });
+
+  it("reads the capability fields the listing publishes, per model", async () => {
+    const res = await discover(ctx, {
+      provider_id: "openai-compatible",
+      api_key: "hints-key",
+      base_url_override: GOOD_BASE_URL,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.outcome).toBe("ok");
+
+    // In no catalog, yet described — the endpoint published its own context
+    // window and nothing else was requested to learn it.
+    const local = body.models[0]!;
+    expect(local.id).toBe("local-llm");
+    expect(local.context_window).toBe(32768);
+    expect(local.source).toBe("endpoint");
+    expect(local.label).toBeNull();
+
+    // The same listing describes nothing about `gpt-4o`, so the catalog still
+    // does — the hint path must not blank out what was already known.
+    const known = body.models[1]!;
+    expect(known.id).toBe("gpt-4o");
+    expect(known.context_window).toBeGreaterThan(0);
+    expect(known.source).toBe("catalog");
   });
 
   it("enumerates an anthropic-messages endpoint over the Anthropic listing shape", async () => {

@@ -1072,7 +1072,7 @@ type ModelListingFetchResult =
 /**
  * Issue the guarded `GET <baseUrl>/models` request. Shared by
  * {@link testModelConfig}, which reads only the status, and
- * `listServedModelIds` (`model-providers/model-listing.ts`), which parses the
+ * `listServedModels` (`model-providers/model-listing.ts`), which parses the
  * body — so the SSRF pre-flight, the pinned transport and the pre-response
  * failure mapping exist once.
  */

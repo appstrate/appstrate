@@ -17,6 +17,7 @@ import { isSystemModelProviderCredential } from "../services/model-registry.ts";
 import {
   createApiKeyCredential,
   dedupeCredentialLabel,
+  deriveCredentialLabel,
   deleteModelProviderCredential,
   getOrgModelProviderCredential,
   listOrgModelProviderCredentials,
@@ -26,7 +27,7 @@ import {
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
-import { listServedModelIds } from "../services/model-providers/model-listing.ts";
+import { listServedModels } from "../services/model-providers/model-listing.ts";
 import { describeServedModel } from "../services/model-providers/model-metadata.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -49,13 +50,15 @@ export const createSchema = z
   .object({
     /**
      * Optional. When omitted, the server derives the label from the provider's
-     * `displayName`. Either way it is deduped against existing org credentials
-     * (suffixed ` (2)`, ` (3)`, … on collision). See {@link dedupeCredentialLabel}.
+     * `displayName`, prefixed with the endpoint host when the credential carries
+     * a `baseUrlOverride` (see {@link deriveCredentialLabel}). Either way it is
+     * deduped against existing org credentials (suffixed ` (2)`, ` (3)`, … on
+     * collision). See {@link dedupeCredentialLabel}.
      */
     label: z.string().min(1).optional(),
     providerId: z.string().min(1, "providerId is required"),
     apiKey: z.string().min(1, "apiKey is required"),
-    /** Required only for providers with `baseUrlOverridable: true` (e.g. `openai-compatible`). */
+    /** Required only for providers with `baseUrlOverridable: true` (the custom-endpoint entries). */
     baseUrlOverride: z.url({ error: "baseUrlOverride must be a valid URL" }).optional().nullable(),
   })
   .strict();
@@ -214,8 +217,8 @@ export const testInlineSchema = z
  *     credential's discovered ids) — the registry just supplies the metadata, so it
  *     carries the full catalog and stays a pure, org-independent function.
  *   - **No catalog** (`featuredModels` empty — openrouter live-search,
- *     openai-compatible Custom): empty list. The picker falls back to
- *     "Custom" or its own live-search UI.
+ *     the base-URL-overridable custom endpoints): empty list. The picker
+ *     falls back to a typed model id or its own live-search UI.
  */
 function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
   const catalogKey = p.catalogProviderId ?? p.providerId;
@@ -307,7 +310,10 @@ export function createModelProviderCredentialsRouter() {
 
     // Always dedupe — a user-supplied label is suffixed on collision too, so
     // labels stay unique within the org (same scheme as org models).
-    const label = await dedupeCredentialLabel(orgId, data.label?.trim() || cfg.displayName);
+    const label = await dedupeCredentialLabel(
+      orgId,
+      data.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
+    );
 
     try {
       const id = await createApiKeyCredential({
@@ -373,13 +379,14 @@ export function createModelProviderCredentialsRouter() {
   );
 
   // POST /api/model-provider-credentials/discover — enumerate what an endpoint
-  // actually serves, and prefill what the catalog knows about each id, BEFORE a
-  // credential exists (the operator types URL + key inline and saves both at
-  // once). `refresh-models` cannot answer this: it needs a persisted
-  // credential, it persists its verdict, and it intersects the listing with the
-  // provider's discovery candidates — of which `openai-compatible` declares
-  // none. This endpoint persists NOTHING and never echoes the key. Same
-  // rate limit and permission as `refresh-models`: it spends the user's key.
+  // actually serves, and describe each id from what its own listing published
+  // and what the catalog knows about it, BEFORE a credential exists (the
+  // operator types URL + key inline and saves both at once). `refresh-models`
+  // cannot answer this: it needs a persisted credential, it persists its
+  // verdict, and it intersects the listing with the provider's discovery
+  // candidates — of which a custom endpoint declares none. This endpoint
+  // persists NOTHING and never echoes the key. Same rate limit and permission
+  // as `refresh-models`: it spends the user's key.
   router.post(
     "/discover",
     rateLimit(6),
@@ -388,7 +395,7 @@ export function createModelProviderCredentialsRouter() {
       const orgId = c.get("orgId");
       const body = await readJsonBody(c, discoverSchema);
       const target = await resolveDiscoverTarget(orgId, body);
-      const listing = await listServedModelIds(target);
+      const listing = await listServedModels(target);
       if (!listing.ok) {
         return c.json({
           outcome: listing.error.toLowerCase(),
@@ -398,8 +405,8 @@ export function createModelProviderCredentialsRouter() {
       }
       return c.json({
         outcome: "ok",
-        models: listing.modelIds.map((id) => {
-          const described = describeServedModel(target.providerId, id);
+        models: listing.models.map(({ id, hints }) => {
+          const described = describeServedModel(target.providerId, id, hints);
           return {
             id,
             label: described.label,
@@ -407,6 +414,7 @@ export function createModelProviderCredentialsRouter() {
             max_tokens: described.maxTokens,
             input: described.input,
             reasoning: described.reasoning,
+            source: described.source,
           };
         }),
         message: null,

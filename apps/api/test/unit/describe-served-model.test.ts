@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for `describeServedModel` — the catalog prefill applied to the
- * bare ids a custom endpoint enumerates.
+ * Unit tests for `describeServedModel` — how a bare id a custom endpoint
+ * enumerates gets described, from the hints its listing published and from the
+ * vendored catalog.
  *
  * Three lookup phases, in order: the provider's own catalog
  * (`catalogProviderId ?? providerId`), every catalog by exact id, every
@@ -11,8 +12,9 @@
  * publish `gpt-4o`, and the provider's own catalog is the one that describes
  * what it actually serves.
  *
- * Cost is never part of the answer: an endpoint serving a vendor's model id is
- * not billed at the vendor's rate.
+ * A hint wins over the catalog for its own field and sets `source: "endpoint"`;
+ * `label` is catalog-only. Cost is never part of the answer: an endpoint
+ * serving a vendor's model id is not billed at the vendor's rate.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -78,6 +80,7 @@ describe("describeServedModel", () => {
       maxTokens: 100,
       input: ["text", "image"],
       reasoning: true,
+      source: "catalog",
     });
   });
 
@@ -88,6 +91,7 @@ describe("describeServedModel", () => {
       maxTokens: 200,
       input: ["text"],
       reasoning: false,
+      source: "catalog",
     });
   });
 
@@ -104,6 +108,7 @@ describe("describeServedModel", () => {
       maxTokens: null,
       input: null,
       reasoning: null,
+      source: null,
     });
   });
 
@@ -129,6 +134,37 @@ describe("describeServedModel", () => {
       maxTokens: entry!.maxTokens,
       input: entry!.capabilities.filter((c) => c === "text" || c === "image"),
       reasoning: entry!.capabilities.includes("reasoning"),
+      source: "catalog",
     });
+  });
+
+  it("lets a hint override the catalog field by field, keeping the catalog label", () => {
+    expect(describeServedModel(PROVIDER, "shared-id", { contextWindow: 262144 })).toEqual({
+      label: "Own Catalog Model",
+      // The endpoint knows what it was actually started with; the catalog
+      // describes the vendor's hosted variant of the same id.
+      contextWindow: 262144,
+      maxTokens: 100,
+      input: ["text", "image"],
+      reasoning: true,
+      source: "endpoint",
+    });
+  });
+
+  it("describes an id no catalog knows from its hints alone", () => {
+    expect(
+      describeServedModel(PROVIDER, "qwen3:8b", { contextWindow: 40960, input: ["text"] }),
+    ).toEqual({
+      label: null,
+      contextWindow: 40960,
+      maxTokens: null,
+      input: ["text"],
+      reasoning: null,
+      source: "endpoint",
+    });
+  });
+
+  it("stays on the catalog when the listing published no hint", () => {
+    expect(describeServedModel(PROVIDER, "shared-id", {}).source).toBe("catalog");
   });
 });

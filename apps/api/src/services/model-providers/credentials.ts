@@ -464,6 +464,23 @@ export async function dedupeCredentialLabel(orgId: string, base: string): Promis
 }
 
 /**
+ * Default label for a new credential. A credential pointing at its own
+ * endpoint is named after that endpoint's host — `localhost:11434 ·
+ * OpenAI-compatible (custom)` — because every custom endpoint behind one
+ * provider entry would otherwise share the provider's display name and be told
+ * apart only by the ` (2)` suffix {@link dedupeCredentialLabel} appends. The
+ * result is a base label: run it through that dedupe like any other.
+ */
+export function deriveCredentialLabel(
+  cfg: Pick<ModelProviderDefinition, "displayName" | "baseUrlOverridable">,
+  baseUrlOverride: string | null | undefined,
+): string {
+  if (!cfg.baseUrlOverridable || !baseUrlOverride) return cfg.displayName;
+  const host = URL.parse(baseUrlOverride)?.host;
+  return host ? `${host} · ${cfg.displayName}` : cfg.displayName;
+}
+
+/**
  * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
  * upstream didn't return (e.g. `email`, `accountId` when not rotated).

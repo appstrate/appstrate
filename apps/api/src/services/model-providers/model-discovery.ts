@@ -19,7 +19,7 @@
  *     Discovery is then a truthful no-op: it reports the current list.
  *
  *   - listing (default, when `modelDiscovery` is omitted — API-key providers)
- *     — ONE `GET <baseUrl>/models` request (`listServedModelIds`,
+ *     — ONE `GET <baseUrl>/models` request (`listServedModels`,
  *     `model-listing.ts`), whose parsed body is intersected with the
  *     provider's discovery candidates (`modelDiscoveryCandidates`, falling
  *     back to `featuredModels`). A candidate the provider does not list is
@@ -51,7 +51,7 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { loadInferenceCredentials } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
 import { resolveCatalogBackedCandidates, resolveDiscoveryCandidates } from "./model-selection.ts";
-import { listServedModelIds, type ListServedModelsResult } from "./model-listing.ts";
+import { listServedModels, type ListServedModelsResult } from "./model-listing.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Pause before the single 429 retry. */
@@ -81,7 +81,7 @@ interface ModelDiscoveryResult {
 }
 
 export interface ModelDiscoveryDeps {
-  /** List what a credential serves — defaults to {@link listServedModelIds}. */
+  /** List what a credential serves — defaults to {@link listServedModels}. */
   listModels: (config: {
     apiShape: string;
     baseUrl: string;
@@ -93,7 +93,7 @@ export interface ModelDiscoveryDeps {
 }
 
 const defaultDeps: ModelDiscoveryDeps = {
-  listModels: listServedModelIds,
+  listModels: listServedModels,
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 };
 
@@ -188,7 +188,7 @@ export async function discoverAvailableModels(
 
   // Declaration order, not response order: the candidate list is the
   // provider's own ranking and the model picker renders it as such.
-  const served = new Set(listing.modelIds);
+  const served = new Set(listing.models.map((m) => m.id));
   const verified = candidates.filter((id) => served.has(id));
 
   if (verified.length === 0) {
@@ -196,7 +196,7 @@ export async function discoverAvailableModels(
       credentialId,
       providerId: creds.providerId,
       candidateCount: candidates.length,
-      servedCount: listing.modelIds.length,
+      servedCount: listing.models.length,
     });
     return { outcome: "nothing_verified", candidateCount: candidates.length };
   }

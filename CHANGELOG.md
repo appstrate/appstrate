@@ -15,6 +15,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   vendor publishing an Anthropic-compatible endpoint), enumerated through
   `POST /api/model-provider-credentials/discover` like its OpenAI counterpart.
 
+- **Endpoint-published model metadata.**
+  `POST /api/model-provider-credentials/discover` now reads the capability
+  fields a listing entry carries — vLLM `max_model_len`, Mistral `capabilities`,
+  OpenRouter `context_length` / `architecture.input_modalities` /
+  `top_provider.max_completion_tokens` / `supported_parameters`, LM Studio
+  `max_context_length` — out of the response already in hand: no second
+  request, and an entry publishing none is unaffected. Such a field wins over
+  the vendored catalog for that field (the endpoint knows the context window it
+  was started with; the catalog describes the vendor's hosted variant of the
+  same id), the catalog fills the rest, and `label` stays catalog-only. Each
+  returned model gains a `source` — `endpoint`, `catalog` or `null` — saying
+  which of the two described it.
+
 - **`POST /api/model-provider-credentials/discover`** — asks an endpoint once
   for its model listing (`GET <base_url>/models`) and returns the ids it serves.
   Accepts either an existing `credential_id` or an inline
@@ -100,6 +113,15 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **A custom-endpoint credential is named after its host.** Creating one
+  through `POST /api/model-provider-credentials` without a `label`, with a
+  `baseUrlOverride` on a `baseUrlOverridable` provider, now defaults to
+  `<host> · <provider display name>`, e.g.
+  `localhost:11434 · OpenAI-compatible (custom)`, instead of the provider's
+  display name alone — which made every endpoint behind one provider entry a
+  ` (2)`, ` (3)` suffix of the same name. Deduplication is unchanged and still
+  applies.
+
 - **The model form asks about an operator's own endpoint once, not once per
   wire format.** The provider picker no longer lists `openai-compatible` and
   `anthropic-compatible` as two entries among the branded providers: every
@@ -110,10 +132,11 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   so the two forms cannot drift. Step 2 opens once the URL parses and a key is
   present, and offers both ways to name a model: "Détecter les modèles" asks
   the endpoint and lets the operator pick from what it serves, "Configurer
-  manuellement" types the id in. The name is now optional on both paths — left
-  empty, the server names the row after the catalog entry or the model id —
-  and the capabilities moved behind an "Avancé" collapsible, unfolded only
-  when a discovered pick just filled them in or the row already carries one.
+  manuellement" types the id in. On creation the name is optional on both
+  paths — left empty, the server names the row after the catalog entry or the
+  model id — and, on the custom-endpoint form, the capabilities sit behind an
+  "Avancé" collapsible, unfolded only when a discovered pick just filled them
+  in or the row already carries one.
 
 - **Model discovery for API-key providers lists the provider's models once
   instead of issuing N identical requests that verified nothing.**

@@ -3,11 +3,14 @@
 /**
  * Served-model metadata — what we know about a model id an endpoint serves.
  *
- * A custom OpenAI-compatible endpoint enumerates bare ids, so the vendored
- * pricing catalog is the only place a label, a context window or a capability
- * set can come from. Lookup order: the provider's own catalog
- * (`catalogProviderId ?? providerId`), then every vendored catalog by exact
- * id, then every catalog by the id with one leading `<vendor>/` segment
+ * Two sources, and the endpoint wins field by field: the hints its own listing
+ * published ({@link ServedModelHints}, read by `model-listing.ts` from the
+ * response already in hand), then the vendored pricing catalog for everything
+ * the hints leave open — which, for a custom endpoint enumerating bare ids, is
+ * usually everything. `label` is catalog-only: a listing entry names a model
+ * for its own API, not for a picker. Catalog lookup order: the provider's own
+ * catalog (`catalogProviderId ?? providerId`), then every vendored catalog by
+ * exact id, then every catalog by the id with one leading `<vendor>/` segment
  * stripped (`openai/gpt-4o` → `gpt-4o`, the shape gateways publish). First hit
  * wins; a miss describes nothing rather than guessing.
  *
@@ -18,13 +21,14 @@
  */
 
 import type { CatalogModelEntry } from "@appstrate/shared-types";
+import type { ServedModelHints } from "./model-listing.ts";
 import { listCatalogProviderIds, lookupCatalogModel } from "../pricing-catalog.ts";
 import { getModelProvider } from "./registry.ts";
 
 /** Catalog capabilities that describe what the model accepts as input. */
 const INPUT_MODALITIES = new Set(["text", "image"]);
 
-/** Everything the catalog can tell us about a served id, minus its price. */
+/** Everything we can tell about a served id, minus its price. */
 interface ServedModelDescription {
   label: string | null;
   contextWindow: number | null;
@@ -32,16 +36,12 @@ interface ServedModelDescription {
   /** Accepted input modalities — the `text`/`image` subset of the capabilities. */
   input: string[] | null;
   reasoning: boolean | null;
-}
-
-function describe(entry: CatalogModelEntry): ServedModelDescription {
-  return {
-    label: entry.label,
-    contextWindow: entry.contextWindow,
-    maxTokens: entry.maxTokens,
-    input: entry.capabilities.filter((c) => INPUT_MODALITIES.has(c)),
-    reasoning: entry.capabilities.includes("reasoning"),
-  };
+  /**
+   * Where the description comes from: `endpoint` when the listing published at
+   * least one field of it, `catalog` when it is a pure catalog hit, `null` when
+   * nothing described the id.
+   */
+  source: "endpoint" | "catalog" | null;
 }
 
 /** Strip one leading `<vendor>/` segment; null when the id carries none. */
@@ -50,25 +50,47 @@ function stripVendorPrefix(modelId: string): string | null {
   return slash > 0 && slash < modelId.length - 1 ? modelId.slice(slash + 1) : null;
 }
 
-/** Describe `modelId` as served by `providerId`, or all-null on a catalog miss. */
-export function describeServedModel(providerId: string, modelId: string): ServedModelDescription {
+/** The catalog entry describing `modelId` as served by `providerId`, if any. */
+function lookupServedEntry(providerId: string, modelId: string): CatalogModelEntry | null {
   const ownCatalog = getModelProvider(providerId)?.catalogProviderId ?? providerId;
   const own = lookupCatalogModel(ownCatalog, modelId);
-  if (own) return describe(own);
+  if (own) return own;
 
   const catalogIds = listCatalogProviderIds();
   for (const catalogId of catalogIds) {
     const entry = lookupCatalogModel(catalogId, modelId);
-    if (entry) return describe(entry);
+    if (entry) return entry;
   }
 
   const stripped = stripVendorPrefix(modelId);
   if (stripped !== null) {
     for (const catalogId of catalogIds) {
       const entry = lookupCatalogModel(catalogId, stripped);
-      if (entry) return describe(entry);
+      if (entry) return entry;
     }
   }
 
-  return { label: null, contextWindow: null, maxTokens: null, input: null, reasoning: null };
+  return null;
+}
+
+/**
+ * Describe `modelId` as served by `providerId`. `hints` — what the endpoint's
+ * own listing published — wins field by field; the catalog fills the rest, and
+ * an id described by neither comes back all-null.
+ */
+export function describeServedModel(
+  providerId: string,
+  modelId: string,
+  hints: ServedModelHints = {},
+): ServedModelDescription {
+  const entry = lookupServedEntry(providerId, modelId);
+  const hinted = Object.values(hints).some((value) => value !== undefined);
+  return {
+    label: entry?.label ?? null,
+    contextWindow: hints.contextWindow ?? entry?.contextWindow ?? null,
+    maxTokens: hints.maxTokens ?? entry?.maxTokens ?? null,
+    input: hints.input ?? entry?.capabilities.filter((c) => INPUT_MODALITIES.has(c)) ?? null,
+    reasoning: hints.reasoning ?? entry?.capabilities.includes("reasoning") ?? null,
+    source: hinted ? "endpoint" : entry ? "catalog" : null,
+  };
 }

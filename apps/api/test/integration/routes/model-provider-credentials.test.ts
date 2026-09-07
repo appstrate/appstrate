@@ -273,6 +273,24 @@ describe("Model Provider Keys API", () => {
       expect(body).not.toHaveProperty("apiKey");
       expect(body).not.toHaveProperty("credentialsEncrypted");
     });
+
+    it("names an unlabelled custom-endpoint credential after its host", async () => {
+      // Several endpoints behind one provider entry would otherwise all be
+      // called "OpenAI-compatible (custom)", told apart only by a ` (2)` suffix.
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          apiKey: "sk-local",
+          baseUrlOverride: "http://10.255.255.9:9/v1",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.label).toStartWith("10.255.255.9:9 · ");
+    });
   });
 
   describe("PUT /api/model-provider-credentials/:id", () => {

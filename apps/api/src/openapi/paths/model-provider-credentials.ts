@@ -210,7 +210,7 @@ export const modelProviderCredentialsPaths = {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Display name for the model provider credential. Optional — the server derives one from the provider's `displayName` when omitted, deduping against existing org credentials.",
+                    "Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `baseUrlOverride` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials.",
                 },
                 providerId: {
                   type: "string",
@@ -328,7 +328,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Enumerate the models an endpoint serves",
       description:
-        "Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each prefilled with what the vendored pricing catalog knows about it (label, context window, max output tokens, input modalities, reasoning). Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.",
+        "Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -372,7 +372,7 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "200": {
           description:
-            "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null when the id is in no catalog.",
+            "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -405,6 +405,7 @@ export const modelProviderCredentialsPaths = {
                         "max_tokens",
                         "input",
                         "reasoning",
+                        "source",
                       ],
                       properties: {
                         id: { type: "string", description: "Model id exactly as served." },
@@ -417,6 +418,12 @@ export const modelProviderCredentialsPaths = {
                           description: "Accepted input modalities (`text`, `image`).",
                         },
                         reasoning: { type: ["boolean", "null"] },
+                        source: {
+                          type: ["string", "null"],
+                          enum: ["endpoint", "catalog", null],
+                          description:
+                            "Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it.",
+                        },
                       },
                     },
                   },
