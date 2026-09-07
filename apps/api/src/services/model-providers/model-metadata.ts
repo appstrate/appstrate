@@ -1,23 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Served-model metadata — what we know about a model id an endpoint serves.
- *
- * Two sources, and the endpoint wins field by field: the hints its own listing
- * published ({@link ServedModelHints}, read by `model-listing.ts` from the
- * response already in hand), then the vendored pricing catalog for everything
- * the hints leave open — which, for a custom endpoint enumerating bare ids, is
- * usually everything. `label` is catalog-only: a listing entry names a model
- * for its own API, not for a picker. Catalog lookup order: the provider's own
- * catalog (`catalogProviderId ?? providerId`), then every vendored catalog by
- * exact id, then every catalog by the id with one leading `<vendor>/` segment
- * stripped (`openai/gpt-4o` → `gpt-4o`, the shape gateways publish). First hit
- * wins; a miss describes nothing rather than guessing.
- *
- * Cost is DELIBERATELY never returned. A self-hosted or third-party endpoint
- * serving a vendor's model id is not billed at the vendor's rate, so a price
- * carried over from the catalog would silently corrupt the usage ledger
- * (`llm_usage`). An absent cost is a visible gap; a wrong one is not.
+ * What we know about a model id an endpoint serves: the listing's own hints
+ * win field by field, the vendored catalog fills the rest (`label` is
+ * catalog-only). Catalog lookup: the provider's own, then any by exact id,
+ * then any by the id with one leading `<vendor>/` stripped. Cost is never
+ * returned: an endpoint serving a vendor's id is not billed at the vendor's
+ * rate, and a wrong price would corrupt `llm_usage`.
  */
 
 import type { CatalogModelEntry } from "@appstrate/shared-types";
@@ -25,7 +14,6 @@ import { INPUT_MODALITIES, type ServedModelHints } from "./model-listing.ts";
 import { listCatalogProviderIds, lookupCatalogModel } from "../pricing-catalog.ts";
 import { getModelProvider } from "./registry.ts";
 
-/** Catalog capabilities that describe what the model accepts as input. */
 const MODALITIES: readonly string[] = INPUT_MODALITIES;
 
 /** Everything we can tell about a served id, minus its price. */
@@ -36,11 +24,7 @@ interface ServedModelDescription {
   /** Accepted input modalities — the `text`/`image` subset of the capabilities. */
   input: string[] | null;
   reasoning: boolean | null;
-  /**
-   * Where the description comes from: `endpoint` when the listing published at
-   * least one field of it, `catalog` when it is a pure catalog hit, `null` when
-   * nothing described the id.
-   */
+  /** `endpoint` when the listing published any field, `catalog` on a pure hit, else `null`. */
   source: "endpoint" | "catalog" | null;
 }
 
@@ -73,11 +57,6 @@ function lookupServedEntry(providerId: string, modelId: string): CatalogModelEnt
   return null;
 }
 
-/**
- * Describe `modelId` as served by `providerId`. `hints` — what the endpoint's
- * own listing published — wins field by field; the catalog fills the rest, and
- * an id described by neither comes back all-null.
- */
 export function describeServedModel(
   providerId: string,
   modelId: string,

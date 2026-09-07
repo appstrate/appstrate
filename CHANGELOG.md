@@ -9,45 +9,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **`anthropic-compatible` model provider** — a second custom-endpoint entry in
-  `core-providers`, alongside `openai-compatible`: one escape hatch per wire
-  format. It points a credential's own `base_url_override` at any self-hosted or
-  third-party endpoint speaking the Anthropic Messages API (a LiteLLM proxy, a
-  vendor publishing an Anthropic-compatible endpoint), enumerated through
-  `POST /api/model-provider-credentials/discover` like its OpenAI counterpart.
-
-- **Endpoint-published model metadata.**
-  `POST /api/model-provider-credentials/discover` now reads the capability
-  fields a listing entry carries — vLLM `max_model_len`, Mistral `capabilities`,
-  OpenRouter `context_length` / `architecture.input_modalities` /
-  `top_provider.max_completion_tokens` / `supported_parameters`, LM Studio
-  `max_context_length` — out of the response already in hand: no second
-  request, and an entry publishing none is unaffected. Such a field wins over
-  the vendored catalog for that field (the endpoint knows the context window it
-  was started with; the catalog describes the vendor's hosted variant of the
-  same id), the catalog fills the rest, and `label` stays catalog-only. Each
-  returned model gains a `source` — `endpoint`, `catalog` or `null` — saying
-  which of the two described it.
+  `core-providers` next to `openai-compatible`, for any self-hosted or
+  third-party endpoint speaking the Anthropic Messages API (LiteLLM proxy, …).
 
 - **`POST /api/model-provider-credentials/discover`** — asks an endpoint once
-  for its model listing (`GET <base_url>/models`) and returns the ids it serves.
-  Accepts either an existing `credential_id` or an inline
-  `provider_id` + `api_key` (+ `base_url_override`), so the model form can offer
-  what a custom OpenAI-compatible endpoint actually serves BEFORE the credential
-  exists — which `POST /{id}/refresh-models` cannot do: it needs a persisted
-  credential, it persists its verdict, and it intersects the listing with
-  discovery candidates, of which `openai-compatible` declares none.
-- Each returned id is prefilled from the vendored pricing catalog (`label`,
-  `context_window`, `max_tokens`, `input`, `reasoning`) — the provider's own
-  catalog first, then any catalog by exact id, then by the id with one leading
-  `<vendor>/` segment stripped. An id in no catalog comes back all-null rather
-  than guessed. Per-token cost is deliberately never returned: an endpoint
-  serving a vendor's model id is not billed at the vendor's rate, and a wrong
-  price would corrupt the `llm_usage` ledger.
-- The endpoint persists nothing (no credential, no `available_model_ids`), never
-  echoes the key back, and refuses any provider whose `authMode` is not
-  `api_key` — a subscription token is never read or spent to enumerate models
-  (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). Rate limited to 6/min behind
-  `model-provider-credentials:write`, the same gate as `refresh-models`.
+  for its listing (`GET <base_url>/models`) and returns the ids it serves,
+  each described from the fields the listing publishes (vLLM `max_model_len`,
+  Mistral `capabilities`, OpenRouter `context_length` / `architecture` /
+  `top_provider` / `supported_parameters`, LM Studio `max_context_length`) and,
+  for the rest, from the vendored pricing catalog (the provider's own, then any
+  by exact id, then by the id with one leading `<vendor>/` stripped); `source`
+  says which described it, `label` is catalog-only, an id in no catalog comes
+  back all-null. Takes an existing `credential_id` or an inline `provider_id` +
+  `api_key` (+ `base_url_override`), so the model form can list a custom
+  endpoint before its credential exists. Persists nothing, never echoes the
+  key, refuses OAuth providers (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`),
+  and never returns a per-token cost: an endpoint serving a vendor's model id is
+  not billed at the vendor's rate. Rate limited to 6/min behind
+  `model-provider-credentials:write`.
 
 - **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
   out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
@@ -113,100 +92,56 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
-- **A key is renamed through its edit dialog only.** The credentials table no
-  longer turns the label into an inline input on click — one affordance to
-  change a key, the same one that changes its secret. `InlineEditableLabel`
-  had no other reader and is deleted.
+- **A key is renamed through its edit dialog only.** The inline click-to-edit
+  label in the credentials table is gone (`InlineEditableLabel` deleted).
 
-- **A custom-endpoint credential is named after its host.** Creating one
-  through `POST /api/model-provider-credentials` without a `label`, with a
-  `baseUrlOverride` on a `baseUrlOverridable` provider, now defaults to
-  `<host> · <provider display name>`, e.g.
-  `localhost:11434 · OpenAI-compatible (custom)`, instead of the provider's
-  display name alone — which made every endpoint behind one provider entry a
-  ` (2)`, ` (3)` suffix of the same name. Deduplication is unchanged and still
-  applies.
+- **A custom-endpoint credential is named after its host.**
+  `POST /api/model-provider-credentials` without a `label` defaults to
+  `<host> · <provider display name>` (`localhost:11434 · OpenAI-compatible
+(custom)`) when a `baseUrlOverride` is supplied; deduplication unchanged.
 
 - **The model form is one arrangement for every provider: pick the provider,
-  describe the endpoint it runs on, then pick or type the model.** It used to
-  be four — catalogued providers picked a model first and asked for the key
-  after, OpenRouter had its own search box, a "Personnalisé" model on a
-  catalogued provider re-implemented the custom endpoint without detection,
-  and subscription providers put the connection first. Now two registry facts
-  decide what renders: `baseUrlOverridable` puts the "Type d'API" and base URL
-  questions on screen (every such entry collapses into a single "Endpoint
-  personnalisé" picker row, so a third one needs no client edit), and
-  `authMode` decides whether the endpoint is opened with a key to type or pick
-  or a connection to pick or open. The endpoint block is the component the
-  credentials tab renders, so the two forms cannot drift. The model step opens
-  once the endpoint is answered and is the same list for every provider —
-  searchable, checkbox rows with a `catalogue` / `endpoint` badge, "Tout
-  sélectionner", "Ajouter N modèles" — fed by whichever listing describes the
-  provider: the vendored catalog (grouped "Recommandés" / "Tous les modèles";
-  filtered by what the plan serves for a subscription), the OpenRouter live
-  search, or, for an operator's own endpoint, "Détecter les modèles". A row
-  picked from the catalog is created from its id alone, so the weekly catalog
-  refresh keeps reaching it; a detected or searched row ships what described
-  it (the OpenRouter rate included). "Configurer manuellement" types the id in
-  instead — for any provider but a subscription, whose plan is the only
-  answer — with an optional name on creation and the limits and capabilities
-  toggle (see below). Editing a row is always the typed-in arrangement, with
-  the provider locked and its credential shown as a chip; the toggle opens on
-  only when the row differs from its catalog entry, so renaming a catalogued
-  model never freezes the catalog's numbers as overrides. The `__custom__`
-  model sentinel and the separate OpenRouter combobox are gone.
+  describe the endpoint, then pick or type the model.** `baseUrlOverridable`
+  puts the "Type d'API" and base URL on screen (every such entry collapses
+  into one "Endpoint personnalisé" picker row); `authMode` decides key or
+  connection. The endpoint block is shared with the credentials tab. The model
+  step is one searchable checkbox list for every provider — `catalogue` /
+  `endpoint` badge, "Tout sélectionner", "Ajouter N modèles" — fed by the
+  vendored catalog ("Recommandés" / "Tous les modèles"; filtered by what the
+  plan serves for a subscription), the OpenRouter live search, or "Détecter
+  les modèles" for a custom endpoint. A catalog pick is created from its id
+  alone, so the weekly catalog refresh keeps reaching it; a detected or
+  searched row ships what described it (OpenRouter rate included).
+  "Configurer manuellement" types the id in (not for a subscription). An edit
+  is always the typed-in arrangement, provider locked, credential as a chip.
+  The `__custom__` model sentinel and the OpenRouter combobox are removed.
 
-- **Models are added several at a time, and a custom endpoint's saved keys
-  are offered whatever URL is typed.** The footer reads "Ajouter N modèles"
-  and posts one `POST /api/models` per checked row against the single key they
-  share
-  (created first when typed inline). A refused model keeps the dialog open
-  with just the failed ids still checked, and a retry binds to the key the
-  first attempt already created instead of posting it twice. In step 1, the
-  "Mes clés" picker for an overridable provider now lists every key saved for
-  that provider (it used to require the typed URL to match the key's, so a
-  saved key only reappeared once its endpoint had been retyped); picking one
-  fills and pins the base URL it was saved against. The credentials list's
-  `providerId` is documented as always set for a `custom` credential — it
-  already was; the OpenAPI prose said "when `authMode === 'oauth2'`".
+- **Several models at a time.** One `POST /api/models` per checked row against
+  the one key they share (created first when typed inline). A refused model
+  keeps the dialog open with the failed ids checked; a retry binds to the key
+  already created. The "Mes clés" picker of an overridable provider lists every
+  key saved for it, whatever URL is typed, and picking one fills and pins the
+  base URL. The credentials list's `providerId` is documented as always set for
+  a `custom` credential.
 
-- **The model form says what happens when limits and capabilities are left
-  alone, and one toggle owns them.** The "Avancé" fold used to show four
-  fields under "Optionnel : ces valeurs remplacent la détection automatique du
-  SDK" — nothing detects anything: the server resolves row override → vendored
-  catalog by model id → nothing, and the runtime fills nothing with fixed
-  defaults (128k context, 16k output tokens, text only, no reasoning). And the
-  fields shipped only when touched, so an unticked box meant "undefined" or
-  `false` depending on whether it had been clicked. The fold is gone; in its
-  place a single toggle, "Définir moi-même les limites et capacités", opens
-  the fields — grouped as "Limites" and "Ce que le modèle accepte",
-  placeholders set to the real defaults — and every one of them ships when it
-  is on; off, a sentence states the fallback chain instead. On an edit, leaving the toggle off (or blanking a
-  limit with it on) sends `null`, so a stored override is dropped rather than
-  silently kept. A model added from a detection stores only what the listing
-  or the catalog described — nothing is invented for a model neither knew —
-  so its row opens on "auto" rather than on defaults presented as answers.
+- **Limits and capabilities behind one toggle, "Définir moi-même les limites
+  et capacités".** Off, a sentence states the fallback chain (row override →
+  catalog → runtime defaults: 128k context, 16k output tokens, text only, no
+  reasoning); on, every field ships, an unticked box included. On an edit,
+  toggle off or a blanked limit sends `null` and drops the stored override. The
+  toggle opens on only when the row differs from its catalog entry, so a
+  catalogued model never gets the catalog's numbers frozen as overrides. The
+  "Avancé" fold and its "détection automatique du SDK" copy are removed.
 
-- **Model discovery for API-key providers lists the provider's models once
-  instead of issuing N identical requests that verified nothing.**
-  `discoverAvailableModels` now calls `listServedModels`
-  (`services/model-providers/model-listing.ts`), which sends ONE guarded
-  `GET <base_url>/models`, parses the response per `apiShape`
-  (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }` for the
-  Google shapes) and intersects the served ids with the provider's discovery
-  candidates. Before, every candidate was "probed" through `testModelConfig`,
-  which never read the `modelId` it was handed — all 24 requests were the same
-  listing call, so they all succeeded or failed together and a candidate the
-  provider does not serve was recorded as verified.
-- `available_model_ids` therefore now holds only candidates the provider
-  actually lists. An auth failure, an unreachable or unreadable listing, a
-  429 that survives one retry, or an empty intersection all leave the
-  previously persisted list untouched, as before.
+- **Model discovery lists the provider's models once.** `discoverAvailableModels`
+  sends ONE guarded `GET <base_url>/models` (`listServedModels`), parsed per
+  `apiShape` (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }`
+  for the Google shapes), and persists the discovery candidates present in it
+  as `available_model_ids`. An auth failure, an unreadable listing, a 429 that
+  survives one retry, or an empty intersection leave the previous list untouched.
 - **Wire change** — `POST /api/model-provider-credentials/{id}/refresh-models`
-  answers with `candidate_count` in place of `probed_count`: the count is the
-  discovery candidates considered, and nothing is probed any more. Static
-  (subscription) providers report their derived candidate count instead of a
-  constant 0; they still issue no request and write nothing.
+  answers `candidate_count` in place of `probed_count` (the candidates
+  considered; static providers report theirs instead of 0).
 
 - **`appstrate self-update`, `scripts/bootstrap.sh` and `scripts/bootstrap-runner.sh`
   resolve "latest" by listing GitHub Releases and picking the newest platform
@@ -498,51 +433,30 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
-- **A custom endpoint's key and models show an icon — a neutral one.** The
-  credentials table and every model list resolved the provider by matching
-  `(apiShape, baseUrl)` against the registry's `defaultBaseUrl`, which an
-  operator's own host never matches, so `openai-compatible` and
-  `anthropic-compatible` rows rendered icon-less. Both now read the entry off
-  the row's `providerId` (`resolveProviderEntry`) and fall back to the endpoint
-  match only where the binding is hidden (built-in credentials, aliased models).
-  The two entries' `iconUrl` is `custom-endpoint`, a server glyph, instead of
-  the vendor logo of the API they speak: an OpenAI mark next to a Qwen model on
-  Ollama read as a vendor claim.
+- **A custom endpoint's key and models show a neutral icon.** Rows resolve
+  their registry entry by `providerId` (`resolveProviderEntry`), falling back
+  to the `(apiShape, baseUrl)` match only where the binding is hidden; the
+  custom-endpoint entries' `iconUrl` is `custom-endpoint`, a server glyph, not
+  the vendor logo of the API they speak.
 
 - **Editing an OpenRouter key opens on its provider.** The credential form's
-  picker filtered `openrouter` out — a leftover from when such a key could
-  only be created inline from the model form's dedicated combobox — so the
-  edit dialog for one opened with an empty "Provider" field. The picker now
-  offers every registry entry, the model form's own picker included.
+  picker no longer filters `openrouter` out.
 
-- **Deleting a key a model still runs on says so.** The server refuses it
-  (409 `credential_in_use`, `org_models.credential_id` is ON DELETE RESTRICT)
-  but the page swallowed the error: the confirmation stayed open with a dead
-  button, and its copy claimed linked models would "need to be reconfigured".
-  The dialog now counts the models on the key and disables Confirm until they
-  are gone; a refusal the server still raises (and any other failed delete,
-  models included) is reported as a toast.
+- **Deleting a key a model still runs on says so.** The dialog counts the
+  models on the key and disables Confirm until they are gone; a delete the
+  server refuses (409 `credential_in_use`) or otherwise fails, models
+  included, is reported as a toast.
 
-- **The Playwright suite no longer opens the developer's own database.** Its
-  `webServer` inherited the API's defaults for `PGLITE_DATA_DIR` and
-  `FS_STORAGE_PATH`, so a run in a checkout where `bun run dev` was up pointed
-  a second process at `data/pglite`. PGlite tolerates one process per
-  directory: the second aborts with `RuntimeError: Aborted()`, and the
-  concurrent open can corrupt the first one's catalog. The suite now keeps its
-  own `data/e2e/{pglite,storage}` — always, CI included; it seeds users and
-  orgs per test, so it never wanted the shared state.
+- **The Playwright suite keeps its own `data/e2e/{pglite,storage}`** instead
+  of inheriting `PGLITE_DATA_DIR` / `FS_STORAGE_PATH`, which pointed a second
+  process at the developer's `data/pglite` (PGlite aborts with
+  `RuntimeError: Aborted()` and can corrupt the first process's catalog).
 
 - **A custom (OpenAI-compatible) model can be created from the model form
-  again.** The provider picker offered a client-only `__custom__` entry and
-  submitted it as the credential's `providerId`, which
-  `POST /api/model-provider-credentials` answers with
-  `400 Unknown providerId`. The custom entry is now the registry's own
-  `openai-compatible` provider — the credential it creates carries the
-  `openai-completions` shape and the typed base URL, which is where the server
-  reads both from. The old "Type d'API" selector, whose value never reached
-  the payload, is replaced by a choice between registry providers (see the
-  "Endpoint personnalisé" entry under Changed), so the shape the form shows is
-  the shape the server honours.
+  again.** The picker submitted a client-only `__custom__` sentinel as the
+  credential's `providerId` (`400 Unknown providerId`); the custom entry is now
+  the registry's own `openai-compatible` provider, whose credential carries the
+  shape and base URL the server reads.
 
 - **A Dynamic Client Registration body without `scope` now yields the full
   self-service scope set (#1267).** An MCP client registering without `scope`

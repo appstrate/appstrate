@@ -142,8 +142,6 @@ function CredentialFormBody({
     ? getProviderById(selectedOption.providerId, registry)
     : undefined;
   const needsBaseUrlOverride = !!selectedProvider?.baseUrlOverridable;
-  // Every entry that can be pointed at the operator's own endpoint is one
-  // picker row; the endpoint arrangement then asks which API it speaks.
   const overridableProviders = registry.filter((p) => p.baseUrlOverridable);
   const pickerRows = buildProviderPickerRows(options);
   const pickerValue = needsBaseUrlOverride ? CUSTOM_ENDPOINT_ID : selectedId;
@@ -235,8 +233,7 @@ function CredentialFormBody({
     }
   };
 
-  // Same contract as the model form's endpoint (see `onApiTypeChange`): the URL
-  // follows the new entry, the typed key stays.
+  // The URL follows the new entry, the typed key stays.
   const handleApiTypeChange = (entry: ProviderRegistryEntry) => {
     setSelectedId(entry.providerId);
     clearErrors();

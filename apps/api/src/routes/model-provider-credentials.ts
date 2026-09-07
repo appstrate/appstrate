@@ -96,13 +96,7 @@ function pgErrorCode(err: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * `POST /discover` body — exactly one of the two forms: an existing
- * `credential_id`, or an inline `provider_id` + `api_key` (+ optional
- * `base_url_override`) for an endpoint no credential exists for yet. Both
- * forms and neither form are rejected by the route, which names the offending
- * field; Zod only pins the field types.
- */
+/** Exactly one of `credential_id` or inline `provider_id` + `api_key`; the route enforces which. */
 export const discoverSchema = z
   .object({
     credential_id: z.uuid().optional(),
@@ -120,11 +114,7 @@ interface DiscoverTarget {
   apiKey: string;
 }
 
-/**
- * Enumeration must never spend a subscription token: the platform issues no
- * platform-side request on an OAuth provider's behalf
- * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`).
- */
+/** Enumeration never spends a subscription token (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). */
 function assertApiKeyProvider(cfg: ModelProviderDefinition, param: string): void {
   if (cfg.authMode !== "api_key") {
     throw invalidRequest(
@@ -378,15 +368,9 @@ export function createModelProviderCredentialsRouter() {
     },
   );
 
-  // POST /api/model-provider-credentials/discover — enumerate what an endpoint
-  // actually serves, and describe each id from what its own listing published
-  // and what the catalog knows about it, BEFORE a credential exists (the
-  // operator types URL + key inline and saves both at once). `refresh-models`
-  // cannot answer this: it needs a persisted credential, it persists its
-  // verdict, and it intersects the listing with the provider's discovery
-  // candidates — of which a custom endpoint declares none. This endpoint
-  // persists NOTHING and never echoes the key. Same rate limit and permission
-  // as `refresh-models`: it spends the user's key.
+  // POST /api/model-provider-credentials/discover — what an endpoint serves,
+  // described from its listing and the catalog, BEFORE a credential exists.
+  // Persists nothing, never echoes the key; gated like `refresh-models`.
   router.post(
     "/discover",
     rateLimit(6),

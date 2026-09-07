@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Naming a model by hand: its id, the row's name, and the capabilities the
- * operator may answer for.
- *
- * The same three fields whatever the provider — an edit always uses them, and a
- * create falls back to them wherever a listing has nothing to offer or the
- * operator would rather type the id. Nothing here knows which of the two it is.
- */
+/** Naming a model by hand: its id, the row's name, and the capabilities section. */
 
 import type { ComponentProps } from "react";
 import { useTranslation } from "react-i18next";

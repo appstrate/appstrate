@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which provider a model runs on.
- *
- * Every registry entry is a row, except that the ones an operator can point at
- * their own endpoint collapse into a single "custom endpoint" row: which of
- * them it is becomes the "API type" question inside the endpoint block. So the
- * value this picker shows is not always the value the form holds — the form
- * always holds, and submits, a real registry `providerId`.
+ * Which provider a model runs on. The overridable entries collapse into one
+ * "custom endpoint" row (the "API type" question picks among them), so the
+ * shown value is not always the `providerId` the form holds.
  */
 
 import { useTranslation } from "react-i18next";

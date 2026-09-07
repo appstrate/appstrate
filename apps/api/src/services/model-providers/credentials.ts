@@ -464,12 +464,8 @@ export async function dedupeCredentialLabel(orgId: string, base: string): Promis
 }
 
 /**
- * Default label for a new credential. A credential pointing at its own
- * endpoint is named after that endpoint's host — `localhost:11434 ·
- * OpenAI-compatible (custom)` — because every custom endpoint behind one
- * provider entry would otherwise share the provider's display name and be told
- * apart only by the ` (2)` suffix {@link dedupeCredentialLabel} appends. The
- * result is a base label: run it through that dedupe like any other.
+ * Default label: `<host> · <displayName>` for a credential on its own endpoint,
+ * the display name otherwise. A base label — run it through {@link dedupeCredentialLabel}.
  */
 export function deriveCredentialLabel(
   cfg: Pick<ModelProviderDefinition, "displayName" | "baseUrlOverridable">,

@@ -437,17 +437,14 @@ export function OrgSettingsModelsPage() {
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
-  // `org_models.credential_id` is ON DELETE RESTRICT: the server refuses to
-  // delete a key a model still runs on (409 `credential_in_use`). The models
-  // are already loaded here, so the dialog says so before asking the server.
+  // `org_models.credential_id` is ON DELETE RESTRICT (409 `credential_in_use`):
+  // the dialog says so before asking the server.
   const modelsOnCredential =
     confirmState?.type === "deleteCredential"
       ? (models ?? []).filter((m) => m.credentialId === confirmState.id).length
       : 0;
 
   const closeConfirm = () => setConfirmState(null);
-  // A refused delete used to leave the dialog open with nothing said — the
-  // spinner stopped and the button looked dead.
   const reportDeleteFailure = (err: unknown) => {
     toast.error(
       err instanceof ApiError && err.code === "credential_in_use"

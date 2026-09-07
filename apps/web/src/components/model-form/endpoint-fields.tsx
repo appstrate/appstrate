@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How a model form reaches its provider: which API shape, where it lives, and
- * what opens it. One arrangement for every provider — the two registry facts
- * decide which halves render.
- *
- * `baseUrlOverridable` puts the API type and the base URL on screen; a provider
- * that pins its own endpoint shows neither, because neither is the operator's
- * to answer. `authMode` picks the credential row: a key to type or pick, or a
- * connection to pick or open. Shared by the model form and the credential form
- * so the arrangement has a single implementation.
+ * How a form reaches its provider: API type and base URL where
+ * `baseUrlOverridable`, then a key to type or pick, or a connection, per
+ * `authMode`. Shared by the model form and the credential form.
  */
 
 import type { ReactNode } from "react";
@@ -42,10 +36,7 @@ interface ExistingKeys {
   onClear: () => void;
 }
 
-/**
- * "Type a new key, or pick one you already saved." The row alone — the label,
- * the hint and the pinned-selection state belong to the host arrangement.
- */
+/** "Type a new key, or pick one you already saved." Label and hint belong to the host. */
 function ApiKeyRow({
   id,
   apiKeyProps,
@@ -88,10 +79,7 @@ function ApiKeyRow({
   );
 }
 
-/**
- * The credential a form is currently bound to, and the way to unbind it.
- * `icon` and `secondary` carry what a connection shows over a bare key.
- */
+/** The credential a form is bound to, and the way to unbind it. */
 function CredentialChip({
   label,
   icon,
@@ -126,10 +114,7 @@ function CredentialChip({
   );
 }
 
-/**
- * Where the endpoint lives. `placeholder` is the picked entry's default URL, so
- * the shape it suggests is the one that entry's API actually answers on.
- */
+/** `placeholder` is the picked entry's default URL. */
 function BaseUrlField({
   id,
   baseUrlProps,
@@ -186,11 +171,7 @@ export function EndpointFields({
   provider: ProviderRegistryEntry | undefined;
   /** The overridable entries — the "API type" question's options. */
   providers: readonly ProviderRegistryEntry[];
-  /**
-   * The API type is the wire format, not the secret: the host points its base
-   * URL at `entry.defaultBaseUrl` and keeps the typed key, dropping only a
-   * saved credential, which pins both.
-   */
+  /** The host re-points its base URL and keeps the typed key; a saved credential is dropped. */
   onApiTypeChange: (entry: ProviderRegistryEntry) => void;
   providerLocked?: boolean;
   baseUrlProps: UseFormRegisterReturn;

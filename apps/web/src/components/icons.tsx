@@ -170,10 +170,8 @@ export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement
   "fireworks-ai": FireworksIcon,
   zai: ZaiIcon,
   "opencode-go": OpenCodeIcon,
-  // The registry's custom-endpoint entries (`baseUrlOverridable`): a neutral
-  // glyph, because the API they speak says nothing about who serves the model
-  // — an OpenAI logo next to `qwen3:8b` on Ollama would read as a vendor.
-  // Same glyph as the picker's "Endpoint personnalisé" row.
+  // The custom-endpoint entries: the API they speak says nothing about who
+  // serves the model. Same glyph as the picker's "Endpoint personnalisé" row.
   "custom-endpoint": Server,
 };
 

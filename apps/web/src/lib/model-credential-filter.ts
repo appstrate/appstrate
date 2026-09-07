@@ -3,33 +3,21 @@
 /**
  * Which saved keys a form may bind to, for the provider it names.
  *
- * A provider whose endpoint the operator supplies has no endpoint to match on:
- * every one of its keys was saved against a host of its own, and the form reads
- * that host off the key it picks rather than asking for it to be retyped. A
- * provider that pins its own endpoint has the opposite problem — several of
- * them share one `apiShape` — so there the endpoint itself is the match.
- *
- * Built-in (`source: "built-in"`) credentials are never offered: they carry a
- * slug id (`"anthropic"`), and `org_models.credential_id` is a UUID FK, so the
- * insert would 400. Models against a system key are declared in the env
- * `models[]` block instead.
+ * An overridable provider matches on `providerId` alone — each key was saved
+ * against its own host, which the form reads off the key. A pinned provider
+ * shares its `apiShape` with others, so there the endpoint is the match.
+ * Built-in credentials are never offered: their slug id is no UUID FK.
  */
 
-/** The credential fields the rule reads — a `ModelProviderCredentialInfo` fits. */
-interface CredentialCandidate {
-  source: "built-in" | "custom";
-  authMode: "api_key" | "oauth2";
-  apiShape: string | null;
-  baseUrl: string | null;
-  providerId?: string | null;
-}
+import type {
+  ModelProviderCredentialInfo,
+  ProviderRegistryEntry,
+} from "../hooks/use-model-provider-credentials";
 
-/** The registry facts the rule turns on — a `ProviderRegistryEntry` fits. */
-interface CredentialFilterProvider {
-  providerId: string;
-  authMode: "api_key" | "oauth2";
-  baseUrlOverridable: boolean;
-}
+type CredentialCandidate = Pick<
+  ModelProviderCredentialInfo,
+  "source" | "authMode" | "apiShape" | "baseUrl" | "providerId"
+>;
 
 function withoutTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
@@ -37,8 +25,8 @@ function withoutTrailingSlash(url: string): string {
 
 export function selectableCredentials<T extends CredentialCandidate>(input: {
   credentials: readonly T[] | undefined;
-  /** The picked registry entry; undefined until a provider is picked. */
-  provider: CredentialFilterProvider | undefined;
+  provider:
+    Pick<ProviderRegistryEntry, "providerId" | "authMode" | "baseUrlOverridable"> | undefined;
   /** The form's endpoint fields, read only where the provider pins its own. */
   apiShape: string;
   baseUrl: string;

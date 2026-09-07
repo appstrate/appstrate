@@ -1008,11 +1008,8 @@ export function validateGenerationOverride(
 
 /**
  * Build the URL + headers of a model provider's model listing. Pure for unit
- * testing.
- *
- * Note what this does NOT take: a model id. Every branch below builds a plain
- * `GET <baseUrl>/models` listing request, so the result identifies the
- * CREDENTIAL and enumerates what it serves — it never addresses one model.
+ * testing. Takes no model id: a `GET <baseUrl>/models` identifies the
+ * CREDENTIAL, never one model.
  */
 export function buildModelTestRequest(config: {
   apiShape: string;
@@ -1062,19 +1059,14 @@ export function buildModelTestRequest(config: {
   return { url, headers };
 }
 
-/**
- * Outcome of the guarded listing request — a delivered response, or the
- * structured failure that stopped it from being one.
- */
+/** A delivered response, or the structured failure that stopped it from being one. */
 type ModelListingFetchResult =
-  { ok: true; res: Response; latency: number } | { ok: false; failure: TestResult };
+  { ok: true; res: Response; latency: number } | (TestResult & { ok: false });
 
 /**
- * Issue the guarded `GET <baseUrl>/models` request. Shared by
- * {@link testModelConfig}, which reads only the status, and
- * `listServedModels` (`model-providers/model-listing.ts`), which parses the
- * body — so the SSRF pre-flight, the pinned transport and the pre-response
- * failure mapping exist once.
+ * The guarded `GET <baseUrl>/models` request, shared by {@link testModelConfig}
+ * (reads the status) and `listServedModels` (parses the body): the SSRF
+ * pre-flight, the pinned transport and the pre-response failure mapping exist once.
  */
 export async function fetchModelListing(config: {
   apiShape: string;
@@ -1090,12 +1082,9 @@ export async function fetchModelListing(config: {
   if (!egress.ok) {
     return {
       ok: false,
-      failure: {
-        ok: false,
-        latency: 0,
-        error: "BLOCKED_URL",
-        message: "URL targets a blocked network",
-      },
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
     };
   }
 
@@ -1131,25 +1120,14 @@ export async function fetchModelListing(config: {
         // problem, not a blocked network.
         return {
           ok: false,
-          failure: {
-            ok: false,
-            latency,
-            error: "PROVIDER_ERROR",
-            message: "Provider endpoint redirected; use the final URL as base URL",
-          },
+          latency,
+          error: "PROVIDER_ERROR",
+          message: "Provider endpoint redirected; use the final URL as base URL",
         };
       }
-      return {
-        ok: false,
-        failure: {
-          ok: false,
-          latency,
-          error: "BLOCKED_URL",
-          message: "URL targets a blocked network",
-        },
-      };
+      return { ok: false, latency, error: "BLOCKED_URL", message: "URL targets a blocked network" };
     }
-    return { ok: false, failure: mapFetchErrorToTestResult(err, latency) };
+    return { ...mapFetchErrorToTestResult(err, latency), ok: false };
   }
 }
 
@@ -1184,7 +1162,7 @@ export async function testModelConfig(config: {
   }
 
   const listing = await fetchModelListing(config);
-  if (!listing.ok) return listing.failure;
+  if (!listing.ok) return listing;
 
   const { res, latency } = listing;
   if (res.ok) return { ok: true, latency, status: res.status };

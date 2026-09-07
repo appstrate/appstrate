@@ -1,21 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Model listing — read what a credential's provider actually serves.
- *
- * One guarded `GET <baseUrl>/models` request (built and sent by
- * `fetchModelListing`, the same transport the credential test uses), with its
- * body parsed according to the provider's `apiShape`. Callers decide what to
- * do with the result: `model-discovery.ts` intersects the ids with the
- * provider's discovery candidates, `routes/model-provider-credentials.ts`
- * merges the hints into the catalog description.
- *
- * The `/models` protocol carries no capability contract, but several servers
- * publish extra fields per entry (vLLM `max_model_len`, Mistral
- * `capabilities`, OpenRouter `context_length` / `architecture` /
- * `supported_parameters`, LM Studio `max_context_length`). Those are read
- * from the entry already in hand — nothing more is requested — and an entry
- * that publishes none simply carries no hint.
+ * What a credential's provider serves: one guarded `GET <baseUrl>/models`
+ * (`fetchModelListing`, the credential test's transport), parsed per
+ * `apiShape`. Per-entry capability fields some servers publish (vLLM
+ * `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` /
+ * `architecture` / `supported_parameters`, LM Studio `max_context_length`)
+ * are read from the entry in hand as hints.
  */
 
 import { fetchModelListing } from "../org-models.ts";
@@ -81,13 +72,7 @@ function readStringArray(value: unknown): string[] | null {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : null;
 }
 
-/**
- * Read the capability fields an entry publishes. Sniffing is per entry and
- * independent of the container shape — the same fields are looked for
- * whatever `apiShape` the response came in. A value of the wrong type leaves
- * its key absent rather than throwing: one odd field must not cost the rest of
- * the entry.
- */
+/** Per entry, whatever the container shape. A wrong-typed value leaves its key absent. */
 function sniffHints(entry: Record<string, unknown>): ServedModelHints {
   const hints: ServedModelHints = {};
 
@@ -125,13 +110,9 @@ function sniffHints(entry: Record<string, unknown>): ServedModelHints {
 }
 
 /**
- * Extract the served models from a `/models` response body. `null` means the
- * body carries no listing at all — a response nobody can read must not be
- * mistaken for a provider that serves nothing. Strict on the container, lenient
- * inside it: an entry with no usable id is skipped, because one odd row must
- * not discard a listing whose other rows are perfectly readable. Models keep
- * response order, deduped on id (first occurrence wins, hints included),
- * capped at {@link MAX_SERVED_MODELS}.
+ * `null` = no listing at all (not "serves nothing"). Strict on the container,
+ * lenient inside: an entry with no usable id is skipped. Response order,
+ * deduped on id (first wins), capped at {@link MAX_SERVED_MODELS}.
  */
 export function parseServedModels(apiShape: string, body: unknown): ServedModel[] | null {
   const { key, field, prefix } = listingShape(apiShape);
@@ -165,14 +146,12 @@ export async function listServedModels(config: {
 }): Promise<ListServedModelsResult> {
   const listing = await fetchModelListing(config);
   if (!listing.ok) {
-    // No response reached us at all. A refused URL keeps its own verdict — the
-    // operator fixes it with `EGRESS_ALLOW_INTERNAL_HOSTS`, not by retrying —
-    // while timeouts, DNS/TCP/TLS failures and refused redirects are all
-    // "the provider did not answer".
+    // A refused URL keeps its verdict (fixed by `EGRESS_ALLOW_INTERNAL_HOSTS`,
+    // not by retrying); anything else is "the provider did not answer".
     return {
       ok: false,
-      error: listing.failure.error === "BLOCKED_URL" ? "BLOCKED_URL" : "UNREACHABLE",
-      message: listing.failure.message ?? "Model listing request failed",
+      error: listing.error === "BLOCKED_URL" ? "BLOCKED_URL" : "UNREACHABLE",
+      message: listing.message ?? "Model listing request failed",
     };
   }
 

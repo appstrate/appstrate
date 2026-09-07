@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * "Pick a connection you already have, or make a new one." The oauth2 half of
- * the endpoint block: there is no secret to type, so the only two answers are
- * an existing credential and the pairing dialog the host opens.
- */
+/** The oauth2 half of the endpoint block: an existing connection, or the pairing dialog. */
 
 import { useTranslation } from "react-i18next";
 import { Plug } from "lucide-react";
@@ -36,8 +32,7 @@ export function ConnectionRow({
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Stacked rather than side by side: a long provider name overflows the
-          two-column arrangement. */}
+      {/* Stacked: a long provider name overflows two columns. */}
       {connections.length > 0 && (
         <Select value="" onValueChange={onSelect}>
           <SelectTrigger className="w-full">

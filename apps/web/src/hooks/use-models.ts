@@ -159,11 +159,7 @@ export function useSetAgentModel(packageId: string) {
   });
 }
 
-/**
- * The create body for a key the form typed inline. `label` is omitted — the
- * server derives it from the provider's `displayName` (a custom endpoint is
- * named after its host) and dedupes against existing org credentials.
- */
+/** `label` is omitted: the server derives and dedupes one. */
 function credentialBody(credential: NonNullable<ModelFormData["newCredential"]>) {
   return {
     providerId: credential.providerId,
@@ -173,9 +169,8 @@ function credentialBody(credential: NonNullable<ModelFormData["newCredential"]>)
 }
 
 /**
- * Handles ModelFormModal submission: creates provider key inline if needed,
- * then creates or updates the model — or, for a batch the detected-models list
- * checked, creates that one key and then one model per entry.
+ * ModelFormModal submission: the inline key first if any, then one create or
+ * update — or, for a batch, one create per entry against that one key.
  */
 export function useModelFormHandler(opts: {
   editModel?: OrgModelInfo | null;
@@ -184,14 +179,10 @@ export function useModelFormHandler(opts: {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
   const createCredential = useCreateModelProviderCredential();
-  // Kept warm so the modal's credential picker has data ready, but no
-  // longer used here — the server now derives the credential's label
-  // from the registry's `displayName` and dedupes against existing rows.
+  // Kept warm for the modal's credential picker.
   useModelProviderCredentials();
 
-  // Spans a whole submission: the per-mutation flags fall back to false between
-  // the credential and the model (and between two creates in a batch), which
-  // would re-enable the button mid-run.
+  // Spans the whole submission: the per-mutation flags drop between calls.
   const [submitPending, setSubmitPending] = useState(false);
   const isPending =
     submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
@@ -202,11 +193,7 @@ export function useModelFormHandler(opts: {
       ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
       : data.credentialId;
 
-  /**
-   * One credential, then one `POST /api/models` per entry — there is no bulk
-   * create. Each refusal is collected instead of aborting: the models around a
-   * rejected id are still worth adding, and the caller re-offers the rest.
-   */
+  /** No bulk create: one POST per entry, refusals collected rather than aborting. */
   const submitBatch = async (data: ModelFormMultiData): Promise<ModelFormSubmitOutcome> => {
     setSubmitPending(true);
     try {
@@ -222,21 +209,14 @@ export function useModelFormHandler(opts: {
       if (failedModelIds.length === 0) opts.onSuccess();
       return { failedModelIds, credentialId };
     } catch {
-      // The key itself was refused, so not one model could be created against it.
+      // The key itself was refused.
       return { failedModelIds: data.models.map((m) => m.modelId) };
     } finally {
       setSubmitPending(false);
     }
   };
 
-  /**
-   * One model: the credential first where the key was typed inline, then the
-   * create or the update. A refusal is reported back the same way a batch
-   * reports its own — the id is the only one there is, and the form names it
-   * rather than closing on a save that never happened or leaving the operator
-   * in front of a button that answered nothing. A credential the server
-   * refused fails the model with it: there is nothing to bind it to.
-   */
+  /** A refusal (of the key or the model) is reported the way a batch reports its own. */
   const submitOne = async (data: ModelFormData): Promise<ModelFormSubmitOutcome> => {
     setSubmitPending(true);
     try {

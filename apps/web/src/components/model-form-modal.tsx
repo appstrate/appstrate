@@ -3,11 +3,9 @@
 /**
  * Adding or editing a model, in one arrangement for every provider: pick the
  * provider, describe the endpoint it runs on, then pick or type the model.
- *
- * Only two registry facts change what renders. `baseUrlOverridable` decides
- * whether the endpoint is the operator's to describe; `authMode` decides
- * whether it is opened with a key or a connection. Everything else — which
- * listing fills the model list — is the derived `modelSource`.
+ * Two registry facts change what renders: `baseUrlOverridable` (is the
+ * endpoint the operator's to describe) and `authMode` (key or connection);
+ * which listing fills the model list is the derived `modelSource`.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -40,10 +38,10 @@ import { getProviderById } from "@/lib/provider-registry-helpers";
 import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
 import {
   buildModelFormPayload,
+  buildModelsBatchPayload,
   type ModelFormFields,
   type ModelFormSubmit,
 } from "@/lib/model-form-payload";
-import { buildModelsBatchPayload } from "@/lib/model-pick-payload";
 import {
   catalogRows,
   discoveredRows,
@@ -72,14 +70,9 @@ interface ModelFormBodyProps {
 }
 
 /**
- * The form itself, without the dialog chrome — `ModelFormModal` owns the
- * `<Modal>`, its title and its footer buttons (which submit through
- * `form="model-form"`). Exported so the rendered form can be asserted on: a
- * Radix dialog renders nothing at all without a DOM.
- *
- * The catalog is awaited rather than defaulted: the capabilities toggle opens
- * on a comparison against the edited row's registry entry, so a form built
- * before the registry lands would answer that question wrong.
+ * The form without the dialog chrome (a Radix dialog renders nothing without
+ * a DOM). The registry is awaited, not defaulted: the capabilities toggle
+ * opens on a comparison against the edited row's catalog entry.
  */
 export function ModelFormBody(props: ModelFormBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
@@ -87,8 +80,7 @@ export function ModelFormBody(props: ModelFormBodyProps) {
   if (registryQuery.error) return <ErrorState message={getErrorMessage(registryQuery.error)} />;
   if (!registryQuery.data) return <LoadingState />;
   // A row whose provider left the registry has no endpoint to describe and no
-  // credential to match: the form would render empty and report its refusal on
-  // a field that is not on screen, which is a Save button doing nothing.
+  // credential to match: say so rather than render an empty form.
   if (props.model && !getProviderById(props.model.providerId ?? "", registryQuery.data)) {
     return <ErrorState message={t("models.form.providerUnavailable")} />;
   }
@@ -103,8 +95,8 @@ function ModelForm({
 }: ModelFormBodyProps & { registry: readonly ProviderRegistryEntry[] }) {
   const { t } = useTranslation(["settings", "common"]);
 
-  // A row's provider is its credential's, and every non-aliased row carries it;
-  // aliases hide their binding and the models page refuses to edit them.
+  // Every non-aliased row carries its credential's providerId; aliases hide
+  // their binding and the models page refuses to edit them.
   const [providerId, setProviderId] = useState(model?.providerId ?? "");
   const selectedProvider = useMemo(
     () => getProviderById(providerId, registry),
@@ -114,12 +106,7 @@ function ModelForm({
   const isOauth = selectedProvider?.authMode === "oauth2";
   const source = modelSource(selectedProvider);
 
-  /**
-   * What the vendored catalog says about a model id, where it knows it. Two
-   * questions read it, and they must read the same entry: whether the edited
-   * row already disagrees with the catalog (the toggle's opening state), and
-   * which of the values on screen are the operator's own (what ships).
-   */
+  /** The catalog's own values for an id: read by the toggle's opening state and by the payload. */
   const catalogEntry = (id: string | null | undefined) =>
     id ? selectedProvider?.models.find((m) => m.id === id) : undefined;
 
@@ -172,8 +159,6 @@ function ModelForm({
     ],
   });
 
-  // Which saved keys the picked provider can bind to — the whole rule lives in
-  // `lib/model-credential-filter.ts`.
   const credentialsQuery = useModelProviderCredentials();
   const availableCredentials = useMemo(
     () =>
@@ -196,17 +181,13 @@ function ModelForm({
     (!!selectedCredential || (!isOauth && !!inlineApiKey.trim())) &&
     (!overridable || parsesAsUrl(baseUrl));
 
-  // "Ask the endpoint what it serves." Persists nothing, so the listing lives
-  // here for this form-open — and only for what it was run against, which
-  // `discoveryKey` pins: editing the URL, the key or the provider makes it
-  // stale rather than offering ids from an endpoint the form left behind.
+  // Discovery persists nothing, so the listing lives here — and only for what
+  // it ran against: editing the URL, the key or the provider makes it stale.
   const discoverModels = useDiscoverModels();
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
   const discoveryKey = [providerId, baseUrl.trim(), credentialId, inlineApiKey.trim()].join("|");
   const freshDiscovery = discovery?.key === discoveryKey ? discovery : null;
 
-  // A subscription's served ids, asked of the live credential — its plan drifts
-  // while the credential does not. Only asked where a catalog is filtered by it.
   const served = useServedModels(!model && isOauth && source === "catalog" ? credentialId : null);
   const search = useOpenRouterSearch(source === "search");
 
@@ -218,47 +199,35 @@ function ModelForm({
     }
     const rows = catalogRows(selectedProvider.models);
     if (!isOauth) return rows;
-    // Exactly what the listing reported, in catalog order-independent form: a
-    // served id the catalog never heard of stays offered as an id-only row.
+    // Exactly what the plan serves; an id the catalog lacks stays offered id-only.
     const byId = new Map(rows.map((r) => [r.id, r]));
     return (served.modelIds ?? []).map((id) => byId.get(id) ?? idOnlyRow(id));
   }, [selectedProvider, source, isOauth, search.models, freshDiscovery, served.modelIds]);
 
-  // A remote search filters itself; the other two are filtered here.
   const rows = source === "search" ? allRows : filterRows(allRows, search.search);
 
   /** The rows checked so far — kept whole, so a filtered-out pick still ships. */
   const [picked, setPicked] = useState<ModelPickRow[]>([]);
   /** Ids a batch could not create — re-offered instead of silently dropped. */
   const [failedModelIds, setFailedModelIds] = useState<string[]>([]);
-  /**
-   * The credential a partially failed batch already created: a retry binds to
-   * it rather than posting the same inline key a second time.
-   */
+  /** The credential a partially failed batch already created: a retry binds to it. */
   const [createdCredentialId, setCreatedCredentialId] = useState<string | null>(null);
   const [modelMode, setModelMode] = useState<"list" | "manual" | null>(null);
 
-  // An existing row already names a model, so an edit is always the typed-in
-  // arrangement. A create opens on the list wherever one is free to show.
+  // An edit always types the id in. A create opens on the list wherever one is
+  // free to show; discovery has to be asked for.
   const mode = model ? "manual" : (modelMode ?? (source === "discover" ? null : "list"));
   const manual = endpointReady && mode === "manual";
-  // A catalog is free and a search is typed, so both show the list at once and
-  // state their own waiting or empty inside it. Discovery has to be asked for.
   const listing =
     endpointReady && !model && mode === "list" && (source !== "discover" || allRows.length > 0);
-  /**
-   * oauth2 has no typed-in answer. Not because the server refuses one —
-   * `POST /api/models` has no served-id gate, that one is on `/seed` — but
-   * because a subscription only answers for what its plan serves: an id the
-   * plan does not carry saves fine and then fails every run it is picked for.
-   */
+  // A subscription only answers for what its plan serves: an id it does not
+  // carry saves fine and then fails every run.
   const offersManual = !isOauth;
 
   useEffect(() => {
     onMultiSelectionChange?.(listing ? picked.length : null);
   }, [listing, picked.length, onMultiSelectionChange]);
 
-  /** A listing belongs to the endpoint it ran against, and to nothing else. */
   const dropListing = () => {
     setPicked([]);
     setFailedModelIds([]);
@@ -268,8 +237,6 @@ function ModelForm({
   const resetModelStep = () => {
     setValue("label", "");
     setValue("modelId", "");
-    // The id it complained about is gone with the step; leaving the message up
-    // would blame the list the operator is about to be handed.
     clearErrors("modelId");
     setValue("capabilitiesExplicit", false);
     setValue("inputText", true);
@@ -282,7 +249,7 @@ function ModelForm({
     dropListing();
   };
 
-  /** Bind the form to one saved credential (or to none) — a typed key never coexists with it. */
+  /** A typed key never coexists with a saved credential. */
   const bindCredential = (id: string) => {
     setValue("credentialId", id);
     setValue("inlineApiKey", "");
@@ -290,11 +257,9 @@ function ModelForm({
   };
 
   /**
-   * Point the form at another registry entry. A saved credential belongs to the
-   * provider it was picked for — carrying it over would bind the model to the
-   * endpoint the operator just left — and the model step was answered against
-   * a listing this endpoint no longer serves. A typed key survives only the
-   * API-type switch: it re-points the endpoint, not the secret.
+   * A saved credential belongs to the provider it was picked for; a typed key
+   * survives only the API-type switch, which re-points the endpoint, not the
+   * secret.
    */
   const switchProvider = (id: string, keepTypedKey: boolean) => {
     setProviderId(id);
@@ -304,8 +269,7 @@ function ModelForm({
     const provider = getProviderById(id, registry);
     if (provider) {
       setValue("apiShape", provider.apiShape);
-      // Pre-seeded even when overridable: the operator edits the value they are
-      // customising rather than typing a whole URL from scratch.
+      // Pre-seeded even when overridable: the operator edits, not retypes.
       setValue("baseUrl", provider.defaultBaseUrl);
     }
     resetModelStep();
@@ -316,8 +280,7 @@ function ModelForm({
     selected: selectedCredential ?? null,
     onSelect: (id: string) => {
       bindCredential(id);
-      // The key carries the endpoint it was saved against — the form follows it
-      // there (and pins the field) instead of asking for the URL again.
+      // The key carries the endpoint it was saved against; the form follows it there.
       const key = availableCredentials.find((k) => k.id === id);
       if (key?.baseUrl) setValue("baseUrl", key.baseUrl);
       dropListing();
@@ -337,7 +300,6 @@ function ModelForm({
     if (!selectedProvider) return;
     const key = discoveryKey;
     switchMode("list");
-    // A re-run describes the endpoint again: nothing checked carries over.
     dropListing();
     discoverModels.mutate(
       {
@@ -395,8 +357,7 @@ function ModelForm({
       setError(result.field, { message: t(result.messageKey) });
       return;
     }
-    // A refused save leaves the dialog open on the values that caused it, so
-    // it has to say so: the host closes on success and reports nothing here.
+    // The host closes on success and reports nothing here.
     const outcome = await onSubmit(result.data);
     if (outcome.failedModelIds.length > 0) {
       setError("modelId", { message: t("models.form.saveFailed") });
@@ -404,7 +365,7 @@ function ModelForm({
   });
 
   // Creating, an empty name lets the server derive one. Editing, PUT reads an
-  // absent name as "keep it", so clearing it is refused rather than saved.
+  // absent name as "keep it", so clearing it is refused.
   const labelValidate = (v: string) =>
     !model || v.trim() ? undefined : t("validation.required", { ns: "common" });
   const baseUrlValidate = (v: string) => {
@@ -436,8 +397,7 @@ function ModelForm({
         id="mdl-provider"
         registry={registry}
         providerId={providerId}
-        // The endpoint belongs to the saved row; changing it would rebind the
-        // model to a service it was never verified against.
+        // The endpoint belongs to the saved row.
         disabled={!!model}
         onChange={(id) => switchProvider(id, false)}
       />
@@ -449,8 +409,7 @@ function ModelForm({
         onApiTypeChange={(entry) => switchProvider(entry.providerId, true)}
         providerLocked={!!model}
         baseUrlProps={register("baseUrl", { validate: baseUrlValidate, onChange: dropListing })}
-        // The URL is a property of the credential (`baseUrlOverride`), not of
-        // the model, so it only moves when a credential is created with it.
+        // The URL is a property of the credential, not of the model.
         baseUrlLocked={!!selectedCredential}
         baseUrlError={showError("baseUrl") ? errors.baseUrl?.message : undefined}
         apiKeyProps={register("inlineApiKey", { onChange: dropListing })}
@@ -493,9 +452,7 @@ function ModelForm({
                 ? t("models.form.modelSearchLoading")
                 : t("models.form.detectingModels")
             }
-            // A refusal is not an empty plan: saying "this connection serves
-            // nothing" would send the operator to check a subscription that is
-            // fine, when the call simply never landed.
+            // A refusal is not an empty plan.
             emptyText={
               isOauth && served.failed
                 ? t("models.form.discoverRequestFailed")
@@ -546,8 +503,7 @@ function ModelForm({
         </>
       )}
 
-      {/* Registered even where no arrangement puts it on screen — an id nothing
-          validates turns saving too early into a dead button. */}
+      {/* Registered even off screen, so saving too early is refused, not a dead button. */}
       {!manual && !listing && (
         <>
           <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
@@ -581,11 +537,7 @@ function ModelForm({
   );
 }
 
-/**
- * The dialog around the form. Mounted only while open, so the selection count
- * its footer reads starts empty on every open — the body owns which models are
- * checked, this owns the button that adds them.
- */
+/** Mounted only while open, so the footer's selection count starts empty on every open. */
 function ModelFormDialog({
   onClose,
   model,

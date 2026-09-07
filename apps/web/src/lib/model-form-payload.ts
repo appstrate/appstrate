@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the model form submits: the model, plus the inline credential to create
- * first when the user typed a key instead of picking one. Pure and DOM-free —
- * the modal owns the fields and renders the error, this owns the wire payload,
- * and the credential it names is always a registry `providerId`.
+ * What the model form submits: one typed-in model, or the rows a pick list had
+ * checked, plus the inline credential to create first when the user typed a
+ * key instead of picking one. Pure and DOM-free; the credential it names is
+ * always a registry `providerId`.
  */
 
 import type { ModelCost } from "@appstrate/core/module";
+import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
+import type { ModelPickRow } from "./model-source";
 import { catalogValues, sameSet, type CatalogModelValues } from "./row-overrides-catalog";
 
 /** The model form's controlled field values. */
@@ -18,11 +20,7 @@ export interface ModelFormFields {
   modelId: string;
   credentialId: string;
   inlineApiKey: string;
-  /**
-   * "I answer for the limits and modalities myself." Off, the four fields
-   * below are not on screen and not on the wire — the server resolves them
-   * from the catalog and the runtime falls back to fixed defaults.
-   */
+  /** Off, the four fields below are neither on screen nor on the wire. */
   capabilitiesExplicit: boolean;
   inputText: boolean;
   inputImage: boolean;
@@ -32,11 +30,8 @@ export interface ModelFormFields {
 }
 
 /**
- * Catalog-derivable overrides, in the shape a create takes. Sent only when the
- * operator answered for them (the capabilities toggle, or an OpenRouter
- * import) — otherwise the server keeps resolving them from the vendored
- * catalog and the weekly `refresh-pricing-catalog.ts` bump still reaches
- * existing rows.
+ * Catalog-derivable overrides. Sent only when the operator answered for them,
+ * so the server keeps resolving the rest from the vendored catalog.
  */
 interface ModelCapabilityOverrides {
   input?: string[];
@@ -47,11 +42,7 @@ interface ModelCapabilityOverrides {
 
 /** One `POST /api/models` body, minus the credential every entry shares. */
 export interface ModelFormModelEntry extends ModelCapabilityOverrides {
-  /**
-   * Optional — server derives from the catalog label (`<catalog>.label`)
-   * and dedupes against existing org rows when absent. Sent only when the
-   * user explicitly customized it.
-   */
+  /** Sent only when typed; the server derives and dedupes one otherwise. */
   label?: string;
   modelId: string;
   cost?: ModelCost;
@@ -64,10 +55,8 @@ interface ModelFormCredentialBinding {
 }
 
 /**
- * One model, ready to submit. The four capability overrides widen to `null`
- * here: `PUT /api/models/{id}` reads `null` as "drop the stored override and
- * resolve from the catalog again", which is how the form clears one. `POST`
- * has nothing to clear and refuses `null`, so a create body goes through
+ * One model, ready to submit. The four overrides widen to `null`: `PUT` reads
+ * `null` as "drop the stored override", `POST` refuses it and goes through
  * {@link toCreateModelBody}.
  */
 export type ModelFormData = ModelFormCredentialBinding &
@@ -78,12 +67,7 @@ export type ModelFormData = ModelFormCredentialBinding &
     reasoning?: boolean | null;
   };
 
-/**
- * A submission → the `POST /api/models` body that creates it. The builder only
- * emits `null` capabilities when editing, so dropping them here is a type
- * narrowing rather than a behaviour change. The credential id is passed in
- * because an inline key is created first and only then has one.
- */
+/** The `POST /api/models` body, bound to the credential an inline key just created. */
 export function toCreateModelBody(
   data: ModelFormData,
   credentialId: string,
@@ -104,14 +88,9 @@ export interface ModelFormMultiData extends ModelFormCredentialBinding {
   models: ModelFormModelEntry[];
 }
 
-/** What the model form hands its host: one model, or a batch of them. */
 export type ModelFormSubmission = ModelFormData | ModelFormMultiData;
 
-/**
- * What a batch reports back once every create has been attempted: the ids that
- * failed — so the form can re-offer exactly those — and the credential it
- * created, which a retry binds to instead of creating a second one.
- */
+/** The ids a batch could not create, and the credential it created for a retry to bind to. */
 export interface ModelFormSubmitOutcome {
   failedModelIds: string[];
   credentialId?: string;
@@ -119,47 +98,32 @@ export interface ModelFormSubmitOutcome {
 
 export type ModelFormSubmit = (data: ModelFormSubmission) => Promise<ModelFormSubmitOutcome>;
 
-/** The registry facts the payload turns on — a `ProviderRegistryEntry` fits. */
-export interface ModelFormProvider {
-  providerId: string;
-  authMode: "api_key" | "oauth2";
-  baseUrlOverridable: boolean;
-}
+export type ModelFormProvider = Pick<
+  ProviderRegistryEntry,
+  "providerId" | "authMode" | "baseUrlOverridable"
+>;
 
 export interface ModelFormPayloadInput {
   fields: ModelFormFields;
   /** RHF `dirtyFields` — the row's name ships only when the operator typed one. */
   dirtyFields: { [K in keyof ModelFormFields]?: boolean };
   /**
-   * What the capabilities section answered — it is on screen for every manual
-   * arrangement, so there is always an answer:
-   * - `explicit` — the operator ticked the toggle: every value that is the
-   *   operator's own ships, an unticked box included. A blank field, and a
-   *   value still equal to `catalogEntry`'s, is not one of those.
-   * - `auto` — the toggle was left off. Nothing to send on a create; on an
-   *   edit every field ships as `null`, so a previously stored override is
-   *   dropped and the catalog resolves it again (a no-op for a catalogued row
-   *   that never overrode anything).
+   * `explicit`: every value that is the operator's own ships, an unticked box
+   * included; a blank field, or one still equal to `catalogEntry`, is not.
+   * `auto`: nothing on a create; every field as `null` on an edit.
    */
   capabilities: "explicit" | "auto";
-  /** Editing an existing row. Decides clear (`null`) vs. omit. */
   isEdit: boolean;
   /**
-   * What the vendored catalog says about the submitted model id, where it
-   * knows it. `GET /api/models` returns RESOLVED values, so an edit form opens
-   * on the catalog's own numbers: in the `explicit` branch a field still equal
-   * to this entry's is not an answer the operator gave, and shipping it would
-   * freeze it as an override and cut the row off from the weekly catalog
-   * refresh. Absent for a model no catalog describes, where every value on
-   * screen can only be the operator's.
+   * The catalog's own values for the submitted id. An edit form opens on them,
+   * so a field still equal to them is not an answer: shipping it would freeze it
+   * as an override and cut the row off from the catalog refresh.
    */
   catalogEntry?: CatalogModelValues;
-  /** The picked registry entry; undefined until the user picks a provider. */
   provider: ModelFormProvider | undefined;
   /**
-   * The credential the form could actually match against the picked provider,
-   * or `null`. `fields.credentialId` alone is not a binding: it survives a
-   * provider switch and would bind the model to the endpoint the operator left.
+   * The credential the form could match against the picked provider, or
+   * `null`. `fields.credentialId` alone survives a provider switch.
    */
   selectedCredentialId: string | null;
 }
@@ -168,11 +132,8 @@ type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string 
 
 type ModelFormPayloadResult = { ok: true; data: ModelFormData } | CredentialFailure;
 
-/**
- * The credential half of any model create, shared by the single-model form and
- * the multi-add path: an existing selection, or the inline key to create first.
- */
-export function resolveCredentialBinding(input: {
+/** The credential half of any create: an existing selection, or the inline key to create first. */
+function resolveCredentialBinding(input: {
   provider: ModelFormProvider | undefined;
   selectedCredentialId: string | null;
   inlineApiKey: string;
@@ -183,13 +144,10 @@ export function resolveCredentialBinding(input: {
   const inlineApiKey = input.inlineApiKey.trim();
   const credentialId = input.selectedCredentialId ?? "";
 
-  // Inline api-key creation only applies to api_key providers — OAuth
-  // credentials must exist before the model is saved (they're created via the
-  // pairing dialog and auto-selected into `credentialId`).
+  // OAuth credentials exist before the model is saved (pairing dialog).
   const newCredentialProvider =
     !isOauthProvider && !credentialId && inlineApiKey ? provider : undefined;
 
-  // OAuth has no inline-key affordance, so an empty selection is a hard error.
   if (isOauthProvider && !credentialId) {
     return { ok: false, field: "credentialId", messageKey: "models.form.connectionRequired" };
   }
@@ -199,7 +157,6 @@ export function resolveCredentialBinding(input: {
     }
     return { ok: true, binding: { credentialId } };
   }
-  // Posted to /api/model-provider-credentials before the model itself.
   return {
     ok: true,
     binding: {
@@ -215,7 +172,6 @@ export function resolveCredentialBinding(input: {
   };
 }
 
-/** The capability half of the body — see `ModelFormPayloadInput.capabilities`. */
 function capabilityOverrides(
   input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit" | "catalogEntry">,
 ): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
@@ -230,13 +186,8 @@ function capabilityOverrides(
   ) as string[];
   const contextWindow = parseInt(fields.contextWindow.trim(), 10);
   const maxTokens = parseInt(fields.maxTokens.trim(), 10);
-  // Two things are left to the catalog and the runtime default rather than
-  // sent. A blank limit, or neither box ticked (the server refuses an empty
-  // array) — the operator emptied the field, and omitting the value would
-  // silently keep the old one. And a value still equal to the catalog's own,
-  // which is what the form was prefilled with: the operator is looking at it,
-  // not answering it. Both are omitted on a create and sent as `null` on an
-  // edit, which drops any stored override and resolves from the catalog again.
+  // A blank limit, no box ticked (the server refuses an empty array), or a
+  // value still equal to the catalog's: omitted on a create, `null` on an edit.
   const answered: Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> = {};
   if (modalities.length > 0 && !(catalog && sameSet(modalities, catalog.input))) {
     answered.input = modalities;
@@ -246,8 +197,7 @@ function capabilityOverrides(
   } else if (input.isEdit) answered.contextWindow = null;
   if (maxTokens > 0 && maxTokens !== catalog?.maxTokens) answered.maxTokens = maxTokens;
   else if (input.isEdit) answered.maxTokens = null;
-  // A boolean has no blank state, so an unticked box IS the answer `false` —
-  // unless the catalog already says exactly that, and then it stays its answer.
+  // A boolean has no blank state: an unticked box IS the answer `false`.
   if (!catalog || fields.reasoning !== catalog.reasoning) answered.reasoning = fields.reasoning;
   else if (input.isEdit) answered.reasoning = null;
   return answered;
@@ -266,12 +216,47 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
   return {
     ok: true,
     data: {
-      // Only a name the operator actually typed is flagged dirty, so an
-      // untouched field leaves the server free to derive one.
       ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
       modelId: fields.modelId.trim(),
       ...credential.binding,
       ...capabilityOverrides(input),
     },
   };
+}
+
+/**
+ * How much of a picked row ships depends on its listing. `catalog`: the id
+ * only, the vendored catalog answers for the rest. `discover`: what the
+ * listing reported, as explicit overrides; nothing is defaulted. `search`:
+ * everything, cost included — the search IS the billing rate.
+ */
+function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
+  if (row.origin === "catalog") return { modelId: row.id };
+  return {
+    ...(row.label ? { label: row.label } : {}),
+    modelId: row.id,
+    // The server refuses an empty modality list.
+    ...(row.input?.length ? { input: row.input } : {}),
+    ...(row.contextWindow !== null ? { contextWindow: row.contextWindow } : {}),
+    ...(row.maxTokens !== null ? { maxTokens: row.maxTokens } : {}),
+    ...(row.reasoning !== null ? { reasoning: row.reasoning } : {}),
+    ...(row.origin === "search" && row.cost ? { cost: row.cost } : {}),
+  };
+}
+
+export function buildModelsBatchPayload(input: {
+  rows: readonly ModelPickRow[];
+  provider: ModelFormProvider | undefined;
+  selectedCredentialId: string | null;
+  inlineApiKey: string;
+  baseUrl: string;
+}):
+  | { ok: true; data: ModelFormMultiData }
+  | { ok: false; field: "credentialId" | "modelId"; messageKey: string } {
+  if (input.rows.length === 0) {
+    return { ok: false, field: "modelId", messageKey: "models.form.selectionRequired" };
+  }
+  const credential = resolveCredentialBinding(input);
+  if (!credential.ok) return credential;
+  return { ok: true, data: { ...credential.binding, models: input.rows.map(rowToEntry) } };
 }

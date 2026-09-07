@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The models a provider offers, as a list to pick from.
- *
- * One listing describes every model at once — whether it came from the
- * vendored catalog, from an endpoint's own `/models`, or from a live search —
- * so adding them one at a time would be the same endpoint configured over and
- * over: the rows are checkboxes and the dialog's footer adds all of them in one
- * go. A row shows only what its description actually carried; `source` says
- * whether the endpoint published it or the catalog filled it in, and neither is
- * claimed when nothing described the model.
+ * The models a provider offers, as checkbox rows the dialog's footer adds in
+ * one go. A row shows only what its description carried; `source` says who
+ * described it.
  */
 
 import { useTranslation } from "react-i18next";
@@ -86,10 +80,8 @@ export function ModelPickList({
   grouped?: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  // The index is the row's place in `rows`, not in its group, so the grouping
-  // below cannot renumber it. A search does: `rows` arrives already filtered,
-  // so `mdl-pick-N` names the Nth row currently shown and nothing more — a
-  // selector written against it holds only while the box is untouched.
+  // `mdl-pick-N` names the Nth row currently shown: grouping cannot renumber
+  // it, a search does.
   const indexed = rows.map((row, index) => ({ row, index }));
   const featured = grouped ? indexed.filter((r) => r.row.featured) : [];
   const rest = grouped ? indexed.filter((r) => !r.row.featured) : indexed;

@@ -66,16 +66,10 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
 }
 
 /**
- * Boot-time check that a subscription provider's models are never enumerated
- * by the platform.
- *
- * `authMode: "oauth2"` means the credential is a user's subscription token, and
- * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` allows no platform-side request
- * on one: inference goes through the Pi engine at run time, nothing else. Model
- * discovery only honours that when the definition declares
- * `modelDiscovery: { mode: "static" }` — the listing path (`GET <baseUrl>/models`)
- * has no second gate and would send the access token upstream. Declaring it is
- * therefore a contract obligation checked here, not a per-provider courtesy.
+ * An oauth2 credential is a subscription token, and
+ * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` allows no platform-side
+ * request on one. Only `modelDiscovery: { mode: "static" }` keeps the listing
+ * path from sending it upstream, so declaring it is checked at boot.
  */
 function assertSubscriptionNeverEnumerated(def: ModelProviderDefinition): void {
   if (def.authMode === "oauth2" && def.modelDiscovery?.mode !== "static") {

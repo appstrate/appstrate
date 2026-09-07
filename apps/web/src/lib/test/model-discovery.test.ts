@@ -10,13 +10,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildDiscoverBody, type DiscoverProvider } from "../model-discovery.ts";
+import { buildDiscoverBody } from "../model-discovery.ts";
 
-const OPENAI_COMPATIBLE: DiscoverProvider = {
+const OPENAI_COMPATIBLE = {
   providerId: "openai-compatible",
   baseUrlOverridable: true,
 };
-const ANTHROPIC: DiscoverProvider = { providerId: "anthropic", baseUrlOverridable: false };
+const ANTHROPIC = { providerId: "anthropic", baseUrlOverridable: false };
 
 describe("buildDiscoverBody — a saved credential", () => {
   it("names the credential and nothing else: it already carries key and endpoint", () => {

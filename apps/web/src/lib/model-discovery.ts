@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What asking an operator's endpoint for its models answered.
- *
- * The outcomes are flattened — a request that never reached the endpoint is one
- * more of them — so the form reads a single value and every failure has copy
- * that names what to fix rather than a generic apology.
+ * What asking an operator's endpoint for its models answered. A request that
+ * never reached the endpoint is one more outcome, so the form reads one value.
  */
 
 import type {
   DiscoveredModel,
   DiscoveredModelsResponse,
+  ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 
 export interface DiscoveryState {
@@ -20,7 +18,6 @@ export interface DiscoveryState {
   models: DiscoveredModel[];
 }
 
-/** The line under the discovery button when no listing came back. */
 export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
   switch (outcome) {
     case "auth_failed":
@@ -42,25 +39,13 @@ export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
   }
 }
 
-/** The registry facts the discovery body turns on — an entry fits. */
-export interface DiscoverProvider {
-  providerId: string;
-  baseUrlOverridable: boolean;
-}
-
-/**
- * `POST /api/model-provider-credentials/discover` takes exactly one of two
- * forms, never both: a saved credential names its own endpoint and key, and an
- * inline key has to describe the endpoint it opens. The base URL rides along
- * only where the provider lets the operator move it — a pinned provider
- * answers on its own `defaultBaseUrl` and the route refuses the field.
- */
+/** Exactly one of the two forms; the base URL only where the provider lets it move. */
 export type DiscoverBody =
   { credential_id: string } | { provider_id: string; api_key: string; base_url_override?: string };
 
 export function buildDiscoverBody(input: {
   credentialId: string | null;
-  provider: DiscoverProvider;
+  provider: Pick<ProviderRegistryEntry, "providerId" | "baseUrlOverridable">;
   inlineApiKey: string;
   baseUrl: string;
 }): DiscoverBody {

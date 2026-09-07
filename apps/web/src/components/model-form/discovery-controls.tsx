@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Asking an operator's own endpoint what it serves — or declining to.
- *
- * Detection spends a request against a host the platform knows nothing about,
- * so it is never implicit: until one of the two buttons is pressed there is
- * nothing below them, and whatever the endpoint answered is stated in the same
- * place, successes and failures alike.
+ * Asking an operator's own endpoint what it serves — or declining to. Never
+ * implicit: detection spends a request against an unknown host.
  */
 
 import { useTranslation } from "react-i18next";

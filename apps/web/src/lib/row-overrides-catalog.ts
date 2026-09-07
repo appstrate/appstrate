@@ -2,26 +2,12 @@
 
 /**
  * Does a saved model row answer for its own limits and modalities, or is it
- * still following the catalog?
- *
- * `GET /api/models` returns RESOLVED values: a catalogued id reports the
- * catalog's own numbers whether or not the row overrides anything. Reading
- * "carries a value" as "overrides" would open the capabilities toggle on every
- * catalogued row, and saving it would freeze those numbers as overrides — so
- * renaming a row would quietly stop the weekly catalog refresh from reaching
- * it. The answer is a comparison against the registry entry, not a null check.
- *
- * `label` is deliberately out: the operator names the row, the catalog names
- * the model, and the two are allowed to differ without that meaning anything
- * about its capabilities.
+ * still following the catalog? `GET /api/models` returns RESOLVED values, so
+ * "carries a value" is not "overrides": the answer is a comparison against the
+ * registry entry. `label` is deliberately out of it.
  */
 
-/** The two capability strings that describe an input modality, not a behaviour. */
 const MODALITIES = ["text", "image"];
-
-function catalogModalities(capabilities: readonly string[]): string[] {
-  return capabilities.filter((c) => MODALITIES.includes(c));
-}
 
 /** The stored row's four catalog-derivable fields — an `OrgModel` fits. */
 export interface StoredModelValues {
@@ -38,18 +24,11 @@ export interface CatalogModelValues {
   capabilities: string[];
 }
 
-/** Two modality lists describing the same thing — order is not part of it. */
 export function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v) => b.includes(v));
 }
 
-/**
- * The four answers the catalog entry gives on its own, in the stored row's
- * shape. The pick list renders them, and both readers of this file compare
- * against them: the toggle asks whether the row already disagrees, the payload
- * asks — field by field — whether what is on screen is anything but the
- * catalog's own number read back.
- */
+/** The catalog entry's four answers, in the stored row's shape. */
 export function catalogValues(entry: CatalogModelValues): {
   input: string[];
   contextWindow: number;
@@ -57,7 +36,7 @@ export function catalogValues(entry: CatalogModelValues): {
   reasoning: boolean;
 } {
   return {
-    input: catalogModalities(entry.capabilities),
+    input: entry.capabilities.filter((c) => MODALITIES.includes(c)),
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens ?? null,
     reasoning: entry.capabilities.includes("reasoning"),
@@ -68,7 +47,6 @@ export function rowOverridesCatalog(
   row: StoredModelValues,
   entry: CatalogModelValues | undefined,
 ): boolean {
-  // No entry to follow: whatever the row carries can only be its own answer.
   if (!entry) {
     return (
       !!row.input?.length ||

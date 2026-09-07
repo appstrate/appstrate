@@ -1,24 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Capabilities" sub-section of the model form modal — limits and modalities.
- * It renders in every manual arrangement, a catalogued row's edit form
- * included: what a row follows is a question about that row, not about which
- * provider it names.
- *
- * One toggle owns the whole section, because the alternative to filling it in
- * is not "leave the fields blank" but a documented fallback chain the operator
- * should be able to read: the server resolves row override → vendored catalog
- * by model id → nothing, and the runtime replaces that nothing with fixed
- * defaults (`runtime-pi/env.ts`: 128000 context / 16384 output tokens;
- * `apps/api/src/services/run-launcher/pi.ts`: text-only input, no reasoning).
- * Off, the sentence states that chain; on, the operator answers it themselves
- * and every field ships — a visible unticked box then means `false`, not
- * "undefined".
- *
- * The host passes `register` props for the numeric text fields plus
- * imperative setters for the booleans so this component stays unaware
- * of the parent's RHF field-name generic.
+ * Limits and modalities, behind one toggle. Off, a sentence states the
+ * fallback chain (row override → catalog → runtime defaults: 128000 context /
+ * 16384 output tokens, text-only, no reasoning); on, every field ships and an
+ * unticked box means `false`. The host passes `register` props for the numeric
+ * fields and setters for the booleans, so this stays unaware of its RHF generic.
  */
 
 import { useTranslation } from "react-i18next";

@@ -107,12 +107,7 @@ export function listCatalogModels(providerId: string): Array<CatalogModelEntry &
   return Object.entries(file).map(([id, entry]) => ({ id, ...entry }));
 }
 
-/**
- * Every catalogued `providerId`, in registration order (vendored files first,
- * then anything {@link registerCatalog} added). Lets a caller that only holds a
- * model id — a custom endpoint enumerating what it serves — scan the catalogs
- * it was not told to look in.
- */
+/** Every catalogued `providerId`, in registration order. */
 export function listCatalogProviderIds(): string[] {
   return Object.keys(PROVIDER_INDEX);
 }

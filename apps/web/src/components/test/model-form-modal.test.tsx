@@ -296,8 +296,8 @@ describe("ModelFormBody — custom endpoint with no key to open it", () => {
 });
 
 describe("ModelFormBody — custom endpoint, keys saved against other hosts", () => {
-  // Nothing is bound (the row names a key that no longer exists), and the only
-  // saved key answers on a different URL than the one the form holds.
+  // Nothing is bound (the row names an unknown key), and the only saved key
+  // answers on a different URL than the one the form holds.
   const html = form(model({ credentialId: "cred_gone" }), [REMOTE_KEY]);
 
   it("still offers the saved keys, since the picked one brings its own URL", () => {
