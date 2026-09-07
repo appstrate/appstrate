@@ -32,6 +32,9 @@ const ANTHROPIC_MODELS = [{ id: "claude-x", display_name: "Claude X" }];
 const ADD_MODEL = "Ajouter un modèle";
 /** The single picker row every overridable endpoint collapses into (`models.form.customEndpoint`). */
 const CUSTOM_ENDPOINT = "Endpoint personnalisé";
+/** Registry display names of the two custom-endpoint entries, the "Type d'API" options. */
+const OPENAI_TYPE = "OpenAI-compatible (custom)";
+const ANTHROPIC_TYPE = "Anthropic-compatible (custom)";
 /** The discovery combobox shows this placeholder until a model is picked. */
 const MODEL_SEARCH_PLACEHOLDER = "Rechercher parmi les modèles détectés...";
 
@@ -92,12 +95,13 @@ async function selectOption(page: Page, triggerId: string, optionName: string) {
 
 /**
  * Open the model form on the custom-endpoint path and answer step 1: which
- * API shape, where it lives, and the key that opens it. `apiType` left out
- * keeps the pre-selected first overridable entry (OpenAI-compatible).
+ * API shape, where it lives, and the key that opens it. The shape is always
+ * picked explicitly: the pre-selected entry is whichever the registry lists
+ * first, which is not something a test should depend on.
  */
 async function openCustomEndpointForm(
   page: Page,
-  { baseUrl, apiKey, apiType }: { baseUrl: string; apiKey: string; apiType?: string },
+  { baseUrl, apiKey, apiType }: { baseUrl: string; apiKey: string; apiType: string },
 ) {
   await page.goto(SETTINGS_PATH);
   // Header button and empty-state button carry the same label; either opens the form.
@@ -106,7 +110,7 @@ async function openCustomEndpointForm(
   await expect(page.getByRole("dialog", { name: ADD_MODEL })).toBeVisible();
 
   await selectOption(page, "mdl-provider", CUSTOM_ENDPOINT);
-  if (apiType) await selectOption(page, "mdl-apiType", apiType);
+  await selectOption(page, "mdl-apiType", apiType);
   await page.locator("#mdl-baseUrl").fill(baseUrl);
   await page.getByPlaceholder("sk-...").fill(apiKey);
 }
@@ -117,7 +121,7 @@ test.describe("Custom endpoint model — UI", () => {
     apiClient,
   }) => {
     const baseUrl = `${mockOrigin}/v1`;
-    await openCustomEndpointForm(page, { baseUrl, apiKey: GOOD_KEY });
+    await openCustomEndpointForm(page, { baseUrl, apiKey: GOOD_KEY, apiType: OPENAI_TYPE });
 
     await page.getByRole("button", { name: "Détecter les modèles" }).click();
     await expect(page.getByText("2 modèles détectés")).toBeVisible();
@@ -158,7 +162,11 @@ test.describe("Custom endpoint model — UI", () => {
   });
 
   test("reports a key the endpoint rejects", async ({ authedPage: page }) => {
-    await openCustomEndpointForm(page, { baseUrl: `${mockOrigin}/v1`, apiKey: "e2e-wrong-key" });
+    await openCustomEndpointForm(page, {
+      baseUrl: `${mockOrigin}/v1`,
+      apiKey: "e2e-wrong-key",
+      apiType: OPENAI_TYPE,
+    });
 
     await page.getByRole("button", { name: "Détecter les modèles" }).click();
     await expect(page.getByText("Clé refusée par le endpoint.")).toBeVisible();
@@ -168,7 +176,11 @@ test.describe("Custom endpoint model — UI", () => {
     authedPage: page,
     apiClient,
   }) => {
-    await openCustomEndpointForm(page, { baseUrl: `${mockOrigin}/v1`, apiKey: GOOD_KEY });
+    await openCustomEndpointForm(page, {
+      baseUrl: `${mockOrigin}/v1`,
+      apiKey: GOOD_KEY,
+      apiType: OPENAI_TYPE,
+    });
 
     await page.getByRole("button", { name: "Configurer manuellement" }).click();
     await page.locator("#mdl-modelId").fill("llama3");
@@ -194,7 +206,7 @@ test.describe("Custom endpoint model — UI", () => {
     await openCustomEndpointForm(page, {
       baseUrl: mockOrigin,
       apiKey: GOOD_KEY,
-      apiType: "Anthropic-compatible (custom)",
+      apiType: ANTHROPIC_TYPE,
     });
 
     await page.getByRole("button", { name: "Détecter les modèles" }).click();

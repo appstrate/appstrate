@@ -170,6 +170,38 @@ describe("buildModelFormPayload — custom endpoint", () => {
   });
 });
 
+describe("buildModelFormPayload — capabilities", () => {
+  const TICKED = fields({
+    modelId: "qwen3:8b",
+    baseUrl: "http://localhost:11434/v1",
+    inlineApiKey: "sk-test",
+    inputImage: true,
+    reasoning: true,
+  });
+
+  it("ships the modalities and the reasoning flag once a box is ticked", () => {
+    // The modal writes each box with `shouldDirty` for exactly this reason —
+    // that half is a form-state effect, unobservable from here.
+    const result = build({
+      provider: OPENAI_COMPATIBLE,
+      fields: TICKED,
+      dirtyFields: { inputImage: true, reasoning: true },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.input).toEqual(["text", "image"]);
+    expect(result.data.reasoning).toBe(true);
+  });
+
+  it("leaves an untouched pair to the catalog", () => {
+    const result = build({ provider: OPENAI_COMPATIBLE, fields: TICKED, dirtyFields: {} });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.input).toBeUndefined();
+    expect(result.data.reasoning).toBeUndefined();
+  });
+});
+
 describe("buildModelFormPayload — the model's name", () => {
   const CUSTOM_ENDPOINT = fields({
     apiShape: "openai-completions",

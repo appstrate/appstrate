@@ -604,7 +604,7 @@
   "models.form.apiKeyRequired": "Enter an API key or pick an existing one.",
   "models.form.discoverButton": "Detect models",
   "models.form.manualButton": "Configure manually",
-  "models.form.modelStepRequired": "Detect the models, or configure them manually, before saving.",
+  "models.form.modelStepRequired": "Complete the endpoint, then detect the models or configure them manually, before saving.",
   "models.form.advanced": "Advanced",
   "models.form.labelPlaceholder": "Defaults to the model id",
   "models.form.discovering": "Detecting…",

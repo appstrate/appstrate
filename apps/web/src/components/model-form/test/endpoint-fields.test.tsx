@@ -63,7 +63,7 @@ function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): 
       idPrefix="pk"
       providers={[OPENAI_COMPATIBLE]}
       providerId={OPENAI_COMPATIBLE.providerId}
-      onProviderChange={() => {}}
+      onApiTypeChange={() => {}}
       baseUrlProps={fieldProps("baseUrlOverride")}
       baseUrlLocked={false}
       apiKeyProps={fieldProps("apiKey")}
@@ -81,6 +81,12 @@ describe("EndpointFields", () => {
     expect(html).toContain(settingsFr["models.form.apiType"]);
     expect(html).toContain(settingsFr["models.form.baseUrlHint"]);
     expect(html).toContain('placeholder="sk-..."');
+  });
+
+  it("suggests the URL shape the picked API type answers on", () => {
+    // A shape borrowed from another entry produces a URL that entry's API never
+    // serves — `anthropic-messages` appends `/v1/models` to what is typed here.
+    expect(fields()).toContain(`placeholder="${OPENAI_COMPATIBLE.defaultBaseUrl}"`);
   });
 
   it("renames its fields for the other host", () => {

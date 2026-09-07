@@ -59,8 +59,7 @@ import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 
 /**
  * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
- * `baseUrlOverride` is only meaningful for providers with `baseUrlOverridable: true`
- * (today: `openai-compatible`).
+ * `baseUrlOverride` is only meaningful for a base-URL-overridable entry.
  */
 interface CredentialFormData {
   label: string;
@@ -212,6 +211,14 @@ function CredentialFormBody({
     );
   };
 
+  /** An auto-filled name follows the picked entry; a typed one is left alone. */
+  const applyProviderName = (provider: ProviderRegistryEntry) => {
+    const current = label.trim();
+    if (!current || current === selectedProvider?.displayName) {
+      setValue("label", provider.displayName);
+    }
+  };
+
   const handleProviderChange = (picked: string) => {
     const id = picked === CUSTOM_ENDPOINT_ID ? (overridableProviders[0]?.providerId ?? "") : picked;
     setSelectedId(id);
@@ -227,8 +234,17 @@ function CredentialFormBody({
       // see the value they're customising. Non-overridable providers
       // never read this field.
       setValue("baseUrlOverride", provider.baseUrlOverridable ? provider.defaultBaseUrl : "");
-      if (!label.trim()) setValue("label", provider.displayName);
+      applyProviderName(provider);
     }
+  };
+
+  // Same contract as the model form's endpoint (see `onApiTypeChange`): the URL
+  // follows the new entry, the typed key stays.
+  const handleApiTypeChange = (entry: ProviderRegistryEntry) => {
+    setSelectedId(entry.providerId);
+    clearErrors();
+    setValue("baseUrlOverride", entry.defaultBaseUrl);
+    applyProviderName(entry);
   };
 
   const onFormSubmit = handleSubmit((data) => {
@@ -393,7 +409,7 @@ function CredentialFormBody({
             idPrefix="pk"
             providers={overridableProviders}
             providerId={selectedProvider?.providerId ?? ""}
-            onProviderChange={handleProviderChange}
+            onApiTypeChange={handleApiTypeChange}
             // `apiShape` and `baseUrl` are pinned by `providerId` at create
             // time — delete and re-create to point the key elsewhere.
             providerLocked={isEditing}

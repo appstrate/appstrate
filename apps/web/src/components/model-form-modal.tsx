@@ -32,11 +32,16 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
-import { Check, ChevronDown, ChevronsUpDown, KeyRound, Plug, Server, X } from "lucide-react";
+import { Check, ChevronDown, ChevronsUpDown, Plug, Server } from "lucide-react";
 import { type OrgModelInfo } from "../hooks/use-models";
 import type { ModelCost } from "@appstrate/core/module";
 import { CapabilitiesSection } from "./model-form/capabilities-section";
-import { ApiKeyRow, EndpointFields } from "./model-form/endpoint-fields";
+import {
+  ApiKeyRow,
+  BaseUrlField,
+  CredentialChip,
+  EndpointFields,
+} from "./model-form/endpoint-fields";
 import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
   useDiscoverModels,
@@ -45,6 +50,7 @@ import {
   useRefreshCredentialModels,
   type DiscoveredModel,
   type DiscoveredModelsResponse,
+  type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
@@ -604,6 +610,18 @@ export function ModelFormBody({
     openRouterSearch.setSearch("");
   };
 
+  // Switching the wire format re-points the endpoint, not the secret: the URL
+  // follows the new entry and the typed key stays. A saved credential pins both,
+  // and the model was named by a listing this endpoint no longer serves.
+  const handleApiTypeChange = (entry: ProviderRegistryEntry) => {
+    setProviderId(entry.providerId);
+    clearErrors();
+    setValue("apiShape", entry.apiShape);
+    setValue("baseUrl", entry.defaultBaseUrl);
+    setValue("credentialId", "");
+    resetModelFields();
+  };
+
   const handleModelChange = (id: string) => {
     setSelectedModelId(id);
     clearErrors();
@@ -709,34 +727,16 @@ export function ModelFormBody({
       </Label>
 
       {selectedCredential ? (
-        <div className="flex gap-2">
-          <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
-            {isOauthProvider ? (
+        <CredentialChip
+          label={selectedCredential.label}
+          icon={
+            isOauthProvider ? (
               <Plug className="text-muted-foreground size-3.5 shrink-0" />
-            ) : (
-              <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
-            )}
-            <span className="truncate">{selectedCredential.label}</span>
-            {isOauthProvider && selectedCredential.oauth_email && (
-              <span className="text-muted-foreground truncate text-xs">
-                ({selectedCredential.oauth_email})
-              </span>
-            )}
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0"
-            onClick={() => {
-              setValue("credentialId", "");
-              setValue("inlineApiKey", "");
-            }}
-          >
-            <X className="size-4" />
-            <span className="sr-only">{t("btn.cancel")}</span>
-          </Button>
-        </div>
+            ) : undefined
+          }
+          secondary={isOauthProvider ? selectedCredential.oauth_email : undefined}
+          onClear={existingKeys.onClear}
+        />
       ) : isOauthProvider ? (
         // OAuth: existing-connection select stacks ABOVE the connect
         // button when there's at least one match — single column avoids
@@ -818,56 +818,55 @@ export function ModelFormBody({
    */
   const showModelFields =
     modelMode === "manual" || (modelMode === "detect" && discoveredModels.length > 0);
+  /** The typed model id reaches the screen only once both steps are answered. */
+  const modelIdOnScreen = endpointReady && showModelFields;
 
   // A preset carries its own values; anywhere else they are typed or picked.
   const baseUrlValidate = (v: string) =>
     isPreset || parsesAsUrl(v) ? undefined : t("validation.required", { ns: "common" });
-  // A custom endpoint has to get through step 2 before there is an id to require,
-  // so an empty one names the step rather than the field.
+  // A custom endpoint has to get through both steps before there is an id to
+  // require, so an empty one names the steps rather than the field.
   const modelIdValidate = (v: string) =>
     isPreset || v.trim()
       ? undefined
-      : isCustomProvider && !showModelFields
+      : isCustomProvider && !modelIdOnScreen
         ? t("models.form.modelStepRequired")
         : t("validation.required", { ns: "common" });
 
-  // The typed fields. Built only where they render, so RHF registers (and
-  // validates) each under exactly the condition it did before.
+  // The typed fields, built where they render so RHF validates each under the
+  // arrangement that puts it on screen.
+  // Creating, an empty name lets the server derive one. Editing, PATCH reads an
+  // absent name as "keep it", so clearing it is refused rather than saved.
+  const labelValidate = (v: string) =>
+    !model || v.trim() ? undefined : t("validation.required", { ns: "common" });
+
   const labelFieldJsx = isCustom ? (
     <div className="space-y-2">
       <Label htmlFor="mdl-label">{t("models.form.label")}</Label>
-      {/* Optional: with nothing typed the server names the row after the
-          catalog entry, or after the model id. */}
       <Input
         id="mdl-label"
         type="text"
-        {...register("label")}
-        placeholder={t("models.form.labelPlaceholder")}
+        {...register("label", { validate: labelValidate })}
+        placeholder={model ? undefined : t("models.form.labelPlaceholder")}
+        aria-invalid={showError("label") ? true : undefined}
+        className={cn(showError("label") && "border-destructive")}
       />
+      {showError("label") && errors.label?.message && (
+        <div className="text-destructive text-sm">{errors.label.message}</div>
+      )}
     </div>
   ) : null;
 
   const baseUrlFieldJsx = isCustomModel ? (
-    <div className="space-y-2">
-      <Label htmlFor="mdl-baseUrl">{t("models.form.baseUrl")}</Label>
-      <Input
-        id="mdl-baseUrl"
-        type="url"
-        {...register("baseUrl", { validate: baseUrlValidate })}
-        // The URL is a property of the credential (`baseUrlOverride`), not of
-        // the model, so it only moves when a credential is created with it.
-        disabled={!!selectedCredential}
-        placeholder="https://api.openai.com/v1"
-        aria-invalid={showError("baseUrl") ? true : undefined}
-        className={cn(showError("baseUrl") && "border-destructive")}
-      />
-      <div className="text-muted-foreground text-sm">
-        {selectedCredential ? t("models.form.baseUrlPinnedHint") : t("models.form.baseUrlHint")}
-      </div>
-      {showError("baseUrl") && errors.baseUrl?.message && (
-        <div className="text-destructive text-sm">{errors.baseUrl.message}</div>
-      )}
-    </div>
+    <BaseUrlField
+      id="mdl-baseUrl"
+      baseUrlProps={register("baseUrl", { validate: baseUrlValidate })}
+      // The URL is a property of the credential (`baseUrlOverride`), not of the
+      // model, so it only moves when a credential is created with it.
+      locked={!!selectedCredential}
+      error={showError("baseUrl") ? errors.baseUrl?.message : undefined}
+      placeholder={selectedProvider?.defaultBaseUrl}
+    />
   ) : null;
 
   // Rows for the discovered-model combobox: filtered here (the picker itself
@@ -922,9 +921,9 @@ export function ModelFormBody({
       inputText={inputText}
       inputImage={inputImage}
       reasoning={reasoning}
-      onInputTextChange={(v) => setValue("inputText", v)}
-      onInputImageChange={(v) => setValue("inputImage", v)}
-      onReasoningChange={(v) => setValue("reasoning", v)}
+      onInputTextChange={(v) => setValue("inputText", v, { shouldDirty: true })}
+      onInputImageChange={(v) => setValue("inputImage", v, { shouldDirty: true })}
+      onReasoningChange={(v) => setValue("reasoning", v, { shouldDirty: true })}
     />
   ) : null;
 
@@ -963,12 +962,6 @@ export function ModelFormBody({
           ) : (
             <div className="text-destructive text-sm">{discoveryErrorText(freshDiscovery, t)}</div>
           ))}
-        {!showModelFields && (
-          <>
-            <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
-            {modelIdErrorJsx}
-          </>
-        )}
       </div>
 
       {showModelFields && (
@@ -1077,7 +1070,7 @@ export function ModelFormBody({
             idPrefix="mdl"
             providers={overridableProviders}
             providerId={providerId}
-            onProviderChange={handleProviderChange}
+            onApiTypeChange={handleApiTypeChange}
             // The endpoint belongs to the saved row; changing it would rebind
             // the model to a service it was never verified against.
             providerLocked={!!model}
@@ -1094,6 +1087,14 @@ export function ModelFormBody({
             existingKeys={existingKeys}
           />
           {endpointReady && modelStepJsx}
+          {/* Registered even where neither step put it on screen — an id nothing
+              validates turns saving too early into a dead button. */}
+          {!modelIdOnScreen && (
+            <>
+              <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
+              {modelIdErrorJsx}
+            </>
+          )}
         </>
       ) : (
         <>

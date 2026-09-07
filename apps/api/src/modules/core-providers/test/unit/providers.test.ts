@@ -39,7 +39,8 @@ describe("core-providers module", () => {
   it("offers at most one custom endpoint per wire format", () => {
     // A `baseUrlOverridable` entry exists to reach an endpoint no named preset
     // covers, and what distinguishes one from another is the wire format —
-    // two sharing an apiShape would make one of them unreachable in the picker.
+    // two sharing an apiShape could not be told apart when a credential's
+    // (apiShape, baseUrl) is resolved back to its provider.
     const shapes = (coreProvidersModule.modelProviders?.() ?? [])
       .filter((p) => p.baseUrlOverridable)
       .map((p) => p.apiShape);

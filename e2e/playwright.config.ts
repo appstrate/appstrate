@@ -38,9 +38,9 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 120_000,
     // Playwright already spreads `process.env` underneath this map, so only the
-    // keys the suite pins are listed. At the default port every value below is
-    // byte-identical to what the API resolves on its own — `E2E_PORT` is the
-    // only thing that moves them.
+    // keys the suite pins are listed. The port-derived values match the API's own
+    // defaults at the default port; the data directories are deliberately not
+    // the API's defaults (see below).
     env: {
       PORT: String(E2E_PORT),
       APP_URL: E2E_BASE_URL,

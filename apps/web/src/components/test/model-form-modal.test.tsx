@@ -145,6 +145,9 @@ describe("ModelFormBody — editing a custom endpoint", () => {
   it("opens on the model the row already names, editable and free-text", () => {
     expect(html).toContain('id="mdl-modelId"');
     expect(html).toContain('id="mdl-label"');
+    // The name is required on a saved row: PATCH reads an absent one as "keep",
+    // so promising a derived one would describe a save that changes nothing.
+    expect(html).not.toContain(settingsFr["models.form.labelPlaceholder"]);
     expect(html).toContain(settingsFr["models.form.advanced"]);
     // "Avancé" is open, so the capabilities the row carries are on screen.
     expect(html).toContain(settingsFr["models.form.capabilities"]);
@@ -183,6 +186,17 @@ describe("ModelFormBody — custom endpoint with no key to open it", () => {
     expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
     expect(html).not.toContain('id="mdl-modelId"');
     expect(html).not.toContain('id="mdl-label"');
+  });
+
+  it("keeps the model id registered, so saving too early is answered", () => {
+    // Without the field on screen nothing validates the id, and the save button
+    // reports nothing at all.
+    expect(html).toContain('type="hidden"');
+    expect(html).toContain('name="modelId"');
+  });
+
+  it("suggests the URL shape the picked API type answers on", () => {
+    expect(html).toContain(`placeholder="${OPENAI_COMPATIBLE.defaultBaseUrl}"`);
   });
 });
 

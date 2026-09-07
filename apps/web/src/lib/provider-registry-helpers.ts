@@ -15,8 +15,8 @@ import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credenti
 /**
  * Sentinel for the MODEL-level "custom" entry: a model id the picked provider's
  * catalog doesn't list, typed in by hand. It is never a `providerId` — a custom
- * endpoint is the registry's own `openai-compatible` provider, whose credential
- * carries the apiShape and base URL the model runs on.
+ * endpoint is any base-URL-overridable registry entry, whose credential carries
+ * the apiShape and base URL the model runs on.
  */
 export const CUSTOM_ID = "__custom__";
 

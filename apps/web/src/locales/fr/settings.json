@@ -604,7 +604,7 @@
   "models.form.apiKeyRequired": "Saisis une clé API ou sélectionne une clé existante.",
   "models.form.discoverButton": "Détecter les modèles",
   "models.form.manualButton": "Configurer manuellement",
-  "models.form.modelStepRequired": "Détecte les modèles ou configure-les manuellement avant d'enregistrer.",
+  "models.form.modelStepRequired": "Complète l'endpoint, puis détecte les modèles ou configure-les manuellement avant d'enregistrer.",
   "models.form.advanced": "Avancé",
   "models.form.labelPlaceholder": "Par défaut : l'identifiant du modèle",
   "models.form.discovering": "Détection en cours...",

@@ -10,6 +10,7 @@
  * `baseUrlOverridable` ones, and the payload it builds names one of them.
  */
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { UseFormRegisterReturn } from "react-hook-form";
 import { KeyRound, X } from "lucide-react";
@@ -84,11 +85,88 @@ export function ApiKeyRow({
   );
 }
 
+/**
+ * The credential a form is currently bound to, and the way to unbind it.
+ * `icon` and `secondary` carry what a connection shows over a bare key.
+ */
+export function CredentialChip({
+  label,
+  icon,
+  secondary,
+  onClear,
+}: {
+  label: string;
+  icon?: ReactNode;
+  secondary?: string | null;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+
+  return (
+    <div className="flex gap-2">
+      <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
+        {icon ?? <KeyRound className="text-muted-foreground size-3.5 shrink-0" />}
+        <span className="truncate">{label}</span>
+        {secondary && <span className="text-muted-foreground truncate text-xs">({secondary})</span>}
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9 shrink-0"
+        onClick={onClear}
+      >
+        <X className="size-4" />
+        <span className="sr-only">{t("btn.cancel")}</span>
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Where the endpoint lives. `placeholder` is the picked entry's default URL, so
+ * the shape it suggests is the one that entry's API actually answers on.
+ */
+export function BaseUrlField({
+  id,
+  baseUrlProps,
+  locked,
+  error,
+  placeholder,
+}: {
+  id: string;
+  baseUrlProps: UseFormRegisterReturn;
+  locked: boolean;
+  error?: string;
+  placeholder?: string;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{t("models.form.baseUrl")}</Label>
+      <Input
+        id={id}
+        type="url"
+        {...baseUrlProps}
+        disabled={locked}
+        placeholder={placeholder}
+        aria-invalid={error ? true : undefined}
+        className={cn(error && "border-destructive")}
+      />
+      <div className="text-muted-foreground text-sm">
+        {locked ? t("models.form.baseUrlPinnedHint") : t("models.form.baseUrlHint")}
+      </div>
+      {error && <div className="text-destructive text-sm">{error}</div>}
+    </div>
+  );
+}
+
 export function EndpointFields({
   idPrefix,
   providers,
   providerId,
-  onProviderChange,
+  onApiTypeChange,
   providerLocked,
   baseUrlProps,
   baseUrlLocked,
@@ -102,7 +180,12 @@ export function EndpointFields({
   idPrefix: string;
   providers: readonly ProviderRegistryEntry[];
   providerId: string;
-  onProviderChange: (id: string) => void;
+  /**
+   * The API type is the wire format, not the secret: the host points its base
+   * URL at `entry.defaultBaseUrl` and keeps the typed key, dropping only a
+   * saved credential, which pins both.
+   */
+  onApiTypeChange: (entry: ProviderRegistryEntry) => void;
   providerLocked?: boolean;
   baseUrlProps: UseFormRegisterReturn;
   baseUrlLocked: boolean;
@@ -114,12 +197,20 @@ export function EndpointFields({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const selectedKey = existingKeys?.selected ?? null;
+  const selectedEntry = providers.find((p) => p.providerId === providerId);
 
   return (
     <>
       <div className="space-y-2">
         <Label htmlFor={`${idPrefix}-apiType`}>{t("models.form.apiType")}</Label>
-        <Select value={providerId} onValueChange={onProviderChange} disabled={providerLocked}>
+        <Select
+          value={providerId}
+          onValueChange={(id) => {
+            const entry = providers.find((p) => p.providerId === id);
+            if (entry) onApiTypeChange(entry);
+          }}
+          disabled={providerLocked}
+        >
           <SelectTrigger id={`${idPrefix}-apiType`}>
             <SelectValue placeholder={t("models.form.providerPlaceholder")} />
           </SelectTrigger>
@@ -139,44 +230,20 @@ export function EndpointFields({
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-baseUrl`}>{t("models.form.baseUrl")}</Label>
-        <Input
-          id={`${idPrefix}-baseUrl`}
-          type="url"
-          {...baseUrlProps}
-          disabled={baseUrlLocked}
-          placeholder="https://api.openai.com/v1"
-          aria-invalid={baseUrlError ? true : undefined}
-          className={cn(baseUrlError && "border-destructive")}
-        />
-        <div className="text-muted-foreground text-sm">
-          {baseUrlLocked ? t("models.form.baseUrlPinnedHint") : t("models.form.baseUrlHint")}
-        </div>
-        {baseUrlError && <div className="text-destructive text-sm">{baseUrlError}</div>}
-      </div>
+      <BaseUrlField
+        id={`${idPrefix}-baseUrl`}
+        baseUrlProps={baseUrlProps}
+        locked={baseUrlLocked}
+        error={baseUrlError}
+        placeholder={selectedEntry?.defaultBaseUrl}
+      />
 
       <div className="space-y-2">
         <Label htmlFor={selectedKey ? undefined : `${idPrefix}-apiKey`}>
           {t("credentials.form.apiKey")}
         </Label>
         {selectedKey && existingKeys ? (
-          <div className="flex gap-2">
-            <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
-              <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
-              <span className="truncate">{selectedKey.label}</span>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 shrink-0"
-              onClick={existingKeys.onClear}
-            >
-              <X className="size-4" />
-              <span className="sr-only">{t("btn.cancel")}</span>
-            </Button>
-          </div>
+          <CredentialChip label={selectedKey.label} onClear={existingKeys.onClear} />
         ) : (
           <ApiKeyRow
             id={`${idPrefix}-apiKey`}
