@@ -5009,7 +5009,7 @@ export interface components {
             source: "built-in" | "custom";
             /** @enum {string} */
             authMode: "api_key" | "oauth2";
-            /** @description Canonical providerId backing the credential. Set when `authMode === 'oauth2'`. */
+            /** @description Canonical providerId backing the credential. Always set for a `custom` credential (the model form matches a custom endpoint's saved keys on it); `null` for a `built-in` one, whose backing is hidden. */
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;

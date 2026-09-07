@@ -24,7 +24,8 @@ export interface ModelFormFields {
   reasoning: boolean;
 }
 
-export interface ModelFormData {
+/** One `POST /api/models` body, minus the credential every entry shares. */
+export interface ModelFormModelEntry {
   /**
    * Optional — server derives from the catalog label (`<catalog>.label`)
    * and dedupes against existing org rows when absent. Sent only when the
@@ -32,8 +33,6 @@ export interface ModelFormData {
    */
   label?: string;
   modelId: string;
-  credentialId: string;
-  newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
   /**
    * Catalog-derivable overrides. Sent only when the user edited them after
    * picking a preset (RHF `dirtyFields`) — keeps existing rows in sync with
@@ -45,6 +44,36 @@ export interface ModelFormData {
   reasoning?: boolean;
   cost?: ModelCost;
 }
+
+/** The credential the model(s) run on: an existing one, or one to create first. */
+interface ModelFormCredentialBinding {
+  credentialId: string;
+  newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
+}
+
+export interface ModelFormData extends ModelFormModelEntry, ModelFormCredentialBinding {}
+
+/** Several models against ONE credential — one `POST /api/models` per entry. */
+export interface ModelFormMultiData extends ModelFormCredentialBinding {
+  models: ModelFormModelEntry[];
+}
+
+/** What the model form hands its host: one model, or a batch of them. */
+export type ModelFormSubmission = ModelFormData | ModelFormMultiData;
+
+/**
+ * What a batch reports back once every create has been attempted: the ids that
+ * failed — so the form can re-offer exactly those — and the credential it
+ * created, which a retry binds to instead of creating a second one.
+ */
+export interface ModelFormSubmitOutcome {
+  failedModelIds: string[];
+  credentialId?: string;
+}
+
+export type ModelFormSubmit = (
+  data: ModelFormSubmission,
+) => void | Promise<ModelFormSubmitOutcome | void>;
 
 /** The registry facts the payload turns on — a `ProviderRegistryEntry` fits. */
 export interface ModelFormProvider {
@@ -69,13 +98,23 @@ export interface ModelFormPayloadInput {
   importedCost: ModelCost | null;
 }
 
-type ModelFormPayloadResult =
-  { ok: true; data: ModelFormData } | { ok: false; field: "credentialId"; messageKey: string };
+type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string };
 
-export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPayloadResult {
-  const { fields, dirtyFields, provider, importedCost } = input;
+type ModelFormPayloadResult = { ok: true; data: ModelFormData } | CredentialFailure;
+
+/**
+ * The credential half of any model create, shared by the single-model form and
+ * the multi-add path: an existing selection, or the inline key to create first.
+ */
+export function resolveCredentialBinding(input: {
+  provider: ModelFormProvider | undefined;
+  selectedCredentialId: string | null;
+  inlineApiKey: string;
+  baseUrl: string;
+}): { ok: true; binding: ModelFormCredentialBinding } | CredentialFailure {
+  const { provider, baseUrl } = input;
   const isOauthProvider = provider?.authMode === "oauth2";
-  const inlineApiKey = fields.inlineApiKey.trim();
+  const inlineApiKey = input.inlineApiKey.trim();
   const credentialId = input.selectedCredentialId ?? "";
 
   // Inline api-key creation only applies to api_key providers — OAuth
@@ -88,9 +127,37 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
   if (isOauthProvider && !credentialId) {
     return { ok: false, field: "credentialId", messageKey: "models.form.connectionRequired" };
   }
-  if (!isOauthProvider && !credentialId && !newCredentialProvider) {
-    return { ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" };
+  if (!newCredentialProvider) {
+    if (!credentialId) {
+      return { ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" };
+    }
+    return { ok: true, binding: { credentialId } };
   }
+  // Posted to /api/model-provider-credentials before the model itself.
+  return {
+    ok: true,
+    binding: {
+      credentialId: "",
+      newCredential: {
+        apiKey: inlineApiKey,
+        providerId: newCredentialProvider.providerId,
+        ...(newCredentialProvider.baseUrlOverridable && baseUrl.trim()
+          ? { baseUrlOverride: baseUrl.trim() }
+          : {}),
+      },
+    },
+  };
+}
+
+export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPayloadResult {
+  const { fields, dirtyFields, importedCost } = input;
+  const credential = resolveCredentialBinding({
+    provider: input.provider,
+    selectedCredentialId: input.selectedCredentialId,
+    inlineApiKey: fields.inlineApiKey,
+    baseUrl: fields.baseUrl,
+  });
+  if (!credential.ok) return credential;
 
   const inputArr = [fields.inputText && "text", fields.inputImage && "image"].filter(
     Boolean,
@@ -106,19 +173,7 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
       // the user edited (or OpenRouter live-search imported) is flagged here.
       ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
       modelId: fields.modelId.trim(),
-      credentialId: newCredentialProvider ? "" : credentialId,
-      // Posted to /api/model-provider-credentials before the model itself.
-      ...(newCredentialProvider
-        ? {
-            newCredential: {
-              apiKey: inlineApiKey,
-              providerId: newCredentialProvider.providerId,
-              ...(newCredentialProvider.baseUrlOverridable && fields.baseUrl.trim()
-                ? { baseUrlOverride: fields.baseUrl.trim() }
-                : {}),
-            },
-          }
-        : {}),
+      ...credential.binding,
       ...(inputDirty && inputArr.length > 0 ? { input: inputArr } : {}),
       ...(dirtyFields.contextWindow === true && cw ? { contextWindow: cw } : {}),
       ...(dirtyFields.maxTokens === true && mt ? { maxTokens: mt } : {}),

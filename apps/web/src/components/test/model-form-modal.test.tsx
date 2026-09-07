@@ -102,17 +102,27 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
   };
 }
 
-/** The key the edited model is bound to — matched on apiShape + base URL. */
+/** The key the edited model is bound to. Every custom credential names the
+ *  provider it was created for, which is what an overridable one is matched on. */
 const LOCAL_KEY: ModelProviderCredentialInfo = {
   id: "cred_1",
-  label: "Ollama local",
+  label: "localhost:11434 · OpenAI-compatible",
   apiShape: "openai-completions",
   baseUrl: "http://localhost:11434/v1",
+  providerId: "openai-compatible",
   source: "custom",
   authMode: "api_key",
   created_by: null,
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
+};
+
+/** The same provider, saved against another host — E1's whole point. */
+const REMOTE_KEY: ModelProviderCredentialInfo = {
+  ...LOCAL_KEY,
+  id: "cred_2",
+  label: "vllm.internal · OpenAI-compatible",
+  baseUrl: "https://vllm.internal/v1",
 };
 
 function form(target: OrgModelInfo, credentials: ModelProviderCredentialInfo[] = []): string {
@@ -154,19 +164,17 @@ describe("ModelFormBody — editing a custom endpoint", () => {
     expect(html).toContain('id="mdl-input-text"');
   });
 
-  it("still offers to ask the endpoint what it serves", () => {
-    expect(html).toContain(settingsFr["models.form.discoverButton"]);
-    expect(html).toContain(settingsFr["models.form.manualButton"]);
+  it("does not offer detection: that adds rows, and an edit changes this one", () => {
+    expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
+    expect(html).not.toContain(settingsFr["models.form.manualButton"]);
   });
 
   it("orders the fields the way they are filled in", () => {
-    // endpoint (type → URL → key) → the two ways to name a model → the model
-    // → its name → the capabilities fold.
+    // endpoint (type → URL → key) → the model → its name → the capabilities fold.
     const order = [
       'id="mdl-apiType"',
       'id="mdl-baseUrl"',
       settingsFr["credentials.form.apiKey"],
-      settingsFr["models.form.discoverButton"],
       'id="mdl-modelId"',
       'id="mdl-label"',
       settingsFr["models.form.advanced"],
@@ -197,6 +205,20 @@ describe("ModelFormBody — custom endpoint with no key to open it", () => {
 
   it("suggests the URL shape the picked API type answers on", () => {
     expect(html).toContain(`placeholder="${OPENAI_COMPATIBLE.defaultBaseUrl}"`);
+  });
+});
+
+describe("ModelFormBody — custom endpoint, keys saved against other hosts", () => {
+  // Nothing is bound (the row names a key that no longer exists), and the only
+  // saved key answers on a different URL than the one the form holds.
+  const html = form(model({ credentialId: "cred_gone" }), [REMOTE_KEY]);
+
+  it("still offers the saved keys, since the picked one brings its own URL", () => {
+    // Select ITEMS are portalled, so what the picker holds is asserted in
+    // `lib/test/model-credential-filter.test.ts`; here the trigger's presence
+    // is the observable — provider, API type, and the "my keys" picker.
+    expect(html.split('role="combobox"').length - 1).toBe(3);
+    expect(html).toContain('id="mdl-apiKey"');
   });
 });
 

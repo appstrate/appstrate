@@ -1315,7 +1315,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`.",
+          "Canonical providerId backing the credential. Always set for a `custom` credential (the model form matches a custom endpoint's saved keys on it); `null` for a `built-in` one, whose backing is hidden.",
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },

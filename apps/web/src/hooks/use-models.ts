@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
@@ -7,7 +8,12 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
 import type { ModelCost } from "@appstrate/core/module";
-import type { ModelFormData } from "../lib/model-form-payload";
+import type {
+  ModelFormData,
+  ModelFormMultiData,
+  ModelFormSubmission,
+  ModelFormSubmitOutcome,
+} from "../lib/model-form-payload";
 import {
   useCreateModelProviderCredential,
   useModelProviderCredentials,
@@ -153,8 +159,22 @@ export function useSetAgentModel(packageId: string) {
 }
 
 /**
+ * The create body for a key the form typed inline. `label` is omitted — the
+ * server derives it from the provider's `displayName` (a custom endpoint is
+ * named after its host) and dedupes against existing org credentials.
+ */
+function credentialBody(credential: NonNullable<ModelFormData["newCredential"]>) {
+  return {
+    providerId: credential.providerId,
+    apiKey: credential.apiKey,
+    ...(credential.baseUrlOverride ? { baseUrlOverride: credential.baseUrlOverride } : {}),
+  };
+}
+
+/**
  * Handles ModelFormModal submission: creates provider key inline if needed,
- * then creates or updates the model.
+ * then creates or updates the model — or, for a batch the detected-models list
+ * checked, creates that one key and then one model per entry.
  */
 export function useModelFormHandler(opts: {
   editModel?: OrgModelInfo | null;
@@ -168,23 +188,47 @@ export function useModelFormHandler(opts: {
   // from the registry's `displayName` and dedupes against existing rows.
   useModelProviderCredentials();
 
-  const isPending = createModel.isPending || updateModel.isPending || createCredential.isPending;
+  // Spans the whole sequential batch: the per-mutation flags fall back to false
+  // between two creates, which would re-enable the button mid-run.
+  const [batchPending, setBatchPending] = useState(false);
+  const isPending =
+    batchPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
 
-  const onSubmit = (data: ModelFormData) => {
+  /**
+   * One credential, then one `POST /api/models` per entry — there is no bulk
+   * create. Each refusal is collected instead of aborting: the models around a
+   * rejected id are still worth adding, and the caller re-offers the rest.
+   */
+  const submitBatch = async (data: ModelFormMultiData): Promise<ModelFormSubmitOutcome> => {
+    setBatchPending(true);
+    try {
+      const credentialId = data.newCredential
+        ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
+        : data.credentialId;
+      const failedModelIds: string[] = [];
+      for (const entry of data.models) {
+        try {
+          await createModel.mutateAsync({ body: { ...entry, credentialId } });
+        } catch {
+          failedModelIds.push(entry.modelId);
+        }
+      }
+      if (failedModelIds.length === 0) opts.onSuccess();
+      return { failedModelIds, credentialId };
+    } catch {
+      // The key itself was refused, so not one model could be created against it.
+      return { failedModelIds: data.models.map((m) => m.modelId) };
+    } finally {
+      setBatchPending(false);
+    }
+  };
+
+  const onSubmit = (data: ModelFormSubmission) => {
+    if ("models" in data) return submitBatch(data);
+
     const createCredentialAndThen = (onKeyCreated: (keyId: string) => void) => {
-      // Omit `label` — the server derives it from the provider's `displayName`
-      // and dedupes against existing org credentials. Operator-side scripts
-      // can pass `label` explicitly to override.
       createCredential.mutate(
-        {
-          body: {
-            providerId: data.newCredential!.providerId,
-            apiKey: data.newCredential!.apiKey,
-            ...(data.newCredential!.baseUrlOverride
-              ? { baseUrlOverride: data.newCredential!.baseUrlOverride }
-              : {}),
-          },
-        },
+        { body: credentialBody(data.newCredential!) },
         { onSuccess: (result) => onKeyCreated(result.id) },
       );
     };

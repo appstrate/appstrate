@@ -64,10 +64,12 @@ import {
 } from "@/lib/provider-registry-helpers";
 import {
   buildModelFormPayload,
-  type ModelFormData,
   type ModelFormFields,
+  type ModelFormSubmit,
 } from "@/lib/model-form-payload";
-import { discoveredModelToFieldValues } from "@/lib/discovered-model-fields";
+import { buildDiscoveredModelsPayload } from "@/lib/discovered-model-fields";
+import { selectableCredentials } from "@/lib/model-credential-filter";
+import { DiscoveredModelList } from "./model-form/discovered-model-list";
 import { getProviderIcon } from "./icons";
 
 /** This-session discovery, flattened: a failed request is one more outcome. */
@@ -114,7 +116,7 @@ interface ModelFormModalProps {
   onClose: () => void;
   model: OrgModelInfo | null;
   isPending: boolean;
-  onSubmit: (data: ModelFormData) => void;
+  onSubmit: ModelFormSubmit;
 }
 
 /** What the combobox reads off a row, whatever the listing it came from. */
@@ -127,8 +129,7 @@ interface ComboboxModel {
 /**
  * Searchable model picker over any listing the form can offer. Filtering is
  * the host's job — `shouldFilter={false}` — so a remote search and a
- * client-side one plug in the same way, and `freeTextItem` adds a row adopting
- * the raw typed text so an id the listing omits stays enterable.
+ * client-side one plug in the same way.
  */
 function ModelCombobox<T extends ComboboxModel>({
   value,
@@ -140,7 +141,6 @@ function ModelCombobox<T extends ComboboxModel>({
   emptyText,
   searchingText,
   onSelect,
-  freeTextItem,
 }: {
   value: string;
   search: string;
@@ -151,7 +151,6 @@ function ModelCombobox<T extends ComboboxModel>({
   emptyText: string;
   searchingText: string;
   onSelect: (m: T) => void;
-  freeTextItem?: { label: string; onSelect: () => void };
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -199,22 +198,7 @@ function ModelCombobox<T extends ComboboxModel>({
                 {searchingText}
               </div>
             )}
-            {!isLoading && models.length === 0 && !freeTextItem && (
-              <CommandEmpty>{emptyText}</CommandEmpty>
-            )}
-            {freeTextItem && (
-              <CommandGroup>
-                <CommandItem
-                  value={freeTextItem.label}
-                  onSelect={() => {
-                    freeTextItem.onSelect();
-                    setOpen(false);
-                  }}
-                >
-                  <span className="truncate">{freeTextItem.label}</span>
-                </CommandItem>
-              </CommandGroup>
-            )}
+            {!isLoading && models.length === 0 && <CommandEmpty>{emptyText}</CommandEmpty>}
             {models.length > 0 && (
               <CommandGroup>
                 {models.map((m) => (
@@ -259,9 +243,12 @@ function ModelCombobox<T extends ComboboxModel>({
 export function ModelFormBody({
   model,
   onSubmit,
+  onMultiSelectionChange,
 }: {
   model: OrgModelInfo | null;
-  onSubmit: (data: ModelFormData) => void;
+  onSubmit: ModelFormSubmit;
+  /** How many models the detected list has checked; `null` = single model. */
+  onMultiSelectionChange?: (count: number | null) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -351,43 +338,24 @@ export function ModelFormBody({
   //   - "api_key" → inline apiKey input OR pick an existing matching credential.
   // The registry is the single source of truth — adding a provider on the
   // server flows through here without any client edits.
-  const registryEntry = useMemo(
-    () => registryQuery.data?.find((p) => p.providerId === providerId),
-    [registryQuery.data, providerId],
+  const selectedProvider = useMemo(
+    () => getProviderById(providerId, registry),
+    [registry, providerId],
   );
-  const authMode: "api_key" | "oauth2" = registryEntry?.authMode ?? "api_key";
-  const isOauthProvider = authMode === "oauth2";
+  const isOauthProvider = selectedProvider?.authMode === "oauth2";
 
-  // Filter the existing credential list to those compatible with the picked
-  // provider:
-  //   - OAuth: pin to the canonical `providerId` (DB column) — apiShape +
-  //            baseUrl would collide with api-key Anthropic credentials.
-  //   - api-key: match on apiShape + baseUrl as before.
-  //
-  // Built-in (`source: "built-in"`) credentials come from `SYSTEM_PROVIDER_KEYS`
-  // env and use a slug id (e.g. `"anthropic"`), not a UUID — `org_models.credential_id`
-  // is a UUID FK to `model_provider_credentials.id` and would 400 the insert.
-  // Operators add models against system keys by declaring them in the env
-  // `models[]` block, not via this form. Hiding them removes the trap.
-  const availableCredentials = useMemo(() => {
-    if (!credentialsQuery.data) return [];
-    const customOnly = credentialsQuery.data.filter((k) => k.source === "custom");
-    if (isOauthProvider) {
-      return customOnly.filter((k) => k.authMode === "oauth2" && k.providerId === providerId);
-    }
-    if (!apiShape || !baseUrl) return [];
-    const normalizedBase = baseUrl.replace(/\/+$/, "");
-    return customOnly.filter(
-      (k) =>
-        k.authMode === "api_key" &&
-        k.apiShape === apiShape &&
-        // `baseUrl` is null only for alias-only built-in credentials, which are
-        // already excluded by the `customOnly` filter above — guard anyway so
-        // the type narrows (binding-hidden credentials never match a form pick).
-        k.baseUrl != null &&
-        k.baseUrl.replace(/\/+$/, "") === normalizedBase,
-    );
-  }, [credentialsQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
+  // Which saved keys the picked provider can bind to — the whole rule lives in
+  // `lib/model-credential-filter.ts`.
+  const availableCredentials = useMemo(
+    () =>
+      selectableCredentials({
+        credentials: credentialsQuery.data,
+        provider: selectedProvider,
+        apiShape,
+        baseUrl,
+      }),
+    [credentialsQuery.data, selectedProvider, apiShape, baseUrl],
+  );
 
   const selectedCredential = availableCredentials.find((k) => k.id === credentialId);
 
@@ -457,7 +425,6 @@ export function ModelFormBody({
 
   const isOpenRouter = providerId === "openrouter";
   const openRouterSearch = useOpenRouterSearch(isOpenRouter);
-  const selectedProvider = getProviderById(providerId, registry);
   // A provider that lets the operator point the credential at their own
   // endpoint has no catalog behind it: base URL, model id, label and
   // capabilities are all typed in. Read off the registry flag, so a second
@@ -481,10 +448,31 @@ export function ModelFormBody({
   // stale rather than offering ids from an endpoint the form left behind.
   const discoverModels = useDiscoverModels();
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
-  const [discoverySearch, setDiscoverySearch] = useState("");
   const discoveryKey = [providerId, baseUrl.trim(), credentialId, inlineApiKey.trim()].join("|");
   const freshDiscovery = discovery?.key === discoveryKey ? discovery : null;
   const discoveredModels = freshDiscovery?.outcome === "ok" ? freshDiscovery.models : [];
+
+  // Which detected models are checked. `null` — the form adds ONE model, the
+  // one its fields name; an array — it adds exactly these, in one submit.
+  const [selectedModelIds, setSelectedModelIds] = useState<string[] | null>(null);
+  /** Ids a batch could not create — re-offered instead of silently dropped. */
+  const [failedModelIds, setFailedModelIds] = useState<string[]>([]);
+  /**
+   * The credential a partially failed batch already created: a retry binds to
+   * it rather than posting the same inline key a second time.
+   */
+  const [createdCredentialId, setCreatedCredentialId] = useState<string | null>(null);
+
+  const applySelection = (ids: string[] | null) => {
+    setSelectedModelIds(ids);
+    onMultiSelectionChange?.(ids?.length ?? null);
+  };
+  /** A listing belongs to the endpoint it ran against, and to nothing else. */
+  const dropDiscovery = () => {
+    applySelection(null);
+    setFailedModelIds([]);
+    setCreatedCredentialId(null);
+  };
 
   /** Step 1 answered: an endpoint that parses, and something to authenticate with. */
   const endpointReady =
@@ -507,7 +495,7 @@ export function ModelFormBody({
   };
 
   // Capabilities are the rare edit — folded away unless the row already
-  // carries one, or a discovered pick just filled them in.
+  // carries one.
   const [advancedOpen, setAdvancedOpen] = useState(
     () =>
       !!model &&
@@ -520,7 +508,7 @@ export function ModelFormBody({
   const handleDiscover = () => {
     if (!selectedProvider) return;
     const key = discoveryKey;
-    setDiscoverySearch("");
+    dropDiscovery();
     discoverModels.mutate(
       {
         body: selectedCredential
@@ -532,25 +520,14 @@ export function ModelFormBody({
             },
       },
       {
-        onSuccess: (data) => setDiscovery({ key, outcome: data.outcome, models: data.models }),
+        onSuccess: (data) => {
+          setDiscovery({ key, outcome: data.outcome, models: data.models });
+          // Nothing checked yet: the footer counts what the operator picks.
+          if (data.outcome === "ok" && data.models.length > 0) applySelection([]);
+        },
         onError: () => setDiscovery({ key, outcome: "request_failed", models: [] }),
       },
     );
-  };
-
-  // Same reason as the OpenRouter import below: nothing resolves these on read
-  // for such an endpoint, so each write is dirty and ships as an override.
-  const applyDiscoveredModel = (m: DiscoveredModel) => {
-    const next = discoveredModelToFieldValues(m);
-    const dirty = { shouldDirty: true } as const;
-    setValue("modelId", next.modelId, dirty);
-    setValue("label", next.label, dirty);
-    setValue("contextWindow", next.contextWindow, dirty);
-    setValue("maxTokens", next.maxTokens, dirty);
-    setValue("inputText", next.inputText, dirty);
-    setValue("inputImage", next.inputImage, dirty);
-    setValue("reasoning", next.reasoning, dirty);
-    setAdvancedOpen(true);
   };
 
   const handleDetect = () => {
@@ -588,6 +565,7 @@ export function ModelFormBody({
     setValue("maxTokens", "");
     setValue("reasoning", false);
     setImportedCost(null);
+    dropDiscovery();
   };
 
   const handleProviderChange = (id: string) => {
@@ -646,7 +624,27 @@ export function ModelFormBody({
     setImportedCost(null);
   };
 
-  const onFormSubmit = handleSubmit((data) => {
+  const onFormSubmit = handleSubmit(async (data) => {
+    if (selectedModelIds !== null) {
+      const batch = buildDiscoveredModelsPayload({
+        models: discoveredModels.filter((m) => selectedModelIds.includes(m.id)),
+        provider: selectedProvider,
+        selectedCredentialId: selectedCredential?.id ?? createdCredentialId,
+        inlineApiKey: data.inlineApiKey,
+        baseUrl: data.baseUrl,
+      });
+      if (!batch.ok) {
+        setError(batch.field, { message: t(batch.messageKey) });
+        return;
+      }
+      const outcome = await onSubmit(batch.data);
+      if (!outcome || outcome.failedModelIds.length === 0) return;
+      if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
+      setFailedModelIds(outcome.failedModelIds);
+      // Only what failed stays checked — the rest are rows in the table now.
+      applySelection(outcome.failedModelIds);
+      return;
+    }
     const result = buildModelFormPayload({
       fields: data,
       dirtyFields,
@@ -708,10 +706,16 @@ export function ModelFormBody({
     onSelect: (id: string) => {
       setValue("credentialId", id);
       setValue("inlineApiKey", "");
+      // The key carries the endpoint it was saved against — the form follows it
+      // there (and pins the field) instead of asking for the URL again.
+      const picked = availableCredentials.find((k) => k.id === id);
+      if (picked?.baseUrl) setValue("baseUrl", picked.baseUrl);
+      dropDiscovery();
     },
     onClear: () => {
       setValue("credentialId", "");
       setValue("inlineApiKey", "");
+      dropDiscovery();
     },
   };
 
@@ -783,10 +787,10 @@ export function ModelFormBody({
             <span className="truncate">
               {availableCredentials.length > 0
                 ? t("models.form.connectAnother", {
-                    provider: registryEntry?.displayName ?? providerId,
+                    provider: selectedProvider?.displayName ?? providerId,
                   })
                 : t("models.form.connectProvider", {
-                    provider: registryEntry?.displayName ?? providerId,
+                    provider: selectedProvider?.displayName ?? providerId,
                   })}
             </span>
           </Button>
@@ -869,29 +873,6 @@ export function ModelFormBody({
     />
   ) : null;
 
-  // Rows for the discovered-model combobox: filtered here (the picker itself
-  // never filters) and named the way every listing names its rows.
-  const typedModelId = discoverySearch.trim();
-  const discoveryQuery = typedModelId.toLowerCase();
-  const discoveredRows = discoveredModels
-    .filter(
-      (m) =>
-        !discoveryQuery ||
-        m.id.toLowerCase().includes(discoveryQuery) ||
-        (m.label ?? "").toLowerCase().includes(discoveryQuery),
-    )
-    .map((m) => ({ ...m, name: m.label ?? m.id, contextWindow: m.context_window }));
-  // Offered only for text that names nothing in the listing — picking a row
-  // puts its label in the search box, which must not read as a new id.
-  const freeTextItem =
-    typedModelId &&
-    !discoveredModels.some((m) => m.id === typedModelId || (m.label ?? m.id) === typedModelId)
-      ? {
-          label: t("models.form.discoverUseTyped", { id: typedModelId }),
-          onSelect: () => setValue("modelId", typedModelId, { shouldDirty: true }),
-        }
-      : undefined;
-
   const modelIdErrorJsx =
     showError("modelId") && errors.modelId?.message ? (
       <div className="text-destructive text-sm">{errors.modelId.message}</div>
@@ -934,23 +915,27 @@ export function ModelFormBody({
   const modelStepJsx = isCustomProvider ? (
     <>
       <div className="space-y-2">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant={modelMode === "detect" ? "default" : "outline"}
-            onClick={handleDetect}
-            disabled={discoverModels.isPending}
-          >
-            {discoverModels.isPending ? <Spinner /> : t("models.form.discoverButton")}
-          </Button>
-          <Button
-            type="button"
-            variant={modelMode === "manual" ? "default" : "outline"}
-            onClick={() => switchModelMode("manual")}
-          >
-            {t("models.form.manualButton")}
-          </Button>
-        </div>
+        {/* Detection adds rows; an edit changes one. So the choice only exists
+            on create, and an edit is always the typed-in arrangement. */}
+        {!model && (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant={modelMode === "detect" ? "default" : "outline"}
+              onClick={handleDetect}
+              disabled={discoverModels.isPending}
+            >
+              {discoverModels.isPending ? <Spinner /> : t("models.form.discoverButton")}
+            </Button>
+            <Button
+              type="button"
+              variant={modelMode === "manual" ? "default" : "outline"}
+              onClick={() => switchModelMode("manual")}
+            >
+              {t("models.form.manualButton")}
+            </Button>
+          </div>
+        )}
         {modelMode === "detect" &&
           freshDiscovery &&
           (freshDiscovery.outcome === "ok" ? (
@@ -964,51 +949,47 @@ export function ModelFormBody({
           ))}
       </div>
 
-      {showModelFields && (
-        <>
-          {modelMode === "detect" ? (
-            <div className="space-y-2">
-              <Label>{t("models.form.modelId")}</Label>
-              {/* The id is picked from what the endpoint serves; the hidden
-                  input keeps RHF validating the field the picker writes. */}
-              <ModelCombobox
-                value={modelId}
-                search={discoverySearch}
-                onSearchChange={setDiscoverySearch}
-                models={discoveredRows}
-                isLoading={discoverModels.isPending}
-                placeholder={t("models.form.discoverSearchPlaceholder")}
-                emptyText={t("models.form.discoverNoMatch")}
-                searchingText={t("models.form.discovering")}
-                onSelect={applyDiscoveredModel}
-                freeTextItem={freeTextItem}
-              />
-              <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
-              {modelIdErrorJsx}
-            </div>
-          ) : (
-            renderModelIdInput()
-          )}
-          {labelFieldJsx}
-          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-            <CollapsibleTrigger asChild>
-              <button
-                type="button"
-                className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
-              >
-                <span>{t("models.form.advanced")}</span>
-                <ChevronDown
-                  className={cn(
-                    "text-muted-foreground size-4 transition-transform",
-                    advancedOpen && "rotate-180",
-                  )}
-                />
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>{capabilitiesJsx}</CollapsibleContent>
-          </Collapsible>
-        </>
-      )}
+      {showModelFields &&
+        (modelMode === "detect" ? (
+          <div className="space-y-2">
+            <Label>{t("models.form.modelId")}</Label>
+            {/* Names and capabilities come from the listing itself, and the
+                models table edits them afterwards: the batch asks which ones. */}
+            <DiscoveredModelList
+              models={discoveredModels}
+              selectedIds={selectedModelIds ?? []}
+              onSelectionChange={applySelection}
+            />
+            {modelIdErrorJsx}
+            {failedModelIds.length > 0 && (
+              <div className="text-destructive text-sm">
+                {t("models.form.addFailed", { ids: failedModelIds.join(", ") })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {renderModelIdInput()}
+            {labelFieldJsx}
+            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
+                >
+                  <span>{t("models.form.advanced")}</span>
+                  <ChevronDown
+                    className={cn(
+                      "text-muted-foreground size-4 transition-transform",
+                      advancedOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>{capabilitiesJsx}</CollapsibleContent>
+            </Collapsible>
+          </>
+        ))}
     </>
   ) : null;
 
@@ -1074,10 +1055,13 @@ export function ModelFormBody({
             // The endpoint belongs to the saved row; changing it would rebind
             // the model to a service it was never verified against.
             providerLocked={!!model}
-            baseUrlProps={register("baseUrl", { validate: baseUrlValidate })}
+            baseUrlProps={register("baseUrl", {
+              validate: baseUrlValidate,
+              onChange: dropDiscovery,
+            })}
             baseUrlLocked={!!selectedCredential}
             baseUrlError={showError("baseUrl") ? errors.baseUrl?.message : undefined}
-            apiKeyProps={register("inlineApiKey")}
+            apiKeyProps={register("inlineApiKey", { onChange: dropDiscovery })}
             apiKeyError={showError("credentialId") ? errors.credentialId?.message : undefined}
             apiKeyHint={
               !selectedCredential && inlineApiKey.trim()
@@ -1216,9 +1200,19 @@ export function ModelFormBody({
   );
 }
 
-export function ModelFormModal({ open, onClose, model, isPending, onSubmit }: ModelFormModalProps) {
+/**
+ * The dialog around the form. Mounted only while open, so the selection count
+ * its footer reads starts empty on every open — the body owns which models are
+ * checked, this owns the button that adds them.
+ */
+function ModelFormDialog({
+  onClose,
+  model,
+  isPending,
+  onSubmit,
+}: Omit<ModelFormModalProps, "open">) {
   const { t } = useTranslation(["settings", "common"]);
-  if (!open) return null;
+  const [selectionCount, setSelectionCount] = useState<number | null>(null);
 
   return (
     <Modal
@@ -1230,14 +1224,30 @@ export function ModelFormModal({ open, onClose, model, isPending, onSubmit }: Mo
           <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
-          <Button type="submit" form="model-form" disabled={isPending}>
-            {isPending ? <Spinner /> : t("btn.save")}
+          <Button type="submit" form="model-form" disabled={isPending || selectionCount === 0}>
+            {isPending ? (
+              <Spinner />
+            ) : selectionCount !== null ? (
+              t("models.form.addModels", { count: selectionCount })
+            ) : (
+              t("btn.save")
+            )}
           </Button>
         </>
       }
     >
       {/* Key forces remount when the target model changes, resetting all state */}
-      <ModelFormBody key={model?.id ?? "__create__"} model={model} onSubmit={onSubmit} />
+      <ModelFormBody
+        key={model?.id ?? "__create__"}
+        model={model}
+        onSubmit={onSubmit}
+        onMultiSelectionChange={setSelectionCount}
+      />
     </Modal>
   );
+}
+
+export function ModelFormModal({ open, ...props }: ModelFormModalProps) {
+  if (!open) return null;
+  return <ModelFormDialog {...props} />;
 }

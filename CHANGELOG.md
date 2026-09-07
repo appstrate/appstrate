@@ -131,12 +131,28 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   (API type, base URL, key) is the same component the credentials tab renders,
   so the two forms cannot drift. Step 2 opens once the URL parses and a key is
   present, and offers both ways to name a model: "Détecter les modèles" asks
-  the endpoint and lets the operator pick from what it serves, "Configurer
-  manuellement" types the id in. On creation the name is optional on both
-  paths — left empty, the server names the row after the catalog entry or the
-  model id — and, on the custom-endpoint form, the capabilities sit behind an
-  "Avancé" collapsible, unfolded only when a discovered pick just filled them
-  in or the row already carries one.
+  the endpoint and lists what it serves, "Configurer manuellement" types the
+  id in. On the manual path the name is optional on creation — left empty,
+  the server names the row after the catalog entry or the model id — and the
+  capabilities sit behind an "Avancé" collapsible, unfolded only when the row
+  already carries one. Editing a row is always the manual arrangement:
+  detection adds rows, an edit changes one.
+
+- **Detected models are added several at a time, and a custom endpoint's
+  saved keys are offered whatever URL is typed.** After "Détecter les
+  modèles" each served model is a checkbox row — with the name, context window
+  and a `catalogue` / `endpoint` badge saying where its description came from
+  — plus "Tout sélectionner"; the footer reads "Ajouter N modèles" and posts
+  one `POST /api/models` per checked row against the single key they share
+  (created first when typed inline). A refused model keeps the dialog open
+  with just the failed ids still checked, and a retry binds to the key the
+  first attempt already created instead of posting it twice. In step 1, the
+  "Mes clés" picker for an overridable provider now lists every key saved for
+  that provider (it used to require the typed URL to match the key's, so a
+  saved key only reappeared once its endpoint had been retyped); picking one
+  fills and pins the base URL it was saved against. The credentials list's
+  `providerId` is documented as always set for a `custom` credential — it
+  already was; the OpenAPI prose said "when `authMode === 'oauth2'`".
 
 - **Model discovery for API-key providers lists the provider's models once
   instead of issuing N identical requests that verified nothing.**
