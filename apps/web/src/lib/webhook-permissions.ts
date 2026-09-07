@@ -3,9 +3,8 @@
 import type { GateablePermission } from "@/hooks/use-permissions";
 
 /**
- * `webhooks` (space) and `org-webhooks` (org) are two resources; which one
- * guards a row comes from the ROW, exactly as the server resolves it
- * (`loadWebhookForAction`).
+ * `webhooks` (space) and `org-webhooks` (org) are two resources; the ROW says
+ * which one guards it, as the server resolves it (`loadWebhookForAction`).
  */
 export function webhookResource(level: "org" | "space"): string {
   return level === "org" ? "org-webhooks" : "webhooks";

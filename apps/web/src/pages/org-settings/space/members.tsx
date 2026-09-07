@@ -53,6 +53,8 @@ import { useSpace } from "../../../hooks/use-spaces";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { CopyLinkButton } from "../../../components/copy-link-button";
 import { Modal } from "../../../components/modal";
+import { RoleCatalogState } from "../../../components/role-catalog-state";
+import { SpaceRoleSelect } from "../../../components/space-role-select";
 import { ViewAsDialog } from "../../../components/view-as-dialog";
 import { OrgInvitationsList } from "../../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
@@ -103,7 +105,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   // it shows here, pending, from the same object the Users page lists — never
   // as a fake member row. Tokens are org invitation authority, so only that
   // permission fetches the list (the server returns [] to anyone else anyway).
-  const canSeeInvitations = currentOrg?.permissions?.includes("members:invite") ?? false;
+  const canSeeInvitations = can("members:invite");
   const { data: orgDetail } = $api.useQuery(
     "get",
     "/api/orgs/{orgId}",
@@ -175,23 +177,15 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   return (
     <>
       <p className="text-muted-foreground mb-4 text-sm">{t("spaceMembers.accessHint")}</p>
-      {canManageRoles && rolesError && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertDescription>
-            <p>{t("spaceMembers.rolesLoadError")}</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetchRoles()}>
-              {t("btn.retry", { ns: "common" })}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
-      {canManageRoles && rolesLoading && (
-        <p role="status" className="text-muted-foreground mb-4 text-sm">
-          {t("spaceMembers.rolesLoading")}
-        </p>
-      )}
-      {canManageRoles && rolesKnown && !rolesError && roleOptions.length === 0 && (
-        <p className="text-muted-foreground mb-4 text-sm">{t("spaceMembers.noAssignableRoles")}</p>
+      {canManageRoles && (
+        <RoleCatalogState
+          className="mb-4"
+          isLoading={rolesLoading}
+          rolesKnown={rolesKnown}
+          error={rolesError}
+          refetch={() => void refetchRoles()}
+          emptyMessage={roleOptions.length === 0 ? t("spaceMembers.noAssignableRoles") : null}
+        />
       )}
       {canRemove && spaceError && (
         <Alert variant="destructive" className="mb-4">
@@ -249,9 +243,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                 // implicit member gets a row created (`invite`).
                 const currentValue =
                   memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`;
-                const currentOptionMissing = !roleOptions.some(
-                  (option) => option.value === currentValue,
-                );
                 const editable =
                   member.source !== "org_role" &&
                   rolesKnown &&
@@ -280,34 +271,16 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                         {t("spaceMembers.colRole")}
                       </span>
                       {editable ? (
-                        <Select
+                        <SpaceRoleSelect
                           value={currentValue}
-                          onValueChange={(v) => changeRole(member, v)}
+                          options={roleOptions}
+                          fallbackLabel={spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
+                          placeholder={t("spaceMembers.noRole")}
+                          className="w-full md:w-[180px]"
+                          ariaLabel={t("spaceMembers.roleAriaLabel", { name: memberLabel(member) })}
                           disabled={updateMember.isPending || addMember.isPending}
-                        >
-                          <SelectTrigger
-                            className="w-full md:w-[180px]"
-                            aria-label={t("spaceMembers.roleAriaLabel", {
-                              name: memberLabel(member),
-                            })}
-                          >
-                            <SelectValue placeholder={t("spaceMembers.noRole")} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {currentOptionMissing && (
-                                <SelectItem value={currentValue} disabled>
-                                  {spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
-                                </SelectItem>
-                              )}
-                              {roleOptions.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                          onValueChange={(v) => changeRole(member, v)}
+                        />
                       ) : (
                         <span className="text-muted-foreground text-sm">
                           {member.source === "org_role"
@@ -405,15 +378,15 @@ function AddSpaceMemberModal({
   const {
     options: roleOptions,
     roles,
+    rolesKnown,
     isLoading: rolesLoading,
     error: rolesError,
     refetch: refetchRoles,
   } = useSpaceRoleOptions(spaceId);
   const addMember = useAddSpaceMember();
   const { can } = usePermissions();
-  const { currentOrg } = useOrg();
   const queryClient = useQueryClient();
-  const canInviteExternal = currentOrg?.permissions?.includes("members:invite") ?? false;
+  const canInviteExternal = can("members:invite");
   const canReadDirectory = can("members:read");
   const [mode, setMode] = useState("existing");
   const invitingExternal = canInviteExternal && mode === "external";
@@ -462,6 +435,7 @@ function AddSpaceMemberModal({
     (roleOptions.some((option) => option.value === DEFAULT_SPACE_ROLE_VALUE)
       ? DEFAULT_SPACE_ROLE_VALUE
       : (roleOptions[0]?.value ?? ""));
+  const roleFieldLocked = rolesLoading || !!rolesError || roleOptions.length === 0 || isPending;
   const selectedRole = roles?.find((item) => memberRoleValue(item, roles) === effectiveRole);
   const roleDescription = selectedRole ? spaceRoleDescription(selectedRole, t) : null;
   const hasIdentity = selectingUser ? !!userId : !!email.trim();
@@ -671,52 +645,27 @@ function AddSpaceMemberModal({
                 </FieldDescription>
               </Field>
             )}
-            <Field
-              data-disabled={rolesLoading || !!rolesError || roleOptions.length === 0 || isPending}
-            >
+            <Field data-disabled={roleFieldLocked}>
               <Label htmlFor="space-member-role">{t("spaceMembers.colRole")}</Label>
-              <Select
+              <SpaceRoleSelect
+                id="space-member-role"
                 value={effectiveRole}
+                options={roleOptions}
+                fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
+                placeholder={t("spaceMembers.noAssignableRoles")}
+                disabled={roleFieldLocked}
                 onValueChange={(value) => {
                   setRole(value);
                   setFormError(null);
                 }}
-                disabled={rolesLoading || !!rolesError || roleOptions.length === 0 || isPending}
-              >
-                <SelectTrigger id="space-member-role">
-                  <SelectValue placeholder={t("spaceMembers.noAssignableRoles")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {roleOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              {rolesLoading && (
-                <FieldDescription role="status">{t("spaceMembers.rolesLoading")}</FieldDescription>
-              )}
-              {rolesError && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    <p>{t("spaceMembers.rolesLoadError")}</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refetchRoles()}
-                    >
-                      {t("btn.retry", { ns: "common" })}
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-              {!rolesLoading && !rolesError && roleOptions.length === 0 && (
-                <FieldDescription>{t("spaceMembers.noAssignableRoles")}</FieldDescription>
-              )}
+              />
+              <RoleCatalogState
+                isLoading={rolesLoading}
+                rolesKnown={rolesKnown}
+                error={rolesError}
+                refetch={() => void refetchRoles()}
+                emptyMessage={roleOptions.length === 0 ? t("spaceMembers.noAssignableRoles") : null}
+              />
               {!rolesLoading && !rolesError && roleDescription && (
                 <FieldDescription>{roleDescription}</FieldDescription>
               )}

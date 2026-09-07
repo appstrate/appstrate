@@ -2,9 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
@@ -17,6 +15,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
 import { OrgRoleOptions } from "./org-role-options";
+import { RoleCatalogState } from "./role-catalog-state";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
@@ -71,6 +70,7 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   // previewable. Unknown is not empty: until the catalog lands there is nothing
   // to judge the choice against.
   const roleOption = rolesKnown ? options.find((o) => o.value === roleValue) : undefined;
+  const catalogUsable = rolesKnown && !rolesError && options.length > 0;
   const ready = !!orgId && (!inSpace || (!!roleOption && !!space));
 
   const submit = () => {
@@ -140,27 +140,7 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
           {inSpace && (
             <Field>
               <Label htmlFor="view-as-space-role">{t("viewAs.spaceRoleLabel")}</Label>
-              {rolesError ? (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    <p>{getErrorMessage(rolesError)}</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refetchRoles()}
-                    >
-                      {t("btn.retry", { ns: "common" })}
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              ) : rolesLoading || !rolesKnown ? (
-                <p role="status" className="text-muted-foreground text-sm">
-                  {t("spaceMembers.rolesLoading")}
-                </p>
-              ) : options.length === 0 ? (
-                <p className="text-muted-foreground text-sm">{t("viewAs.rolesEmpty")}</p>
-              ) : (
+              {catalogUsable ? (
                 <Select value={roleValue || undefined} onValueChange={setRoleValue}>
                   <SelectTrigger id="view-as-space-role">
                     <SelectValue placeholder={t("viewAs.spaceRolePlaceholder")} />
@@ -173,6 +153,14 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
                     ))}
                   </SelectContent>
                 </Select>
+              ) : (
+                <RoleCatalogState
+                  isLoading={rolesLoading}
+                  rolesKnown={rolesKnown}
+                  error={rolesError}
+                  refetch={() => void refetchRoles()}
+                  emptyMessage={t("viewAs.rolesEmpty")}
+                />
               )}
             </Field>
           )}

@@ -14,15 +14,9 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
 import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { RoleCatalogState } from "../../../components/role-catalog-state";
+import { SpaceRoleSelect } from "../../../components/space-role-select";
 import { useSpaceRoleOptions, type SpaceRolePreset } from "../../../hooks/use-roles";
 import type { components } from "../../../api/client";
 import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
@@ -57,11 +51,14 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
   const navigate = useNavigate();
   const {
     roles,
+    rolesKnown,
     isLoading: rolesLoading,
     error: rolesError,
     refetch: refetchRoles,
   } = useSpaceRoleOptions(spaceId);
-  const presets = (roles ?? []).filter((role) => role.kind === "preset");
+  const presetOptions = (roles ?? [])
+    .filter((role) => role.kind === "preset")
+    .map((role) => ({ value: role.key, label: t(`roles.preset.${role.key}`) }));
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
 
@@ -76,6 +73,8 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
   const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
   const visibility = editedVisibility ?? space.visibility;
   const defaultRole = editedDefaultRole ?? space.default_role;
+  const defaultRoleLocked =
+    rolesLoading || !!rolesError || presetOptions.length === 0 || updateMutation.isPending;
 
   const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
     values: { name: space.name },
@@ -152,59 +151,25 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
           </fieldset>
 
           {visibility === "open" && (
-            <Field
-              data-disabled={
-                rolesLoading || !!rolesError || presets.length === 0 || updateMutation.isPending
-              }
-            >
+            <Field data-disabled={defaultRoleLocked}>
               <Label htmlFor="space-default-role">{t("spaces.defaultRoleLabel")}</Label>
               <FieldDescription>{t("spaces.defaultRoleHint")}</FieldDescription>
-              <Select
+              <SpaceRoleSelect
+                id="space-default-role"
+                className="w-full sm:w-[240px]"
                 value={defaultRole}
+                options={presetOptions}
+                fallbackLabel={t(`roles.preset.${defaultRole}`)}
+                disabled={defaultRoleLocked}
                 onValueChange={(value) => setEditedDefaultRole(value as SpaceRolePreset)}
-                disabled={
-                  rolesLoading || !!rolesError || presets.length === 0 || updateMutation.isPending
-                }
-              >
-                <SelectTrigger id="space-default-role" className="w-full sm:w-[240px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {!presets.some((preset) => preset.key === defaultRole) && (
-                      <SelectItem value={defaultRole} disabled>
-                        {t(`roles.preset.${defaultRole}`)}
-                      </SelectItem>
-                    )}
-                    {presets.map((preset) => (
-                      <SelectItem key={preset.key} value={preset.key}>
-                        {t(`roles.preset.${preset.key}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              {rolesLoading && (
-                <FieldDescription role="status">{t("spaceMembers.rolesLoading")}</FieldDescription>
-              )}
-              {rolesError && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    <p>{t("spaceMembers.rolesLoadError")}</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refetchRoles()}
-                    >
-                      {t("btn.retry", { ns: "common" })}
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-              {!rolesLoading && !rolesError && presets.length === 0 && (
-                <FieldDescription>{t("spaces.noAssignablePresets")}</FieldDescription>
-              )}
+              />
+              <RoleCatalogState
+                isLoading={rolesLoading}
+                rolesKnown={rolesKnown}
+                error={rolesError}
+                refetch={() => void refetchRoles()}
+                emptyMessage={presetOptions.length === 0 ? t("spaces.noAssignablePresets") : null}
+              />
               <FieldDescription>{t(`roles.presetDesc.${defaultRole}`)}</FieldDescription>
               <FieldDescription>{t("spaces.defaultRoleImpact")}</FieldDescription>
             </Field>

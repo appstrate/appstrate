@@ -90,8 +90,7 @@ function LibraryMatrix({
   const { data: accessibleSpaces } = useSpaces();
   const toggle = useTogglePackageInstall();
   const permissionsBySpace = new Map(accessibleSpaces?.map((s) => [s.id, s.permissions]));
-  const installPermission = PACKAGE_PERMISSIONS[type].install;
-  const uninstallPermission = type === "integration" ? "integrations:uninstall" : installPermission;
+  const { install: installPermission, uninstall: uninstallPermission } = PACKAGE_PERMISSIONS[type];
   // Every column targets a different space. Installation state chooses the
   // operation; the target space's effective set decides whether it is allowed.
   const canToggle = (spaceId: string, installed: boolean) =>

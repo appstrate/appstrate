@@ -1,24 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "View as role" — the persona an organization owner or administrator is
- * previewing the product as.
- *
- * The store is the SPA's only copy of the persona: the transport reads it
- * ({@link getViewAsHeader}), the banner renders from it, and nothing else
- * derives the preview from a response. The server enforces the restriction on
- * every call (`apps/api/src/lib/view-as.ts`) — a client-side preview that only
- * hid buttons would be the Airtable failure the plan names.
- *
- * Persisted under ONE key carrying its own `orgId`, so switching organization
- * cannot leave a persona pointing at the wrong one: the header is emitted only
- * while that id is the selected org, and `switchOrg` drops it outright.
- *
- * Read from `localStorage` at module init and never again, like `org-store` and
- * unlike `pairing-store`: a NEW TAB therefore opens inside an active preview,
- * which the banner makes plain, while a tab that leaves it is not followed by
- * the others. Tabs holding different personas is the same shape as tabs holding
- * different organizations, and the server judges every request on its own.
+ * "View as role" — the persona an owner or administrator is previewing the
+ * product as. The server enforces it on every call (`apps/api/src/lib/view-as.ts`);
+ * this is only the SPA's copy. Persisted under ONE key carrying its own
+ * `orgId`, read at module init and never again, so tabs hold personas the way
+ * they hold organizations.
  *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §6.7, §8
  */
@@ -28,15 +15,15 @@ import { VIEW_AS_ORG_ROLES } from "@appstrate/core/permissions";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { queryClient } from "../lib/query-client";
-import { orgKeys } from "../lib/query-keys";
+import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
 import { getCurrentOrgId, orgStore } from "./org-store";
 
 export const STORAGE_KEY = "appstrate_view_as";
 
 /**
- * The space half carries the two strings the banner shows. They are captured
- * when the preview is entered — a banner that had to resolve a role name would
- * need a catalog read under the very permissions it is previewing away.
+ * The space half carries the two strings the banner shows, captured on entry:
+ * resolving a role name later would need a catalog read under the very
+ * permissions being previewed away.
  */
 const personaSchema = z.object({
   orgId: z.string().min(1),
@@ -59,27 +46,23 @@ interface ViewAsState {
   persona: ViewAsPersona | null;
   /**
    * Why the preview ended, waiting to be told to the user — set only when the
-   * SERVER refused the persona, never when they left on purpose.
+   * SERVER refused the persona.
    *
-   * It is state rather than a toast fired on the spot because the refusal
-   * usually lands during boot, on the org list `main.tsx` starts before React
-   * mounts: Sonner drops anything published before its `<Toaster/>` subscribes,
-   * so the message would be lost exactly when it matters most.
+   * State rather than a toast fired on the spot: the refusal usually lands on
+   * the boot org list, and Sonner drops anything published before its
+   * `<Toaster/>` subscribes.
    */
   stoppedReason: string | null;
   commit: (persona: ViewAsPersona | null, stoppedReason: string | null) => void;
 }
 
 /**
- * The init read, exported so a test can exercise the parse it performs (the
- * same shape `pairing-store` exposes). A stored value that no longer parses is
- * dropped rather than repaired: it would otherwise reach the server as a
- * malformed header on every request.
+ * The init read. A stored value that no longer parses is dropped rather than
+ * repaired: it would otherwise reach the server as a malformed header on every
+ * request.
  */
 export function readPersistedPersona(): ViewAsPersona | null {
-  // Feature-detect the store itself, not `window`: this also runs under the
-  // SSR test harness, and a blocked store throws on access rather than being
-  // absent (hence the catch).
+  // The store itself, not `window`: the SSR harness has one without the other.
   if (typeof localStorage === "undefined") return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -96,8 +79,8 @@ function persist(persona: ViewAsPersona | null): void {
     if (persona) localStorage.setItem(STORAGE_KEY, JSON.stringify(persona));
     else localStorage.removeItem(STORAGE_KEY);
   } catch {
-    // Storage blocked (private mode, sandboxed iframe) — the preview still
-    // works for this tab, it just does not survive a reload.
+    // Storage blocked (private mode, sandboxed iframe): the preview works for
+    // this tab, it just does not survive a reload.
   }
 }
 
@@ -117,10 +100,8 @@ export function useViewAs(): ViewAsPersona | null {
 
 /**
  * {@link getViewAsHeader} as a reactive value, for the effects that OPEN a
- * connection: an `EventSource` reads its URL once, so a stream opened before
- * the preview started keeps streaming the caller's real authority into a
- * previewed page — and into the cache `enterViewAs` just emptied. Putting this
- * in the effect's dependencies is what makes entering or leaving reconnect.
+ * connection: an `EventSource` reads its URL once, so listing this in an
+ * effect's dependencies is what makes entering or leaving a preview reconnect.
  */
 export function useViewAsHeader(): string | null {
   const persona = useStore(viewAsStore, (s) => s.persona);
@@ -134,9 +115,8 @@ export function useViewAsStopped(): string | null {
 }
 
 /**
- * Take the pending reason, clearing it. An atomic take rather than a separate
- * read-then-clear because StrictMode runs the effect that shows it twice: the
- * second call gets `null` and no second toast is raised.
+ * Take the pending reason, clearing it. Atomic rather than read-then-clear
+ * because StrictMode runs the effect that shows it twice.
  */
 export function takeViewAsStopped(): string | null {
   const { stoppedReason } = viewAsStore.getState();
@@ -144,15 +124,7 @@ export function takeViewAsStopped(): string | null {
   return stoppedReason;
 }
 
-/**
- * The persona a submitted `view-as-dialog` commits: the space half exists only
- * when BOTH a space and a role grantable THERE were chosen, which is exactly
- * the header's "space and role are optional as a pair".
- *
- * Here rather than in the dialog so the shape is built beside its definition
- * and its serializer — and so the no-DOM harness can pin it, which it cannot do
- * through a portalled dialog.
- */
+/** The space half exists only when BOTH were chosen — the header's own rule. */
 export function toViewAsPersona(
   orgId: string,
   orgRole: ViewAsPersona["orgRole"],
@@ -174,22 +146,15 @@ export function toViewAsPersona(
   };
 }
 
-/**
- * Enter the preview. The entry dialog is the only caller; it supplies the
- * labels it already rendered in its own pickers.
- */
+/** Enter the preview, with the labels the entry dialog already rendered. */
 export function enterViewAs(persona: ViewAsPersona): void {
   viewAsStore.getState().commit(persona, null);
   resetScopedCache();
 }
 
 /**
- * The ONE exit path — "Quitter", org switch, sign-out, and a persona the
- * server refuses all land here. Clearing the cache is the point: every cached
- * row was answered under the other authority.
- *
- * `reason` is set only by the refusal path; leaving on purpose needs no
- * explanation.
+ * The ONE exit path — "Quitter", org switch, sign-out and a refused persona all
+ * land here. `reason` is set only by the refusal path.
  */
 export function exitViewAs(reason?: string): void {
   if (!viewAsStore.getState().persona) return;
@@ -198,16 +163,12 @@ export function exitViewAs(reason?: string): void {
 }
 
 /**
- * Every cached row was answered under the other authority, so all of them go —
- * except `["orgs"]`, which is REFETCHED instead of dropped. `OrgGate` blocks on
- * that query, so removing it flashes the boot screen on every enter and exit;
- * and it cannot merely be left alone either, because under a persona
+ * `["orgs"]` is REFETCHED rather than dropped or left alone: under a persona
  * `GET /api/orgs` answers with the persona's `role` and `permissions`, which is
- * what every `can()` gate in the SPA reads. Same split `switchOrg` makes, for
- * the same reason.
+ * what every `can()` gate in the SPA reads.
  */
 function resetScopedCache(): void {
-  queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== orgKeys.all[0] });
+  removeOrgScopedQueries(queryClient);
   void queryClient.refetchQueries({ queryKey: orgKeys.all });
 }
 
@@ -221,9 +182,8 @@ function serializeViewAs(persona: ViewAsPersona): string {
 }
 
 /**
- * Header value for the selected organization, or `null`. Non-hook, for the
- * transport: a persona validated in one org says nothing about another, so
- * outside its own org the caller is simply themselves.
+ * Header value for the selected organization, or `null` — a persona validated
+ * in one org says nothing about another.
  */
 export function getViewAsHeader(): string | null {
   const { persona } = viewAsStore.getState();

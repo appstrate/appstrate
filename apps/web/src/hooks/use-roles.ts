@@ -23,13 +23,13 @@ export function useRoles(enabled = true) {
   );
 }
 
-export function useRoleVocabulary(enabled = true) {
+export function useRoleVocabulary() {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/roles/vocabulary",
     { params: { header: scope.header } },
-    { enabled: scope.enabled && enabled, select: (e) => e.data },
+    { enabled: scope.enabled, select: (e) => e.data },
   );
 }
 

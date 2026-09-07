@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { spaceStore, getCurrentSpaceId } from "../stores/space-store";
@@ -80,9 +80,23 @@ export function useSpaceSwitcher() {
 }
 
 /**
- * Resolver — ensures `currentSpaceId` is always set.
- * If null, fetches spaces and auto-selects the default enterable one.
- * Must be called inside a component rendered within MainLayout.
+ * Forget a persisted space the caller can no longer enter — their membership
+ * was removed, the space was closed, or a preview sees less than they do.
+ * Auto-selection only ever SETS, so without this the stale id keeps riding on
+ * `X-Space-Id` and 403s every space-scoped request while `usePermissions()`
+ * still reports itself ready.
+ */
+export function dropUnenterableSpace(
+  enterable: { id: string }[] | undefined,
+  currentSpaceId: string | null,
+): void {
+  if (!enterable || !currentSpaceId) return;
+  if (!enterable.some((s) => s.id === currentSpaceId)) spaceStore.getState().setId(null);
+}
+
+/**
+ * Resolver — ensures `currentSpaceId` names a space the caller can enter, or
+ * nothing. Must be called inside a component rendered within MainLayout.
  *
  * Only `access: "member"` spaces are candidates: a `closed` space is listed so
  * the caller knows it exists, not so they can be dropped into it — pinning one
@@ -99,5 +113,6 @@ export function useSpaceResolver(): void {
     [],
   );
 
+  useEffect(() => dropUnenterableSpace(enterable, currentSpaceId), [enterable, currentSpaceId]);
   useAutoSelect(enterable, currentSpaceId, switchSpace, findDefault);
 }

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The two entry points into a role preview, and the persona they commit.
+ * What the two settings pages decide OUTSIDE a portal: the two entry points
+ * into a role preview and the persona they commit, and the roles page's own
+ * gating on the `custom_roles` feature and the `roles:*` permissions.
  *
  * What is asserted here is what this harness can see. The dialog itself is a
  * Radix `Dialog`, and its selects are Radix `Select`s — both render through
@@ -13,10 +15,11 @@
  * the exact persona a submit commits.
  */
 
-import { afterAll, describe, it, expect, spyOn } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { OrgRole } from "@appstrate/shared-types";
 import type { components } from "../../api/client.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
 
 /**
  * The roles page reads `window.__APP_CONFIG__` (the `custom_roles` feature) at
@@ -24,49 +27,8 @@ import type { components } from "../../api/client.ts";
  * are installed before the dynamic imports below. `document` stays absent,
  * which is what keeps the portals inert rather than crashing.
  */
-class FakeStorage {
-  private m = new Map<string, string>();
-  get length() {
-    return this.m.size;
-  }
-  getItem(key: string): string | null {
-    return this.m.get(key) ?? null;
-  }
-  setItem(key: string, value: string): void {
-    this.m.set(key, value);
-  }
-  removeItem(key: string): void {
-    this.m.delete(key);
-  }
-  clear(): void {
-    this.m.clear();
-  }
-  key(i: number): string | null {
-    return [...this.m.keys()][i] ?? null;
-  }
-}
-const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
-const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-const fakeStorage = new FakeStorage();
-Object.defineProperty(globalThis, "localStorage", { configurable: true, value: fakeStorage });
-Object.defineProperty(globalThis, "window", {
-  configurable: true,
-  value: {
-    __APP_CONFIG__: { features: { custom_roles: true }, trustedOrigins: [] },
-    localStorage: fakeStorage,
-  },
-});
-
-// Restored so a suite that runs after this one in the same process still sees
-// the DOM-less environment the harness promises.
-afterAll(() => {
-  for (const [name, descriptor] of [
-    ["localStorage", previousStorage],
-    ["window", previousWindow],
-  ] as const) {
-    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-    else Reflect.deleteProperty(globalThis, name);
-  }
+installFakeStorage({
+  __APP_CONFIG__: { features: { custom_roles: true }, trustedOrigins: [] },
 });
 
 const { $api } = await import("../../api/client.ts");
@@ -117,15 +79,27 @@ function preset(key: string): components["schemas"]["RoleObject"] {
   };
 }
 
+interface SeedOptions {
+  /** Added to the four every case holds. */
+  orgPermissions?: string[];
+  customRoles?: components["schemas"]["RoleObject"][];
+}
+
 /** Seed the caches both settings pages read, as the given organization role. */
-function seed(orgRole: OrgRole): QueryClient {
+function seed(orgRole: OrgRole, options: SeedOptions = {}): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   const org: components["schemas"]["Organization"] = {
     id: ORG_ID,
     name: "Acme",
     slug: "acme",
     role: orgRole,
-    permissions: ["roles:read", "members:read", "space-members:read", "space-members:invite"],
+    permissions: [
+      "roles:read",
+      "members:read",
+      "space-members:read",
+      "space-members:invite",
+      ...(options.orgPermissions ?? []),
+    ],
     createdAt: "2026-01-01T00:00:00Z",
   };
   queryClient.setQueryData(["orgs"], [org]);
@@ -142,7 +116,7 @@ function seed(orgRole: OrgRole): QueryClient {
     $api.queryOptions("get", "/api/roles", { params: { header } }).queryKey,
     {
       object: "list",
-      data: [preset("admin"), preset("viewer")],
+      data: [preset("admin"), preset("viewer"), ...(options.customRoles ?? [])],
       hasMore: false,
     },
   );
@@ -162,7 +136,11 @@ function seed(orgRole: OrgRole): QueryClient {
 }
 
 /** SSR reads Zustand's hydration snapshot, not its live state. */
-function renderAs(orgRole: OrgRole, node: Parameters<typeof render>[0]): string {
+function renderAs(
+  orgRole: OrgRole,
+  node: Parameters<typeof render>[0],
+  options: SeedOptions = {},
+): string {
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
     id: ORG_ID,
@@ -172,7 +150,7 @@ function renderAs(orgRole: OrgRole, node: Parameters<typeof render>[0]): string 
     id: SPACE_ID,
   });
   try {
-    return render(node, { queryClient: seed(orgRole) });
+    return render(node, { queryClient: seed(orgRole, options) });
   } finally {
     orgSnapshot.mockRestore();
     spaceSnapshot.mockRestore();
@@ -241,5 +219,68 @@ describe("the persona a submit commits", () => {
     expect(toViewAsPersona(ORG_ID, "guest", undefined, undefined).space).toBeNull();
     expect(toViewAsPersona(ORG_ID, "guest", marketing, undefined).space).toBeNull();
     expect(toViewAsPersona(ORG_ID, "guest", undefined, viewer).space).toBeNull();
+  });
+});
+
+describe("custom-role gating on the roles page", () => {
+  const custom: components["schemas"]["RoleObject"] = {
+    object: "role",
+    kind: "custom",
+    id: "srl_support",
+    key: "support",
+    name: "Responsable assistance",
+    description: "Assistance clients",
+    permissions: ["agents:read"],
+    created_at: null,
+    updated_at: null,
+  };
+
+  /** `useAppConfig` reads the global at render, so the flag is swapped around one. */
+  function withCustomRoles(enabled: boolean, renderOnce: () => string): string {
+    const config = window.__APP_CONFIG__;
+    window.__APP_CONFIG__ = { ...config, features: { ...config.features, custom_roles: enabled } };
+    try {
+      return renderOnce();
+    } finally {
+      window.__APP_CONFIG__ = config;
+    }
+  }
+
+  it("offers create, edit and delete to a holder of both write grants", () => {
+    const html = withCustomRoles(true, () =>
+      renderAs("admin", <OrgSettingsRolesPage />, {
+        orgPermissions: ["roles:write", "roles:delete"],
+        customRoles: [custom],
+      }),
+    );
+    expect(html).toContain('data-testid="create-role-button"');
+    expect(html).toContain("Responsable assistance");
+    expect(html).toContain("Modifier");
+    expect(html).toContain("Supprimer");
+    expect(html).not.toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
+  });
+
+  it("says why and offers nothing to write when the feature is off, presets included", () => {
+    const html = withCustomRoles(false, () =>
+      renderAs("owner", <OrgSettingsRolesPage />, {
+        orgPermissions: ["roles:write", "roles:delete"],
+        customRoles: [custom],
+      }),
+    );
+    expect(html).toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
+    expect(html).not.toContain('data-testid="create-role-button"');
+    expect(html).not.toContain("Modifier");
+    expect(html).not.toContain("Supprimer");
+    // The four presets stay listed and usable — the feature gates authoring.
+    expect(html).toContain("Rôles intégrés");
+  });
+
+  it("hides the create action from a reader while the feature is on", () => {
+    const html = withCustomRoles(true, () =>
+      renderAs("admin", <OrgSettingsRolesPage />, { customRoles: [custom] }),
+    );
+    expect(html).toContain("Responsable assistance");
+    expect(html).not.toContain('data-testid="create-role-button"');
+    expect(html).not.toContain("Modifier");
   });
 });

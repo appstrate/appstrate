@@ -19,21 +19,15 @@ import { spaceRoleLabel } from "../hooks/use-roles";
 import { useSpaces } from "../hooks/use-spaces";
 
 /**
- * The preview's only visible state, and its only exit.
+ * The preview's only visible state, and its only exit. Mounted once in the app
+ * frame, above the scroll container, so it survives every route and every
+ * permission-denied page. Not dismissible: hiding it would leave an admin
+ * acting under a downgraded authority with no sign of it.
  *
- * Mounted once in the app frame (above the scroll container, so it survives
- * every route, settings layout and permission-denied page): a 403 answered
- * under a preview has to be readable as the persona's. Not dismissible —
- * hiding it would leave an admin acting under a downgraded authority with no
- * sign of it.
- *
- * Both labels of the space half were captured when the preview was entered.
- * The one thing read live is the space listing, which is answered AS the
- * persona: outside the persona's own space it is only its org role — an
- * implicit member of open spaces with their default role — and the banner
- * names that role for the space the user is looking at, so "Lecteur dans
- * Default" over a page answered for Marketing is not read as a preview that
- * does not work.
+ * Outside the persona's own space the persona is only its org role, so the
+ * banner also names the role it holds in the space being looked at — "Lecteur
+ * dans Default" over a page answered for Marketing otherwise reads as a preview
+ * that does not work.
  */
 export function ViewAsBanner() {
   const { t } = useTranslation(["common", "settings"]);
@@ -43,17 +37,14 @@ export function ViewAsBanner() {
   const currentSpaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
 
-  // A persona the server refused was dropped before this frame existed — the
-  // API client cannot toast it itself, because the refusal typically lands on
-  // the boot org list, before `<Toaster/>` subscribes. This is the first mount
-  // that can say so.
+  // The refusal typically lands on the boot org list, before `<Toaster/>`
+  // subscribes; this is the first mount that can report it.
   useEffect(() => {
     if (stopped === null) return;
     // Atomic take — StrictMode runs this twice and the second call gets `null`.
     const code = takeViewAsStopped();
     if (code === null) return;
-    // Translated per refusal code. The server's `detail` is English prose meant
-    // for an API caller, not copy for a French UI.
+    // The server's `detail` is English prose for an API caller, not UI copy.
     toast.warning(
       VIEW_AS_REFUSAL_CODES.has(code) ? t(`viewAs.stopped.${code}`) : t("viewAs.stopped.generic"),
     );

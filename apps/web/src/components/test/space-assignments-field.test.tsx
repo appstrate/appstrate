@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { render } from "../test/render.tsx";
-import { i18nReady } from "../i18n.ts";
-import { SpaceAssignmentsField } from "./space-assignments-field.tsx";
-import { hasUnavailableAssignments } from "../lib/space-assignments.ts";
+import { render } from "../../test/render.tsx";
+import { i18nReady } from "../../i18n.ts";
+import { SpaceAssignmentsField } from "../space-assignments-field.tsx";
+import { hasUnavailableAssignments } from "../../lib/space-assignments.ts";
 
 await i18nReady;
 

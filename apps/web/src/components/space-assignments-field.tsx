@@ -4,8 +4,6 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { Spinner } from "./spinner";
 import {
   Select,
   SelectContent,
@@ -14,6 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
+import { RoleCatalogState } from "./role-catalog-state";
+import { SpaceRoleSelect } from "./space-role-select";
 import { DEFAULT_SPACE_ROLE_VALUE, type SpaceRoleOption } from "../hooks/use-roles";
 import type { AssignmentDraft } from "../lib/space-assignments";
 
@@ -52,7 +52,6 @@ export function SpaceAssignmentsField({
   const unavailable = disabled || loading || !!error;
   const taken = new Set(value.map((a) => a.space_id));
   const available = spaces.filter((s) => !taken.has(s.id));
-  const defaultRole = DEFAULT_SPACE_ROLE_VALUE;
 
   return (
     <fieldset className="flex min-w-0 flex-col gap-3">
@@ -66,66 +65,35 @@ export function SpaceAssignmentsField({
         />
       ) : (
         <>
-          {loading && (
-            <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Spinner />
-              {t("orgSettings.assignmentsLoading")}
-            </p>
-          )}
-          {!!error && (
-            <div
-              role="alert"
-              className="text-destructive flex flex-wrap items-center gap-2 text-sm"
-            >
-              <span>{getErrorMessage(error)}</span>
-              <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-                {t("common:btn.retry")}
-              </Button>
-            </div>
-          )}
-          {!loading && !error && spaces.length === 0 && (
-            <p className="text-muted-foreground text-sm">{t("orgSettings.assignmentsNoSpaces")}</p>
-          )}
+          <RoleCatalogState
+            isLoading={loading}
+            error={error}
+            refetch={onRetry}
+            loadingMessage={t("orgSettings.assignmentsLoading")}
+            emptyMessage={spaces.length === 0 ? t("orgSettings.assignmentsNoSpaces") : null}
+          />
           {value.map((assignment, index) => {
             const space = spaces.find((s) => s.id === assignment.space_id);
+            const spaceName = space?.name ?? t("orgSettings.assignmentUnavailableSpace");
             return (
               <div
                 key={assignment.space_id}
                 className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
               >
                 <span className="col-span-2 text-sm font-medium break-words sm:col-span-1">
-                  {space?.name ?? t("orgSettings.assignmentUnavailableSpace")}
+                  {spaceName}
                 </span>
-                <Select
+                <SpaceRoleSelect
                   value={assignment.role}
+                  options={roleOptions}
+                  fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
                   disabled={unavailable}
+                  className="w-full min-w-0"
+                  ariaLabel={t("orgSettings.inviteSpaceRoleAriaLabel", { space: spaceName })}
                   onValueChange={(role) =>
                     onChange(value.map((a, i) => (i === index ? { ...a, role } : a)))
                   }
-                >
-                  <SelectTrigger
-                    className="w-full min-w-0"
-                    aria-label={t("orgSettings.inviteSpaceRoleAriaLabel", {
-                      space: space?.name ?? t("orgSettings.assignmentUnavailableSpace"),
-                    })}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {!roleOptions.some((option) => option.value === assignment.role) && (
-                        <SelectItem value={assignment.role} disabled>
-                          {t("orgSettings.assignmentUnavailableRole")}
-                        </SelectItem>
-                      )}
-                      {roleOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                />
                 <Button
                   type="button"
                   variant="ghost"
@@ -144,7 +112,7 @@ export function SpaceAssignmentsField({
               value=""
               disabled={unavailable}
               onValueChange={(spaceId) =>
-                onChange([...value, { space_id: spaceId, role: defaultRole }])
+                onChange([...value, { space_id: spaceId, role: DEFAULT_SPACE_ROLE_VALUE }])
               }
             >
               <SelectTrigger className="w-full" aria-label={t("orgSettings.inviteSpaceAdd")}>

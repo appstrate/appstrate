@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The app's single React Query client, as a module value rather than a local in
- * `main.tsx`: the role preview drops every cached admin-shaped row from OUTSIDE
- * React — the store's enter/exit actions and the API middleware that notices a
- * refused persona — and neither can reach `useQueryClient()`.
+ * The app's single React Query client, a module value rather than a local in
+ * `main.tsx` because the role preview resets the cache from OUTSIDE React — the
+ * store's actions and the API response middleware, which have no hooks.
  */
 
 import { QueryClient } from "@tanstack/react-query";

@@ -10,6 +10,7 @@ import { Button } from "@appstrate/ui/components/button";
 import type { components } from "../api/client";
 import { $api } from "../api/client";
 import { useOrg } from "../hooks/use-org";
+import { usePermissions } from "../hooks/use-permissions";
 import { roleI18nKey } from "../hooks/use-permissions";
 import { useSpaces } from "../hooks/use-spaces";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
@@ -34,11 +35,11 @@ export function OrgInvitationsList({
   const headingId = useId();
   const queryClient = useQueryClient();
   const { currentOrg } = useOrg();
+  const { can } = usePermissions();
   const { data: spaces } = useSpaces();
   const { options: roles } = useSpaceRoleOptions();
-  const canInvite = currentOrg?.id === orgId && currentOrg.permissions.includes("members:invite");
-  const canEdit =
-    currentOrg?.id === orgId && currentOrg.permissions.includes("members:change-role");
+  const canInvite = currentOrg?.id === orgId && can("members:invite");
+  const canEdit = currentOrg?.id === orgId && can("members:change-role");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const visibleInvitations = spaceId

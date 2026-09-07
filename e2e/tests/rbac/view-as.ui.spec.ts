@@ -251,10 +251,10 @@ test.describe("View as role", () => {
     authedPage: page,
     browserCtx,
   }) => {
-    // The live stream is the one reader that RETRIES: a refused persona there
-    // used to loop against the wall forever, on an idle tab, with the banner
-    // still claiming a preview. Everything else about this persona is valid, so
-    // the stream's answer is the only thing that can end it.
+    // The live stream is the one reader that RETRIES, so on an idle tab it is
+    // the only thing that can notice a refusal and end the preview — without
+    // this the banner keeps claiming one while the stream reconnects forever.
+    // Everything else about this persona is valid.
     await page.route("**/api/realtime/runs?*", (route) =>
       route.fulfill({
         status: 403,

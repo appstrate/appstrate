@@ -232,7 +232,7 @@ describe("invite-only space member access", () => {
     const result = pageFor(["space-members:read", "space-members:invite"], true, {
       rolesError: true,
     });
-    expect(result.html).toContain("Impossible de charger les rôles disponibles.");
+    expect(result.html).toContain("Catalog unavailable");
     expect(result.html).toContain("Réessayer");
     expect(result.html).toContain("Private cached member");
     expect(result.html).not.toContain('aria-label="Rôle de Private cached member');

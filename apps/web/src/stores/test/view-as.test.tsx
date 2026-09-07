@@ -12,46 +12,16 @@
  * on a refused PERSONA without firing on a denial the persona correctly earned.
  */
 
-import { afterAll, describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 // Type-only: erased at compile time, so it does not pull the store in before
 // the fake storage below is installed.
 import type { ViewAsPersona } from "../view-as-store.ts";
 import { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/client.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
 
 /** Installed before the dynamic imports below: the stores read it at module init. */
-class FakeStorage {
-  private m = new Map<string, string>();
-  get length() {
-    return this.m.size;
-  }
-  getItem(key: string): string | null {
-    return this.m.get(key) ?? null;
-  }
-  setItem(key: string, value: string): void {
-    this.m.set(key, value);
-  }
-  removeItem(key: string): void {
-    this.m.delete(key);
-  }
-  clear(): void {
-    this.m.clear();
-  }
-  key(i: number): string | null {
-    return [...this.m.keys()][i] ?? null;
-  }
-}
-
-const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
-const fakeStorage = new FakeStorage();
-Object.defineProperty(globalThis, "localStorage", { configurable: true, value: fakeStorage });
-
-// Restored so a suite running after this one in the same process still sees the
-// DOM-less environment the harness promises.
-afterAll(() => {
-  if (previousStorage) Object.defineProperty(globalThis, "localStorage", previousStorage);
-  else Reflect.deleteProperty(globalThis, "localStorage");
-});
+const fakeStorage = installFakeStorage();
 
 const {
   viewAsStore,
@@ -205,14 +175,14 @@ describe("cache reset", () => {
 describe("realtime carrier", () => {
   it("appends `view_as` to the stream URL — those routes refuse the header", () => {
     enterViewAs(PERSONA);
-    expect(withViewAsParam("/api/realtime/runs?orgId=org_a")).toBe(
+    expect(withViewAsParam("/api/realtime/runs?orgId=org_a", getViewAsHeader())).toBe(
       "/api/realtime/runs?orgId=org_a&view_as=org_role%3Dmember%3B%20space%3Dspc_1%3B%20role%3Dpreset%3Aviewer",
     );
   });
 
   it("uses the value it is handed, so an effect can depend on it", () => {
     // The reactive callers pass `useViewAsHeader()`; a stream reads its URL
-    // once, so the store read must not be hidden inside the builder for them.
+    // once, so the value cannot be read from the store inside the builder.
     expect(withViewAsParam("/api/realtime/runs?orgId=org_a", "org_role=guest")).toBe(
       "/api/realtime/runs?orgId=org_a&view_as=org_role%3Dguest",
     );
