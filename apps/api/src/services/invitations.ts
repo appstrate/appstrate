@@ -166,7 +166,7 @@ export async function getOrgInvitations(orgId: string) {
 /**
  * Atomically claim a single-use invitation: flips `pending → accepted` only if
  * it is still pending AND not yet expired, in one conditional UPDATE. Returns
- * `true` if THIS call won the claim, `false` if the row was already consumed
+ * the claimed row if THIS call won, null if the row was already consumed
  * (lost a concurrent race) or has passed `expiresAt`. The `WHERE status =
  * 'pending'` guard is what makes two simultaneous accepts safe — the row lock
  * lets exactly one UPDATE match. The `expiresAt > now()` guard closes the gap
@@ -184,11 +184,8 @@ export async function getOrgInvitations(orgId: string) {
  * was a claim and not a fact for one release; `test/integration/routes/
  * invitations.test.ts` now asserts it.
  */
-export async function markInvitationAccepted(
-  invitationId: string,
-  tx: DbOrTx = db,
-): Promise<boolean> {
-  const claimed = await tx
+export async function markInvitationAccepted(invitationId: string, tx: DbOrTx = db) {
+  const [claimed] = await tx
     .update(orgInvitations)
     .set({ status: "accepted" })
     .where(
@@ -198,8 +195,8 @@ export async function markInvitationAccepted(
         gt(orgInvitations.expiresAt, new Date()),
       ),
     )
-    .returning({ id: orgInvitations.id });
-  return claimed.length > 0;
+    .returning();
+  return claimed ?? null;
 }
 
 export async function cancelInvitation(invitationId: string, orgId: string) {

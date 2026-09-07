@@ -130,18 +130,19 @@ router.post("/:token/accept", async (c) => {
   // is reported as already-accepted. `addMember` is idempotent (it swallows the
   // unique violation), so an existing membership keeps the claim valid.
   const claimed = await db.transaction(async (tx) => {
-    const won = await markInvitationAccepted(invitation.id, tx);
-    if (!won) return null;
-    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
-    // Same transaction as the claim: an invitation that granted spaces must
-    // never be spent while leaving the invitee out of them.
-    return applySpaceAssignments(tx, {
-      orgId: invitation.orgId,
+    const current = await markInvitationAccepted(invitation.id, tx);
+    if (!current) return null;
+    // The claim locks and returns the current grant, including edits committed
+    // since the initial token lookup. Never apply that earlier snapshot.
+    await addMember(current.orgId, session.user.id, current.role as AssignableOrgRole, tx);
+    const assignments = await applySpaceAssignments(tx, {
+      orgId: current.orgId,
       userId: session.user.id,
-      addedBy: invitation.invitedBy,
-      assignments: invitation.spaceAssignments,
+      addedBy: current.invitedBy,
+      assignments: current.spaceAssignments,
       onMissing: "skip",
     });
+    return { invitation: current, assignments };
   });
 
   if (!claimed) {
@@ -176,8 +177,8 @@ router.post("/:token/accept", async (c) => {
     resourceId: invitation.id,
     after: {
       email: invitation.email,
-      role: invitation.role,
-      space_assignments: claimed,
+      role: claimed.invitation.role,
+      space_assignments: claimed.assignments,
     },
     ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,
@@ -189,8 +190,8 @@ router.post("/:token/accept", async (c) => {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    role: invitation.role,
-    permissions: listedOrgPermissions(invitation.role),
+    role: claimed.invitation.role,
+    permissions: listedOrgPermissions(claimed.invitation.role),
     createdAt: org.createdAt,
   });
 });

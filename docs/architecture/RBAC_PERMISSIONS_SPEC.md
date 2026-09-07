@@ -91,6 +91,11 @@ Rule: **`space_members` never holds an owner or admin.** Their access is implied
 
 Custom roles cannot hold org-level strings. There is no "space-level custom role that also manages members of the org".
 
+Scheduled runs re-resolve their user's space role at every fire and require
+`agents:run`. Revoking the explicit membership, closing an implicitly accessible
+space or removing that permission disables the schedule and records a failed run.
+End-user schedules retain their pinned-space identity check.
+
 ### 3.4 Permission vocabulary by level
 
 Org-level (granted by org roles; resource rows live at the org):
@@ -291,7 +296,7 @@ Casing per `docs/CASING_CONVENTIONS.md`: snake_case on the wire, with the `id`/`
 
 ### 6.1 Org users — `/api/orgs/:orgId/members`
 
-Guarded by `requirePermission("members", …)`; the assignable-role policy runs in the handler after it. `role` accepts `admin | member | guest`. The invite body carries `space_assignments`: guests require at least one, admins require an empty list, members may carry explicit grants, and every space and custom-role reference must belong to the organization. Acceptance applies the grants in the membership transaction; deleted targets are skipped and logged.
+Guarded by `requirePermission("members", …)`; the assignable-role policy runs in the handler after it. `role` accepts `admin | member | guest`. The invite body carries `space_assignments`: guests require at least one, admins require an empty list, members may carry explicit grants, and every space and custom-role reference must belong to the organization. Acceptance consumes the role and assignments returned by the atomic token claim, so an edit committed before the claim takes effect. It applies the grants in the membership transaction; deleted targets are skipped and logged.
 
 One pending invitation exists per (organization, email) — the partial unique index `uq_org_invitations_pending` (§11). A second create for an address that already has a valid pending row is a 409 `invitation_already_pending` carrying its `invitation_id`, not a cancel-and-replace: the first link stays valid and its assignments stay. An expired-but-unswept row is cancelled so a fresh invitation can follow it.
 

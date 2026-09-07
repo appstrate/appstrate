@@ -1764,7 +1764,7 @@ export const schemas = {
 
   SpaceMemberObject: {
     type: "object",
-    required: ["object", "userId", "name", "email", "org_role", "source", "role", "created_at"],
+    required: ["object", "userId", "name", "email", "org_role", "source", "role", "createdAt"],
     properties: {
       object: { type: "string", enum: ["space_member"] },
       userId: { type: "string" },
@@ -1786,7 +1786,7 @@ export const schemas = {
           name: { type: "string" },
         },
       },
-      created_at: {
+      createdAt: {
         type: ["string", "null"],
         format: "date-time",
         description: "When the explicit row was written; null for an implicit member",
@@ -1815,8 +1815,8 @@ export const schemas = {
       "name",
       "description",
       "permissions",
-      "created_at",
-      "updated_at",
+      "createdAt",
+      "updatedAt",
     ],
     description:
       "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
@@ -1835,8 +1835,8 @@ export const schemas = {
         items: { type: "string" },
         description: "Space-level permission strings the role grants, sorted.",
       },
-      created_at: { type: ["string", "null"], format: "date-time" },
-      updated_at: { type: ["string", "null"], format: "date-time" },
+      createdAt: { type: ["string", "null"], format: "date-time" },
+      updatedAt: { type: ["string", "null"], format: "date-time" },
     },
   },
 

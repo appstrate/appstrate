@@ -24995,7 +24995,7 @@
           "org_role",
           "source",
           "role",
-          "created_at"
+          "createdAt"
         ],
         "properties": {
           "object": {
@@ -25036,7 +25036,7 @@
               }
             }
           },
-          "created_at": {
+          "createdAt": {
             "type": ["string", "null"],
             "format": "date-time",
             "description": "When the explicit row was written; null for an implicit member"
@@ -25074,8 +25074,8 @@
           "name",
           "description",
           "permissions",
-          "created_at",
-          "updated_at"
+          "createdAt",
+          "updatedAt"
         ],
         "description": "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
         "properties": {
@@ -25107,11 +25107,11 @@
             },
             "description": "Space-level permission strings the role grants, sorted."
           },
-          "created_at": {
+          "createdAt": {
             "type": ["string", "null"],
             "format": "date-time"
           },
-          "updated_at": {
+          "updatedAt": {
             "type": ["string", "null"],
             "format": "date-time"
           }

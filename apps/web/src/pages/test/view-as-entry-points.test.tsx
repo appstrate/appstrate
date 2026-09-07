@@ -74,8 +74,8 @@ function preset(key: string): components["schemas"]["RoleObject"] {
     name: key,
     description: null,
     permissions: [],
-    created_at: null,
-    updated_at: null,
+    createdAt: null,
+    updatedAt: null,
   };
 }
 
@@ -231,8 +231,8 @@ describe("custom-role gating on the roles page", () => {
     name: "Responsable assistance",
     description: "Assistance clients",
     permissions: ["agents:read"],
-    created_at: null,
-    updated_at: null,
+    createdAt: null,
+    updatedAt: null,
   };
 
   /** `useAppConfig` reads the global at render, so the flag is swapped around one. */

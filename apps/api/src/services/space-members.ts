@@ -19,10 +19,9 @@ import {
   spaces,
   user as userTable,
 } from "@appstrate/db/schema";
-import type { OrgRole, SpaceRolePreset } from "@appstrate/core/permissions";
+import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
-import { getOrgMember } from "./organizations.ts";
 import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
 
@@ -118,7 +117,7 @@ export async function listSpaceMembers(
       org_role: orgRole,
       source: found ? "explicit" : orgRole === "member" ? "open_space" : "org_role",
       role: toSpaceRoleWire(effective),
-      created_at: found?.createdAt?.toISOString() ?? null,
+      createdAt: found?.createdAt?.toISOString() ?? null,
     });
   }
   return out;
@@ -129,6 +128,16 @@ function spaceAccess(space: { visibility: string; defaultRole: SpaceRolePreset }
     visibility: space.visibility as "open" | "closed" | "private",
     defaultRole: space.defaultRole,
   };
+}
+
+/** Hold the membership lock until the caller's grant transaction commits. */
+export async function lockOrgMemberForSpaceGrant(tx: DbOrTx, orgId: string, userId: string) {
+  const [member] = await tx
+    .select({ role: organizationMembers.role })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .for("update");
+  return member;
 }
 
 /**
@@ -150,41 +159,46 @@ export async function saveSpaceMember(params: {
   requireExisting?: boolean;
 }): Promise<void> {
   const { orgId, spaceId, userId, assignment, addedBy } = params;
-  const targetRole = await orgRoleOf(db, orgId, userId);
-  if (!targetRole) throw notFound("User is not a member of this organization");
-  if (targetRole === "owner" || targetRole === "admin") {
-    throw conflict(
-      "redundant_space_role",
-      `${targetRole}s already run every space in the organization; an explicit role would grant nothing`,
-    );
-  }
-  const memberFilter = and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId));
-  if (!params.requireExisting) {
-    const [existing] = await db
-      .select({ userId: spaceMembers.userId })
-      .from(spaceMembers)
-      .where(memberFilter)
-      .limit(1);
-    if (existing) throw existingSpaceMember();
-  }
-  const values = await assignmentColumns(orgId, assignment, params.actorPermissions);
+  // Serialize with org promotion/removal, which lock this row before cleaning
+  // up space memberships. A transaction alone would still allow stale grants.
+  return db.transaction(async (tx) => {
+    const target = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+    const targetRole = target?.role;
+    if (!targetRole) throw notFound("User is not a member of this organization");
+    if (targetRole === "owner" || targetRole === "admin") {
+      throw conflict(
+        "redundant_space_role",
+        `${targetRole}s already run every space in the organization; an explicit role would grant nothing`,
+      );
+    }
+    const memberFilter = and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId));
+    if (!params.requireExisting) {
+      const [existing] = await tx
+        .select({ userId: spaceMembers.userId })
+        .from(spaceMembers)
+        .where(memberFilter)
+        .limit(1);
+      if (existing) throw existingSpaceMember();
+    }
+    const values = await assignmentColumns(orgId, assignment, params.actorPermissions, tx);
 
-  if (params.requireExisting) {
-    const updated = await db
-      .update(spaceMembers)
-      .set(values)
-      .where(memberFilter)
+    if (params.requireExisting) {
+      const updated = await tx
+        .update(spaceMembers)
+        .set(values)
+        .where(memberFilter)
+        .returning({ userId: spaceMembers.userId });
+      if (updated.length === 0) throw notFound("Space member not found");
+      return;
+    }
+
+    const inserted = await tx
+      .insert(spaceMembers)
+      .values({ spaceId, userId, addedBy, ...values })
+      .onConflictDoNothing({ target: [spaceMembers.spaceId, spaceMembers.userId] })
       .returning({ userId: spaceMembers.userId });
-    if (updated.length === 0) throw notFound("Space member not found");
-    return;
-  }
-
-  const inserted = await db
-    .insert(spaceMembers)
-    .values({ spaceId, userId, addedBy, ...values })
-    .onConflictDoNothing({ target: [spaceMembers.spaceId, spaceMembers.userId] })
-    .returning({ userId: spaceMembers.userId });
-  if (inserted.length === 0) throw existingSpaceMember();
+    if (inserted.length === 0) throw existingSpaceMember();
+  });
 }
 
 function existingSpaceMember() {
@@ -247,22 +261,18 @@ export async function deleteSpaceMembershipsInOrg(
     });
 }
 
-async function orgRoleOf(tx: DbOrTx, orgId: string, userId: string): Promise<OrgRole | null> {
-  const row = await getOrgMember(orgId, userId, tx);
-  return row ? row.role : null;
-}
-
 /** The FK alone would accept another org's bundle, so the org is checked here. */
 async function assignmentColumns(
   orgId: string,
   assignment: SpaceRoleAssignment,
   actorPermissions: ReadonlySet<string> | undefined,
+  tx: DbOrTx,
 ): Promise<RoleColumns> {
   if ("preset_role" in assignment) {
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  const [role] = await db
+  const [role] = await tx
     .select({
       id: spaceRoles.id,
       key: spaceRoles.key,

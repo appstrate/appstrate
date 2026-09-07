@@ -5464,9 +5464,9 @@ export interface components {
             /** @description Space-level permission strings the role grants, sorted. */
             permissions: string[];
             /** Format: date-time */
-            created_at: string | null;
+            createdAt: string | null;
             /** Format: date-time */
-            updated_at: string | null;
+            updatedAt: string | null;
         };
         /** @description Space-level permissions of one resource, with their delegation facts. */
         RoleVocabularyGroup: {
@@ -5750,7 +5750,7 @@ export interface components {
              * Format: date-time
              * @description When the explicit row was written; null for an implicit member
              */
-            created_at: string | null;
+            createdAt: string | null;
         };
         SpaceMemberRemoval: {
             /**

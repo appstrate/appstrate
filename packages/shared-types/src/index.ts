@@ -964,7 +964,7 @@ export interface SpaceMember {
   source: "explicit" | "org_role" | "open_space";
   role: { kind: "preset" | "custom"; key: string; name: string } | null;
   /** When the explicit row was written; null for an implicit member. */
-  created_at: string | null;
+  createdAt: string | null;
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see

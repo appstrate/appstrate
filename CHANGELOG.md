@@ -385,6 +385,11 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- Scheduled runs recheck their actor's current space permissions and disable
+  themselves when `agents:run` is revoked. Invitation acceptance consumes the
+  role and space assignments current at its atomic claim; concurrent space
+  grants serialize with organization membership removal and promotion.
+
 - **A Dynamic Client Registration body without `scope` now yields the full
   self-service scope set (#1267).** An MCP client registering without `scope`
   got the identity scopes alone, so authorizing for `mcp:read` / `mcp:invoke`

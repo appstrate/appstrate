@@ -27,8 +27,8 @@ export interface SpaceRoleWire {
   name: string;
   description: string | null;
   permissions: string[];
-  created_at: string | null;
-  updated_at: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 /** Fields a create or update carries; `description` is nullable, not absent. */
@@ -80,8 +80,8 @@ function toWire(row: SpaceRoleRow): SpaceRoleWire {
     name: row.name,
     description: row.description,
     permissions: [...row.permissions].sort(),
-    created_at: row.createdAt.toISOString(),
-    updated_at: row.updatedAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -94,8 +94,8 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     name: preset,
     description: null,
     permissions: [...presetPermissions(preset)].sort(),
-    created_at: null,
-    updated_at: null,
+    createdAt: null,
+    updatedAt: null,
   };
 }
 

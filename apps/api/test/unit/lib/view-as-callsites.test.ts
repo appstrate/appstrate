@@ -88,6 +88,10 @@ describe("persona-sensitive call sites", () => {
           "reads the TARGET member's row on a role change, not the caller's",
         ],
         [
+          "apps/api/src/services/scheduler.ts",
+          "background fires revalidate the saved actor's live grants; no request persona survives into a schedule",
+        ],
+        [
           "apps/api/src/services/spaces.ts",
           "the listing's own load, bypassed by the overlay `listSpacesForPrincipal` takes",
         ],

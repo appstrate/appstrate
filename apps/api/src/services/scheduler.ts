@@ -9,10 +9,12 @@ import {
   schedules,
   endUsers,
   organizationMembers,
+  spaces,
   runs,
   notifications,
 } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/db/run-status";
+import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
@@ -189,7 +191,8 @@ export async function removeScheduleJobs(scheduleIds: readonly string[]): Promis
  * `user` row (multi-org), so their schedules would otherwise keep firing as
  * them. Re-check on EVERY fire that the frozen actor still holds the
  * identity the schedule runs as: a member must still belong to the
- * schedule's org, an end-user must still exist in the schedule's space.
+ * schedule's org and hold agents:run in its space; an end-user must still
+ * exist in the schedule's space.
  */
 async function isScheduleActorValid(
   actor: Actor,
@@ -198,11 +201,19 @@ async function isScheduleActorValid(
 ): Promise<boolean> {
   if (actor.type === "user") {
     const [row] = await db
-      .select({ userId: organizationMembers.userId })
+      .select({ role: organizationMembers.role })
       .from(organizationMembers)
       .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, actor.id)))
       .limit(1);
-    return row !== undefined;
+    if (!row) return false;
+    const [space] = await db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
+      .limit(1);
+    if (!space) return false;
+    const membership = await loadSpaceMember(spaceId, actor.id);
+    return spacePermissions(resolveSpaceRole(row.role, space, membership)).has("agents:run");
   }
   const [row] = await db
     .select({ id: endUsers.id })
@@ -498,7 +509,7 @@ export async function triggerScheduledRun(
       await disableScheduleForInvalidActor(scheduleId);
       await failSchedule(
         actor.type === "user"
-          ? "Schedule disabled: its actor is no longer a member of this organization"
+          ? "Schedule disabled: its actor is no longer a member of this organization or cannot run agents in this space"
           : "Schedule disabled: its end-user actor no longer exists in this space",
       );
       return;

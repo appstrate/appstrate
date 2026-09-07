@@ -17,8 +17,8 @@ const custom: RoleObject = {
   name: "Delegated reader",
   description: null,
   permissions: ["agents:read"],
-  created_at: null,
-  updated_at: null,
+  createdAt: null,
+  updatedAt: null,
 };
 
 function RolePicker({ spaceId }: { spaceId: string }) {
