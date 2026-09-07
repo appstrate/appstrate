@@ -30,8 +30,6 @@ interface ViewAsDialogProps {
   onClose: () => void;
   /** Space the trigger is about. Defaults to the space the user is in. */
   spaceId?: string;
-  /** Space-role value (`preset:…` / `custom:…`) to preselect, from the row clicked. */
-  role?: string;
 }
 
 /**
@@ -48,7 +46,7 @@ interface ViewAsDialogProps {
  * Eligibility is not decided here — the triggers show only for an owner or an
  * administrator, and the server refuses anyone else (`view_as_forbidden`).
  */
-export function ViewAsDialog({ onClose, spaceId, role }: ViewAsDialogProps) {
+export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
@@ -57,10 +55,7 @@ export function ViewAsDialog({ onClose, spaceId, role }: ViewAsDialogProps) {
   const initialSpaceId = spaceId ?? currentSpaceId ?? NO_SPACE;
   const [orgRole, setOrgRole] = useState<ViewAsOrgRole>("member");
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId);
-  // A role preselected by the trigger only means something inside a space. With
-  // none resolved, the select opens on its placeholder rather than committing a
-  // persona the user never saw.
-  const [roleValue, setRoleValue] = useState(initialSpaceId === NO_SPACE ? "" : (role ?? ""));
+  const [roleValue, setRoleValue] = useState("");
 
   const inSpace = selectedSpaceId !== NO_SPACE;
   const {
@@ -71,9 +66,9 @@ export function ViewAsDialog({ onClose, spaceId, role }: ViewAsDialogProps) {
     refetch: refetchRoles,
   } = useSpaceRoleOptions(inSpace ? selectedSpaceId : undefined, inSpace);
   const space = spaces?.find((s) => s.id === selectedSpaceId);
-  // Grantability is per space, so the catalog — not the carried-over value — is
-  // what says whether this pair is previewable. Unknown is not empty: until the
-  // catalog lands there is nothing to judge the choice against.
+  // Grantability is per space, so the catalog is what says whether this pair is
+  // previewable. Unknown is not empty: until the catalog lands there is nothing
+  // to judge the choice against.
   const roleOption = rolesKnown ? options.find((o) => o.value === roleValue) : undefined;
   const ready = !!orgId && (!inSpace || (!!roleOption && !!space));
 

@@ -185,12 +185,14 @@ describe("trigger visibility", () => {
   // while the previewer outranks every persona.
   it.each(["owner", "admin"] as const)("offers the roles-page trigger to an %s", (orgRole) => {
     const html = renderAs(orgRole, <OrgSettingsRolesPage />);
-    expect(html).toContain('data-testid="preview-role-viewer"');
-    expect(html).toContain('data-testid="preview-role-admin"');
+    expect(html).toContain('data-testid="view-as-button"');
+    expect(html).toContain("Prévisualiser un rôle");
   });
 
   it.each(["member", "guest"] as const)("hides the roles-page trigger from a %s", (orgRole) => {
-    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).not.toContain("preview-role-");
+    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).not.toContain(
+      'data-testid="view-as-button"',
+    );
   });
 
   it("offers the space-members trigger to an owner and hides it from a member", () => {

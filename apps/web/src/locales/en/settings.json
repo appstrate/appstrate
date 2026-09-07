@@ -1008,7 +1008,5 @@
   "viewAs.spaceRolePlaceholder": "Choose a role",
   "viewAs.rolesEmpty": "No previewable role in this space.",
   "viewAs.submit": "Preview",
-  "viewAs.trigger": "Preview",
-  "viewAs.triggerSpace": "Preview a role",
-  "viewAs.previewRole": "Preview the {{role}} role"
+  "viewAs.trigger": "Preview a role"
 }

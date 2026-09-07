@@ -52,7 +52,7 @@ test.describe("View as role", () => {
     const agentUrl = `/agents/${scope}/${agentName}`;
 
     await page.goto("/org-settings/roles");
-    await page.getByTestId("preview-role-viewer").click();
+    await page.getByTestId("view-as-button").click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -61,8 +61,10 @@ test.describe("View as role", () => {
     await expect(dialog.getByRole("radio", { name: /Utilisateur standard/ })).toBeVisible();
     await expect(dialog.getByRole("radio", { name: /^Invité/ })).toBeVisible();
     await expect(dialog.getByRole("radio", { name: /Administrateur/ })).toHaveCount(0);
-    // Space defaults to the one the user is in; the role came from the row.
+    // Space defaults to the one the user is in; the role is chosen here.
     await expect(dialog.locator("#view-as-space")).toContainText("Default");
+    await dialog.locator("#view-as-space-role").click();
+    await page.getByRole("option", { name: /^(Lecteur|Viewer)$/ }).click();
     await expect(dialog.locator("#view-as-space-role")).toContainText("Lecteur");
 
     await dialog.getByTestId("view-as-submit").click();

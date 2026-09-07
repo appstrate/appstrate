@@ -1008,7 +1008,5 @@
   "viewAs.spaceRolePlaceholder": "Choisir un rôle",
   "viewAs.rolesEmpty": "Aucun rôle prévisualisable dans cet espace.",
   "viewAs.submit": "Prévisualiser",
-  "viewAs.trigger": "Prévisualiser",
-  "viewAs.triggerSpace": "Prévisualiser un rôle",
-  "viewAs.previewRole": "Prévisualiser le rôle {{role}}"
+  "viewAs.trigger": "Prévisualiser un rôle"
 }

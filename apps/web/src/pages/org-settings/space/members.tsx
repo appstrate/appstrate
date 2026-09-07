@@ -211,7 +211,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               data-testid="view-as-space-button"
               onClick={() => setPreviewing(true)}
             >
-              {t("viewAs.triggerSpace")}
+              {t("viewAs.trigger")}
             </Button>
           )}
           {canInvite && (
