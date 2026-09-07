@@ -234,17 +234,20 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
+    // `error`, not `warn`: without the triggers or without the LISTEN install
+    // every dashboard SSE is silent for the life of the process.
     createNotifyTriggers(db)
       .then(() => logger.info("NOTIFY triggers installed"))
       .catch((err) => {
-        logger.warn("Could not install NOTIFY triggers", {
+        logger.error("Could not install NOTIFY triggers", {
           error: getErrorMessage(err),
         });
       }),
     initRealtime().catch((err) => {
-      logger.warn("Could not initialize realtime LISTEN", {
+      logger.error("Could not initialize realtime LISTEN", {
         error: getErrorMessage(err),
       });
+      retryRealtimeInBackground();
     }),
     // Cross-replica cache invalidation rides the same LISTEN client. Without
     // it every `@appstrate/core/cache` invalidation stays process-local and
@@ -695,6 +698,35 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
       orgs: offenders.map((o) => ({ orgId: o.id, pinnedVersion: o.apiVersion })),
     },
   );
+}
+
+let realtimeRetryArmed = false;
+
+/**
+ * Bounded retry (1 s / 5 s / 25 s) of the realtime LISTEN install, armed once per
+ * process. Fire-and-forget: readiness never waits on it, and `/health` reports
+ * `checks.realtime: degraded` until an attempt lands.
+ */
+function retryRealtimeInBackground(): void {
+  if (realtimeRetryArmed) return;
+  realtimeRetryArmed = true;
+  void (async () => {
+    for (const delayMs of [1_000, 5_000, 25_000]) {
+      // Unref'd: a pending retry must never hold the process (or a test run) open.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, delayMs).unref?.();
+      });
+      try {
+        await initRealtime();
+        return;
+      } catch (err) {
+        logger.error("Realtime LISTEN retry failed", {
+          delayMs,
+          error: getErrorMessage(err),
+        });
+      }
+    }
+  })();
 }
 
 /**

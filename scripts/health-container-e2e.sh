@@ -107,7 +107,8 @@ positive_body=$(wait_for_health_body healthy)
 jq -e '
   .status == "healthy" and
   .checks.database.status == "healthy" and
-  .checks.agents.status == "healthy"
+  .checks.agents.status == "healthy" and
+  .checks.realtime.status == "healthy"
 ' <<<"$positive_body" >/dev/null
 positive_id=$(compose ps -q appstrate)
 wait_for_docker_health "$positive_id" healthy
