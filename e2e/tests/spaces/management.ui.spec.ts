@@ -79,25 +79,19 @@ test.describe("Space management in UI", () => {
 
     await page.goto("/org-settings/space/general");
     const sidebar = new Sidebar(page);
-    const switchSpace = async (spaceId: string) => {
-      await sidebar.openSwitcher();
-      await sidebar.spaceSubmenuTrigger.click();
-      await page.getByTestId(`space-item-${spaceId}`).click();
-      await expect(sidebar.dropdownMenu).toHaveCount(0);
-    };
     const name = page.locator("#space-name");
     // Prime B's detail cache, then edit A. On the return to B there is no
     // loading-state unmount to accidentally clear A's draft for us.
-    await switchSpace(target.id);
+    await sidebar.switchSpaceById(target.id);
     await expect(name).toHaveValue(target.name);
-    await switchSpace(source.id);
+    await sidebar.switchSpaceById(source.id);
     await expect(name).toHaveValue(source.name);
 
     await page.locator("#space-default-role").click();
     await page.getByRole("option", { name: /^(Administrateur de l'espace|Space admin)$/ }).click();
     await page.locator("#space-visibility-private").click();
 
-    await switchSpace(target.id);
+    await sidebar.switchSpaceById(target.id);
     await expect(name).toHaveValue(target.name);
     await expect(page.locator("#space-visibility-open")).toHaveAttribute("aria-checked", "true");
     await expect(page.locator("#space-default-role")).toContainText(/Lecteur|Viewer/);

@@ -4,14 +4,13 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
-  addOrgMember,
   authHeaders,
   createTestContext,
-  createTestUser,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
-import { presetPermissions } from "../../../src/lib/permissions.ts";
+import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
 
 const app = getTestApp();
 
@@ -28,11 +27,7 @@ describe("space role delegation", () => {
     owner = await createTestContext({ orgSlug: "delegation" });
   });
 
-  async function member(): Promise<TestContext> {
-    const user = await createTestUser();
-    await addOrgMember(owner.orgId, user.id, "member");
-    return { ...owner, user, cookie: user.cookie };
-  }
+  const member = () => memberContext(owner, "member");
 
   async function delegated(spaceId: string, permissions: string[]): Promise<TestContext> {
     const ctx = await member();
@@ -219,7 +214,23 @@ describe("space role delegation", () => {
     expect(await roleKey(target, owner.defaultSpaceId)).toBe("admin");
   });
 
-  it("an owner's space-bound API key does not inherit membership or settings authority", async () => {
+  it("space membership and settings are session-only: unmintable as scopes, 403 on the routes", async () => {
+    // An owner's effective set in a space is everything, so the refusal cannot
+    // be the creator ceiling narrowing — it is the allowlist.
+    const ownerEverything = new Set<string>([
+      ...orgPermissions("owner"),
+      ...presetPermissions("admin"),
+    ]);
+    expect(() => validateScopes(["space-members:invite"], ownerEverything)).toThrow(
+      /non-grantable API key scope/,
+    );
+    expect(() => validateScopes(["space-settings:write"], ownerEverything)).toThrow(
+      /non-grantable API key scope/,
+    );
+    // Same call with a grantable scope proves the throw is about the scope,
+    // not about the helper refusing everything.
+    expect(validateScopes(["spaces:read"], ownerEverything)).toEqual(["spaces:read"]);
+
     const target = await member();
     const key = await seedApiKey({
       orgId: owner.orgId,

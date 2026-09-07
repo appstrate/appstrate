@@ -26,8 +26,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -159,9 +158,7 @@ describe("Schedule run counters", () => {
     // the same org does not.
     await seedUnread(run.id, ctx.user.id);
 
-    const other = await createTestUser();
-    await addOrgMember(ctx.orgId, other.id, "admin");
-    const otherCtx: TestContext = { ...ctx, user: other, cookie: other.cookie };
+    const otherCtx = await memberContext(ctx, "admin");
 
     const [asOwner] = await listSchedules(ctx);
     const [asOther] = await listSchedules(otherCtx);

@@ -23,12 +23,14 @@ import { prefixedId, SPACE_ID_RE } from "../../src/lib/ids.ts";
 import {
   organizations,
   organizationMembers,
+  spaceMembers,
   spaces,
   user as userTable,
   session as sessionTable,
   account as accountTable,
   profiles,
 } from "@appstrate/db/schema";
+import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { OrgRole } from "@appstrate/shared-types";
 
 let counter = 0;
@@ -221,6 +223,32 @@ export async function addOrgMember(
   role: OrgRole = "member",
 ): Promise<void> {
   await db.insert(organizationMembers).values({ orgId, userId, role });
+}
+
+/**
+ * A `TestContext` for a second user in `ctx`'s org — same org and space, a
+ * different session. `spaceRole` also seeds the explicit `space_members` row
+ * in `ctx.defaultSpaceId`; without it the user reaches that space only through
+ * its visibility and default role. Seed a custom bundle with `seedSpaceMember`
+ * on the returned `user.id`.
+ */
+export async function memberContext(
+  ctx: TestContext,
+  role: OrgRole,
+  spaceRole?: SpaceRolePreset,
+): Promise<TestContext> {
+  const member = await createTestUser();
+  await addOrgMember(ctx.orgId, member.id, role);
+  if (spaceRole) {
+    await db
+      .insert(spaceMembers)
+      .values({ spaceId: ctx.defaultSpaceId, userId: member.id, presetRole: spaceRole });
+  }
+  return {
+    ...ctx,
+    user: { id: member.id, email: member.email, name: member.name },
+    cookie: member.cookie,
+  };
 }
 
 /**

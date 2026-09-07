@@ -37,8 +37,7 @@ import { zipSync } from "fflate";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -264,9 +263,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // membership suite). Each gets its own user — role is a property of the
     // membership row, not of the session.
     for (const role of ["owner", "admin", "member"] as const) {
-      const roleUser = await createTestUser();
-      await addOrgMember(ctx.orgId, roleUser.id, role);
-      const headers = authHeaders({ ...ctx, cookie: roleUser.cookie });
+      const headers = authHeaders(await memberContext(ctx, role));
 
       for (const source of ["draft", "published"]) {
         const res = await app.request(`/api/agents/${AGENT_ID}/bundle?source=${source}`, {

@@ -6,8 +6,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -283,9 +282,7 @@ describe("API Keys API", () => {
     });
 
     it("returns 403 for member (api-keys:read is admin-only)", async () => {
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-      const memberCtx: TestContext = { ...ctx, user: member, cookie: member.cookie };
+      const memberCtx = await memberContext(ctx, "member");
 
       const res = await app.request("/api/api-keys/available-scopes", {
         headers: authHeaders(memberCtx),

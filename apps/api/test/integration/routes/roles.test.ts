@@ -17,6 +17,7 @@ import {
   authHeaders,
   createTestContext,
   createTestUser,
+  memberContext,
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -110,9 +111,7 @@ describe("custom space roles", () => {
     it("an org member reads the catalog but cannot define a bundle", async () => {
       // A space `admin` is often only an org `member`; assigning a role means
       // seeing what is assignable. Defining one stays owner/admin.
-      const user = await createTestUser();
-      await addOrgMember(owner.orgId, user.id, "member");
-      const asMember: TestContext = { ...owner, user, cookie: user.cookie };
+      const asMember = await memberContext(owner, "member");
 
       expect((await app.request("/api/roles", { headers: orgOnlyHeaders(asMember) })).status).toBe(
         200,
@@ -124,9 +123,7 @@ describe("custom space roles", () => {
     });
 
     it("a guest reads nothing — roles are the org's own vocabulary", async () => {
-      const user = await createTestUser();
-      await addOrgMember(owner.orgId, user.id, "guest");
-      const asGuest: TestContext = { ...owner, user, cookie: user.cookie };
+      const asGuest = await memberContext(owner, "guest");
       expect((await app.request("/api/roles", { headers: orgOnlyHeaders(asGuest) })).status).toBe(
         403,
       );
@@ -426,16 +423,13 @@ describe("custom space roles", () => {
       expect(created.status).toBe(201);
       const role = (await created.json()) as RoleWire;
 
-      const user = await createTestUser();
-      await addOrgMember(owner.orgId, user.id, "guest");
+      const asGuest = await memberContext(owner, "guest");
       const assigned = await app.request(`/api/spaces/${owner.defaultSpaceId}/members`, {
         method: "POST",
         headers: { ...orgOnlyHeaders(owner), "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, custom_role_id: role.id }),
+        body: JSON.stringify({ userId: asGuest.user.id, custom_role_id: role.id }),
       });
       expect(assigned.status).toBe(201);
-
-      const asGuest: TestContext = { ...owner, user, cookie: user.cookie };
       expect((await app.request("/api/agents", { headers: authHeaders(asGuest) })).status).toBe(
         200,
       );
@@ -460,7 +454,10 @@ describe("custom space roles", () => {
         headers: { ...authHeaders(asGuest), "Content-Type": "application/json" },
         body: JSON.stringify({ input: {} }),
       });
-      expect(rerun.status).not.toBe(403);
+      // Past the guard and into the handler, which stops on the fixture having
+      // no published version — a refusal about the agent, not about the caller.
+      expect(rerun.status).toBe(404);
+      expect((await rerun.json()) as Problem).toMatchObject({ code: "no_published_version" });
     });
 
     it("through an invitation's space_assignments", async () => {
@@ -488,7 +485,9 @@ describe("custom space roles", () => {
       // acceptance above is the org check passing, not the field being ignored.
       const other = await createTestContext({ orgSlug: "roles-invite-foreign" });
       const foreign = await seedSpaceRole({ orgId: other.orgId, key: "foreign" });
-      expect((await invite(foreign.id)).status).not.toBe(201);
+      const refused = await invite(foreign.id);
+      expect(refused.status).toBe(404);
+      expect(((await refused.json()) as Problem).detail).toContain(foreign.id);
     });
   });
 });

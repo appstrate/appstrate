@@ -9,14 +9,16 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { spaceMembers } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll, db } from "../../helpers/db.ts";
-import { toRows } from "@appstrate/db/client";
+import { truncateAll } from "../../helpers/db.ts";
+import { assertDbCount } from "../../helpers/assertions.ts";
 import {
+  addOrgMember,
   createTestContext,
   createTestUser,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -29,14 +31,6 @@ import {
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 
 const app = getTestApp();
-
-/** Explicit `space_members` rows a user holds, across every space. */
-async function spaceMemberCount(userId: string): Promise<number> {
-  const rows = toRows<{ n: number | string }>(
-    await db.execute(sql`SELECT count(*)::int AS n FROM space_members WHERE user_id = ${userId}`),
-  );
-  return Number(rows[0]?.n ?? -1);
-}
 
 interface SpaceItem {
   id: string;
@@ -57,12 +51,7 @@ describe("space membership", () => {
     await seedInstalledPackage(owner.defaultSpaceId, "@membership/agent");
   });
 
-  /** A user with `role` in the org, sharing the owner's org context. */
-  async function member(role: OrgRole): Promise<TestContext> {
-    const user = await createTestUser();
-    await addOrgMember(owner.orgId, user.id, role);
-    return { ...owner, user, cookie: user.cookie };
-  }
+  const member = (role: OrgRole) => memberContext(owner, role);
 
   /** `GET /api/agents` in `spaceId` — the cheapest space-level read there is. */
   async function readAgents(ctx: TestContext, spaceId: string): Promise<Response> {
@@ -415,7 +404,7 @@ describe("space membership", () => {
       });
       expect(res.status).toBe(200);
 
-      expect(await spaceMemberCount(promoted.user.id)).toBe(0);
+      await assertDbCount(spaceMembers, eq(spaceMembers.userId, promoted.user.id), 0);
       // The access itself is unchanged — implied by the org role now.
       expect((await readAgents(promoted, closed.id)).status).toBe(200);
     });
@@ -438,7 +427,7 @@ describe("space membership", () => {
       // Nothing cascades these — `space_members` references `spaces` and
       // `user`, and removing an org membership deletes neither. Left behind,
       // they would silently restore the role on re-invite.
-      expect(await spaceMemberCount(leaving.user.id)).toBe(0);
+      await assertDbCount(spaceMembers, eq(spaceMembers.userId, leaving.user.id), 0);
     });
   });
 });

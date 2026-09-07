@@ -14,8 +14,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -51,10 +50,8 @@ describe("space package install/config/uninstall — permission is per package t
     await seedInstalledPackage(owner.defaultSpaceId, AGENT);
     await seedInstalledPackage(owner.defaultSpaceId, SKILL);
 
-    const user = await createTestUser();
-    await addOrgMember(owner.orgId, user.id, "member");
-    await seedSpaceMember({ spaceId: runs.id, userId: user.id, presetRole: "admin" });
-    spaceAdmin = { ...owner, user, cookie: user.cookie };
+    spaceAdmin = await memberContext(owner, "member");
+    await seedSpaceMember({ spaceId: runs.id, userId: spaceAdmin.user.id, presetRole: "admin" });
   });
 
   async function install(ctx: TestContext, spaceId: string, packageId: string): Promise<Response> {
@@ -88,15 +85,13 @@ describe("space package install/config/uninstall — permission is per package t
       key: "skills-only",
       permissions: ["skills:read", "skills:write", "agents:read"],
     });
-    const author = await createTestUser();
-    await addOrgMember(owner.orgId, author.id, "member");
+    const asAuthor = await memberContext(owner, "member");
     await seedSpaceMember({
       spaceId: visits.id,
-      userId: author.id,
+      userId: asAuthor.user.id,
       presetRole: null,
       customRoleId: skillsOnly.id,
     });
-    const asAuthor: TestContext = { ...owner, user: author, cookie: author.cookie };
 
     expect((await install(asAuthor, visits.id, SKILL)).status).toBe(201);
     expect((await install(asAuthor, visits.id, AGENT)).status).toBe(403);
@@ -128,10 +123,8 @@ describe("space package install/config/uninstall — permission is per package t
     // The gate runs before the catalog lookup so a caller with no authority
     // gets the same answer whether or not the package exists (no enumeration
     // oracle).
-    const viewer = await createTestUser();
-    await addOrgMember(owner.orgId, viewer.id, "member");
-    await seedSpaceMember({ spaceId: runs.id, userId: viewer.id, presetRole: "viewer" });
-    const asViewer: TestContext = { ...owner, user: viewer, cookie: viewer.cookie };
+    const asViewer = await memberContext(owner, "member");
+    await seedSpaceMember({ spaceId: runs.id, userId: asViewer.user.id, presetRole: "viewer" });
     await seedInstalledPackage(runs.id, AGENT);
 
     const missing = "@testorg/does-not-exist";

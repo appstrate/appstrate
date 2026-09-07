@@ -8,9 +8,13 @@ import {
   authHeaders,
   createTestContext,
   createTestUser,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedSpace, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
+import { db } from "../../helpers/db.ts";
+import { auditEvents, spaceMembers } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import { presetPermissions } from "../../../src/lib/permissions.ts";
 import type { SpaceRoleWire } from "../../../src/services/space-roles.ts";
 
@@ -23,10 +27,7 @@ describe("delegated space membership management", () => {
   beforeEach(async () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "space-management" });
-    const user = await createTestUser();
-    await addOrgMember(owner.orgId, user.id, "guest");
-    await seedSpaceMember({ spaceId: owner.defaultSpaceId, userId: user.id, presetRole: "admin" });
-    guest = { ...owner, user, cookie: user.cookie };
+    guest = await memberContext(owner, "guest", "admin");
   });
 
   function request(ctx: TestContext, path: string, method = "GET", body?: unknown) {
@@ -108,22 +109,22 @@ describe("delegated space membership management", () => {
       });
       expect(response.status).toBe(400);
     }
-    const delegator = await createTestUser();
-    await addOrgMember(owner.orgId, delegator.id, "guest");
+    const delegator = await memberContext(owner, "guest");
     const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["space-members:invite"] });
     await seedSpaceMember({
       spaceId: owner.defaultSpaceId,
-      userId: delegator.id,
+      userId: delegator.user.id,
       presetRole: null,
       customRoleId: role.id,
     });
-    const ctx = { ...owner, user: delegator, cookie: delegator.cookie };
     const target = await createTestUser();
     await addOrgMember(owner.orgId, target.id, "guest");
-    const response = await request(ctx, `/api/spaces/${owner.defaultSpaceId}/members`, "POST", {
-      email: target.email,
-      preset_role: "admin",
-    });
+    const response = await request(
+      delegator,
+      `/api/spaces/${owner.defaultSpaceId}/members`,
+      "POST",
+      { email: target.email, preset_role: "admin" },
+    );
     expect(response.status).toBe(403);
   });
 
@@ -162,27 +163,75 @@ describe("delegated space membership management", () => {
       orgId: owner.orgId,
       permissions: ["space-settings:write"],
     });
-    const target = await createTestUser();
-    await addOrgMember(owner.orgId, target.id, "guest");
+    const editor = await memberContext(owner, "guest");
     await seedSpaceMember({
       spaceId: owner.defaultSpaceId,
-      userId: target.id,
+      userId: editor.user.id,
       presetRole: null,
       customRoleId: settingsRole.id,
     });
-    const ctx = { ...owner, user: target, cookie: target.cookie };
-    expect((await request(ctx, `/api/spaces/${owner.defaultSpaceId}/roles`)).status).toBe(200);
+    expect((await request(editor, `/api/spaces/${owner.defaultSpaceId}/roles`)).status).toBe(200);
     const elsewhere = await seedSpace({ orgId: owner.orgId, visibility: "private" });
-    expect((await request(ctx, `/api/spaces/${elsewhere.id}/roles`)).status).toBe(404);
-    const viewer = await createTestUser();
-    await addOrgMember(owner.orgId, viewer.id, "member");
-    expect(
-      (
-        await request(
-          { ...owner, user: viewer, cookie: viewer.cookie },
-          `/api/spaces/${owner.defaultSpaceId}/roles`,
-        )
-      ).status,
-    ).toBe(403);
+    expect((await request(editor, `/api/spaces/${elsewhere.id}/roles`)).status).toBe(404);
+    const viewer = await memberContext(owner, "member");
+    expect((await request(viewer, `/api/spaces/${owner.defaultSpaceId}/roles`)).status).toBe(403);
+  });
+
+  // Promotion to owner/admin deletes every explicit space row (the org role
+  // subsumes them) and a later demotion restores nothing, so the audit event is
+  // the only surviving record of what was dropped.
+  it("records the space grants a promotion revoked, and restores none of them on demotion", async () => {
+    const target = await createTestUser();
+    await addOrgMember(owner.orgId, target.id, "member");
+    const second = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
+    const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
+    await seedSpaceMember({
+      spaceId: owner.defaultSpaceId,
+      userId: target.id,
+      presetRole: "builder",
+    });
+    await seedSpaceMember({
+      spaceId: second.id,
+      userId: target.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+
+    const promoted = await request(owner, `/api/orgs/${owner.orgId}/members/${target.id}`, "PUT", {
+      role: "admin",
+    });
+    expect(promoted.status).toBe(200);
+
+    const events = await db
+      .select({ before: auditEvents.before })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "org.member_role_updated"),
+          eq(auditEvents.resourceId, target.id),
+        ),
+      );
+    expect(events).toHaveLength(1);
+    const revoked = (events[0]!.before as { revoked_space_assignments: unknown[] })
+      .revoked_space_assignments;
+    expect(revoked).toHaveLength(2);
+    expect(revoked).toContainEqual({
+      space_id: owner.defaultSpaceId,
+      preset_role: "builder",
+      custom_role_id: null,
+    });
+    expect(revoked).toContainEqual({
+      space_id: second.id,
+      preset_role: null,
+      custom_role_id: role.id,
+    });
+
+    const demoted = await request(owner, `/api/orgs/${owner.orgId}/members/${target.id}`, "PUT", {
+      role: "member",
+    });
+    expect(demoted.status).toBe(200);
+    expect(await db.select().from(spaceMembers).where(eq(spaceMembers.userId, target.id))).toEqual(
+      [],
+    );
   });
 });

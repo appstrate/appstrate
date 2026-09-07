@@ -301,7 +301,11 @@ test("a pending standard invitation can become a guest invitation with a space a
   expect(created.status()).toBe(201);
   const invitation = await created.json();
   await page.goto("/org-settings/members");
-  await page.getByRole("button", { name: /^(Modifier|Edit)$/ }).click();
+  // Scoped to this invitation's card: the page carries one edit button per row.
+  await page
+    .locator(`[data-invitation-id="${invitation.id}"]`)
+    .getByRole("button", { name: /^(Modifier|Edit)$/ })
+    .click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("radio", { name: /Invité|Guest/ }).check();
   await dialog.getByRole("button", { name: /Enregistrer|Save/ }).click();
