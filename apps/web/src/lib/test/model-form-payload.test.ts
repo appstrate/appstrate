@@ -58,6 +58,9 @@ function build(input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields
     dirtyFields: {},
     provider: ANTHROPIC,
     importedCost: null,
+    // The form passes the credential it could match against the picked
+    // provider; unless a case says otherwise, that is the raw field.
+    selectedCredentialId: input.fields.credentialId || null,
     ...input,
   });
 }
@@ -183,6 +186,46 @@ describe("buildModelFormPayload — missing credential", () => {
   it("refuses an api-key provider with neither a selection nor an inline key", () => {
     const result = build({
       fields: fields({ modelId: "claude-sonnet-4-5-20250929" }),
+    });
+    expect(result).toEqual({
+      ok: false,
+      field: "credentialId",
+      messageKey: "models.form.apiKeyRequired",
+    });
+  });
+
+  it("ignores a credential the form can no longer match, creating one instead", () => {
+    // Provider switched after the key was picked: the id still sits in the
+    // field but names another endpoint, so it must not become the binding.
+    const result = build({
+      provider: OPENAI_COMPATIBLE,
+      fields: fields({
+        modelId: "qwen3:8b",
+        baseUrl: "http://localhost:11434/v1",
+        credentialId: "cred_groq",
+        inlineApiKey: "sk-local",
+      }),
+      selectedCredentialId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.credentialId).toBe("");
+    expect(result.data.newCredential).toEqual({
+      apiKey: "sk-local",
+      providerId: "openai-compatible",
+      baseUrlOverride: "http://localhost:11434/v1",
+    });
+  });
+
+  it("refuses an unmatched credential with no inline key to fall back on", () => {
+    const result = build({
+      provider: OPENAI_COMPATIBLE,
+      fields: fields({
+        modelId: "qwen3:8b",
+        baseUrl: "http://localhost:11434/v1",
+        credentialId: "cred_groq",
+      }),
+      selectedCredentialId: null,
     });
     expect(result).toEqual({
       ok: false,

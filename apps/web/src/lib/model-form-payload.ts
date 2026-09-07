@@ -59,6 +59,12 @@ export interface ModelFormPayloadInput {
   dirtyFields: { [K in keyof ModelFormFields]?: boolean };
   /** The picked registry entry; undefined until the user picks a provider. */
   provider: ModelFormProvider | undefined;
+  /**
+   * The credential the form could actually match against the picked provider,
+   * or `null`. `fields.credentialId` alone is not a binding: it survives a
+   * provider switch and would bind the model to the endpoint the operator left.
+   */
+  selectedCredentialId: string | null;
   /** OpenRouter live-search rates — the only cost the form submits. */
   importedCost: ModelCost | null;
 }
@@ -70,18 +76,19 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
   const { fields, dirtyFields, provider, importedCost } = input;
   const isOauthProvider = provider?.authMode === "oauth2";
   const inlineApiKey = fields.inlineApiKey.trim();
+  const credentialId = input.selectedCredentialId ?? "";
 
   // Inline api-key creation only applies to api_key providers — OAuth
   // credentials must exist before the model is saved (they're created via the
   // pairing dialog and auto-selected into `credentialId`).
   const newCredentialProvider =
-    !isOauthProvider && !fields.credentialId && inlineApiKey ? provider : undefined;
+    !isOauthProvider && !credentialId && inlineApiKey ? provider : undefined;
 
   // OAuth has no inline-key affordance, so an empty selection is a hard error.
-  if (isOauthProvider && !fields.credentialId) {
+  if (isOauthProvider && !credentialId) {
     return { ok: false, field: "credentialId", messageKey: "models.form.connectionRequired" };
   }
-  if (!isOauthProvider && !fields.credentialId && !newCredentialProvider) {
+  if (!isOauthProvider && !credentialId && !newCredentialProvider) {
     return { ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" };
   }
 
@@ -99,7 +106,7 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
       // the user edited (or OpenRouter live-search imported) is flagged here.
       ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
       modelId: fields.modelId.trim(),
-      credentialId: newCredentialProvider ? "" : fields.credentialId,
+      credentialId: newCredentialProvider ? "" : credentialId,
       // Posted to /api/model-provider-credentials before the model itself.
       ...(newCredentialProvider
         ? {

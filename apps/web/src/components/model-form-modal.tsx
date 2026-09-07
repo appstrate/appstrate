@@ -62,7 +62,6 @@ interface DiscoveryState {
   key: string;
   outcome: DiscoveredModelsResponse["outcome"] | "request_failed";
   models: DiscoveredModel[];
-  message: string | null;
 }
 
 /** The line under the discovery button when no listing came back. */
@@ -74,9 +73,16 @@ function discoveryErrorText(discovery: DiscoveryState, t: (key: string) => strin
       return t("models.form.discoverBlockedUrl");
     case "request_failed":
       return t("models.form.discoverRequestFailed");
-    // unreachable | http_error | bad_response | rate_limited.
+    case "rate_limited":
+      return t("models.form.discoverRateLimited");
+    case "unreachable":
+      return t("models.form.discoverUnreachable");
+    case "http_error":
+      return t("models.form.discoverHttpError");
+    case "bad_response":
+      return t("models.form.discoverBadResponse");
     default:
-      return t("models.form.discoverFailed") + (discovery.message ? ` ${discovery.message}` : "");
+      return t("models.form.discoverFailed");
   }
 }
 
@@ -381,23 +387,24 @@ export function ModelFormBody({
   // before the user can pick a model. What the endpoint DOES depends on the
   // provider's discovery mode: `mode: "static"` (both current subscription
   // providers) derives the list server-side from the provider definition ∩
-  // catalog and probes nothing; a probe provider runs one 1-token inference
-  // per candidate. Same response shape either way — one code path here.
+  // catalog with zero requests; any other mode reads the provider's `GET
+  // /models` listing once and intersects it with the candidates. Same
+  // response shape either way — one code path here.
   const refreshModels = useRefreshCredentialModels();
   // This-session result, per credential: the ids the call just reported. It —
   // NOT the credential row's `available_model_ids` — drives the dropdown, so a
   // stale plan is never shown (and for a static provider the row is
   // deliberately empty). Null until the call returns (detector spinner shows);
   // empty array = answered, nothing served.
-  const [probeResult, setProbeResult] = useState<{ id: string; modelIds: string[] } | null>(null);
-  // Credentials already probed THIS form-open (the body remounts per open,
-  // so this resets each time the modal is reopened → a fresh probe every
+  const [servedModels, setServedModels] = useState<{ id: string; modelIds: string[] } | null>(null);
+  // Credentials already refreshed THIS form-open (the body remounts per open,
+  // so this resets each time the modal is reopened → a fresh listing every
   // config session). Prevents re-firing on reselect within one open.
-  const probeAttempted = React.useRef<Set<string>>(new Set());
+  const refreshAttempted = React.useRef<Set<string>>(new Set());
 
-  const probeCredential = (id: string) => {
-    if (probeAttempted.current.has(id)) return;
-    probeAttempted.current.add(id);
+  const refreshCredentialModels = (id: string) => {
+    if (refreshAttempted.current.has(id)) return;
+    refreshAttempted.current.add(id);
     // The dropdown reads the ids straight off the mutation response below, so
     // nothing cached needs invalidating either way — and for a static provider
     // there is nothing to invalidate at all: the call writes nothing, the seed
@@ -405,8 +412,8 @@ export function ModelFormBody({
     refreshModels.mutate(
       { params: { path: { id } } },
       {
-        onSuccess: (data) => setProbeResult({ id, modelIds: data.available_model_ids ?? [] }),
-        onError: () => setProbeResult({ id, modelIds: [] }),
+        onSuccess: (data) => setServedModels({ id, modelIds: data.available_model_ids ?? [] }),
+        onError: () => setServedModels({ id, modelIds: [] }),
       },
     );
   };
@@ -419,17 +426,17 @@ export function ModelFormBody({
     setValue("credentialId", newId);
     setValue("inlineApiKey", "");
     clearErrors("credentialId");
-    probeCredential(newId);
+    refreshCredentialModels(newId);
   };
 
   // "Select key → fetch the plan's models." Refetches on every selection
   // rather than reusing anything stored: a subscription's served models drift
   // over time while the credential doesn't, and a static provider's list is
   // derived per request from a catalog the weekly refresh moves.
-  // `probeAttempted` bounds it to one call per credential per form-open.
+  // `refreshAttempted` bounds it to one call per credential per form-open.
   useEffect(() => {
     if (!isOauthProvider || !credentialId || !selectedCredential) return;
-    probeCredential(credentialId);
+    refreshCredentialModels(credentialId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOauthProvider, credentialId, selectedCredential]);
 
@@ -457,7 +464,7 @@ export function ModelFormBody({
   const discoveredModels = freshDiscovery?.outcome === "ok" ? freshDiscovery.models : [];
 
   const canDiscover =
-    !!selectedProvider && parsesAsUrl(baseUrl) && (!!credentialId || !!inlineApiKey.trim());
+    !!selectedProvider && parsesAsUrl(baseUrl) && (!!selectedCredential || !!inlineApiKey.trim());
 
   const handleDiscover = () => {
     if (!selectedProvider) return;
@@ -465,8 +472,8 @@ export function ModelFormBody({
     setDiscoverySearch("");
     discoverModels.mutate(
       {
-        body: credentialId
-          ? { credential_id: credentialId }
+        body: selectedCredential
+          ? { credential_id: selectedCredential.id }
           : {
               provider_id: selectedProvider.providerId,
               api_key: inlineApiKey.trim(),
@@ -474,9 +481,8 @@ export function ModelFormBody({
             },
       },
       {
-        onSuccess: (data) =>
-          setDiscovery({ key, outcome: data.outcome, models: data.models, message: data.message }),
-        onError: () => setDiscovery({ key, outcome: "request_failed", models: [], message: null }),
+        onSuccess: (data) => setDiscovery({ key, outcome: data.outcome, models: data.models }),
+        onError: () => setDiscovery({ key, outcome: "request_failed", models: [] }),
       },
     );
   };
@@ -485,37 +491,36 @@ export function ModelFormBody({
   // for such an endpoint, so each write is dirty and ships as an override.
   const applyDiscoveredModel = (m: DiscoveredModel) => {
     const next = discoveredModelToFieldValues(m);
-    setValue("modelId", next.modelId, { shouldDirty: true });
-    setValue("label", next.label, { shouldDirty: true });
-    if (next.contextWindow !== undefined)
-      setValue("contextWindow", next.contextWindow, { shouldDirty: true });
-    if (next.maxTokens !== undefined) setValue("maxTokens", next.maxTokens, { shouldDirty: true });
-    if (next.inputText !== undefined) setValue("inputText", next.inputText, { shouldDirty: true });
-    if (next.inputImage !== undefined)
-      setValue("inputImage", next.inputImage, { shouldDirty: true });
-    if (next.reasoning !== undefined) setValue("reasoning", next.reasoning, { shouldDirty: true });
+    const dirty = { shouldDirty: true } as const;
+    setValue("modelId", next.modelId, dirty);
+    setValue("label", next.label, dirty);
+    setValue("contextWindow", next.contextWindow, dirty);
+    setValue("maxTokens", next.maxTokens, dirty);
+    setValue("inputText", next.inputText, dirty);
+    setValue("inputImage", next.inputImage, dirty);
+    setValue("reasoning", next.reasoning, dirty);
   };
 
   // Models offered in the dropdown. For OAuth (subscription) providers the
   // list is EXACTLY what discovery reported for the selected credential —
-  // derived server-side for a static provider, probe-verified for a probe one
-  // — with no static "featured" floor. Empty until the call returns, which is
-  // why the dropdown stays hidden until then. API-key providers keep the full
-  // registry list (static catalog, no discovery).
+  // derived server-side for a static provider, read off the endpoint's listing
+  // otherwise — with no static "featured" floor. Empty until the call returns,
+  // which is why the dropdown stays hidden until then. API-key providers keep
+  // the full registry list (static catalog, no discovery).
   const modelOptions = useMemo(() => {
     if (!selectedProvider) return [];
     if (!isOauthProvider) return selectedProvider.models;
-    // Only THIS session's fresh probe (matching the selected credential)
+    // Only THIS session's fresh listing (matching the selected credential)
     // drives the list — the persisted `available_model_ids` is never used
     // for display, so a drifted plan can't leak stale models. Map each
-    // verified id to its catalog metadata; a verified id absent from the
+    // served id to its catalog metadata; a served id absent from the
     // catalog (modelDiscoveryCandidates may list non-catalog ids) falls back
     // to an id-only entry so it stays selectable instead of vanishing —
     // otherwise an all-non-catalog plan would hang the detector spinner.
-    const verifiedIds = probeResult?.id === credentialId ? probeResult.modelIds : [];
+    const servedIds = servedModels?.id === credentialId ? servedModels.modelIds : [];
     const byId = new Map(selectedProvider.models.map((m) => [m.id, m]));
-    return verifiedIds.map((id) => byId.get(id) ?? { id, label: id, featured: false });
-  }, [selectedProvider, isOauthProvider, probeResult, credentialId]);
+    return servedIds.map((id) => byId.get(id) ?? { id, label: id, featured: false });
+  }, [selectedProvider, isOauthProvider, servedModels, credentialId]);
 
   const resetModelFields = () => {
     setValue("label", "");
@@ -533,6 +538,10 @@ export function ModelFormBody({
     clearErrors();
 
     setSelectedModelId("");
+    // The credential belongs to the provider it was picked for — carrying it
+    // over would bind the model to the endpoint the operator just left.
+    setValue("credentialId", "");
+    setValue("inlineApiKey", "");
     const provider = getProviderById(id, registry);
     if (provider) {
       setValue("apiShape", provider.apiShape);
@@ -573,6 +582,7 @@ export function ModelFormBody({
       fields: data,
       dirtyFields,
       provider: selectedProvider,
+      selectedCredentialId: selectedCredential?.id ?? null,
       importedCost,
     });
     if (!result.ok) {
@@ -583,7 +593,7 @@ export function ModelFormBody({
   });
 
   // Model dropdown. OAuth (subscription) providers show a FLAT list of the
-  // models discovery reported — every entry is equally "available on the plan",
+  // models the listing reported — every entry is equally "available on the plan",
   // so the Featured/All split (and the Custom escape hatch, which would fail
   // the server's verified-only seed gate) is meaningless. Catalog-covered
   // API-key providers keep the split (50-100+ models) + Custom.
@@ -794,11 +804,16 @@ export function ModelFormBody({
           validate: (v) =>
             isPreset || parsesAsUrl(v) ? undefined : t("validation.required", { ns: "common" }),
         })}
+        // The URL is a property of the credential (`baseUrlOverride`), not of
+        // the model, so it only moves when a credential is created with it.
+        disabled={!!selectedCredential}
         placeholder="https://api.openai.com/v1"
         aria-invalid={showError("baseUrl") ? true : undefined}
         className={cn(showError("baseUrl") && "border-destructive")}
       />
-      <div className="text-muted-foreground text-sm">{t("models.form.baseUrlHint")}</div>
+      <div className="text-muted-foreground text-sm">
+        {selectedCredential ? t("models.form.baseUrlPinnedHint") : t("models.form.baseUrlHint")}
+      </div>
       {showError("baseUrl") && errors.baseUrl?.message && (
         <div className="text-destructive text-sm">{errors.baseUrl.message}</div>
       )}
@@ -954,20 +969,20 @@ export function ModelFormBody({
         <>
           {/* OAuth (subscription) providers need the connection FIRST: the
               served model list depends on the account's plan, known only by
-              probing the live credential. So the order flips to connection →
-              probe → model. API-key / OpenRouter providers keep model-first
+              asking the live credential. So the order flips to connection →
+              listing → model. API-key / OpenRouter providers keep model-first
               (static catalog, no per-credential discovery). */}
           {isOauthProvider ? (
             <>
               {credentialBlockJsx}
-              {/* Model dropdown is gated on the probe: it appears only once
-                  refresh-models has returned the plan's verified ids (metadata
-                  comes from the already-loaded registry catalog). A probe that
-                  found nothing shows the empty-state instead of an empty
+              {/* Model dropdown is gated on the listing: it appears only once
+                  refresh-models has returned the plan's served ids (metadata
+                  comes from the already-loaded registry catalog). A listing
+                  that found nothing shows the empty-state instead of an empty
                   dropdown. */}
               {selectedCredential &&
                 (() => {
-                  const fresh = probeResult?.id === credentialId ? probeResult : null;
+                  const fresh = servedModels?.id === credentialId ? servedModels : null;
                   // No result yet → call in flight (or, rarely, the registry
                   // catalog is still loading) → detector spinner.
                   if (!fresh || (fresh.modelIds.length > 0 && modelOptions.length === 0)) {

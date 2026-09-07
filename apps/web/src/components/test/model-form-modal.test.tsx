@@ -19,7 +19,10 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import settingsFr from "../../locales/fr/settings.json";
 import { render } from "../../test/render.tsx";
 import { ModelFormBody } from "../model-form-modal.tsx";
-import type { ProviderRegistryEntry } from "../../hooks/use-model-provider-credentials.ts";
+import type {
+  ModelProviderCredentialInfo,
+  ProviderRegistryEntry,
+} from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
 
 await i18nReady;
@@ -97,10 +100,23 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
   };
 }
 
-function form(target: OrgModelInfo): string {
+/** The key the edited model is bound to — matched on apiShape + base URL. */
+const LOCAL_KEY: ModelProviderCredentialInfo = {
+  id: "cred_1",
+  label: "Ollama local",
+  apiShape: "openai-completions",
+  baseUrl: "http://localhost:11434/v1",
+  source: "custom",
+  authMode: "api_key",
+  created_by: null,
+  createdAt: "2026-07-01T10:00:00.000Z",
+  updatedAt: "2026-07-01T10:00:00.000Z",
+};
+
+function form(target: OrgModelInfo, credentials: ModelProviderCredentialInfo[] = []): string {
   const qc = new QueryClient();
   qc.setQueryData(REGISTRY_KEY, { data: [ANTHROPIC, OPENAI_COMPATIBLE] });
-  qc.setQueryData(CREDENTIALS_KEY, { data: [] });
+  qc.setQueryData(CREDENTIALS_KEY, { data: credentials });
   return render(<ModelFormBody model={target} onSubmit={() => {}} />, { queryClient: qc });
 }
 
@@ -149,6 +165,18 @@ describe("ModelFormBody — custom (OpenAI-compatible) endpoint", () => {
 
   it("offers no API-type selector — the credential's provider pins the shape", () => {
     expect(html).not.toContain('id="mdl-api"');
+  });
+});
+
+describe("ModelFormBody — custom endpoint bound to an existing key", () => {
+  const html = form(model({}), [LOCAL_KEY]);
+
+  it("locks the base URL, which belongs to the selected key", () => {
+    // Editing it here would save a 200 that changes nothing: the URL rides on
+    // the credential (`baseUrlOverride`), not on the model row.
+    const input = html.slice(html.indexOf('id="mdl-baseUrl"'));
+    expect(input.slice(0, input.indexOf(">"))).toContain("disabled");
+    expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
   });
 });
 

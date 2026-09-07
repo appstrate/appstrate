@@ -3,10 +3,10 @@
 /**
  * What picking a discovered model writes into the form.
  *
- * The omissions are the point: a listing that reports no context window must
- * leave that field alone rather than write a zero, because the form ships every
- * value it holds as an explicit override — an endpoint discovery ran against
- * has no catalog to resolve one from later.
+ * Completeness is the point: every field lands on every pick, so a model the
+ * listing describes poorly cannot inherit the previous pick's context window.
+ * The form ships every value it holds as an explicit override — an endpoint
+ * discovery ran against has no catalog to resolve one from later.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -42,12 +42,20 @@ describe("discoveredModelToFieldValues", () => {
     expect(discoveredModelToFieldValues(discovered({ label: null })).label).toBe("qwen3:8b");
   });
 
-  it("omits every field the listing left null", () => {
+  it("writes the form's blank defaults for every field the listing left null", () => {
     expect(
       discoveredModelToFieldValues(
         discovered({ context_window: null, max_tokens: null, input: null, reasoning: null }),
       ),
-    ).toEqual({ modelId: "qwen3:8b", label: "Qwen 3 8B" });
+    ).toEqual({
+      modelId: "qwen3:8b",
+      label: "Qwen 3 8B",
+      contextWindow: "",
+      maxTokens: "",
+      inputText: true,
+      inputImage: false,
+      reasoning: false,
+    });
   });
 
   it("reads the modalities out of the input list", () => {
