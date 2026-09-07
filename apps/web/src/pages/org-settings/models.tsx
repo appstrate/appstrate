@@ -47,7 +47,6 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
-import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
@@ -232,7 +231,6 @@ function CredentialsSection({
   onCreate,
   onEdit,
   onDelete,
-  onRename,
   onConnectOAuth,
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
@@ -241,7 +239,6 @@ function CredentialsSection({
   onCreate: () => void;
   onEdit: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
-  onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -287,11 +284,7 @@ function CredentialsSection({
                           <ProviderIcon className="text-muted-foreground size-4 shrink-0" />
                         )}
                         <div className="min-w-0">
-                          <InlineEditableLabel
-                            value={pk.label}
-                            editable={pk.source === "custom" && !isOauth}
-                            onSave={(newLabel) => onRename(pk, newLabel)}
-                          />
+                          <div className="truncate text-sm font-medium">{pk.label}</div>
                           {isOauth && pk.oauth_email && (
                             <div className="text-muted-foreground truncate text-[0.65rem]">
                               {t("credentials.oauth.connectedAs", { email: pk.oauth_email })}
@@ -507,12 +500,6 @@ export function OrgSettingsModelsPage() {
           onDelete={(pk) =>
             setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
           }
-          onRename={(pk, newLabel) => {
-            updatePkMutation.mutate({
-              params: { path: { id: pk.id } },
-              body: { label: newLabel },
-            });
-          }}
           onConnectOAuth={(credential) => {
             setEditPk(credential);
             setPkModalOpen(true);

@@ -86,9 +86,7 @@ interface CredentialFormFields {
 /**
  * Unified pick-list option model. Built entirely from the registry —
  * api-key entries surface as plain `providerId` options, OAuth entries
- * are prefixed `oauth:` to keep the dispatch unambiguous. Openrouter
- * stays out of the credential picker (managed via the model form's
- * dedicated combobox).
+ * are prefixed `oauth:` to keep the dispatch unambiguous.
  */
 interface PickerOption {
   id: string;
@@ -101,17 +99,15 @@ interface PickerOption {
 }
 
 function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[] {
-  return registry
-    .filter((p) => p.providerId !== "openrouter")
-    .map((p) => ({
-      id: p.authMode === "oauth2" ? `oauth:${p.providerId}` : p.providerId,
-      label: p.displayName,
-      authMode: p.authMode,
-      providerId: p.providerId,
-      iconUrl: p.iconUrl,
-      featured: p.featured,
-      baseUrlOverridable: p.baseUrlOverridable,
-    }));
+  return registry.map((p) => ({
+    id: p.authMode === "oauth2" ? `oauth:${p.providerId}` : p.providerId,
+    label: p.displayName,
+    authMode: p.authMode,
+    providerId: p.providerId,
+    iconUrl: p.iconUrl,
+    featured: p.featured,
+    baseUrlOverridable: p.baseUrlOverridable,
+  }));
 }
 
 function CredentialFormBody({

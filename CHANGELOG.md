@@ -113,6 +113,11 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **A key is renamed through its edit dialog only.** The credentials table no
+  longer turns the label into an inline input on click — one affordance to
+  change a key, the same one that changes its secret. `InlineEditableLabel`
+  had no other reader and is deleted.
+
 - **A custom-endpoint credential is named after its host.** Creating one
   through `POST /api/model-provider-credentials` without a `label`, with a
   `baseUrlOverride` on a `baseUrlOverridable` provider, now defaults to
@@ -503,6 +508,12 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   The two entries' `iconUrl` is `custom-endpoint`, a server glyph, instead of
   the vendor logo of the API they speak: an OpenAI mark next to a Qwen model on
   Ollama read as a vendor claim.
+
+- **Editing an OpenRouter key opens on its provider.** The credential form's
+  picker filtered `openrouter` out — a leftover from when such a key could
+  only be created inline from the model form's dedicated combobox — so the
+  edit dialog for one opened with an empty "Provider" field. The picker now
+  offers every registry entry, the model form's own picker included.
 
 - **Deleting a key a model still runs on says so.** The server refuses it
   (409 `credential_in_use`, `org_models.credential_id` is ON DELETE RESTRICT)
