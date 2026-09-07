@@ -13,19 +13,11 @@
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 
 /**
- * Sentinel for the MODEL-level "custom" entry: a model id the picked provider's
- * catalog doesn't list, typed in by hand. It is never a `providerId` — a custom
- * endpoint is any base-URL-overridable registry entry, whose credential carries
- * the apiShape and base URL the model runs on.
- */
-export const CUSTOM_ID = "__custom__";
-
-/**
  * Sentinel for the provider picker's single "custom endpoint" row. Every
  * registry entry that lets the operator point at their own endpoint collapses
  * into it; which one is actually selected is then an "API type" choice inside
- * the endpoint arrangement. Like {@link CUSTOM_ID} it is a picker value only —
- * the form always holds, and submits, a real registry `providerId`.
+ * the endpoint arrangement. It is a picker value only — the form always holds,
+ * and submits, a real registry `providerId`.
  */
 export const CUSTOM_ENDPOINT_ID = "__custom_endpoint__";
 
@@ -81,32 +73,11 @@ export function getProviderById(
 }
 
 /**
- * Match a model by apiShape + modelId across the entire registry. Returns
- * both the owning provider and the matching model entry — callers use
- * this to seed the model-form fields (label, context window, …) from the
- * curated catalog.
- */
-function findRegistryModel(
-  apiShape: string | null,
-  modelId: string | null,
-  registry: readonly ProviderRegistryEntry[],
-): { provider: ProviderRegistryEntry; model: ProviderRegistryEntry["models"][number] } | null {
-  if (!apiShape || !modelId) return null;
-  for (const provider of registry) {
-    if (provider.apiShape !== apiShape) continue;
-    const model = provider.models.find((m) => m.id === modelId);
-    if (model) return { provider, model };
-  }
-  return null;
-}
-
-/**
  * Resolve the `providerId` that owns a `(apiShape, baseUrl, modelId?)` row.
- * Tries the curated model catalog first when a `modelId` is supplied
- * (`org_models` rows), then falls back to the base-URL match
- * (`model_provider_credentials` rows have no `modelId`). Returns
- * {@link CUSTOM_ID} when no registry entry claims the row; no picker carries
- * that value, so the provider select renders unselected.
+ * Tries the curated model catalog first when a `modelId` is supplied, then
+ * falls back to the base-URL match (`model_provider_credentials` rows carry no
+ * `modelId`). Returns `""` when no registry entry claims the row: no picker
+ * carries that value, so the provider select renders unselected.
  */
 export function resolveProviderId(
   spec: {
@@ -116,32 +87,11 @@ export function resolveProviderId(
   },
   registry: readonly ProviderRegistryEntry[],
 ): string {
-  if (spec.modelId) {
-    const match = findRegistryModel(spec.apiShape, spec.modelId, registry);
-    if (match) return match.provider.providerId;
+  if (spec.apiShape && spec.modelId) {
+    const owner = registry.find(
+      (p) => p.apiShape === spec.apiShape && p.models.some((m) => m.id === spec.modelId),
+    );
+    if (owner) return owner.providerId;
   }
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
-  return byApiAndUrl ? byApiAndUrl.providerId : CUSTOM_ID;
-}
-
-/**
- * Resolve the model entry id that owns an `(apiShape, baseUrl, modelId)`
- * row, falling back to {@link CUSTOM_ID} when the row doesn't map to any
- * curated catalog model. Providers with no curated catalog (e.g.
- * OpenRouter, codex) keep the raw `modelId` instead of collapsing to
- * "Custom" — operators set it via the dedicated combobox / inline input.
- */
-export function resolveModelEntryId(
-  spec: { apiShape: string | null; baseUrl: string | null; modelId: string | null } | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!spec) return "";
-  const match = findRegistryModel(spec.apiShape, spec.modelId, registry);
-  if (match) return match.model.id;
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
-  if (byApiAndUrl) {
-    if (byApiAndUrl.models.length === 0) return spec.modelId ?? CUSTOM_ID;
-    return CUSTOM_ID;
-  }
-  return CUSTOM_ID;
+  return findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry)?.providerId ?? "";
 }

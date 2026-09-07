@@ -19,7 +19,7 @@ import {
   type ModelFormPayloadInput,
   type ModelFormProvider,
 } from "../model-form-payload.ts";
-import { CUSTOM_ID } from "../provider-registry-helpers.ts";
+import { CUSTOM_ENDPOINT_ID } from "../provider-registry-helpers.ts";
 
 const ANTHROPIC: ModelFormProvider = {
   providerId: "anthropic",
@@ -59,10 +59,9 @@ function build(input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields
   return buildModelFormPayload({
     dirtyFields: {},
     provider: ANTHROPIC,
-    importedCost: null,
-    // The default is the catalogued-preset arrangement: no capabilities
-    // section was ever rendered, and the form is adding a row.
-    capabilities: "hidden",
+    // The capabilities section is on screen for every manual arrangement, so
+    // the default is "it was offered and left off".
+    capabilities: "auto",
     isEdit: false,
     // The form passes the credential it could match against the picked
     // provider; unless a case says otherwise, that is the raw field.
@@ -71,8 +70,8 @@ function build(input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields
   });
 }
 
-/** A preset picked from the catalog: every field seeded, nothing edited. */
-const PRESET_FIELDS = fields({
+/** A catalogued row: the fields describe it, but none of it is the operator's. */
+const CATALOGUED_FIELDS = fields({
   label: "Claude Sonnet 4.5",
   apiShape: "anthropic-messages",
   baseUrl: "https://api.anthropic.com",
@@ -82,9 +81,9 @@ const PRESET_FIELDS = fields({
   maxTokens: "64000",
 });
 
-describe("buildModelFormPayload — catalog preset", () => {
+describe("buildModelFormPayload — a catalogued model, toggle off", () => {
   it("sends the binding only, leaving every catalog-derivable field to the server", () => {
-    const result = build({ fields: PRESET_FIELDS });
+    const result = build({ fields: CATALOGUED_FIELDS });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toEqual({
@@ -93,15 +92,21 @@ describe("buildModelFormPayload — catalog preset", () => {
     });
   });
 
-  it("clears nothing on an edit either — the row never overrode anything", () => {
-    // The section is not rendered for a preset, so there is no answer to
-    // record and, unlike the custom paths, nothing of the operator's to drop.
-    const result = build({ fields: PRESET_FIELDS, isEdit: true });
+  it("clears the four on an edit, which is a no-op for a row that never overrode", () => {
+    // `PUT /api/models/{id}` reads `null` as "drop the stored override and
+    // resolve from the catalog again". A catalogued row carries no override, so
+    // the four nulls change nothing server-side — and a row that DID carry one
+    // is exactly what the operator just declined to keep.
+    const result = build({ fields: CATALOGUED_FIELDS, isEdit: true });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toEqual({
       modelId: "claude-sonnet-4-5-20250929",
       credentialId: "cred_1",
+      input: null,
+      contextWindow: null,
+      maxTokens: null,
+      reasoning: null,
     });
   });
 });
@@ -147,10 +152,10 @@ describe("buildModelFormPayload — custom endpoint", () => {
     expect(result.data.input).toEqual(["text"]);
   });
 
-  it("never puts the client-side custom sentinel on the wire", () => {
+  it("never puts a client-side picker sentinel on the wire", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(JSON.stringify(result.data)).not.toContain(CUSTOM_ID);
+    expect(JSON.stringify(result.data)).not.toContain(CUSTOM_ENDPOINT_ID);
   });
 
   it("omits the base-URL override for a provider that pins its own endpoint", () => {
@@ -277,55 +282,6 @@ describe("buildModelFormPayload — capabilities", () => {
       reasoning: null,
     });
   });
-
-  it("clears nothing on an edit the section never rendered for", () => {
-    const result = build({
-      provider: OPENAI_COMPATIBLE,
-      fields: CUSTOM,
-      capabilities: "hidden",
-      isEdit: true,
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    for (const key of FOUR) expect(key in result.data).toBe(false);
-  });
-});
-
-describe("buildModelFormPayload — OpenRouter import", () => {
-  // No capabilities section is rendered for OpenRouter: the pick itself is the
-  // explicit answer, so what the live API described has to reach the wire —
-  // there is no vendored catalog behind it to resolve any of it on read.
-  const result = build({
-    provider: ANTHROPIC,
-    fields: fields({
-      modelId: "openai/gpt-5",
-      label: "GPT-5",
-      credentialId: "cred_1",
-      capabilitiesExplicit: true,
-      inputImage: true,
-      contextWindow: "400000",
-      maxTokens: "128000",
-      reasoning: true,
-    }),
-    dirtyFields: { label: true },
-    capabilities: "explicit",
-    importedCost: { input: 1.25, output: 10 },
-  });
-
-  it("persists every value the pick brought, cost included", () => {
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data).toEqual({
-      label: "GPT-5",
-      modelId: "openai/gpt-5",
-      credentialId: "cred_1",
-      input: ["text", "image"],
-      contextWindow: 400000,
-      maxTokens: 128000,
-      reasoning: true,
-      cost: { input: 1.25, output: 10 },
-    });
-  });
 });
 
 describe("buildModelFormPayload — the model's name", () => {
@@ -355,18 +311,6 @@ describe("buildModelFormPayload — the model's name", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.label).toBe("Qwen local");
-  });
-
-  it("sends the one a discovered model brought with it", () => {
-    // The combobox writes every field of the pick as dirty, name included.
-    const result = build({
-      provider: OPENAI_COMPATIBLE,
-      fields: { ...CUSTOM_ENDPOINT, label: "Qwen3 8B" },
-      dirtyFields: { label: true, modelId: true },
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.label).toBe("Qwen3 8B");
   });
 
   it("omits it when a name was typed then cleared again", () => {

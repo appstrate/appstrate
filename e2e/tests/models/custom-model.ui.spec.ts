@@ -28,6 +28,7 @@
 
 import { createServer, type Server } from "node:http";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
+import { selectOption } from "../../helpers/radix.ts";
 import type { APIResponse, Locator, Page } from "@playwright/test";
 
 const SETTINGS_PATH = "/org-settings/models";
@@ -109,25 +110,6 @@ test.afterAll(async () => {
 });
 
 /**
- * Pick an option in a Radix select, which renders a listbox rather than a
- * `<select>`. The popper list is taller than the browser viewport and does not
- * scroll with the page, so an option far down it is unclickable; its typeahead
- * brings the option under the cursor and Enter commits it.
- */
-async function selectOption(page: Page, triggerId: string, optionName: string) {
-  const trigger = page.locator(`#${triggerId}`);
-  const option = page.getByRole("option", { name: optionName, exact: true });
-  await trigger.click();
-  // The list must be mounted before typing, or the keystrokes go nowhere and
-  // Enter commits whatever happens to be highlighted first.
-  await expect(option).toBeVisible();
-  await page.keyboard.type(optionName.split(" ")[0]!);
-  await expect(option).toHaveAttribute("data-highlighted", "");
-  await page.keyboard.press("Enter");
-  await expect(trigger).toContainText(optionName);
-}
-
-/**
  * Open the model form on the custom-endpoint path and answer step 1: which API
  * shape, where it lives, and the key that opens it. The shape is always picked
  * explicitly: the pre-selected entry is whichever the registry lists first,
@@ -153,7 +135,7 @@ async function openCustomEndpointForm(
 }
 
 /**
- * One row of the detected-models list. The row is a Radix checkbox (a `button`)
+ * One row of the model pick list. The row is a Radix checkbox (a `button`)
  * labelled by the model's name over its raw id, so the id is a substring of the
  * accessible name whether or not the catalog named the model.
  */

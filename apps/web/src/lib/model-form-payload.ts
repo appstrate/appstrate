@@ -132,16 +132,16 @@ export interface ModelFormPayloadInput {
   /** RHF `dirtyFields` — the row's name ships only when the operator typed one. */
   dirtyFields: { [K in keyof ModelFormFields]?: boolean };
   /**
-   * What the capabilities section answered, or that it never rendered:
-   * - `explicit` — the operator ticked the toggle (or an OpenRouter import
-   *   filled the fields): all four values ship, an unticked box included.
-   * - `auto` — the section was offered and left off. Nothing to send on a
-   *   create; on an edit every field ships as `null`, so a previously stored
-   *   override is dropped and the catalog resolves it again.
-   * - `hidden` — the section never rendered (catalogued preset), so there is
-   *   nothing the operator declined and nothing of theirs to clear.
+   * What the capabilities section answered — it is on screen for every manual
+   * arrangement, so there is always an answer:
+   * - `explicit` — the operator ticked the toggle: all four values ship, an
+   *   unticked box included.
+   * - `auto` — the toggle was left off. Nothing to send on a create; on an
+   *   edit every field ships as `null`, so a previously stored override is
+   *   dropped and the catalog resolves it again (a no-op for a catalogued row
+   *   that never overrode anything).
    */
-  capabilities: "explicit" | "auto" | "hidden";
+  capabilities: "explicit" | "auto";
   /** Editing an existing row. Only `auto` reads it — clear vs. omit. */
   isEdit: boolean;
   /** The picked registry entry; undefined until the user picks a provider. */
@@ -152,8 +152,6 @@ export interface ModelFormPayloadInput {
    * provider switch and would bind the model to the endpoint the operator left.
    */
   selectedCredentialId: string | null;
-  /** OpenRouter live-search rates — the only cost the form submits. */
-  importedCost: ModelCost | null;
 }
 
 type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string };
@@ -212,7 +210,6 @@ function capabilityOverrides(
   input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit">,
 ): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
   const { fields } = input;
-  if (input.capabilities === "hidden") return {};
   if (input.capabilities === "auto") {
     if (!input.isEdit) return {};
     return { input: null, contextWindow: null, maxTokens: null, reasoning: null };
@@ -241,7 +238,7 @@ function capabilityOverrides(
 }
 
 export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPayloadResult {
-  const { fields, dirtyFields, importedCost } = input;
+  const { fields, dirtyFields } = input;
   const credential = resolveCredentialBinding({
     provider: input.provider,
     selectedCredentialId: input.selectedCredentialId,
@@ -253,13 +250,12 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
   return {
     ok: true,
     data: {
-      // Preset-derived values are written without `shouldDirty`, so only what
-      // the user edited (or OpenRouter live-search imported) is flagged here.
+      // Only a name the operator actually typed is flagged dirty, so an
+      // untouched field leaves the server free to derive one.
       ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
       modelId: fields.modelId.trim(),
       ...credential.binding,
       ...capabilityOverrides(input),
-      ...(importedCost ? { cost: importedCost } : {}),
     },
   };
 }

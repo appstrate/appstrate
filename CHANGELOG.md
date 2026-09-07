@@ -122,27 +122,39 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   ` (2)`, ` (3)` suffix of the same name. Deduplication is unchanged and still
   applies.
 
-- **The model form asks about an operator's own endpoint once, not once per
-  wire format.** The provider picker no longer lists `openai-compatible` and
-  `anthropic-compatible` as two entries among the branded providers: every
-  base-URL-overridable registry entry collapses into a single "Endpoint
-  personnalisé" row, and which of them it is becomes a "Type d'API" question
-  inside the form — so a third such provider needs no client edit. Step 1
-  (API type, base URL, key) is the same component the credentials tab renders,
-  so the two forms cannot drift. Step 2 opens once the URL parses and a key is
-  present, and offers both ways to name a model: "Détecter les modèles" asks
-  the endpoint and lists what it serves, "Configurer manuellement" types the
-  id in. On the manual path the name is optional on creation — left empty,
-  the server names the row after the catalog entry or the model id — and the
-  limits and capabilities are one toggle (see below). Editing a row is always
-  the manual arrangement: detection adds rows, an edit changes one.
+- **The model form is one arrangement for every provider: pick the provider,
+  describe the endpoint it runs on, then pick or type the model.** It used to
+  be four — catalogued providers picked a model first and asked for the key
+  after, OpenRouter had its own search box, a "Personnalisé" model on a
+  catalogued provider re-implemented the custom endpoint without detection,
+  and subscription providers put the connection first. Now two registry facts
+  decide what renders: `baseUrlOverridable` puts the "Type d'API" and base URL
+  questions on screen (every such entry collapses into a single "Endpoint
+  personnalisé" picker row, so a third one needs no client edit), and
+  `authMode` decides whether the endpoint is opened with a key to type or pick
+  or a connection to pick or open. The endpoint block is the component the
+  credentials tab renders, so the two forms cannot drift. The model step opens
+  once the endpoint is answered and is the same list for every provider —
+  searchable, checkbox rows with a `catalogue` / `endpoint` badge, "Tout
+  sélectionner", "Ajouter N modèles" — fed by whichever listing describes the
+  provider: the vendored catalog (grouped "Recommandés" / "Tous les modèles";
+  filtered by what the plan serves for a subscription), the OpenRouter live
+  search, or, for an operator's own endpoint, "Détecter les modèles". A row
+  picked from the catalog is created from its id alone, so the weekly catalog
+  refresh keeps reaching it; a detected or searched row ships what described
+  it (the OpenRouter rate included). "Configurer manuellement" types the id in
+  instead — for any provider but a subscription, whose plan is the only
+  answer — with an optional name on creation and the limits and capabilities
+  toggle (see below). Editing a row is always the typed-in arrangement, with
+  the provider locked and its credential shown as a chip; the toggle opens on
+  only when the row differs from its catalog entry, so renaming a catalogued
+  model never freezes the catalog's numbers as overrides. The `__custom__`
+  model sentinel and the separate OpenRouter combobox are gone.
 
-- **Detected models are added several at a time, and a custom endpoint's
-  saved keys are offered whatever URL is typed.** After "Détecter les
-  modèles" each served model is a checkbox row — with the name, context window
-  and a `catalogue` / `endpoint` badge saying where its description came from
-  — plus "Tout sélectionner"; the footer reads "Ajouter N modèles" and posts
-  one `POST /api/models` per checked row against the single key they share
+- **Models are added several at a time, and a custom endpoint's saved keys
+  are offered whatever URL is typed.** The footer reads "Ajouter N modèles"
+  and posts one `POST /api/models` per checked row against the single key they
+  share
   (created first when typed inline). A refused model keeps the dialog open
   with just the failed ids still checked, and a retry binds to the key the
   first attempt already created instead of posting it twice. In step 1, the

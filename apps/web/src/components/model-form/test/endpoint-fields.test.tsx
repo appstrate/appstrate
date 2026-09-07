@@ -62,7 +62,7 @@ function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): 
     <EndpointFields
       idPrefix="pk"
       providers={[OPENAI_COMPATIBLE]}
-      providerId={OPENAI_COMPATIBLE.providerId}
+      provider={OPENAI_COMPATIBLE}
       onApiTypeChange={() => {}}
       baseUrlProps={fieldProps("baseUrlOverride")}
       baseUrlLocked={false}

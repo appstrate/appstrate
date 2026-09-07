@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which fields the model form puts on screen, by provider.
+ * The one arrangement the model form uses for every provider: pick the
+ * provider, describe the endpoint, then name the model.
  *
- * An endpoint the operator supplies is described in two steps: what it is and
- * how to open it (API type, base URL, key), then which model to run on it —
- * and the second step only exists once the first one is answered. A catalogued
- * provider must surface none of that: its endpoint is not the operator's.
+ * Only two registry facts move anything. `baseUrlOverridable` decides whether
+ * the API type and the base URL are the operator's to answer; `authMode`
+ * decides whether the endpoint is opened with a key or a connection. So what is
+ * asserted here is the same three steps under four different providers, and the
+ * one question a static render CAN answer about the third step: on an edit, has
+ * this row overridden its catalog or not.
  *
  * `ModelFormBody` is rendered rather than `ModelFormModal` because the dialog
  * chrome is a Radix portal, which renders nothing at all without a DOM — and
  * the web runner has none. Select ITEMS are portalled too, so what a picker
  * offers is asserted on `buildProviderPickerRows` instead (see
- * `lib/test/provider-registry-helpers.test.ts`).
+ * `lib/test/provider-registry-helpers.test.ts`), and the pick list — which only
+ * exists after a listing answers — on the component itself (see
+ * `model-form/test/model-pick-list.test.tsx`).
  */
 
 import { describe, it, expect } from "bun:test";
@@ -54,6 +59,17 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   models: [],
 };
 
+/** The catalog entry every "does this row override it?" case is measured against. */
+const SONNET = {
+  id: "claude-sonnet-4-5-20250929",
+  label: "Claude Sonnet 4.5",
+  featured: true,
+  contextWindow: 200000,
+  maxTokens: 64000,
+  capabilities: ["text", "image", "reasoning"],
+  cost: { input: 3, output: 15 },
+};
+
 const ANTHROPIC: ProviderRegistryEntry = {
   providerId: "anthropic",
   displayName: "Anthropic",
@@ -65,17 +81,15 @@ const ANTHROPIC: ProviderRegistryEntry = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  models: [
-    {
-      id: "claude-sonnet-4-5-20250929",
-      label: "Claude Sonnet 4.5",
-      featured: true,
-      contextWindow: 200000,
-      maxTokens: 64000,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 3, output: 15 },
-    },
-  ],
+  models: [SONNET],
+};
+
+/** A subscription provider: same catalog, opened by a connection, not a key. */
+const CLAUDE_CODE: ProviderRegistryEntry = {
+  ...ANTHROPIC,
+  providerId: "claude-code",
+  displayName: "Claude Code",
+  authMode: "oauth2",
 };
 
 function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
@@ -102,7 +116,25 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
   };
 }
 
-/** The key the edited model is bound to. Every custom credential names the
+/** A catalogued row as `GET /api/models` returns it: RESOLVED from the catalog. */
+function catalogued(overrides: Partial<OrgModelInfo> = {}): OrgModelInfo {
+  return model({
+    label: "Claude Sonnet 4.5",
+    apiShape: "anthropic-messages",
+    providerId: "anthropic",
+    providerName: "Anthropic",
+    baseUrl: "https://api.anthropic.com",
+    modelId: SONNET.id,
+    credentialId: "cred_ant",
+    input: ["text", "image"],
+    contextWindow: SONNET.contextWindow,
+    maxTokens: SONNET.maxTokens,
+    reasoning: true,
+    ...overrides,
+  });
+}
+
+/** The key the edited row is bound to. Every custom credential names the
  *  provider it was created for, which is what an overridable one is matched on. */
 const LOCAL_KEY: ModelProviderCredentialInfo = {
   id: "cred_1",
@@ -125,15 +157,56 @@ const REMOTE_KEY: ModelProviderCredentialInfo = {
   baseUrl: "https://vllm.internal/v1",
 };
 
-function form(target: OrgModelInfo, credentials: ModelProviderCredentialInfo[] = []): string {
+/** A pinned provider matches its keys on the endpoint, not on the provider id. */
+const ANTHROPIC_KEY: ModelProviderCredentialInfo = {
+  ...LOCAL_KEY,
+  id: "cred_ant",
+  label: "Anthropic",
+  apiShape: "anthropic-messages",
+  baseUrl: "https://api.anthropic.com",
+  providerId: "anthropic",
+};
+
+const CONNECTION: ModelProviderCredentialInfo = {
+  ...ANTHROPIC_KEY,
+  id: "cred_cc",
+  label: "Claude Code",
+  providerId: "claude-code",
+  authMode: "oauth2",
+  oauth_email: "dev@example.com",
+};
+
+function form(
+  target: OrgModelInfo | null,
+  credentials: ModelProviderCredentialInfo[] = [],
+): string {
   const qc = new QueryClient();
-  qc.setQueryData(REGISTRY_KEY, { data: [ANTHROPIC, OPENAI_COMPATIBLE] });
+  qc.setQueryData(REGISTRY_KEY, { data: [ANTHROPIC, CLAUDE_CODE, OPENAI_COMPATIBLE] });
   qc.setQueryData(CREDENTIALS_KEY, { data: credentials });
   return render(<ModelFormBody model={target} onSubmit={() => {}} />, { queryClient: qc });
 }
 
+describe("ModelFormBody — adding a model, nothing picked yet", () => {
+  const html = form(null);
+
+  it("asks for the provider, and for nothing an unpicked provider cannot answer", () => {
+    expect(html).toContain('id="mdl-provider"');
+    expect(html).not.toContain('id="mdl-apiType"');
+    expect(html).not.toContain('id="mdl-baseUrl"');
+    expect(html).not.toContain('placeholder="sk-..."');
+    expect(html).not.toContain('id="mdl-modelId"');
+  });
+
+  it("keeps the model id registered, so saving too early is answered", () => {
+    // Without the field on screen nothing validates the id, and the save button
+    // reports nothing at all.
+    expect(html).toContain('type="hidden"');
+    expect(html).toContain('name="modelId"');
+  });
+});
+
 describe("ModelFormBody — editing a custom endpoint", () => {
-  // A saved row carries a capability, so the capabilities toggle opens on.
+  // A saved row carries a capability no catalog claims, so the toggle opens on.
   const html = form(model({ contextWindow: 32768 }), [LOCAL_KEY]);
 
   it("describes the endpoint: which API it speaks, where it is, which key opens it", () => {
@@ -155,15 +228,14 @@ describe("ModelFormBody — editing a custom endpoint", () => {
   it("opens on the model the row already names, editable and free-text", () => {
     expect(html).toContain('id="mdl-modelId"');
     expect(html).toContain('id="mdl-label"');
-    // The name is required on a saved row: PATCH reads an absent one as "keep",
+    // The name is required on a saved row: PUT reads an absent one as "keep",
     // so promising a derived one would describe a save that changes nothing.
     expect(html).not.toContain(settingsFr["models.form.labelPlaceholder"]);
   });
 
   it("opens the capabilities on the row's own values, the toggle already on", () => {
-    // The row carries a context window, so it answered these questions once —
-    // the fold and the toggle inside it both open on that.
-    expect(html).toContain('id="mdl-capabilities-explicit"');
+    // No catalog entry claims `qwen3:8b`, so the 32768 can only be an answer
+    // the operator gave.
     expect(checkedState(html, "mdl-capabilities-explicit")).toBe("true");
     for (const id of [
       "mdl-ctx",
@@ -176,14 +248,17 @@ describe("ModelFormBody — editing a custom endpoint", () => {
     expect(html).not.toContain(settingsFr["models.form.capabilitiesAuto"]);
   });
 
-  it("does not offer detection: that adds rows, and an edit changes this one", () => {
+  it("offers no listing: that adds rows, and an edit changes this one", () => {
     expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
     expect(html).not.toContain(settingsFr["models.form.manualButton"]);
+    expect(html).not.toContain(settingsFr["models.form.pickFromList"]);
+    expect(html).not.toContain('id="mdl-pick-all"');
   });
 
   it("orders the fields the way they are filled in", () => {
-    // endpoint (type → URL → key) → the model → its name → the capabilities.
+    // provider → endpoint (type → URL → key) → the model → its name → capabilities.
     const order = [
+      'id="mdl-provider"',
       'id="mdl-apiType"',
       'id="mdl-baseUrl"',
       settingsFr["credentials.form.apiKey"],
@@ -209,8 +284,6 @@ describe("ModelFormBody — custom endpoint with no key to open it", () => {
   });
 
   it("keeps the model id registered, so saving too early is answered", () => {
-    // Without the field on screen nothing validates the id, and the save button
-    // reports nothing at all.
     expect(html).toContain('type="hidden"');
     expect(html).toContain('name="modelId"');
   });
@@ -234,59 +307,63 @@ describe("ModelFormBody — custom endpoint, keys saved against other hosts", ()
   });
 });
 
-describe("ModelFormBody — catalogued provider", () => {
-  const html = form(
-    model({
-      label: "Claude Sonnet 4.5",
-      apiShape: "anthropic-messages",
-      providerId: "anthropic",
-      providerName: "Anthropic",
-      baseUrl: "https://api.anthropic.com",
-      modelId: "claude-sonnet-4-5-20250929",
-    }),
-  );
+describe("ModelFormBody — editing a catalogued row that overrides nothing", () => {
+  const html = form(catalogued(), [ANTHROPIC_KEY]);
 
-  it("picks the model from the catalog instead of exposing the binding", () => {
-    expect(html).toContain('id="mdl-model"');
+  it("shows no endpoint questions: a pinned provider's endpoint is not the operator's", () => {
     expect(html).not.toContain('id="mdl-apiType"');
     expect(html).not.toContain('id="mdl-baseUrl"');
-    expect(html).not.toContain('id="mdl-modelId"');
   });
 
-  it("offers no endpoint discovery — the catalog already lists the models", () => {
-    expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
-    expect(html).not.toContain(settingsFr["models.form.manualButton"]);
+  it("shows the bound key as a chip, and the model as a plain editable id", () => {
+    expect(html).toContain(ANTHROPIC_KEY.label);
+    expect(html).not.toContain('placeholder="sk-..."');
+    expect(html).toContain('id="mdl-modelId"');
+    expect(html).toContain('id="mdl-label"');
+  });
+
+  it("leaves the capabilities toggle off, because the row equals its catalog entry", () => {
+    // `GET /api/models` resolves these from the catalog, so reading "carries a
+    // number" as "overrides" would freeze the catalog's own values on the next
+    // save and stop the weekly refresh reaching the row.
+    expect(checkedState(html, "mdl-capabilities-explicit")).toBe("false");
+    expect(html).toContain(settingsFr["models.form.capabilitiesAuto"]);
+    expect(html).not.toContain('id="mdl-ctx"');
   });
 });
 
-describe("ModelFormBody — a custom model id on a catalogued provider", () => {
-  // The provider is catalogued but the id is not one of its entries, so the
-  // form is on the custom-model path: capabilities are asked for, unfolded.
-  // Nothing was ever overridden on this row, so the toggle opens off.
+describe("ModelFormBody — editing a catalogued row that does override it", () => {
+  const html = form(catalogued({ contextWindow: 32768 }), [ANTHROPIC_KEY]);
+
+  it("opens the toggle on, because the row disagrees with the catalog", () => {
+    expect(checkedState(html, "mdl-capabilities-explicit")).toBe("true");
+    expect(html).toContain('id="mdl-ctx"');
+    expect(html).not.toContain(settingsFr["models.form.capabilitiesAuto"]);
+  });
+});
+
+describe("ModelFormBody — editing a subscription row", () => {
   const html = form(
-    model({
-      label: "Claude X",
-      apiShape: "anthropic-messages",
-      providerId: "anthropic",
-      providerName: "Anthropic",
-      baseUrl: "https://api.anthropic.com",
-      modelId: "claude-unreleased",
-      input: null,
-      contextWindow: null,
-      maxTokens: null,
-      reasoning: null,
-    }),
+    catalogued({ providerId: "claude-code", providerName: "Claude Code", credentialId: "cred_cc" }),
+    [CONNECTION],
   );
 
-  it("offers the capabilities toggle, off", () => {
-    expect(html).toContain('id="mdl-capabilities-explicit"');
-    expect(checkedState(html, "mdl-capabilities-explicit")).toBe("false");
+  it("shows the connection it runs on, and the account behind it", () => {
+    expect(html).toContain(settingsFr["models.form.connectionLabel"]);
+    expect(html).toContain(CONNECTION.label);
+    expect(html).toContain(CONNECTION.oauth_email!);
   });
 
-  it("states what answers for the model instead of showing empty fields", () => {
-    expect(html).toContain(settingsFr["models.form.capabilitiesAuto"]);
-    expect(html).not.toContain('id="mdl-ctx"');
-    expect(html).not.toContain('id="mdl-maxtok"');
+  it("asks for no key: a subscription is opened by a connection, not a secret", () => {
+    expect(html).not.toContain('placeholder="sk-..."');
+    expect(html).not.toContain('id="mdl-apiKey"');
+    expect(html).not.toContain(settingsFr["models.form.connectProviderHint"]);
+  });
+
+  it("offers neither listing nor a way back to one", () => {
+    expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
+    expect(html).not.toContain(settingsFr["models.form.manualButton"]);
+    expect(html).not.toContain(settingsFr["models.form.pickFromList"]);
   });
 });
 

@@ -408,7 +408,7 @@ function CredentialFormBody({
           <EndpointFields
             idPrefix="pk"
             providers={overridableProviders}
-            providerId={selectedProvider?.providerId ?? ""}
+            provider={selectedProvider}
             onApiTypeChange={handleApiTypeChange}
             // `apiShape` and `baseUrl` are pinned by `providerId` at create
             // time — delete and re-create to point the key elsewhere.
