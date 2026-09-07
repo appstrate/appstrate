@@ -493,6 +493,22 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **A custom endpoint's key and models show their wire format's icon.** The
+  credentials table and every model list resolved the provider by matching
+  `(apiShape, baseUrl)` against the registry's `defaultBaseUrl`, which an
+  operator's own host never matches, so `openai-compatible` and
+  `anthropic-compatible` rows rendered icon-less. Both now read the entry off
+  the row's `providerId` (`resolveProviderEntry`) and fall back to the endpoint
+  match only where the binding is hidden (built-in credentials, aliased models).
+
+- **Deleting a key a model still runs on says so.** The server refuses it
+  (409 `credential_in_use`, `org_models.credential_id` is ON DELETE RESTRICT)
+  but the page swallowed the error: the confirmation stayed open with a dead
+  button, and its copy claimed linked models would "need to be reconfigured".
+  The dialog now counts the models on the key and disables Confirm until they
+  are gone; a refusal the server still raises (and any other failed delete,
+  models included) is reported as a toast.
+
 - **The Playwright suite no longer opens the developer's own database.** Its
   `webServer` inherited the API's defaults for `PGLITE_DATA_DIR` and
   `FS_STORAGE_PATH`, so a run in a checkout where `bun run dev` was up pointed

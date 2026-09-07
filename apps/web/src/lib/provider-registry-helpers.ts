@@ -56,14 +56,14 @@ export function pickedProviderId<T extends { providerId: string; baseUrlOverrida
 }
 
 /**
- * Locate the provider that owns a given `(apiShape, baseUrl)` combination.
- * Used by run-overrides, agent-configuration, and the credential form's
- * "what icon should this row show?" lookup. Matches on apiShape AND
- * baseUrl prefix — `baseUrl` is normalized (trailing slashes stripped)
- * because the DB column may or may not carry a trailing `/` depending on
- * how the credential was created.
+ * Locate the provider that owns a given `(apiShape, baseUrl)` combination —
+ * the fallback behind {@link resolveProviderEntry} and {@link resolveProviderId}
+ * for rows that carry no `providerId`. Matches on apiShape AND baseUrl prefix
+ * — `baseUrl` is normalized (trailing slashes stripped) because the DB column
+ * may or may not carry a trailing `/` depending on how the credential was
+ * created.
  */
-export function findProviderByApiShapeAndBaseUrl(
+function findProviderByApiShapeAndBaseUrl(
   apiShape: string | null,
   baseUrl: string | null | undefined,
   registry: readonly ProviderRegistryEntry[],
@@ -83,6 +83,24 @@ export function getProviderById(
   registry: readonly ProviderRegistryEntry[],
 ): ProviderRegistryEntry | undefined {
   return registry.find((p) => p.providerId === id);
+}
+
+/**
+ * The registry entry behind a saved row — what its icon and display name read.
+ * `providerId` is the binding itself and answers for any endpoint, an
+ * operator's own included, where the `(apiShape, baseUrl)` match cannot: a
+ * custom URL is by definition no registry `defaultBaseUrl`. That match stays
+ * as the fallback for rows whose binding is hidden (built-in credentials,
+ * aliased models), which pin a registry endpoint by construction.
+ */
+export function resolveProviderEntry(
+  row: { providerId?: string | null; apiShape: string | null; baseUrl: string | null },
+  registry: readonly ProviderRegistryEntry[],
+): ProviderRegistryEntry | undefined {
+  return (
+    (row.providerId ? getProviderById(row.providerId, registry) : undefined) ??
+    findProviderByApiShapeAndBaseUrl(row.apiShape, row.baseUrl, registry)
+  );
 }
 
 /**
