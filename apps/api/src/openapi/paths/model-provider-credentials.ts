@@ -602,7 +602,7 @@ export const modelProviderCredentialsPaths = {
                   candidate_count: {
                     type: "integer",
                     description:
-                      "Number of discovery candidates considered. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none.",
+                      "Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that.",
                   },
                   available_model_ids: {
                     type: ["array", "null"],

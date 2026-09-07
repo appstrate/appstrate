@@ -43,6 +43,9 @@ const testOAuthProvider: ModelProviderDefinition = {
   // Synthetic provider — no catalog, so featured stays empty. The OAuth
   // identity/refresh tests under this fixture don't exercise the picker.
   featuredModels: [],
+  // Required of every oauth2 provider: the platform never enumerates a
+  // subscription token's models.
+  modelDiscovery: { mode: "static" },
 };
 
 /**
@@ -76,6 +79,7 @@ const testOAuthHooksProvider: ModelProviderDefinition = {
     pkce: "S256",
   },
   featuredModels: [],
+  modelDiscovery: { mode: "static" },
   requiredIdentityClaims: ["accountId"],
   hooks: {
     extractTokenIdentity(accessToken) {

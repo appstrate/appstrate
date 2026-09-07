@@ -5,7 +5,7 @@
  * discovery against a credential, with the model listing injected so no
  * network leaves the process.
  *
- * Uses a synthetic `test-oauth-discovery` provider (registered here,
+ * Uses a synthetic `test-listing-discovery` provider (registered here,
  * baseline restored in `afterAll`) so the zero-footprint invariant
  * holds — no module knowledge in core tests.
  */
@@ -16,7 +16,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import { seedOrgModelProviderKey, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { registerCatalog } from "../../../src/services/pricing-catalog.ts";
@@ -27,7 +27,7 @@ import {
 import { getOrgModelProviderCredential } from "../../../src/services/model-providers/credentials.ts";
 import type { ListServedModelsResult } from "../../../src/services/model-providers/model-listing.ts";
 
-const PROVIDER_ID = "test-oauth-discovery";
+const PROVIDER_ID = "test-listing-discovery";
 const OFFLINE_PROVIDER_ID = "test-offline-discovery";
 
 /**
@@ -81,21 +81,15 @@ function registerDiscoveryProvider(): void {
   });
   registerModelProvider({
     providerId: PROVIDER_ID,
-    displayName: "Test OAuth Discovery",
+    displayName: "Test Listing Discovery",
     iconUrl: "openai",
     description: "Synthetic provider exercising model discovery.",
     apiShape: "openai-responses",
     defaultBaseUrl: "https://discovery.example.test/v1",
     baseUrlOverridable: false,
-    authMode: "oauth2",
-    oauth: {
-      clientId: "test-discovery-client",
-      authorizationUrl: "https://auth.example.test/authorize",
-      tokenUrl: "https://auth.example.test/token",
-      refreshUrl: "https://auth.example.test/token",
-      scopes: ["openid"],
-      pkce: "S256",
-    },
+    // API-key: the listing path is the only one an oauth2 provider may not
+    // take — `registerModelProvider` refuses one that is not `mode: "static"`.
+    authMode: "api_key",
     catalogProviderId: "test-discovery-catalog",
     featuredModels: ["m-featured"],
     modelDiscoveryCandidates: ["m-featured", "m-extra", "m-gone"],
@@ -191,7 +185,7 @@ describe("discoverAvailableModels", () => {
   });
 
   it("persists the candidates the provider lists, in candidate order", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
     // Response order is deliberately the reverse of the declaration order, and
     // carries an id the provider declares no candidate for.
     const { deps, calls } = scriptedListing([served("m-unrelated", "m-extra", "m-featured")]);
@@ -206,7 +200,7 @@ describe("discoverAvailableModels", () => {
   });
 
   it("aborts without persisting on AUTH_FAILED (an auth outage must not wipe a good list)", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
     const { deps, calls } = scriptedListing([AUTH_FAILED]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
@@ -228,7 +222,7 @@ describe("discoverAvailableModels", () => {
   });
 
   it("keeps the previous list when the provider is unreachable", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
     await discoverAvailableModels(
       ctx.org.id,
       cred.id,
@@ -247,7 +241,7 @@ describe("discoverAvailableModels", () => {
   });
 
   it("keeps the previous list when no candidate appears in the listing", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
     await discoverAvailableModels(
       ctx.org.id,
       cred.id,
@@ -266,7 +260,7 @@ describe("discoverAvailableModels", () => {
   });
 
   it("retries a 429 once and persists when the retry succeeds", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
     const { deps, calls } = scriptedListing([RATE_LIMITED, served("m-featured")]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
@@ -278,7 +272,7 @@ describe("discoverAvailableModels", () => {
   });
 
   it("keeps the previous list when the retry is rate limited too", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
     await discoverAvailableModels(
       ctx.org.id,
       cred.id,
@@ -319,8 +313,10 @@ describe("discoverAvailableModels", () => {
 
     expect(calls()).toBe(0);
     expect(result.outcome).toBe("ok");
-    // Candidates were considered without a single upstream request.
-    expect(result.candidateCount).toBe(2);
+    // Every declared candidate is counted (including the uncatalogued one) —
+    // the same meaning the listing path gives the number — without a single
+    // upstream request.
+    expect(result.candidateCount).toBe(3);
     // Derived on read, not written: "m-uncatalogued" is filtered out (not in
     // the catalog); the rest come back in declaration order. That nothing was
     // written is pinned by the raw-column assertion in the next test.

@@ -98,6 +98,7 @@ describe("model-providers runtime registry", () => {
       registerModelProvider(
         fakeDef("oauth-test", {
           authMode: "oauth2",
+          modelDiscovery: { mode: "static" },
           oauth: {
             clientId: "x",
             authorizationUrl: "https://example.com/authorize",
@@ -116,8 +117,12 @@ describe("model-providers runtime registry", () => {
   // registry exposes for delivery is oauth-class vs API-key (`isOAuthModelProvider`).
   describe("oauth-class classification", () => {
     beforeEach(() => {
-      registerModelProvider(fakeDef("claude-code", { authMode: "oauth2" }));
-      registerModelProvider(fakeDef("codex", { authMode: "oauth2" }));
+      registerModelProvider(
+        fakeDef("claude-code", { authMode: "oauth2", modelDiscovery: { mode: "static" } }),
+      );
+      registerModelProvider(
+        fakeDef("codex", { authMode: "oauth2", modelDiscovery: { mode: "static" } }),
+      );
       registerModelProvider(fakeDef("openai", { authMode: "api_key" }));
     });
 
@@ -224,6 +229,47 @@ describe("model-providers runtime registry", () => {
     });
   });
 
+  /**
+   * A subscription (oauth2) credential is a user's own token, and
+   * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` allows no platform-side
+   * request on one. The listing discovery path has no gate of its own, so the
+   * guarantee rests on the definition declaring `mode: "static"` — which
+   * registration therefore demands rather than trusts.
+   */
+  describe("subscription providers are never enumerated", () => {
+    const oauthConfig = {
+      clientId: "x",
+      authorizationUrl: "https://example.com/authorize",
+      tokenUrl: "https://example.com/token",
+      refreshUrl: "https://example.com/token",
+      scopes: ["openid"],
+      pkce: "S256",
+    } as const;
+
+    it("refuses an oauth2 provider that omits modelDiscovery", () => {
+      expect(() =>
+        registerModelProvider(fakeDef("oauth-forgot", { authMode: "oauth2", oauth: oauthConfig })),
+      ).toThrow(/must declare modelDiscovery: \{ mode: "static" \}/);
+      expect(getModelProvider("oauth-forgot")).toBeNull();
+    });
+
+    it("accepts an oauth2 provider that declares mode: static", () => {
+      registerModelProvider(
+        fakeDef("oauth-static", {
+          authMode: "oauth2",
+          oauth: oauthConfig,
+          modelDiscovery: { mode: "static" },
+        }),
+      );
+      expect(getModelProvider("oauth-static")?.modelDiscovery?.mode).toBe("static");
+    });
+
+    it("leaves api_key providers free to use the listing path", () => {
+      registerModelProvider(fakeDef("listing-provider", { authMode: "api_key" }));
+      expect(getModelProvider("listing-provider")?.modelDiscovery).toBeUndefined();
+    });
+  });
+
   describe("resetModelProviders (test-only)", () => {
     it("empties the registry", () => {
       registerModelProvider(fakeDef("openai"));
@@ -239,6 +285,7 @@ describe("model-providers runtime registry", () => {
       registerModelProvider(
         fakeDef("oauth-test", {
           authMode: "oauth2",
+          modelDiscovery: { mode: "static" },
           oauth: {
             clientId: "x",
             authorizationUrl: "https://example.com/authorize",

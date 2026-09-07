@@ -591,9 +591,9 @@ describe("Model Provider Keys API", () => {
         available_model_ids: string[] | null;
       };
       expect(body.outcome).toBe("ok");
-      // Candidates are counted, never requested — the platform never spends a
-      // subscription quota to enumerate models.
-      expect(body.candidate_count).toBe(2);
+      // Every declared candidate is counted, none requested — the platform
+      // never spends a subscription quota to enumerate models.
+      expect(body.candidate_count).toBe(3);
       // "s-absent" is filtered out: seeding would reject an uncatalogued id.
       expect(body.available_model_ids).toEqual(["s-one", "s-two"]);
 

@@ -70,10 +70,12 @@ const MAX_CANDIDATES = 24;
 interface ModelDiscoveryResult {
   outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates" | "credential_not_found";
   /**
-   * Discovery candidates considered (after dedupe + cap), whatever the
-   * outcome. NOT a request count: the listing path spends one request (two
-   * when a 429 is retried) regardless, and `mode: "static"` providers spend
-   * none.
+   * Discovery candidates the provider declares, after dedupe and cap —
+   * counted identically on both paths, so the number means one thing. NOT a
+   * request count: the listing path spends one request (two when a 429 is
+   * retried) regardless, and `mode: "static"` providers spend none. Nor a
+   * count of what is served: the static path answers with the catalog-backed
+   * subset of these, the listing path with the listed subset.
    */
   candidateCount: number;
 }
@@ -149,7 +151,7 @@ export async function discoverAvailableModels(
       // distinction any more (there is no previous list to protect), but the
       // outcome should stay honest about an empty answer.
       outcome: served.length > 0 ? "ok" : "no_candidates",
-      candidateCount: served.length,
+      candidateCount: resolveDiscoveryCandidates(def).slice(0, MAX_CANDIDATES).length,
     };
   }
 
