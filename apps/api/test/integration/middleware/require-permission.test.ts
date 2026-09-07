@@ -13,43 +13,15 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
-  createTestUser,
   createTestContext,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSpaceMember } from "../../helpers/seed.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
-import type { AssignableOrgRole } from "@appstrate/shared-types";
 
 const app = getTestApp();
-
-/** Build a context for a user with a specific role in the owner's org. */
-async function contextForRole(
-  ownerCtx: TestContext,
-  role: AssignableOrgRole,
-): Promise<TestContext> {
-  const user = await createTestUser();
-  await addOrgMember(ownerCtx.orgId, user.id, role);
-  return { ...ownerCtx, user, cookie: user.cookie };
-}
-
-/**
- * A read-only caller: an org `guest` (no implicit space access) with an
- * explicit `viewer` row in the default space. This is what "viewer" means
- * after the space-roles split — the two halves have to be seeded together,
- * because the org half alone reaches no space at all.
- */
-async function contextForSpaceViewer(ownerCtx: TestContext): Promise<TestContext> {
-  const ctx = await contextForRole(ownerCtx, "guest");
-  await seedSpaceMember({
-    spaceId: ownerCtx.defaultSpaceId,
-    userId: ctx.user.id,
-    presetRole: "viewer",
-  });
-  return ctx;
-}
 
 describe("RBAC — Permission enforcement", () => {
   let owner: TestContext;
@@ -60,9 +32,11 @@ describe("RBAC — Permission enforcement", () => {
   beforeEach(async () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "rbac-test" });
-    admin = await contextForRole(owner, "admin");
-    member = await contextForRole(owner, "member");
-    spaceViewer = await contextForSpaceViewer(owner);
+    admin = await memberContext(owner, "admin");
+    member = await memberContext(owner, "member");
+    // A read-only caller is an org `guest` (no implicit space access) plus an
+    // explicit `viewer` row: the org half alone reaches no space at all.
+    spaceViewer = await memberContext(owner, "guest", "viewer");
   });
 
   // ─── Admin-only routes ─────────────────────────────────────

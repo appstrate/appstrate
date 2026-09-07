@@ -122,8 +122,11 @@ describe("agent-config + space-package GET routes — read permission", () => {
     }
   });
 
-  it("serves the space-package GETs once the key holds spaces:read", async () => {
-    const rawKey = await keyWithScopes(["spaces:read"]);
+  it("serves the space-package GETs once the key holds spaces:read and the row's type scope", async () => {
+    // `spaces:read` opens both routes; the row's own type scope is what makes
+    // it visible. The detail route applies that filter exactly as the list
+    // does, so an agent association needs `agents:read` beside `spaces:read`.
+    const rawKey = await keyWithScopes(["spaces:read", "agents:read"]);
 
     for (const route of spacePackageReadRoutes(ctx.defaultSpaceId)) {
       const res = await app.request(route.path, {

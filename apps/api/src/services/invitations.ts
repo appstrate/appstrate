@@ -97,13 +97,17 @@ export async function createInvitation({
     .catch(async (err: unknown) => {
       if (!isUniqueViolation(err)) throw err;
       // Lost the race against a concurrent create for the same pair: report the
-      // row that won, exactly as the pre-check would have.
+      // row that won, exactly as the pre-check would have. Without a winner
+      // (the rival was cancelled between the INSERT and this read) the 409's
+      // required `invitation_id` would be empty, so the constraint violation
+      // itself is what surfaces.
       const [winner] = await db
         .select({ id: orgInvitations.id })
         .from(orgInvitations)
         .where(pendingForPair)
         .limit(1);
-      throw new InvitationAlreadyPendingError(winner?.id ?? "");
+      if (!winner) throw err;
+      throw new InvitationAlreadyPendingError(winner.id);
     });
 
   if (getAppConfig().features.smtp) {

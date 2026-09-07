@@ -4307,13 +4307,13 @@ export interface paths {
         };
         /**
          * List webhooks
-         * @description List webhooks visible to the current organization. When `spaceId` is passed, returns org-level + space-level webhooks pinned to that space. When `all=true`, returns every webhook in the org regardless of level.
+         * @description List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`.
          */
         get: operations["listWebhooks"];
         put?: never;
         /**
          * Create a webhook
-         * @description Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.
+         * @description Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. The secret is returned once in the response. Max 20 webhooks per org.
          */
         post: operations["createWebhook"];
         delete?: never;
@@ -5718,7 +5718,7 @@ export interface components {
             /** @enum {string} */
             preset_role?: "admin" | "builder" | "operator" | "viewer";
             custom_role_id?: string;
-        };
+        } & (unknown | unknown);
         SpaceMemberAssignment: {
             /** @enum {string} */
             object: "space_member";
@@ -14595,6 +14595,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token. */
             409: {
                 headers: {
@@ -19479,6 +19480,7 @@ export interface operations {
             400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createSpace: {
@@ -19761,7 +19763,7 @@ export interface operations {
                     /** @enum {string} */
                     preset_role?: "admin" | "builder" | "operator" | "viewer";
                     custom_role_id?: string;
-                } & (unknown | unknown);
+                } & ((unknown | unknown) & (unknown | unknown));
             };
         };
         responses: {
@@ -19841,7 +19843,7 @@ export interface operations {
                     /** @enum {string} */
                     preset_role?: "admin" | "builder" | "operator" | "viewer";
                     custom_role_id?: string;
-                };
+                } & (unknown | unknown);
             };
         };
         responses: {
@@ -20636,7 +20638,7 @@ export interface operations {
             query?: {
                 /** @description Filter — include webhooks pinned to this space (plus org-level). */
                 spaceId?: string;
-                /** @description When `true`, return all webhooks in the org (org-level + every space-level). Overrides `spaceId`. */
+                /** @description When `true`, span every space in the org (org-level + every space-level). Requires `org-webhooks:read`. Overrides `spaceId`. */
                 all?: "true";
             };
             header?: {
@@ -20692,6 +20694,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -20784,6 +20787,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyInProgress"];
             422: components["responses"]["IdempotencyConflict"];
             429: components["responses"]["RateLimited"];

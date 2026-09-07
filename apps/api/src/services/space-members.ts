@@ -29,9 +29,6 @@ import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** One row of `GET /api/spaces/:id/members` — the wire shape, from shared-types. */
-export type SpaceMemberWire = SpaceMember;
-
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
@@ -62,40 +59,50 @@ export async function listSpaceMembers(
   orgId: string,
   space: { id: string; visibility: string; defaultRole: SpaceRolePreset },
   includeImplicit: boolean,
-): Promise<SpaceMemberWire[]> {
-  const [orgRows, explicitRows] = await Promise.all([
-    db
-      .select({
-        userId: organizationMembers.userId,
-        role: organizationMembers.role,
-        name: userTable.name,
-        email: userTable.email,
-        displayName: profiles.displayName,
-      })
-      .from(organizationMembers)
-      .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
-      .leftJoin(profiles, eq(profiles.id, organizationMembers.userId))
-      .where(eq(organizationMembers.orgId, orgId)),
-    db
-      .select({
-        userId: spaceMembers.userId,
-        presetRole: spaceMembers.presetRole,
-        customRoleId: spaceMembers.customRoleId,
-        customKey: spaceRoles.key,
-        customName: spaceRoles.name,
-        customPermissions: spaceRoles.permissions,
-        createdAt: spaceMembers.createdAt,
-      })
-      .from(spaceMembers)
-      .leftJoin(spaceRoles, eq(spaceRoles.id, spaceMembers.customRoleId))
-      .where(eq(spaceMembers.spaceId, space.id)),
-  ]);
+): Promise<SpaceMember[]> {
+  const explicitRows = await db
+    .select({
+      userId: spaceMembers.userId,
+      presetRole: spaceMembers.presetRole,
+      customRoleId: spaceMembers.customRoleId,
+      customKey: spaceRoles.key,
+      customName: spaceRoles.name,
+      customPermissions: spaceRoles.permissions,
+      createdAt: spaceMembers.createdAt,
+    })
+    .from(spaceMembers)
+    .leftJoin(spaceRoles, eq(spaceRoles.id, spaceMembers.customRoleId))
+    .where(eq(spaceMembers.spaceId, space.id));
+
+  // Without `includeImplicit` the answer is confined to the explicit rows, so
+  // the directory read is narrowed to those users instead of being fetched
+  // whole and discarded row by row.
+  const explicitIds = explicitRows.map((row) => row.userId);
+  const orgRows =
+    !includeImplicit && explicitIds.length === 0
+      ? []
+      : await db
+          .select({
+            userId: organizationMembers.userId,
+            role: organizationMembers.role,
+            name: userTable.name,
+            email: userTable.email,
+            displayName: profiles.displayName,
+          })
+          .from(organizationMembers)
+          .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
+          .leftJoin(profiles, eq(profiles.id, organizationMembers.userId))
+          .where(
+            and(
+              eq(organizationMembers.orgId, orgId),
+              includeImplicit ? undefined : inArray(organizationMembers.userId, explicitIds),
+            ),
+          );
 
   const explicit = new Map(explicitRows.map((r) => [r.userId, r]));
-  const out: SpaceMemberWire[] = [];
+  const out: SpaceMember[] = [];
   for (const row of orgRows) {
     const found = explicit.get(row.userId);
-    if (!found && !includeImplicit) continue;
     const orgRole = row.role;
     const effective = resolveSpaceRole(
       orgRole,
@@ -202,27 +209,42 @@ export async function removeSpaceMember(spaceId: string, userId: string): Promis
   return deleted.length > 0;
 }
 
+/** A grant that was dropped, as the audit trail records it. */
+export interface RevokedSpaceAssignment {
+  spaceId: string;
+  presetRole: SpaceRolePreset | null;
+  customRoleId: string | null;
+}
+
 /**
  * Called on promotion to admin/owner, in the same transaction as the role
  * change: the rows become dead weight, and a later demotion must not silently
- * restore a role nobody re-granted.
+ * restore a role nobody re-granted. The deleted rows are returned because they
+ * are the only trace left of what the promotion revoked.
  */
 export async function deleteSpaceMembershipsInOrg(
   tx: Pick<typeof db, "select" | "delete">,
   orgId: string,
   userId: string,
-): Promise<void> {
+): Promise<RevokedSpaceAssignment[]> {
   const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
-  if (orgSpaces.length === 0) return;
-  await tx.delete(spaceMembers).where(
-    and(
-      eq(spaceMembers.userId, userId),
-      inArray(
-        spaceMembers.spaceId,
-        orgSpaces.map((s) => s.id),
+  if (orgSpaces.length === 0) return [];
+  return tx
+    .delete(spaceMembers)
+    .where(
+      and(
+        eq(spaceMembers.userId, userId),
+        inArray(
+          spaceMembers.spaceId,
+          orgSpaces.map((s) => s.id),
+        ),
       ),
-    ),
-  );
+    )
+    .returning({
+      spaceId: spaceMembers.spaceId,
+      presetRole: spaceMembers.presetRole,
+      customRoleId: spaceMembers.customRoleId,
+    });
 }
 
 async function orgRoleOf(tx: DbOrTx, orgId: string, userId: string): Promise<OrgRole | null> {

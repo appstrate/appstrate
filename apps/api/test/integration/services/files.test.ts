@@ -34,6 +34,7 @@ import {
   createTestContext,
   createTestUser,
   addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -560,20 +561,22 @@ describe("files service + routes", () => {
 
   it("DELETE allowed for creator and for admin, forbidden otherwise", async () => {
     // A member (no files:delete) who creates a file.
-    const member = await createTestUser({ email: "member@docs.test" });
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const memberActor: Actor = { type: "user", id: member.id };
-    const memberHeaders = authHeaders({ ...ctx, cookie: member.cookie });
+    const member = await memberContext(ctx, "member");
+    const memberActor: Actor = { type: "user", id: member.user.id };
+    const memberHeaders = authHeaders(member);
 
     // A second member who is neither the creator nor an admin.
-    const stranger = await createTestUser({ email: "stranger@docs.test" });
-    await addOrgMember(ctx.orgId, stranger.id, "member");
-    const strangerHeaders = authHeaders({ ...ctx, cookie: stranger.cookie });
+    const strangerHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
 
     const makeDoc = async () => {
-      const up = await stageUpload(scope, member.id, "m.txt", new TextEncoder().encode("member"));
+      const up = await stageUpload(
+        scope,
+        member.user.id,
+        "m.txt",
+        new TextEncoder().encode("member"),
+      );
       return createFileFromUpload(scope, memberActor, up, { runId });
     };
 
@@ -631,21 +634,23 @@ describe("files service + routes", () => {
 
   it("POST /:id/keep clears the expiry for creator and admin, forbidden otherwise", async () => {
     // A member (no files:delete) who creates a file.
-    const member = await createTestUser({ email: "keeper@docs.test" });
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const memberActor: Actor = { type: "user", id: member.id };
-    const memberHeaders = authHeaders({ ...ctx, cookie: member.cookie });
+    const member = await memberContext(ctx, "member");
+    const memberActor: Actor = { type: "user", id: member.user.id };
+    const memberHeaders = authHeaders(member);
 
     // A second member who is neither the creator nor an admin.
-    const stranger = await createTestUser({ email: "keepstranger@docs.test" });
-    await addOrgMember(ctx.orgId, stranger.id, "member");
-    const strangerHeaders = authHeaders({ ...ctx, cookie: stranger.cookie });
+    const strangerHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
     const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
     const makeExpiringDoc = async () => {
-      const up = await stageUpload(scope, member.id, "k.txt", new TextEncoder().encode("keepme"));
+      const up = await stageUpload(
+        scope,
+        member.user.id,
+        "k.txt",
+        new TextEncoder().encode("keepme"),
+      );
       const doc = await createFileFromUpload(scope, memberActor, up, { runId });
       await db.update(files).set({ expiresAt: soon }).where(eq(files.id, doc.id));
       return doc;
@@ -1007,17 +1012,14 @@ describe("files service + routes", () => {
   it("GET /content: 403 for a member who is not the upload's creator, 200 for an agent_output", async () => {
     // Member A uploads on a run; member B (a second org member) can read the
     // metadata via the container ACL but the bytes are creator-only (D2/S1).
-    const memberA = await createTestUser({ email: "a2@docs.test" });
-    await addOrgMember(ctx.orgId, memberA.id, "member");
-    const actorA: Actor = { type: "user", id: memberA.id };
-    const memberB = await createTestUser({ email: "b2@docs.test" });
-    await addOrgMember(ctx.orgId, memberB.id, "member");
-    const bHeaders = authHeaders({ ...ctx, cookie: memberB.cookie });
+    const memberA = await memberContext(ctx, "member");
+    const actorA: Actor = { type: "user", id: memberA.user.id };
+    const bHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
     const up = await stageUpload(
       scope,
-      memberA.id,
+      memberA.user.id,
       "priv.txt",
       new TextEncoder().encode("A private"),
     );
@@ -1082,17 +1084,14 @@ describe("files service + routes", () => {
   });
 
   it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {
-    const creator = await createTestUser({ email: "c3@docs.test" });
-    await addOrgMember(ctx.orgId, creator.id, "member");
-    const creatorActor: Actor = { type: "user", id: creator.id };
-    const reader = await createTestUser({ email: "r3@docs.test" });
-    await addOrgMember(ctx.orgId, reader.id, "member");
-    const readerHeaders = authHeaders({ ...ctx, cookie: reader.cookie });
+    const creator = await memberContext(ctx, "member");
+    const creatorActor: Actor = { type: "user", id: creator.user.id };
+    const readerHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
     const up = await stageUpload(
       scope,
-      creator.id,
+      creator.user.id,
       "secret-notes.txt",
       new TextEncoder().encode("x"),
     );
@@ -1125,7 +1124,7 @@ describe("files service + routes", () => {
     expect(content.status).toBe(403);
 
     // The creator, by contrast, sees the real name + a minted preview token.
-    const creatorHeaders = authHeaders({ ...ctx, cookie: creator.cookie });
+    const creatorHeaders = authHeaders(creator);
     const own = await app.request(`/api/files/${upload.id}`, { headers: creatorHeaders });
     const ownDto = (await own.json()) as { name: string; preview_url: string | null };
     expect(ownDto.name).toBe("secret-notes.txt");

@@ -12,19 +12,13 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../helpers/app.ts";
 import { truncateAll } from "../helpers/db.ts";
 import {
-  createTestContext,
-  createTestUser,
   addOrgMember,
+  createTestContext,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../helpers/auth.ts";
-import {
-  seedAgent,
-  seedRun,
-  seedPackageVersion,
-  seedSpace,
-  seedSpaceMember,
-} from "../helpers/seed.ts";
+import { seedAgent, seedRun, seedPackageVersion, seedSpace } from "../helpers/seed.ts";
 import { installPackage } from "../../src/services/space-packages.ts";
 
 const app = getTestApp();
@@ -48,22 +42,13 @@ describe("Multi-tenancy isolation", () => {
       // discriminating shape is ONE user in BOTH orgs, holding a role in a
       // space of A and none in a space of B: the same request, the same
       // permission string, two orgs, two answers.
-      const crosser = await createTestUser();
-      await addOrgMember(orgA.orgId, crosser.id, "guest");
-      await addOrgMember(orgB.orgId, crosser.id, "guest");
-      await seedSpaceMember({
-        spaceId: orgA.defaultSpaceId,
-        userId: crosser.id,
-        presetRole: "admin",
-      });
+      const crosser = await memberContext(orgA, "guest", "admin");
+      await addOrgMember(orgB.orgId, crosser.user.id, "guest");
       const closedInB = await seedSpace({ orgId: orgB.orgId, visibility: "closed" });
 
       const read = (ctx: TestContext, spaceId: string) =>
         app.request("/api/agents", {
-          headers: authHeaders(
-            { ...ctx, user: crosser, cookie: crosser.cookie },
-            { "X-Space-Id": spaceId },
-          ),
+          headers: authHeaders(ctx, { Cookie: crosser.cookie, "X-Space-Id": spaceId }),
         });
 
       // Control: the row does let them into org A's space.
@@ -99,8 +84,9 @@ describe("Multi-tenancy isolation", () => {
         }),
       });
 
-      // 403: requirePackageInOrg rejects cross-org DB ownership before handler runs
-      expect([403, 404]).toContain(res.status);
+      // Another org's package never loads: the catalog read is org-or-system
+      // filtered, so it reads as absent rather than as forbidden.
+      expect(res.status).toBe(404);
     });
 
     it("cannot delete another org's agent", async () => {
@@ -111,8 +97,7 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB),
       });
 
-      // 403: requirePackageInOrg rejects cross-org DB ownership before handler runs
-      expect([403, 404]).toContain(res.status);
+      expect(res.status).toBe(404);
     });
 
     it("does not leak other org's agents in list", async () => {
@@ -228,11 +213,7 @@ describe("Multi-tenancy isolation", () => {
       });
 
       // Package not visible to org B — 404 from org-scoped lookup
-      expect([200, 404]).toContain(res.status);
-      if (res.status === 200) {
-        const body = (await res.json()) as { versions: unknown[] };
-        expect(body.versions).toHaveLength(0);
-      }
+      expect(res.status).toBe(404);
     });
 
     it("cannot delete another org's package version", async () => {
@@ -244,8 +225,7 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB),
       });
 
-      // 403 (cross-org DB ownership via requirePackageInOrg) or 404
-      expect([403, 404]).toContain(res.status);
+      expect(res.status).toBe(404);
     });
   });
 

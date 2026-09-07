@@ -2,6 +2,7 @@
 
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
 export const spacesPaths = {
   "/api/spaces": {
@@ -152,6 +153,7 @@ export const spacesPaths = {
         "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -620,12 +622,15 @@ export const spacesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              allOf: [{ oneOf: [{ required: ["userId"] }, { required: ["email"] }] }],
+              allOf: [
+                { oneOf: [{ required: ["userId"] }, { required: ["email"] }] },
+                { oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }] },
+              ],
               properties: {
                 userId: { type: "string", minLength: 1 },
                 email: { type: "string", format: "email" },
                 preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-                custom_role_id: { type: "string", minLength: 1 },
+                custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
               },
               additionalProperties: false,
             },
@@ -677,9 +682,10 @@ export const spacesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              allOf: [{ oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }] }],
               properties: {
                 preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-                custom_role_id: { type: "string", minLength: 1 },
+                custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
               },
               additionalProperties: false,
             },

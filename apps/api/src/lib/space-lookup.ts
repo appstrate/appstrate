@@ -51,7 +51,7 @@ const SPACE_CONTEXT_COLUMNS = {
  * function entirely; each asserts the shape itself, and each says so at the
  * call site:
  *   - `requireSpaceContext`'s default-space fallback (below)
- *   - `resolveMcpSpaceScope`'s default-space fallback (`modules/mcp/router.ts`)
+ *   - `resolveMcpSpaceRow`'s default-space fallback (`modules/mcp/router.ts`)
  *   - `validateSSEAuth`'s API-key branch (`routes/realtime.ts`)
  *
  * The shape check runs BEFORE the SELECT on purpose. A `spc_` id that does not

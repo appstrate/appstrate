@@ -142,8 +142,8 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * deps and any future widening of `depTypes` are covered by construction.
  *
  * Every dependency also needs live catalog reachability. This allows a readable
- * source in another accessible space while hiding packages confined to private spaces.
-
+ * source in another accessible space while hiding packages confined to private
+ * spaces.
  */
 async function requireBundleDependencyReadPermissions(
   c: Context<AppEnv>,
@@ -157,21 +157,23 @@ async function requireBundleDependencyReadPermissions(
     const type = typeof rawType === "string" ? rawType : "";
     const parsed = parsePackageIdentity(identity);
     if (!parsed) throw invalidRequest(`Invalid package identity: ${identity}`);
-    if (checked.has(type)) {
-      await assertCatalogPackageAccess(c, parsed.packageId, accessible);
-      continue;
+    // The read scope is per TYPE, so it is proven once; reachability is per
+    // PACKAGE and runs for every dependency. The scope comes first so a caller
+    // holding none of it is told which permission it lacks rather than which
+    // packages exist.
+    if (!checked.has(type)) {
+      checked.add(type);
+      const guard = BUNDLE_DEPENDENCY_READ_GUARDS.get(type);
+      if (!guard) {
+        throw forbidden(
+          `Insufficient permissions: the bundle carries a '${type || "unknown"}' dependency and no read scope is defined for that type`,
+        );
+      }
+      // `requirePermission` is middleware; invoking it with a no-op `next`
+      // reuses the same 403 shape, denial audit hook, and fail-closed semantics
+      // as every route-level RBAC call site.
+      await guard(c, async () => {});
     }
-    checked.add(type);
-    const guard = BUNDLE_DEPENDENCY_READ_GUARDS.get(type);
-    if (!guard) {
-      throw forbidden(
-        `Insufficient permissions: the bundle carries a '${type || "unknown"}' dependency and no read scope is defined for that type`,
-      );
-    }
-    // `requirePermission` is middleware; invoking it with a no-op `next`
-    // reuses the same 403 shape, denial audit hook, and fail-closed semantics
-    // as every route-level RBAC call site.
-    await guard(c, async () => {});
     await assertCatalogPackageAccess(c, parsed.packageId, accessible);
   }
 }

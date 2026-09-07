@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The "exactly one role reference" body shape, in one place.
- *
- * Three routes accept it — `POST` and `PATCH /api/spaces/:id/members`, and the
- * `space_assignments[]` an invitation carries — and they differ only in what
- * they put BESIDE the role: a `userId`, nothing, or a `space_id`. The xor rule
- * and its error message are the part that must not drift, because a client
- * reads the same message from all three and the service
- * (`assignmentColumns`) assumes the rule already held.
+ * The "exactly one role reference" body shape, in one place: three routes differ only in what
+ * sits beside the role, and `assignmentColumns` assumes the xor rule and its message held.
  */
 
 import { z } from "zod";
@@ -17,11 +11,7 @@ import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceRoleAssignment } from "../services/space-members.ts";
 import { isSpaceRoleId } from "./ids.ts";
 
-/**
- * Zod's `.refine()` returns a wrapper that cannot be `.extend()`ed, so the
- * shared piece is the SHAPE plus the rule, applied by {@link exactlyOneRole}
- * after each caller has added its own fields.
- */
+/** `.refine()` returns a wrapper nothing can `.extend()`, so shape and rule ship apart. */
 export const spaceRoleAssignmentShape = {
   preset_role: z.enum(SPACE_ROLE_PRESETS).optional(),
   custom_role_id: z
@@ -32,7 +22,6 @@ export const spaceRoleAssignmentShape = {
     .optional(),
 };
 
-/** Apply the xor rule to a schema that already carries the shape above. */
 export function exactlyOneRole<Shape extends z.ZodRawShape>(schema: z.ZodObject<Shape>) {
   return schema.strict().refine(
     (v) => {
@@ -46,7 +35,6 @@ export function exactlyOneRole<Shape extends z.ZodRawShape>(schema: z.ZodObject<
   );
 }
 
-/** Narrow a validated body to the union the service takes. */
 export function toAssignment(data: {
   preset_role?: SpaceRolePreset;
   custom_role_id?: string;
@@ -56,7 +44,6 @@ export function toAssignment(data: {
     : { custom_role_id: data.custom_role_id! };
 }
 
-/** A deferred grant names its space alongside the shared role reference. */
 export const spaceAssignmentSchema = exactlyOneRole(
   z.object({ space_id: z.string().min(1), ...spaceRoleAssignmentShape }),
 );

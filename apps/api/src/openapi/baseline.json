@@ -3,7 +3,7 @@
   "info": {
     "title": "Appstrate API",
     "version": "1.0.0",
-    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same body replays the original response with `Idempotent-Replayed: true`; the same key with a different body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
+    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Viewing as a role\n\nAn organization owner or administrator can preview the API as a lesser role by sending the `X-View-As` header (grammar, refusal codes and examples: the `X-View-As` parameter, declared on the operations a client derives its permission gates from). **Every authenticated operation that resolves an organization honours it**, not only the ones that declare it: the persona is applied where permissions are resolved, so every subsequent guard, listing and write answers as the previewed role would. It is documented on those few operations rather than on all of them for the same reason `Idempotency-Key` is documented here.\n\nTwo exceptions, both by design. Personal operations that resolve no organization — `/api/profile*`, `/api/me/connections*`, `/api/welcome/*` — accept the header and ignore it: they answer about the person, not about a role in an organization, so there is nothing for a persona to narrow. And the Server-Sent-Events routes (`/api/realtime/*`) take the persona as the `view_as` QUERY parameter rather than the header, because `EventSource` cannot send headers; the value, the validation and the refusals are identical.\n\nThe persona only ever REMOVES: it is intersected with what the caller really holds, it carries no per-principal grants, and it is refused — never silently ignored — when the credential cannot carry it or the caller is not eligible. The authenticated identity is unchanged; audit rows keep the real actor and record the persona under `after.view_as`. Responses produced under a validated persona carry `X-View-As-Active: 1`.\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same body replays the original response with `Idempotent-Replayed: true`; the same key with a different body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
     "contact": {
       "name": "Appstrate",
       "url": "https://appstrate.dev",
@@ -4177,6 +4177,9 @@
             "$ref": "#/components/parameters/SseOrgId"
           },
           {
+            "$ref": "#/components/parameters/SseViewAs"
+          },
+          {
             "$ref": "#/components/parameters/SseSpaceId"
           },
           {
@@ -4200,11 +4203,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -4228,6 +4237,9 @@
             "$ref": "#/components/parameters/SseOrgId"
           },
           {
+            "$ref": "#/components/parameters/SseViewAs"
+          },
+          {
             "$ref": "#/components/parameters/SseSpaceId"
           },
           {
@@ -4251,11 +4263,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -4280,6 +4298,9 @@
             "$ref": "#/components/parameters/SseOrgId"
           },
           {
+            "$ref": "#/components/parameters/SseViewAs"
+          },
+          {
             "$ref": "#/components/parameters/SseSpaceId"
           },
           {
@@ -4303,11 +4324,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10645,6 +10672,11 @@
         "tags": ["Organizations"],
         "summary": "List user organizations",
         "description": "List organizations the current user is a member of.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XViewAs"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Organization list",
@@ -10694,8 +10726,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       },
@@ -11048,6 +11089,33 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ProblemDetail"
+                    },
+                    {
+                      "type": "object",
+                      "required": ["invitation_id"],
+                      "properties": {
+                        "invitation_id": {
+                          "type": "string",
+                          "description": "The pending invitation already held by this email."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -11728,6 +11796,11 @@
         "tags": ["Profile"],
         "summary": "List orgs the authenticated caller belongs to",
         "description": "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their space. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XViewAs"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Orgs accessible to the caller",
@@ -11805,8 +11878,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -17548,6 +17630,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XViewAs"
           }
         ],
         "responses": {
@@ -17632,11 +17717,17 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -17650,6 +17741,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XViewAs"
           },
           {
             "name": "id",
@@ -17678,6 +17772,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -18266,6 +18363,9 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
+            "$ref": "#/components/parameters/XViewAs"
+          },
+          {
             "name": "id",
             "in": "path",
             "required": true,
@@ -18309,6 +18409,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -18330,6 +18433,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XViewAs"
           },
           {
             "name": "id",
@@ -18376,6 +18482,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ViewAsRefused"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -18421,6 +18530,16 @@
                         "required": ["email"]
                       }
                     ]
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "required": ["preset_role"]
+                      },
+                      {
+                        "required": ["custom_role_id"]
+                      }
+                    ]
                   }
                 ],
                 "properties": {
@@ -18438,7 +18557,7 @@
                   },
                   "custom_role_id": {
                     "type": "string",
-                    "minLength": 1
+                    "pattern": "^srl_"
                   }
                 },
                 "additionalProperties": false
@@ -18523,6 +18642,18 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "required": ["preset_role"]
+                      },
+                      {
+                        "required": ["custom_role_id"]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "preset_role": {
                     "type": "string",
@@ -18530,7 +18661,7 @@
                   },
                   "custom_role_id": {
                     "type": "string",
-                    "minLength": 1
+                    "pattern": "^srl_"
                   }
                 },
                 "additionalProperties": false
@@ -22378,6 +22509,16 @@
           "type": "string"
         }
       },
+      "SseViewAs": {
+        "name": "view_as",
+        "in": "query",
+        "required": false,
+        "description": "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`.",
+        "schema": {
+          "type": "string",
+          "example": "org_role=member; space=spc_…; role=preset:viewer"
+        }
+      },
       "SseToken": {
         "name": "token",
         "in": "query",
@@ -22385,6 +22526,16 @@
         "description": "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
         "schema": {
           "type": "string"
+        }
+      },
+      "XViewAs": {
+        "name": "X-View-As",
+        "in": "header",
+        "required": false,
+        "description": "Preview the API as a lesser role (\"view as\"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:\n\n- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n- `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.\n\nExample: `org_role=member; space=spc_…; role=preset:viewer`.\n\nThe persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.\n\nRefusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.\n\nOn `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.\n\nThe Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.\n\nEvery response produced under a validated persona carries `X-View-As-Active: 1`.",
+        "schema": {
+          "type": "string",
+          "example": "org_role=member; space=spc_…; role=preset:viewer"
         }
       },
       "XSpaceId": {
@@ -22852,6 +23003,14 @@
         "type": "object",
         "description": "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
         "required": ["space_id"],
+        "oneOf": [
+          {
+            "required": ["preset_role"]
+          },
+          {
+            "required": ["custom_role_id"]
+          }
+        ],
         "properties": {
           "space_id": {
             "type": "string"
@@ -22861,7 +23020,8 @@
             "enum": ["admin", "builder", "operator", "viewer"]
           },
           "custom_role_id": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^srl_"
           }
         },
         "additionalProperties": false
@@ -24899,7 +25059,8 @@
             "enum": ["admin", "builder", "operator", "viewer"]
           },
           "custom_role_id": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^srl_"
           }
         }
       },
@@ -25381,6 +25542,54 @@
               "detail": "Agent '@acme/reporter' has no published version",
               "code": "no_published_version",
               "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "ViewAsRefused": {
+        "description": "The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse (bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential cannot carry a persona: only a cookie session and the CLI/instance token authenticate the user themselves; every other credential carries a ceiling of its own and no session to narrow. The other refusals reuse the statuses already documented on this operation: `403 view_as_forbidden` when the real org role is not owner/admin, the role is not grantable by the caller in that space, or a custom role is previewed where the `custom_roles` feature is off, and `404 view_as_not_found` when the space is not in the organization, the custom role does not exist, or the organization named alongside the persona is not the caller's. Those four codes are the complete set that means \"drop the preview\" — a plain `not_found` under an active persona is the previewed role's own wall, not a refusal of the persona. A refused preview is never answered with the caller's real permissions.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "examples": {
+              "invalid": {
+                "summary": "Header does not parse",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/invalid-view-as",
+                  "title": "Invalid View-As Header",
+                  "status": 400,
+                  "detail": "X-View-As could not be parsed: space and role must be provided together",
+                  "code": "invalid_view_as",
+                  "param": "X-View-As",
+                  "requestId": "req_abc123"
+                }
+              },
+              "notFound": {
+                "summary": "The persona names something that is gone",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/view-as-not-found",
+                  "title": "View-As Target Not Found",
+                  "status": 404,
+                  "detail": "Space 'spc_…' not found in this organization",
+                  "code": "view_as_not_found",
+                  "param": "X-View-As",
+                  "requestId": "req_abc123"
+                }
+              },
+              "unsupported": {
+                "summary": "Credential cannot carry a persona",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/view-as-unsupported",
+                  "title": "View-As Not Supported",
+                  "status": 400,
+                  "detail": "X-View-As is only supported for a user session or the CLI/instance token, not for api_key authentication.",
+                  "code": "view_as_unsupported",
+                  "param": "X-View-As",
+                  "requestId": "req_abc123"
+                }
+              }
             }
           }
         }

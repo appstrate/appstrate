@@ -576,11 +576,22 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
     throw forbidden("You cannot assign this role to this member");
   }
 
-  await updateMemberRole(orgId, targetUserId, data.role);
+  // Promoting to owner/admin drops every explicit space grant the member held
+  // (the org role subsumes them). The rows are gone, so the audit is the only
+  // record of what a later demotion will NOT restore.
+  const revoked = await updateMemberRole(orgId, targetUserId, data.role);
   await recordAuditFromContext(c, {
     action: "org.member_role_updated",
     resourceType: "member",
     resourceId: targetUserId,
+    before: {
+      role: target.role,
+      revoked_space_assignments: revoked.map((row) => ({
+        space_id: row.spaceId,
+        preset_role: row.presetRole,
+        custom_role_id: row.customRoleId,
+      })),
+    },
     after: { role: data.role },
     orgIdOverride: orgId,
   });

@@ -8,6 +8,13 @@ import { SPACE_ID_RE } from "../lib/ids.ts";
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
 /**
+ * Prefix a custom space-role id carries. Only the prefix is published: the
+ * server's full `srl_`+UUID rule is stricter, and a spec that pinned it would
+ * turn a server-side id-shape change into a client-side break.
+ */
+export const SPACE_ROLE_ID_PATTERN = "^srl_";
+
+/**
  * Runtime-tool ids a manifest may DECLARE — the canonical catalog
  * ({@link SELECTABLE_RUNTIME_TOOLS}) spread into the mutable `string[]` a JSON
  * Schema `enum` member takes. There is no second list to pick from and no
@@ -358,10 +365,11 @@ export const schemas = {
     description:
       "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
     required: ["space_id"],
+    oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }],
     properties: {
       space_id: { type: "string" },
       preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-      custom_role_id: { type: "string" },
+      custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
     },
     additionalProperties: false,
   },
@@ -1793,7 +1801,7 @@ export const schemas = {
       object: { type: "string", enum: ["space_member"] },
       userId: { type: "string" },
       preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-      custom_role_id: { type: "string" },
+      custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
     },
   },
 

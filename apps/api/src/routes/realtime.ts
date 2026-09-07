@@ -276,12 +276,10 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       : await loadSpaceMember(space.id, session.user.id),
   );
   if (!grants) {
-    // Under a preview the wall must read as the PERSONA's, not as a dead
-    // session: `null` here is exactly what `applySpacePermissions` turns into
-    // 403 / 404 on the HTTP pipeline, and a preview that answered 401 would
-    // send the SPA to the login page instead of showing the role's limit. The
-    // header-less path keeps its 401 — no existing client changes.
-    if (!persona) return null;
+    // `null` here is exactly what `applySpacePermissions` turns into 403 / 404
+    // on the HTTP pipeline; the stream answers the same, so a member-less
+    // caller is not told to log in again for an authenticated session that is
+    // simply outside the space.
     if (space.visibility === "private") {
       throw notFound(`Space '${space.id}' not found in this organization`);
     }

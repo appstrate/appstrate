@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
 const ROLE_ID_PARAM = {
   name: "id",
   in: "path",
   required: true,
-  schema: { type: "string", pattern: "^srl_" },
+  schema: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
   description: "Custom role id (`srl_` prefix). Presets are not addressable.",
 } as const;
 

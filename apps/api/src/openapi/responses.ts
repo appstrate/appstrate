@@ -294,7 +294,7 @@ export const responses = {
               title: "View-As Not Supported",
               status: 400,
               detail:
-                "X-View-As is only supported for interactive user sessions, not for api_key authentication.",
+                "X-View-As is only supported for a user session or the CLI/instance token, not for api_key authentication.",
               code: "view_as_unsupported",
               param: "X-View-As",
               requestId: "req_abc123",

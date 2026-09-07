@@ -3,24 +3,17 @@
 /**
  * "View as role" — an owner or admin previews the product as a lesser persona.
  *
- * A pure RESTRICTION from the caller's own session: nothing is minted,
- * `c.get("user")` and `c.get("orgRole")` stay real, and only "what does this
- * caller reach" changes — hence its application at the sites that already write
- * `permissions`. Every step is a REFUSAL. Three carriers, one validation
- * ({@link validateViewAs}): the `X-View-As` header, `?view_as=` on the SSE
- * routes (no pipeline, and `EventSource` sends no headers), and the chat
- * module's signed loopback claims. Validated in ONE org, applies only there
- * ({@link personaFor}).
+ * A pure RESTRICTION of the caller's own session: nothing is minted, `c.get("user")` and
+ * `c.get("orgRole")` stay real, every step is a REFUSAL. Validated in ONE org
+ * ({@link validateViewAs}) whatever carrier brought it, and applied only there.
  *
- * Only the ORG set is intersected with the caller's own ({@link orgHalfFor}),
- * because `grantTo` has no nesting rule: a
- * module may grant an org-level permission to `member` and not to `owner`. The
- * SPACE slice is a subset of the previewer's by construction — presets are
- * upward-closed (`assertPresetsUpwardClosed`), eligibility is owner/admin whose
- * real standing in every space is preset `admin`, and a custom bundle is checked
- * grantable at validation. **Widening eligibility below org admin breaks all
- * three**: it must reintroduce a space-half intersection AND read the
- * previewer's real `space_members` row.
+ * Only the ORG set is intersected with the caller's own ({@link orgHalfFor}): `grantTo` has
+ * no nesting rule, so a module may grant an org-level permission to `member` and not to
+ * `owner`. The SPACE slice is a subset of the previewer's by construction — presets are
+ * upward-closed (`assertPresetsUpwardClosed`), eligibility is owner/admin whose real standing
+ * in every space is preset `admin`, and a custom bundle is checked grantable at validation.
+ * **Widening eligibility below org admin breaks all three**: it must reintroduce a space-half
+ * intersection AND read the previewer's real `space_members` row.
  *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §6.7
  */
@@ -62,7 +55,6 @@ export interface ViewAsPersona {
   space: { spaceId: string; role: SpaceRoleRef } | null;
 }
 
-/** The role half of a request; a custom bundle is still just an id here. */
 type PersonaRoleRequest =
   { kind: "preset"; preset: SpaceRolePreset } | { kind: "custom"; roleId: string };
 
@@ -71,7 +63,10 @@ interface ViewAsRequest {
   space: { spaceId: string; role: PersonaRoleRequest } | null;
 }
 
-/** `.strict()` so a misspelled `space` is a refusal, not a whole-org preview; ids shape-checked here. */
+/**
+ * `.strict()` so a misspelled `space` is a refusal, not a whole-org preview;
+ * ids are shape-checked here.
+ */
 const viewAsSchema = z
   .object({
     org_role: z.enum(VIEW_AS_ORG_ROLES),
@@ -93,7 +88,6 @@ const viewAsSchema = z
     message: "space and role must be provided together",
   });
 
-/** Shape {@link adoptViewAs} accepts off the loopback bearer. */
 const personaSchema: z.ZodType<ViewAsPersona> = z.object({
   orgId: z.string(),
   orgRole: z.enum(VIEW_AS_ORG_ROLES),
@@ -136,13 +130,7 @@ function viewAsForbidden(detail: string): ApiError {
   });
 }
 
-/**
- * A 404 the PERSONA caused — its space, its custom role or its organization is
- * gone. Its own code rather than the generic `not_found` because that is the
- * only thing that tells a client "your preview died, drop it" apart from "the
- * thing you asked for does not exist, which is what the previewed role sees".
- * Both are 404s on the same routes; the code is the discriminator.
- */
+/** Its own code: "your preview died" and "not found, as the persona sees it" are both 404s here. */
 function viewAsNotFound(detail: string): ApiError {
   return new ApiError({
     status: 404,
@@ -154,9 +142,8 @@ function viewAsNotFound(detail: string): ApiError {
 }
 
 /**
- * Whitespace tolerated (headers get reformatted in transit); an empty segment,
- * a missing `=` or a repeated key is `null` — "last one wins" on a security
- * header is how two readers disagree. Prototype-less, so `toString=x` is not a repeat.
+ * An empty segment, a missing `=` or a repeated key is `null`: "last one wins"
+ * on a security header is how two readers disagree. Prototype-less throughout.
  */
 function splitFields(header: string): Record<string, string> | null {
   const fields = Object.create(null) as Record<string, string>;
@@ -197,19 +184,14 @@ function parseViewAs(raw: string | undefined): ViewAsRequest | null {
   };
 }
 
-/**
- * Steps 2–5 of the plan's §4.2, free of Hono: `onDenial` is a parameter because
- * SSE runs outside the pipeline; `scopeCeiling` stops a credential previewing a
- * role it could not grant.
- */
+/** Free of Hono: `onDenial` is a parameter because SSE runs outside the pipeline. */
 export async function validateViewAs(input: {
   raw: string | undefined;
   orgId: string;
   realOrgRole: OrgRole;
-  scopeCeiling?: ReadonlySet<string>;
   onDenial: (required: string) => void;
 }): Promise<ViewAsPersona | undefined> {
-  const { raw, orgId, realOrgRole, scopeCeiling, onDenial } = input;
+  const { raw, orgId, realOrgRole, onDenial } = input;
   const request = parseViewAs(raw);
   if (!request) return undefined;
 
@@ -223,7 +205,7 @@ export async function validateViewAs(input: {
     orgId,
     orgRole: request.orgRole,
     space: request.space
-      ? await validatePersonaSpace(request.space, orgId, realOrgRole, scopeCeiling, onDenial)
+      ? await validatePersonaSpace(request.space, orgId, realOrgRole, onDenial)
       : null,
   };
 }
@@ -232,19 +214,16 @@ async function validatePersonaSpace(
   requested: NonNullable<ViewAsRequest["space"]>,
   orgId: string,
   realOrgRole: OrgRole,
-  scopeCeiling: ReadonlySet<string> | undefined,
   onDenial: (required: string) => void,
 ): Promise<NonNullable<ViewAsPersona["space"]>> {
   const space = await validateSpaceInOrg(requested.spaceId, orgId);
   if (!space) throw viewAsNotFound(`Space '${requested.spaceId}' not found in this organization`);
   const role = await resolvePersonaSpaceRole(orgId, requested.role);
-  // Grantability against what the real caller holds THERE — the same rule that
-  // gates handing the role to someone else. Owners and admins never carry a
-  // `space_members` row, so `null` IS their row.
+  // Grantability against what the real caller holds THERE, the same rule that gates handing
+  // the role to someone else. Owners and admins carry no `space_members` row, so `null` IS it.
   const real = effectivePermissions({
     orgPermissions: orgPermissions(realOrgRole),
     spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null)),
-    scopeCeiling,
   });
   if (!canGrantSpaceRole(real, role)) {
     onDenial(`view_as:${requested.role.kind}`);
@@ -257,9 +236,7 @@ async function validatePersonaSpace(
 
 /**
  * Feature gate first: with `custom_roles` off there is no bundle vocabulary to
- * look in. Same predicate as the role routes ({@link hasCustomRoles}), a
- * different refusal — every way a persona can be turned down has to be a code
- * the client recognizes as "drop the preview".
+ * look in, and every refusal here carries a code the client reads as "drop it".
  */
 async function resolvePersonaSpaceRole(
   orgId: string,
@@ -285,13 +262,9 @@ async function resolvePersonaSpaceRole(
   };
 }
 
-// ─── Carriers ──────────────────────────────────────────────────────────────
-
 /**
- * Eligibility at the earliest point the header can be judged: a key or bearer
- * carries its own ceiling and no session to narrow. The marker goes after the
- * handler; refusals get it from `errorHandler`, which builds a fresh response.
- * Who reads that marker: {@link VIEW_AS_ACTIVE_HEADER}.
+ * Eligibility at the earliest point the header can be judged: a key or bearer carries its own
+ * ceiling and no session to narrow. The marker goes on after the handler, or via `errorHandler`.
  */
 export function viewAsTransportGuard() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -327,7 +300,6 @@ export async function resolveViewAs(
     raw: c.req.header(VIEW_AS_HEADER),
     orgId,
     realOrgRole,
-    scopeCeiling: c.get("scopeCeiling"),
     onDenial: (required) => reportPermissionDenial(c, required),
   });
   if (persona) c.set("viewAs", persona);
@@ -347,7 +319,8 @@ export async function resolveListingViewAs(
   const orgId = c.get("orgId") ?? c.req.header("X-Org-Id");
   if (!orgId) {
     throw invalidViewAs(
-      `${VIEW_AS_HEADER} names no organization on this operation. Send X-Org-Id alongside it to say which organization the role is previewed in.`,
+      `${VIEW_AS_HEADER} names no organization on this operation. ` +
+        "Send X-Org-Id alongside it to say which organization the role is previewed in.",
     );
   }
   const row = orgs.find((org) => org.id === orgId);
@@ -356,12 +329,9 @@ export async function resolveListingViewAs(
 }
 
 /**
- * ADOPTED, not re-validated: HMAC-signed with a process-local secret, minted
- * from a request the pipeline already validated (the trust `claims.permissions`
- * gets), and the hop's ceiling IS the persona's set so re-validating would ask
- * the wrong question. `"viewAs"` is a literal on both ends — apps/api →
- * module-chat, so the writer cannot import from here — and a rename that misses
- * one end fails the loopback integration test.
+ * ADOPTED, not re-validated: HMAC-signed with a process-local secret, minted from a request
+ * the pipeline already validated, and the hop's ceiling IS the persona's set. `"viewAs"` is a
+ * literal on both ends — module-chat writes it and cannot import from here.
  */
 export function adoptViewAs(
   c: Context<AppEnv>,
@@ -374,29 +344,23 @@ export function adoptViewAs(
   if (!parsed.success) {
     throw invalidViewAs("The loopback bearer carries a role preview this server cannot read.");
   }
-  // A persona applies in ONE org. Publishing one minted for another would stamp
-  // `X-View-As-Active` on a response no persona shaped — every accessor here is
-  // already org-keyed, so the set would narrow nothing and only mislead.
+  // A persona applies in ONE org. Publishing one minted for another would stamp the active
+  // marker on a response no persona shaped: every accessor here is org-keyed, so it misleads.
   if (parsed.data.orgId !== orgId) return;
   c.set("viewAs", parsed.data);
 }
 
-// ─── Applying a persona ────────────────────────────────────────────────────
-
-/** The persona in force for `orgId` — `undefined` in every other org. */
 export function personaFor(c: Context<AppEnv>, orgId: string): ViewAsPersona | undefined {
   const persona = c.get("viewAs");
   return persona?.orgId === orgId ? persona : undefined;
 }
 
 /**
- * The org half of `permissions`, for every site that writes it: the caller's
- * role grants ∪ their principal grants, replaced under a preview by the
- * persona's role grants INTERSECTED with that. A persona takes no principal
- * grants of its own (those are the administrator's), but the set it is
- * intersected with keeps them, so a preview can never exceed the caller.
- *
- * One helper, so a persona cannot apply on some paths and not others.
+ * The org half of `permissions`, for every site that writes it (one helper, so a persona
+ * cannot apply on some paths and not others): the caller's role grants ∪ their principal
+ * grants, replaced under a preview by the persona's role grants INTERSECTED with that. A
+ * persona takes none of the principal grants itself, but the set it is intersected with keeps
+ * them, so a preview can never exceed the caller.
  */
 export function orgHalfFor(
   c: Context<AppEnv>,
@@ -405,8 +369,6 @@ export function orgHalfFor(
   principal?: ReadonlySet<string>,
 ): { orgPermissions: Set<string>; effective: Set<string> } {
   const fromRole = orgPermissions(role);
-  // Allocate a second Set only when a module actually granted something — with
-  // no such module the OSS path keeps the exact shape it had.
   const real: Set<string> =
     principal && principal.size > 0 ? new Set<string>([...fromRole, ...principal]) : fromRole;
   const persona = orgId === undefined ? undefined : personaFor(c, orgId);
@@ -423,7 +385,6 @@ export function orgHalfFor(
   };
 }
 
-/** What this caller reaches in `orgId`; `c.get("orgRole")` stays real. */
 export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRole {
   return personaFor(c, orgId)?.orgRole ?? c.get("orgRole");
 }
@@ -433,7 +394,6 @@ export function personaSpaceMember(persona: ViewAsPersona, spaceId: string): Spa
   return persona.space?.spaceId === spaceId ? { ref: persona.space.role } : null;
 }
 
-/** The caller's row in one space, replaced by the persona overlay while previewing. */
 export async function callerSpaceMember(
   c: Context<AppEnv>,
   orgId: string,
@@ -454,7 +414,6 @@ export function personaMemberships(
   return overlay;
 }
 
-/** {@link personaMemberships} for a caller that must always get a map. */
 export async function callerSpaceMemberships(
   c: Context<AppEnv>,
   orgId: string,
@@ -465,7 +424,6 @@ export async function callerSpaceMemberships(
   );
 }
 
-/** Snake_case snapshot, as audit rows and denial records carry it. */
 export function viewAsWire(persona: ViewAsPersona): Record<string, unknown> {
   return {
     org_role: persona.orgRole,

@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
-  reportPermissionDenial,
   makePermissionGuard,
   SPACE_ROLE_PRESETS,
   SPACE_VISIBILITIES,
@@ -37,7 +36,7 @@ import {
   resolveOrgMemberEmail,
   saveSpaceMember,
 } from "../services/space-members.ts";
-import { effectivePermissions, orgPermissions as orgPermissionsFor } from "../lib/permissions.ts";
+import { effectivePermissions } from "../lib/permissions.ts";
 import {
   callerOrgRole,
   callerSpaceMember,
@@ -68,7 +67,7 @@ import {
   packagePermission,
   spacePackagePermission,
 } from "../lib/package-access.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import {
   exactlyOneRole,
   spaceRoleAssignmentShape,
@@ -85,11 +84,6 @@ import {
   validateGenerationOverride,
 } from "../services/org-models.ts";
 
-/**
- * Project a Drizzle space row onto the wire shape. The DB column is
- * `created_by` (snake_case) but the Drizzle TS field is `createdBy`; the wire
- * contract (SpaceObject) is snake_case `created_by`, so rename here.
- */
 /**
  * The wire shape every space response carries: the row plus the CALLER's
  * standing in it. `SpaceObject` requires all five, so a route that returned
@@ -112,7 +106,7 @@ function spaceWireForCaller(
     role: toSpaceRoleWire(role),
     permissions: [
       ...effectivePermissions({
-        orgPermissions: c.get("orgPermissions") ?? orgPermissionsFor(callerOrgRole(c)),
+        orgPermissions: c.get("orgPermissions") ?? new Set<string>(),
         spacePermissions: spacePermissions(role),
         scopeCeiling: c.get("scopeCeiling"),
       }),
@@ -120,7 +114,6 @@ function spaceWireForCaller(
   };
 }
 
-/** Narrow a validated member body to the service's assignment shape. */
 /**
  * Project a Drizzle space row onto the wire shape. The DB columns are
  * `created_by` / `default_role`; the Drizzle TS fields are `createdBy` /
@@ -248,15 +241,10 @@ async function gateSpacePackageWrite(
   packageId: string,
   op: SpacePackageOp,
 ): Promise<PackageType> {
-  const held = c.get("permissions");
   const alternatives = (["agent", "skill", "integration", "mcp-server"] as const).map((type) =>
     spacePackagePermission(type, op),
   );
-  if (!alternatives.some((perm) => held?.has(perm))) {
-    // Audited like a guard denial — the disjunction is what the record names.
-    reportPermissionDenial(c, alternatives.join("|"));
-    throw forbidden(`Insufficient permissions: cannot ${op} a package in this space`);
-  }
+  await requireAnyPermission(alternatives)(c, async () => {});
 
   const type =
     op === "install"
@@ -397,7 +385,7 @@ export function createSpacesRouter() {
           action: "space.updated",
           resourceType: "space",
           resourceId: space.id,
-          after: data as unknown as Record<string, unknown>,
+          after: data,
         });
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {
@@ -441,31 +429,31 @@ export function createSpacesRouter() {
   router.use("/:id/members", requireSpaceFromParam("id"));
   router.use("/:id/members/*", requireSpaceFromParam("id"));
 
-  router.get("/:id/roles", requireSpaceFromParam("id"), async (c) => {
-    const permissions = c.get("permissions");
-    const alternatives = [
+  router.get(
+    "/:id/roles",
+    requireSpaceFromParam("id"),
+    requireAnyPermission([
       "space-members:invite",
       "space-members:change-role",
       "space-settings:write",
-    ];
-    if (!alternatives.some((permission) => permissions?.has(permission))) {
-      reportPermissionDenial(c, alternatives.join("|"));
-      throw forbidden("Insufficient permissions: cannot assign roles in this space");
-    }
-    const roles = await listSpaceRoles(c.get("orgId"));
-    return c.json(
-      listResponse(
-        roles.filter((role) =>
-          canGrantSpaceRole(
-            permissions,
-            role.kind === "preset"
-              ? { kind: "preset", preset: role.key as SpaceRolePreset }
-              : { kind: "custom", role: { ...role, id: role.id! } },
+    ]),
+    async (c) => {
+      const permissions = c.get("permissions");
+      const roles = await listSpaceRoles(c.get("orgId"));
+      return c.json(
+        listResponse(
+          roles.filter((role) =>
+            canGrantSpaceRole(
+              permissions,
+              role.kind === "preset"
+                ? { kind: "preset", preset: role.key as SpaceRolePreset }
+                : { kind: "custom", role: { ...role, id: role.id! } },
+            ),
           ),
         ),
-      ),
-    );
-  });
+      );
+    },
+  );
 
   // GET /api/spaces/:id/members — who actually has access, not who was added.
   // `space-members:read` opens the list; the IMPLICIT half of it is the org
@@ -498,7 +486,7 @@ export function createSpacesRouter() {
       action: "space.member_added",
       resourceType: "space_member",
       resourceId: `${spaceId}:${userId}`,
-      after: assignment as unknown as Record<string, unknown>,
+      after: assignment,
     });
     return c.json({ object: "space_member", userId, ...assignment }, 201);
   });
@@ -527,7 +515,7 @@ export function createSpacesRouter() {
         action: "space.member_role_changed",
         resourceType: "space_member",
         resourceId: `${spaceId}:${userId}`,
-        after: assignment as unknown as Record<string, unknown>,
+        after: assignment,
       });
       return c.json({ object: "space_member", userId, ...assignment });
     },
@@ -612,7 +600,10 @@ export function createSpacesRouter() {
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
-      if (!row) {
+      // A row the caller may not read reads as absent, exactly as the list
+      // route omits it. Answering 403 instead would turn this route into a
+      // package-type oracle for a role that cannot see the row at all.
+      if (!row || !c.get("permissions")?.has(packagePermission(row.package_type, "read"))) {
         throw new ApiError({
           status: 404,
           code: "package_not_installed",

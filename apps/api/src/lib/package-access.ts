@@ -94,9 +94,7 @@ export async function packageAccessSpaces(
       ? Promise.resolve(new Map())
       : callerSpaceMemberships(c, orgId),
   ]);
-  const pinned = c.get("authMethod") === "api_key" ? c.get("spaceId") : undefined;
   return rows.flatMap((space) => {
-    if (pinned && space.id !== pinned) return [];
     if (c.get("endUser") && !c.get("orgRole")) {
       return space.id === c.get("spaceId")
         ? [{ ...space, permissions: c.get("permissions") ?? new Set<Permission>() }]
@@ -185,8 +183,9 @@ export async function assertPackageMutationAccess(
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<void> {
   const { pkg, accessible, installations } = await loadPackageAccess(c, packageId, resolvedSpaces);
-  if (pkg.orgId !== c.get("orgId"))
-    throw forbidden("Cannot modify a package not in your organization.");
+  // The catalog read above is `orgOrSystemFilter`ed, so another org's package
+  // never loads at all (404). A row whose org does not match is a SYSTEM one.
+  if (pkg.orgId !== c.get("orgId")) throw forbidden("Cannot modify a system package.");
   const permission = packagePermission(pkg.type, action);
   await makePermissionGuard(permission)(c, async () => {});
   const allowed = new Set(

@@ -27,6 +27,7 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
 import { deleteSpaceMembershipsInOrg } from "./space-members.ts";
+import type { RevokedSpaceAssignment } from "./space-members.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -410,17 +411,18 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
   await removeScheduleJobs(disabledScheduleIds);
 }
 
+/** @returns the explicit space grants the promotion revoked, for the audit trail. */
 export async function updateMemberRole(
   orgId: string,
   userId: string,
   role: OrgRole,
-): Promise<void> {
+): Promise<RevokedSpaceAssignment[]> {
   // One transaction: promoting someone to admin/owner makes their explicit
   // space roles unreadable (the resolver answers `admin` from the org role
   // before it looks at the row), so the rows go with the promotion rather than
   // lying in wait for a later demotion to silently restore a role nobody
   // re-granted. RBAC spec §3.2.
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const updated = await tx
       .update(organizationMembers)
       .set({ role })
@@ -435,9 +437,9 @@ export async function updateMemberRole(
     if (updated.length === 0) {
       throw new Error("Failed to update member role: member not found");
     }
-    if (role === "owner" || role === "admin") {
-      await deleteSpaceMembershipsInOrg(tx, orgId, userId);
-    }
+    return role === "owner" || role === "admin"
+      ? await deleteSpaceMembershipsInOrg(tx, orgId, userId)
+      : [];
   });
 }
 

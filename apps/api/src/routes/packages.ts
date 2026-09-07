@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { makePermissionGuard } from "@appstrate/core/permissions";
-import type { Context, Next } from "hono";
+import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
@@ -72,7 +72,7 @@ import {
   packagePermission,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -1664,12 +1664,7 @@ async function requirePackageReadPermission(c: Context<AppEnv>, type: string): P
 }
 
 /** Reject non-authors before parsing uploads or fetching a GitHub archive. */
-async function requireAnyPackageWrite(c: Context<AppEnv>, next: Next) {
-  const granted = PACKAGE_WRITE_PERMISSIONS.find((permission) =>
-    c.get("permissions")?.has(permission),
-  );
-  return makePermissionGuard(granted ?? "agents:write")(c, next);
-}
+const requireAnyPackageWrite = requireAnyPermission(PACKAGE_WRITE_PERMISSIONS);
 
 // ═══════════════════════════════════════════════
 // Router
