@@ -15,6 +15,18 @@
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 
+/**
+ * Hard cap on buffered events per run. A pathological runner that
+ * permanently skips a sequence would otherwise accumulate every later
+ * event in the buffer until the watchdog finalises the run — sized 100×
+ * above any realistic burst so the happy path never trips this. When
+ * it does trip, we drop the LOWEST-sequenced entries (the stale ones
+ * waiting on the missing gap) so the most recent events are kept.
+ *
+ * Both backends enforce it identically and log the same overflow warning.
+ */
+export const MAX_BUFFER_ENTRIES = 10_000;
+
 export interface BufferedEvent {
   sequence: number;
   event: RunEvent;
