@@ -15,7 +15,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildProviderPickerRows } from "../provider-registry-helpers.ts";
+import {
+  buildProviderPickerRows,
+  CUSTOM_ENDPOINT_ID,
+  pickedProviderId,
+} from "../provider-registry-helpers.ts";
 
 const entry = (id: string, overridable: boolean, featured = false) => ({
   providerId: id,
@@ -47,5 +51,25 @@ describe("buildProviderPickerRows", () => {
   it("offers no such row when no entry can be pointed elsewhere", () => {
     const rows = buildProviderPickerRows([entry("anthropic", false), entry("openai", false)]);
     expect(rows.every((r) => r.kind === "provider")).toBe(true);
+  });
+});
+
+describe("pickedProviderId", () => {
+  const registry = [
+    entry("anthropic", false),
+    entry("openai-compatible", true),
+    entry("anthropic-compatible", true),
+  ];
+
+  it("opens the custom-endpoint row on the first overridable entry", () => {
+    expect(pickedProviderId(CUSTOM_ENDPOINT_ID, registry)).toBe("openai-compatible");
+  });
+
+  it("passes a real provider id through untouched", () => {
+    expect(pickedProviderId("anthropic", registry)).toBe("anthropic");
+  });
+
+  it("resolves to nothing when no entry is overridable", () => {
+    expect(pickedProviderId(CUSTOM_ENDPOINT_ID, [entry("anthropic", false)])).toBe("");
   });
 });

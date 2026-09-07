@@ -183,7 +183,9 @@ function form(
   const qc = new QueryClient();
   qc.setQueryData(REGISTRY_KEY, { data: [ANTHROPIC, CLAUDE_CODE, OPENAI_COMPATIBLE] });
   qc.setQueryData(CREDENTIALS_KEY, { data: credentials });
-  return render(<ModelFormBody model={target} onSubmit={() => {}} />, { queryClient: qc });
+  return render(<ModelFormBody model={target} onSubmit={async () => ({ failedModelIds: [] })} />, {
+    queryClient: qc,
+  });
 }
 
 describe("ModelFormBody — adding a model, nothing picked yet", () => {

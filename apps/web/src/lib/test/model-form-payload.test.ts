@@ -265,7 +265,7 @@ describe("buildModelFormPayload — capabilities", () => {
   });
 
   it("clears every stored override when the toggle is off on an edit", () => {
-    // `PATCH /api/models/{id}` reads `null` as "drop it and resolve from the
+    // `PUT /api/models/{id}` reads `null` as "drop it and resolve from the
     // catalog again" — omitting would keep an override the operator just
     // declined to own.
     const result = build({
@@ -504,7 +504,7 @@ describe("buildModelFormPayload — missing credential", () => {
 });
 
 describe("toCreateModelBody", () => {
-  it("drops the `null` clears, which only PATCH understands", () => {
+  it("drops the `null` clears, which only PUT understands", () => {
     // A create has no stored override to drop; `POST /api/models` refuses the
     // nulls outright (`createModelSchema` — value or nothing).
     const body = toCreateModelBody(

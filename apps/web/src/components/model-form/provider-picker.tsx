@@ -26,8 +26,22 @@ import {
   buildProviderPickerRows,
   CUSTOM_ENDPOINT_ID,
   getProviderById,
+  pickedProviderId,
 } from "@/lib/provider-registry-helpers";
 import type { ProviderRegistryEntry } from "../../hooks/use-model-provider-credentials";
+
+/** The one row every `baseUrlOverridable` entry collapses into. */
+export function CustomEndpointItem() {
+  const { t } = useTranslation(["settings", "common"]);
+  return (
+    <SelectItem value={CUSTOM_ENDPOINT_ID}>
+      <span className="flex items-center gap-2">
+        <Server className="size-4" />
+        {t("models.form.customEndpoint")}
+      </span>
+    </SelectItem>
+  );
+}
 
 export function ProviderPicker({
   id,
@@ -51,13 +65,7 @@ export function ProviderPicker({
       <Select
         value={overridable ? CUSTOM_ENDPOINT_ID : providerId}
         disabled={disabled}
-        onValueChange={(picked) =>
-          onChange(
-            picked === CUSTOM_ENDPOINT_ID
-              ? (registry.find((p) => p.baseUrlOverridable)?.providerId ?? "")
-              : picked,
-          )
-        }
+        onValueChange={(picked) => onChange(pickedProviderId(picked, registry))}
       >
         <SelectTrigger id={id}>
           <SelectValue placeholder={t("models.form.providerPlaceholder")} />
@@ -69,14 +77,7 @@ export function ProviderPicker({
             otherLabel={t("models.form.providerGroupOther")}
             renderItem={(row) => {
               if (row.kind === "customEndpoint") {
-                return (
-                  <SelectItem key={CUSTOM_ENDPOINT_ID} value={CUSTOM_ENDPOINT_ID}>
-                    <span className="flex items-center gap-2">
-                      <Server className="size-4" />
-                      {t("models.form.customEndpoint")}
-                    </span>
-                  </SelectItem>
-                );
+                return <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />;
               }
               const Icon = getProviderIcon(row.entry);
               return (

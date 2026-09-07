@@ -65,7 +65,7 @@ interface ModelFormCredentialBinding {
 
 /**
  * One model, ready to submit. The four capability overrides widen to `null`
- * here: `PATCH /api/models/{id}` reads `null` as "drop the stored override and
+ * here: `PUT /api/models/{id}` reads `null` as "drop the stored override and
  * resolve from the catalog again", which is how the form clears one. `POST`
  * has nothing to clear and refuses `null`, so a create body goes through
  * {@link toCreateModelBody}.
@@ -117,9 +117,7 @@ export interface ModelFormSubmitOutcome {
   credentialId?: string;
 }
 
-export type ModelFormSubmit = (
-  data: ModelFormSubmission,
-) => void | Promise<ModelFormSubmitOutcome | void>;
+export type ModelFormSubmit = (data: ModelFormSubmission) => Promise<ModelFormSubmitOutcome>;
 
 /** The registry facts the payload turns on — a `ProviderRegistryEntry` fits. */
 export interface ModelFormProvider {

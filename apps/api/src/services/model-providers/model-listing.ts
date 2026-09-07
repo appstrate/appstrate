@@ -23,8 +23,8 @@ import { fetchModelListing } from "../org-models.ts";
 /** Upper bound on models taken from one listing response. */
 const MAX_SERVED_MODELS = 1000;
 
-/** Input modalities a listing entry can advertise, in canonical order. */
-const INPUT_MODALITIES = ["text", "image"] as const;
+/** Input modalities a listing entry or a catalog entry can advertise, in canonical order. */
+export const INPUT_MODALITIES = ["text", "image"] as const;
 
 /** Context-window fields, in the order the first positive integer wins. */
 const CONTEXT_WINDOW_FIELDS = ["max_model_len", "context_length", "max_context_length"] as const;
@@ -47,7 +47,7 @@ type ListServedModelsError =
   "AUTH_FAILED" | "RATE_LIMITED" | "UNREACHABLE" | "BLOCKED_URL" | "BAD_RESPONSE" | "HTTP_ERROR";
 
 export type ListServedModelsResult =
-  | { ok: true; models: ServedModel[]; latency: number }
+  | { ok: true; models: ServedModel[] }
   | { ok: false; error: ListServedModelsError; status?: number; message: string };
 
 /** Where the ids sit in a `/models` response body, per `apiShape`. */
@@ -176,7 +176,7 @@ export async function listServedModels(config: {
     };
   }
 
-  const { res, latency } = listing;
+  const { res } = listing;
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
       return {
@@ -218,5 +218,5 @@ export async function listServedModels(config: {
       message: `Unrecognised model listing shape for ${config.apiShape}`,
     };
   }
-  return { ok: true, models, latency };
+  return { ok: true, models };
 }

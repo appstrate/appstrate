@@ -16,7 +16,12 @@
  * about its capabilities.
  */
 
-import { catalogModalities } from "./model-source";
+/** The two capability strings that describe an input modality, not a behaviour. */
+const MODALITIES = ["text", "image"];
+
+function catalogModalities(capabilities: readonly string[]): string[] {
+  return capabilities.filter((c) => MODALITIES.includes(c));
+}
 
 /** The stored row's four catalog-derivable fields — an `OrgModel` fits. */
 export interface StoredModelValues {
@@ -40,9 +45,10 @@ export function sameSet(a: readonly string[], b: readonly string[]): boolean {
 
 /**
  * The four answers the catalog entry gives on its own, in the stored row's
- * shape. Both readers of this file compare against it: the toggle asks whether
- * the row already disagrees, the payload asks — field by field — whether what
- * is on screen is anything but the catalog's own number read back.
+ * shape. The pick list renders them, and both readers of this file compare
+ * against them: the toggle asks whether the row already disagrees, the payload
+ * asks — field by field — whether what is on screen is anything but the
+ * catalog's own number read back.
  */
 export function catalogValues(entry: CatalogModelValues): {
   input: string[];

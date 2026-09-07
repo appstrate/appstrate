@@ -196,6 +196,12 @@ export function useModelFormHandler(opts: {
   const isPending =
     submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
 
+  /** The credential the model(s) bind to: the picked one, or the typed key created first. */
+  const bindCredential = async (data: ModelFormSubmission): Promise<string> =>
+    data.newCredential
+      ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
+      : data.credentialId;
+
   /**
    * One credential, then one `POST /api/models` per entry — there is no bulk
    * create. Each refusal is collected instead of aborting: the models around a
@@ -204,9 +210,7 @@ export function useModelFormHandler(opts: {
   const submitBatch = async (data: ModelFormMultiData): Promise<ModelFormSubmitOutcome> => {
     setSubmitPending(true);
     try {
-      const credentialId = data.newCredential
-        ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
-        : data.credentialId;
+      const credentialId = await bindCredential(data);
       const failedModelIds: string[] = [];
       for (const entry of data.models) {
         try {
@@ -236,9 +240,7 @@ export function useModelFormHandler(opts: {
   const submitOne = async (data: ModelFormData): Promise<ModelFormSubmitOutcome> => {
     setSubmitPending(true);
     try {
-      const credentialId = data.newCredential
-        ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
-        : data.credentialId;
+      const credentialId = await bindCredential(data);
       if (opts.editModel) {
         const { newCredential: _, ...modelData } = data;
         await updateModel.mutateAsync({

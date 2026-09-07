@@ -184,7 +184,7 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 - **Model discovery for API-key providers lists the provider's models once
   instead of issuing N identical requests that verified nothing.**
-  `discoverAvailableModels` now calls `listServedModelIds`
+  `discoverAvailableModels` now calls `listServedModels`
   (`services/model-providers/model-listing.ts`), which sends ONE guarded
   `GET <base_url>/models`, parses the response per `apiShape`
   (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }` for the

@@ -282,13 +282,25 @@ function ModelForm({
     dropListing();
   };
 
-  const handleProviderChange = (id: string) => {
+  /** Bind the form to one saved credential (or to none) — a typed key never coexists with it. */
+  const bindCredential = (id: string) => {
+    setValue("credentialId", id);
+    setValue("inlineApiKey", "");
+    clearErrors("credentialId");
+  };
+
+  /**
+   * Point the form at another registry entry. A saved credential belongs to the
+   * provider it was picked for — carrying it over would bind the model to the
+   * endpoint the operator just left — and the model step was answered against
+   * a listing this endpoint no longer serves. A typed key survives only the
+   * API-type switch: it re-points the endpoint, not the secret.
+   */
+  const switchProvider = (id: string, keepTypedKey: boolean) => {
     setProviderId(id);
     clearErrors();
-    // The credential belongs to the provider it was picked for — carrying it
-    // over would bind the model to the endpoint the operator just left.
     setValue("credentialId", "");
-    setValue("inlineApiKey", "");
+    if (!keepTypedKey) setValue("inlineApiKey", "");
     const provider = getProviderById(id, registry);
     if (provider) {
       setValue("apiShape", provider.apiShape);
@@ -299,25 +311,11 @@ function ModelForm({
     resetModelStep();
   };
 
-  // Switching the wire format re-points the endpoint, not the secret: the URL
-  // follows the new entry and the typed key stays. A saved credential pins both,
-  // and the model was named by a listing this endpoint no longer serves.
-  const handleApiTypeChange = (entry: ProviderRegistryEntry) => {
-    setProviderId(entry.providerId);
-    clearErrors();
-    setValue("apiShape", entry.apiShape);
-    setValue("baseUrl", entry.defaultBaseUrl);
-    setValue("credentialId", "");
-    resetModelStep();
-  };
-
   const existingKeys = {
     items: availableCredentials,
     selected: selectedCredential ?? null,
     onSelect: (id: string) => {
-      setValue("credentialId", id);
-      setValue("inlineApiKey", "");
-      clearErrors("credentialId");
+      bindCredential(id);
       // The key carries the endpoint it was saved against — the form follows it
       // there (and pins the field) instead of asking for the URL again.
       const key = availableCredentials.find((k) => k.id === id);
@@ -325,8 +323,7 @@ function ModelForm({
       dropListing();
     },
     onClear: () => {
-      setValue("credentialId", "");
-      setValue("inlineApiKey", "");
+      bindCredential("");
       dropListing();
     },
   };
@@ -378,7 +375,7 @@ function ModelForm({
         return;
       }
       const outcome = await onSubmit(batch.data);
-      if (!outcome || outcome.failedModelIds.length === 0) return;
+      if (outcome.failedModelIds.length === 0) return;
       if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
       setFailedModelIds(outcome.failedModelIds);
       // Only what failed stays checked — the rest are rows in the table now.
@@ -401,7 +398,7 @@ function ModelForm({
     // A refused save leaves the dialog open on the values that caused it, so
     // it has to say so: the host closes on success and reports nothing here.
     const outcome = await onSubmit(result.data);
-    if (outcome && outcome.failedModelIds.length > 0) {
+    if (outcome.failedModelIds.length > 0) {
       setError("modelId", { message: t("models.form.saveFailed") });
     }
   });
@@ -410,8 +407,10 @@ function ModelForm({
   // absent name as "keep it", so clearing it is refused rather than saved.
   const labelValidate = (v: string) =>
     !model || v.trim() ? undefined : t("validation.required", { ns: "common" });
-  const baseUrlValidate = (v: string) =>
-    !overridable || parsesAsUrl(v) ? undefined : t("validation.required", { ns: "common" });
+  const baseUrlValidate = (v: string) => {
+    if (!overridable || parsesAsUrl(v)) return undefined;
+    return t(v.trim() ? "validation.urlFormat" : "validation.required", { ns: "common" });
+  };
   // An empty id with no arrangement to type it in names the steps, not the field.
   const modelIdValidate = (v: string) =>
     v.trim()
@@ -440,14 +439,14 @@ function ModelForm({
         // The endpoint belongs to the saved row; changing it would rebind the
         // model to a service it was never verified against.
         disabled={!!model}
-        onChange={handleProviderChange}
+        onChange={(id) => switchProvider(id, false)}
       />
 
       <EndpointFields
         idPrefix="mdl"
         provider={selectedProvider}
         providers={registry.filter((p) => p.baseUrlOverridable)}
-        onApiTypeChange={handleApiTypeChange}
+        onApiTypeChange={(entry) => switchProvider(entry.providerId, true)}
         providerLocked={!!model}
         baseUrlProps={register("baseUrl", { validate: baseUrlValidate, onChange: dropListing })}
         // The URL is a property of the credential (`baseUrlOverride`), not of
@@ -570,9 +569,7 @@ function ModelForm({
           <OAuthPairingBody
             providerId={providerId}
             onConnected={(newId) => {
-              setValue("credentialId", newId);
-              setValue("inlineApiKey", "");
-              clearErrors("credentialId");
+              bindCredential(newId);
               setOauthDialogOpen(false);
             }}
             onBusyChange={oauthDismiss.onBusyChange}

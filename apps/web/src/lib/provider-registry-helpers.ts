@@ -43,6 +43,19 @@ export function buildProviderPickerRows<
 }
 
 /**
+ * The registry `providerId` a picker value stands for. The custom-endpoint row
+ * opens on the first overridable entry — the "API type" select then offers the
+ * rest — and any other value is already a `providerId`.
+ */
+export function pickedProviderId<T extends { providerId: string; baseUrlOverridable: boolean }>(
+  picked: string,
+  entries: readonly T[],
+): string {
+  if (picked !== CUSTOM_ENDPOINT_ID) return picked;
+  return entries.find((e) => e.baseUrlOverridable)?.providerId ?? "";
+}
+
+/**
  * Locate the provider that owns a given `(apiShape, baseUrl)` combination.
  * Used by run-overrides, agent-configuration, and the credential form's
  * "what icon should this row show?" lookup. Matches on apiShape AND

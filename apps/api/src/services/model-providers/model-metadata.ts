@@ -21,12 +21,12 @@
  */
 
 import type { CatalogModelEntry } from "@appstrate/shared-types";
-import type { ServedModelHints } from "./model-listing.ts";
+import { INPUT_MODALITIES, type ServedModelHints } from "./model-listing.ts";
 import { listCatalogProviderIds, lookupCatalogModel } from "../pricing-catalog.ts";
 import { getModelProvider } from "./registry.ts";
 
 /** Catalog capabilities that describe what the model accepts as input. */
-const INPUT_MODALITIES = new Set(["text", "image"]);
+const MODALITIES: readonly string[] = INPUT_MODALITIES;
 
 /** Everything we can tell about a served id, minus its price. */
 interface ServedModelDescription {
@@ -89,7 +89,7 @@ export function describeServedModel(
     label: entry?.label ?? null,
     contextWindow: hints.contextWindow ?? entry?.contextWindow ?? null,
     maxTokens: hints.maxTokens ?? entry?.maxTokens ?? null,
-    input: hints.input ?? entry?.capabilities.filter((c) => INPUT_MODALITIES.has(c)) ?? null,
+    input: hints.input ?? entry?.capabilities.filter((c) => MODALITIES.includes(c)) ?? null,
     reasoning: hints.reasoning ?? entry?.capabilities.includes("reasoning") ?? null,
     source: hinted ? "endpoint" : entry ? "catalog" : null,
   };

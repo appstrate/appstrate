@@ -25,7 +25,6 @@ import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
-import { Server } from "lucide-react";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
@@ -49,9 +48,11 @@ import {
   buildProviderPickerRows,
   CUSTOM_ENDPOINT_ID,
   getProviderById,
+  pickedProviderId,
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
 import { EndpointFields } from "./model-form/endpoint-fields";
+import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
 import { ProviderPickerGroups } from "./provider-picker-groups";
 import { OAuthPairingBody } from "./oauth-pairing-body";
@@ -220,7 +221,7 @@ function CredentialFormBody({
   };
 
   const handleProviderChange = (picked: string) => {
-    const id = picked === CUSTOM_ENDPOINT_ID ? (overridableProviders[0]?.providerId ?? "") : picked;
+    const id = pickedProviderId(picked, registry);
     setSelectedId(id);
     clearErrors();
     const option = options.find((o) => o.id === id);
@@ -306,7 +307,7 @@ function CredentialFormBody({
                       otherLabel={t("models.form.providerGroupOther")}
                       renderItem={(row) =>
                         row.kind === "customEndpoint" ? (
-                          <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} t={t} />
+                          <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
                         ) : (
                           <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
                         )
@@ -377,7 +378,7 @@ function CredentialFormBody({
                 otherLabel={t("models.form.providerGroupOther")}
                 renderItem={(row) =>
                   row.kind === "customEndpoint" ? (
-                    <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} t={t} />
+                    <CustomEndpointItem key={CUSTOM_ENDPOINT_ID} />
                   ) : (
                     <PickerOptionItem key={row.entry.id} option={row.entry} t={t} />
                   )
@@ -447,18 +448,6 @@ function CredentialFormBody({
         )}
       </form>
     </Modal>
-  );
-}
-
-/** The one row every `baseUrlOverridable` entry collapses into. */
-function CustomEndpointItem({ t }: { t: (key: string) => string }): React.ReactNode {
-  return (
-    <SelectItem value={CUSTOM_ENDPOINT_ID}>
-      <span className="flex items-center gap-2">
-        <Server className="size-4" />
-        {t("models.form.customEndpoint")}
-      </span>
-    </SelectItem>
   );
 }
 

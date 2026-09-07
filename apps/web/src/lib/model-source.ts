@@ -12,6 +12,7 @@
 import type { ModelCost } from "@appstrate/core/module";
 import type { DiscoveredModel } from "../hooks/use-model-provider-credentials";
 import type { OpenRouterModel } from "../hooks/use-models";
+import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
 
 export type ModelSource = "catalog" | "discover" | "search";
 
@@ -64,30 +65,17 @@ export interface ModelPickRow {
 }
 
 /** The catalog fields a registry entry publishes per model. */
-export interface CatalogModelEntry {
+export interface CatalogModelEntry extends CatalogModelValues {
   id: string;
   label: string;
-  contextWindow: number;
-  maxTokens?: number | null;
-  capabilities: string[];
   featured: boolean;
-}
-
-/** The two capability strings that describe an input modality, not a behaviour. */
-const MODALITIES = ["text", "image"];
-
-export function catalogModalities(capabilities: readonly string[]): string[] {
-  return capabilities.filter((c) => MODALITIES.includes(c));
 }
 
 export function catalogRows(entries: readonly CatalogModelEntry[]): ModelPickRow[] {
   return entries.map((m) => ({
     id: m.id,
     label: m.label,
-    contextWindow: m.contextWindow,
-    maxTokens: m.maxTokens ?? null,
-    input: catalogModalities(m.capabilities),
-    reasoning: m.capabilities.includes("reasoning"),
+    ...catalogValues(m),
     source: "catalog",
     cost: null,
     origin: "catalog",
