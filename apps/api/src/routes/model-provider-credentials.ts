@@ -109,9 +109,9 @@ export const testInlineSchema = z
  *     `catalogProviderId` — codex → openai, claude-code → anthropic):
  *     expose every catalog entry as metadata; ids in `featuredModels` get
  *     `featured: true`. For subscription OAuth providers the served set is
- *     narrower than the catalog, but the empirical probe decides that at
- *     selection time (the model form filters this list by the credential's
- *     freshly probed ids) — the registry just supplies the metadata, so it
+ *     narrower than the catalog, but the empirical discovery run decides
+ *     that at selection time (the model form filters this list by the
+ *     credential's discovered ids) — the registry just supplies the metadata, so it
  *     carries the full catalog and stays a pure, org-independent function.
  *   - **No catalog** (`featuredModels` empty — openrouter live-search,
  *     openai-compatible Custom): empty list. The picker falls back to
@@ -310,17 +310,17 @@ export function createModelProviderCredentialsRouter() {
   );
 
   // POST /api/model-provider-credentials/:id/refresh-models — model
-  // discovery. For `"probe"` (API-key) providers this is empirical: probes
-  // every discovery candidate against the live credential (1-token requests)
-  // and persists the ids that answered as `available_model_ids`. For
+  // discovery. For API-key providers this is empirical: one `GET /models`
+  // listing against the live credential, intersected with the provider's
+  // discovery candidates, persisted as `available_model_ids`. For
   // `mode: "static"` providers (subscription: codex, claude-code) it is a
   // no-op that reports the current list: ZERO upstream calls and ZERO writes,
   // because their served set is derived from (definition, catalog) on every
-  // read — `probed_count` comes back 0. The endpoint is kept rather than
-  // removed so the model form keeps ONE code path for both provider kinds.
-  // Rate-limited (a probe call burns a handful of requests on the user's own
-  // quota), but loose enough for the model form to revalidate on every open
-  // while configuring several models in a row.
+  // read. The endpoint is kept rather than removed so the model form keeps
+  // ONE code path for both provider kinds. Rate-limited (each call reaches
+  // the provider on the user's own credential), but loose enough for the
+  // model form to revalidate on every open while configuring several models
+  // in a row.
   router.post(
     "/:id/refresh-models",
     rateLimit(6),
@@ -337,14 +337,14 @@ export function createModelProviderCredentialsRouter() {
           throw notFound("Model provider credential not found");
         }
         // Re-read through the credential DTO rather than echoing the ids
-        // discovery just verified: on a probe round that verified nothing
-        // the previous list is what still stands, and the DTO is the single
+        // discovery just verified: on a round that verified nothing the
+        // previous list is what still stands, and the DTO is the single
         // place where a static provider's list gets derived. Both provider
         // kinds therefore answer with exactly what a subsequent GET returns.
         const credential = await getOrgModelProviderCredential(orgId, id);
         return c.json({
           outcome: result.outcome,
-          probed_count: result.probedCount,
+          candidate_count: result.candidateCount,
           available_model_ids: credential?.available_model_ids ?? null,
         });
       } catch (err) {

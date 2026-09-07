@@ -72,6 +72,27 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **Model discovery for API-key providers lists the provider's models once
+  instead of issuing N identical requests that verified nothing.**
+  `discoverAvailableModels` now calls `listServedModelIds`
+  (`services/model-providers/model-listing.ts`), which sends ONE guarded
+  `GET <base_url>/models`, parses the response per `apiShape`
+  (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }` for the
+  Google shapes) and intersects the served ids with the provider's discovery
+  candidates. Before, every candidate was "probed" through `testModelConfig`,
+  which never read the `modelId` it was handed — all 24 requests were the same
+  listing call, so they all succeeded or failed together and a candidate the
+  provider does not serve was recorded as verified.
+- `available_model_ids` therefore now holds only candidates the provider
+  actually lists. An auth failure, an unreachable or unreadable listing, a
+  429 that survives one retry, or an empty intersection all leave the
+  previously persisted list untouched, as before.
+- **Wire change** — `POST /api/model-provider-credentials/{id}/refresh-models`
+  answers with `candidate_count` in place of `probed_count`: the count is the
+  discovery candidates considered, and nothing is probed any more. Static
+  (subscription) providers report their derived candidate count instead of a
+  constant 0; they still issue no request and write nothing.
+
 - **`appstrate self-update`, `scripts/bootstrap.sh` and `scripts/bootstrap-runner.sh`
   resolve "latest" by listing GitHub Releases and picking the newest platform
   `v<semver>` one, never through `releases/latest`.** GitHub's "latest" is

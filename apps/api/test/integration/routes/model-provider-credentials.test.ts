@@ -561,7 +561,7 @@ describe("Model Provider Keys API", () => {
    * form drives both provider kinds through the same call, and the response
    * still has to be the credential's current list. The harness validates
    * every JSON body against the OpenAPI response schema, so these tests also
-   * gate the documented shape (`outcome`, `probed_count`,
+   * gate the documented shape (`outcome`, `candidate_count`,
    * `available_model_ids`).
    */
   describe("POST /api/model-provider-credentials/:id/refresh-models (static provider)", () => {
@@ -573,7 +573,7 @@ describe("Model Provider Keys API", () => {
     });
     beforeEach(registerStaticRefreshProvider);
 
-    it("returns the derived list with probed_count 0 and writes nothing", async () => {
+    it("returns the derived list and writes nothing", async () => {
       const cred = await seedOrgModelProviderOAuth({
         orgId: ctx.org.id,
         providerId: STATIC_PROVIDER_ID,
@@ -587,13 +587,13 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         outcome: string;
-        probed_count: number;
+        candidate_count: number;
         available_model_ids: string[] | null;
       };
       expect(body.outcome).toBe("ok");
-      // Zero upstream requests — the platform never spends a subscription
-      // quota to enumerate models.
-      expect(body.probed_count).toBe(0);
+      // Candidates are counted, never requested — the platform never spends a
+      // subscription quota to enumerate models.
+      expect(body.candidate_count).toBe(2);
       // "s-absent" is filtered out: seeding would reject an uncatalogued id.
       expect(body.available_model_ids).toEqual(["s-one", "s-two"]);
 
