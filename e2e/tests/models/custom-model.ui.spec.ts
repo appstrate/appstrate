@@ -266,8 +266,11 @@ test.describe("Custom endpoint model — UI", () => {
     );
     await addModelsButton(dialog, 1).click();
     const retry = await retryRequest;
+    // The org's own keys only: a built-in (system) key may be listed alongside.
     const credentials = await apiClient.get("/model-provider-credentials");
-    const keys = (await credentials.json()).data as Array<{ id: string }>;
+    const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
+      (k) => k.source === "custom",
+    );
     expect(keys).toHaveLength(1);
     expect(retry.postDataJSON().credentialId).toBe(keys[0]!.id);
 
