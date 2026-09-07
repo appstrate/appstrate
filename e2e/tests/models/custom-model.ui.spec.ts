@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Adding an OpenAI-compatible (custom) model from org settings → Modèles,
- * against a mock endpoint this spec serves itself.
+ * Adding a model on a custom endpoint from org settings → Modèles, against a
+ * mock endpoint this spec serves itself.
+ *
+ * The picker offers one "Endpoint personnalisé" row for every base-URL-
+ * overridable registry entry; which of them it is becomes the "Type d'API"
+ * question inside the form. Both shapes it can speak are exercised here —
+ * OpenAI (`GET <baseUrl>/models`, `Authorization: Bearer`) and Anthropic
+ * (`GET <baseUrl>/v1/models`, `x-api-key`), which is why the two tests type a
+ * different base URL against the same mock.
  *
  * The mock is a `node:http` server on 127.0.0.1 — Playwright runs under
  * Node, and a loopback endpoint is the only way to exercise discovery
@@ -19,29 +26,43 @@ import type { Page } from "@playwright/test";
 
 const SETTINGS_PATH = "/org-settings/models";
 const GOOD_KEY = "e2e-good-key";
-const SERVED_MODELS = ["gpt-4o", "qwen3:8b"];
+const OPENAI_MODELS = ["gpt-4o", "qwen3:8b"];
+const ANTHROPIC_MODELS = [{ id: "claude-x", display_name: "Claude X" }];
 /** The form modal's title, identical to the button that opens it (`models.add` / `models.form.title`). */
 const ADD_MODEL = "Ajouter un modèle";
+/** The single picker row every overridable endpoint collapses into (`models.form.customEndpoint`). */
+const CUSTOM_ENDPOINT = "Endpoint personnalisé";
 /** The discovery combobox shows this placeholder until a model is picked. */
 const MODEL_SEARCH_PLACEHOLDER = "Rechercher parmi les modèles détectés...";
 
 let server: Server;
-let mockBaseUrl: string;
+/** Mock origin without a path — each test appends what its API shape expects. */
+let mockOrigin: string;
 
 test.beforeAll(async () => {
   server = createServer((req, res) => {
-    if (req.headers.authorization !== `Bearer ${GOOD_KEY}`) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: { message: "bad key" } }));
+    const json = (status: number, body: unknown) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    // One path, two wire formats: the platform appends `/models` to an
+    // OpenAI-shaped base URL (typed with `/v1`) and `/v1/models` to an
+    // Anthropic-shaped one (typed without), so the auth header is what tells
+    // the two callers apart.
+    if (req.headers.authorization === `Bearer ${GOOD_KEY}`) {
+      json(200, { data: OPENAI_MODELS.map((id) => ({ id })) });
       return;
     }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ data: SERVED_MODELS.map((id) => ({ id })) }));
+    if (req.headers["x-api-key"] === GOOD_KEY) {
+      json(200, { data: ANTHROPIC_MODELS });
+      return;
+    }
+    json(401, { error: { message: "bad key" } });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("mock server has no port");
-  mockBaseUrl = `http://127.0.0.1:${address.port}/v1`;
+  mockOrigin = `http://127.0.0.1:${address.port}`;
 });
 
 test.afterAll(async () => {
@@ -69,25 +90,34 @@ async function selectOption(page: Page, triggerId: string, optionName: string) {
   await expect(trigger).toContainText(optionName);
 }
 
-/** Open the model form on the custom-provider path, with the endpoint + key filled in. */
-async function openCustomProviderForm(page: Page, apiKey: string) {
+/**
+ * Open the model form on the custom-endpoint path and answer step 1: which
+ * API shape, where it lives, and the key that opens it. `apiType` left out
+ * keeps the pre-selected first overridable entry (OpenAI-compatible).
+ */
+async function openCustomEndpointForm(
+  page: Page,
+  { baseUrl, apiKey, apiType }: { baseUrl: string; apiKey: string; apiType?: string },
+) {
   await page.goto(SETTINGS_PATH);
   // Header button and empty-state button carry the same label; either opens the form.
   await page.getByRole("button", { name: ADD_MODEL }).first().click();
   // Named, because the discovery combobox's popover is a `dialog` too.
   await expect(page.getByRole("dialog", { name: ADD_MODEL })).toBeVisible();
 
-  await selectOption(page, "mdl-provider", "OpenAI-compatible (custom)");
-  await page.locator("#mdl-baseUrl").fill(mockBaseUrl);
+  await selectOption(page, "mdl-provider", CUSTOM_ENDPOINT);
+  if (apiType) await selectOption(page, "mdl-apiType", apiType);
+  await page.locator("#mdl-baseUrl").fill(baseUrl);
   await page.getByPlaceholder("sk-...").fill(apiKey);
 }
 
-test.describe("Custom (OpenAI-compatible) model — UI", () => {
-  test("discovers the endpoint's models and saves the picked one", async ({
+test.describe("Custom endpoint model — UI", () => {
+  test("discovers an OpenAI-shaped endpoint's models and saves the picked one", async ({
     authedPage: page,
     apiClient,
   }) => {
-    await openCustomProviderForm(page, GOOD_KEY);
+    const baseUrl = `${mockOrigin}/v1`;
+    await openCustomEndpointForm(page, { baseUrl, apiKey: GOOD_KEY });
 
     await page.getByRole("button", { name: "Détecter les modèles" }).click();
     await expect(page.getByText("2 modèles détectés")).toBeVisible();
@@ -102,6 +132,9 @@ test.describe("Custom (OpenAI-compatible) model — UI", () => {
     await page.getByRole("option", { name: /qwen3:8b/ }).click();
     await expect(page.locator("#mdl-label")).toHaveValue("qwen3:8b");
 
+    // "Avancé" is folded away by default but a discovered pick unfolds it —
+    // it just filled the capabilities in, so clicking would close it.
+    await expect(page.getByRole("button", { name: "Avancé" })).toBeVisible();
     await page.locator("#mdl-ctx").fill("32768");
     await page.getByRole("button", { name: "Enregistrer" }).click();
 
@@ -120,14 +153,66 @@ test.describe("Custom (OpenAI-compatible) model — UI", () => {
       modelId: "qwen3:8b",
       contextWindow: 32768,
       apiShape: "openai-completions",
-      baseUrl: mockBaseUrl,
+      baseUrl,
     });
   });
 
   test("reports a key the endpoint rejects", async ({ authedPage: page }) => {
-    await openCustomProviderForm(page, "e2e-wrong-key");
+    await openCustomEndpointForm(page, { baseUrl: `${mockOrigin}/v1`, apiKey: "e2e-wrong-key" });
 
     await page.getByRole("button", { name: "Détecter les modèles" }).click();
     await expect(page.getByText("Clé refusée par le endpoint.")).toBeVisible();
+  });
+
+  test("saves a manually typed model id and lets the server name the row", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
+    await openCustomEndpointForm(page, { baseUrl: `${mockOrigin}/v1`, apiKey: GOOD_KEY });
+
+    await page.getByRole("button", { name: "Configurer manuellement" }).click();
+    await page.locator("#mdl-modelId").fill("llama3");
+    // Name left empty on purpose: the server derives it from the model id.
+    await page.getByRole("button", { name: "Enregistrer" }).click();
+
+    await expect(page.getByRole("dialog", { name: ADD_MODEL })).toBeHidden();
+    await expect(page.getByText("llama3").first()).toBeVisible();
+
+    const res = await apiClient.get("/models");
+    const body = await res.json();
+    const created = (body.data as Array<Record<string, unknown>>).find(
+      (m) => m.modelId === "llama3",
+    );
+    expect(created).toMatchObject({ modelId: "llama3", label: "llama3" });
+  });
+
+  test("discovers an Anthropic-shaped endpoint's models", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
+    // No `/v1`: the platform appends `/v1/models` for this shape.
+    await openCustomEndpointForm(page, {
+      baseUrl: mockOrigin,
+      apiKey: GOOD_KEY,
+      apiType: "Anthropic-compatible (custom)",
+    });
+
+    await page.getByRole("button", { name: "Détecter les modèles" }).click();
+    await expect(page.getByText("1 modèle détecté")).toBeVisible();
+
+    await page.getByRole("combobox").filter({ hasText: MODEL_SEARCH_PLACEHOLDER }).click();
+    // The discovery endpoint names each row from the pricing catalog, which
+    // does not know `claude-x` — so the row reads as its id.
+    await page.getByRole("option", { name: /claude-x/ }).click();
+    await page.getByRole("button", { name: "Enregistrer" }).click();
+
+    await expect(page.getByRole("dialog", { name: ADD_MODEL })).toBeHidden();
+
+    const res = await apiClient.get("/models");
+    const body = await res.json();
+    const created = (body.data as Array<Record<string, unknown>>).find(
+      (m) => m.modelId === "claude-x",
+    );
+    expect(created).toMatchObject({ modelId: "claude-x", apiShape: "anthropic-messages" });
   });
 });

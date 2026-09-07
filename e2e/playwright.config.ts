@@ -49,6 +49,14 @@ export default defineConfig({
       // OpenAI-compatible endpoint on 127.0.0.1; the SSRF guard blocks
       // loopback unless the operator trusts it explicitly.
       EGRESS_ALLOW_INTERNAL_HOSTS: "127.0.0.1,localhost",
+      // The API defaults both to `./data/{pglite,storage}` — the very
+      // directories a developer's `bun run dev` holds open in this checkout.
+      // PGlite tolerates a single process per directory: the second one aborts
+      // (`RuntimeError: Aborted()`) and the concurrent open can corrupt the
+      // first one's catalog. The suite seeds its own users and orgs per test,
+      // so it needs no shared state — only its own place to keep it.
+      PGLITE_DATA_DIR: "./data/e2e/pglite",
+      FS_STORAGE_PATH: "./data/e2e/storage",
     },
   },
 });

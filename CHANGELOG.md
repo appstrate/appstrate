@@ -100,6 +100,21 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **The model form asks about an operator's own endpoint once, not once per
+  wire format.** The provider picker no longer lists `openai-compatible` and
+  `anthropic-compatible` as two entries among the branded providers: every
+  base-URL-overridable registry entry collapses into a single "Endpoint
+  personnalisé" row, and which of them it is becomes a "Type d'API" question
+  inside the form — so a third such provider needs no client edit. Step 1
+  (API type, base URL, key) is the same component the credentials tab renders,
+  so the two forms cannot drift. Step 2 opens once the URL parses and a key is
+  present, and offers both ways to name a model: "Détecter les modèles" asks
+  the endpoint and lets the operator pick from what it serves, "Configurer
+  manuellement" types the id in. The name is now optional on both paths — left
+  empty, the server names the row after the catalog entry or the model id —
+  and the capabilities moved behind an "Avancé" collapsible, unfolded only
+  when a discovered pick just filled them in or the row already carries one.
+
 - **Model discovery for API-key providers lists the provider's models once
   instead of issuing N identical requests that verified nothing.**
   `discoverAvailableModels` now calls `listServedModelIds`
@@ -411,6 +426,15 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **The Playwright suite no longer opens the developer's own database.** Its
+  `webServer` inherited the API's defaults for `PGLITE_DATA_DIR` and
+  `FS_STORAGE_PATH`, so a run in a checkout where `bun run dev` was up pointed
+  a second process at `data/pglite`. PGlite tolerates one process per
+  directory: the second aborts with `RuntimeError: Aborted()`, and the
+  concurrent open can corrupt the first one's catalog. The suite now keeps its
+  own `data/e2e/{pglite,storage}` — always, CI included; it seeds users and
+  orgs per test, so it never wanted the shared state.
+
 - **A custom (OpenAI-compatible) model can be created from the model form
   again.** The provider picker offered a client-only `__custom__` entry and
   submitted it as the credential's `providerId`, which
@@ -418,9 +442,10 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   `400 Unknown providerId`. The custom entry is now the registry's own
   `openai-compatible` provider — the credential it creates carries the
   `openai-completions` shape and the typed base URL, which is where the server
-  reads both from. The form's "Type d'API" selector is gone with it: the
-  payload never carried an `apiShape`, and no shape other than the provider's
-  own could have been honoured.
+  reads both from. The old "Type d'API" selector, whose value never reached
+  the payload, is replaced by a choice between registry providers (see the
+  "Endpoint personnalisé" entry under Changed), so the shape the form shows is
+  the shape the server honours.
 
 - **A Dynamic Client Registration body without `scope` now yields the full
   self-service scope set (#1267).** An MCP client registering without `scope`
