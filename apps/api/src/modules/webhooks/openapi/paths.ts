@@ -31,7 +31,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Create a webhook",
       description:
-        "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.",
+        "Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. The secret is returned once in the response. Max 20 webhooks per org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -145,6 +145,7 @@ export const webhooksPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -155,7 +156,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "List webhooks",
       description:
-        "List webhooks visible to the current organization. When `spaceId` is passed, returns org-level + space-level webhooks pinned to that space. When `all=true`, returns every webhook in the org regardless of level.",
+        "List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -172,7 +173,7 @@ export const webhooksPaths = {
           required: false,
           schema: { type: "string", enum: ["true"] },
           description:
-            "When `true`, return all webhooks in the org (org-level + every space-level). Overrides `spaceId`.",
+            "When `true`, span every space in the org (org-level + every space-level). Requires `org-webhooks:read`. Overrides `spaceId`.",
         },
       ],
       responses: {
@@ -217,6 +218,7 @@ export const webhooksPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

@@ -16,6 +16,7 @@
  */
 
 import type { Context } from "hono";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
@@ -53,7 +54,13 @@ export function selfOrigin(): string {
  * preview must answer as that role, or the prompt describes an org the previewed
  * role cannot reach. The platform re-validates it on the hop.
  */
-const FORWARDED = ["cookie", "authorization", "x-org-id", "x-space-id", "x-view-as"] as const;
+const FORWARDED = [
+  "cookie",
+  "authorization",
+  "x-org-id",
+  "x-space-id",
+  VIEW_AS_HEADER.toLowerCase(),
+] as const;
 
 /** Copy the caller's auth + scoping headers onto an outgoing loopback call. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

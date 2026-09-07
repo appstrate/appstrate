@@ -4,9 +4,8 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
-  addOrgMember,
   createTestContext,
-  createTestUser,
+  memberContext,
   authHeaders,
   orgOnlyHeaders,
   type TestContext,
@@ -353,9 +352,7 @@ describe("Webhooks API", () => {
     it("403s a member, who holds neither half of the split vocabulary", async () => {
       // The control for the owner cases above: the header-less listing is
       // reachable because of the ORG permission, not because the guard is gone.
-      const user = await createTestUser();
-      await addOrgMember(ctx.orgId, user.id, "member");
-      const asMember: TestContext = { ...ctx, user, cookie: user.cookie };
+      const asMember = await memberContext(ctx, "member");
       const denied = await app.request("/api/webhooks", { headers: orgOnlyHeaders(asMember) });
       expect(denied.status).toBe(403);
       expect(((await denied.json()) as { detail: string }).detail).toContain("org-webhooks:read");

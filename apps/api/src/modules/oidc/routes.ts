@@ -118,6 +118,15 @@ import { oauthClient, deviceCode } from "@appstrate/db/schema";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
+ * What the login and register pages say when the client's signup policy is
+ * misconfigured. The underlying message is English and names internal ids
+ * (`spc_`, `srl_`), so it is logged rather than rendered — an unauthenticated
+ * visitor must not learn an org's space layout from a login form.
+ */
+const SIGNUP_CONFIGURATION_ERROR_FR =
+  "La configuration d'inscription de cette application est invalide. Contactez votre administrateur.";
+
+/**
  * Decide whether a Better Auth-signed `exp` query param (Unix seconds) marks
  * the login URL as expired.
  *
@@ -1113,7 +1122,12 @@ export function createOidcRouter() {
           );
         } catch (err) {
           if (err instanceof OrgSignupConfigurationError) {
-            return renderError(err.message, 403, email);
+            logger.warn("oidc: org signup configuration invalid", {
+              clientId: ctx.client.clientId,
+              orgId: ctx.client.referencedOrgId,
+              reason: err.message,
+            });
+            return renderError(SIGNUP_CONFIGURATION_ERROR_FR, 403, email);
           }
           if (err instanceof OrgSignupClosedError) {
             return renderError(
@@ -1466,7 +1480,12 @@ export function createOidcRouter() {
           );
         } catch (err) {
           if (err instanceof OrgSignupConfigurationError) {
-            return renderRegError(err.message, 403, email, name);
+            logger.warn("oidc: org signup configuration invalid", {
+              clientId: ctx.client.clientId,
+              orgId: ctx.client.referencedOrgId,
+              reason: err.message,
+            });
+            return renderRegError(SIGNUP_CONFIGURATION_ERROR_FR, 403, email, name);
           }
           if (err instanceof OrgSignupClosedError) {
             // Should not happen — the GET + POST guards checked already.

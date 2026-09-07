@@ -39,7 +39,11 @@ import type { PiChatInput } from "../src/pi-chat/engine.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
+import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { SYSTEM_PROMPT } from "../src/prompt.ts";
+
+// The chat handler reads the system model registry; the HTTP harness initializes it at boot.
+initSystemModelProviderKeys();
 
 /**
  * Wait until the assistant turn is persisted and the in-flight marker cleared.

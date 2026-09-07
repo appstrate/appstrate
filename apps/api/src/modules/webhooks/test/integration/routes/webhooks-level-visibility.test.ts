@@ -3,7 +3,7 @@
 /**
  * `GET /api/webhooks` spans both scoping levels — `?all=true` returns every
  * row in the org, and the default filter returns the org-level ones — behind
- * `requireAnyWebhookRead()`, which admits a caller holding EITHER
+ * `requireAnyWebhookPermission("read")`, which admits a caller holding EITHER
  * `webhooks:read` or `org-webhooks:read`. Admission alone is not sufficient: a
  * principal holding the space half without the org half (a `builder`) would
  * otherwise read org-level webhooks it cannot administer. The route therefore
@@ -20,18 +20,21 @@
  * narrows to the one combination it is probing.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
-import { seedSpace, seedSpaceMember } from "../../../../../../test/helpers/seed.ts";
+import { seedSpace } from "../../../../../../test/helpers/seed.ts";
 import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
+import {
+  setPermissionDenialHandler,
+  type PermissionDenialContext,
+} from "@appstrate/core/permissions";
 import webhooksModule from "../../../index.ts";
 
 let currentCtx: TestContext | null = null;
@@ -108,6 +111,10 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     spaceWebhookId = ((await space.json()) as { id: string }).id;
   });
 
+  // The stub handler is per-test; restore the platform default so a denial
+  // audited by a later file is not swallowed by this one's array.
+  afterEach(() => setPermissionDenialHandler(null));
+
   async function listWith(perms: string): Promise<string[]> {
     const res = await app.request("/api/webhooks?all=true", {
       headers: { "X-Test-Perms": perms },
@@ -150,18 +157,10 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     // caller reaches only if their role there says so. `spaceViewer` is an org
     // `member` with an explicit role in the default space and none in `other`.
     const other = await seedSpace({ orgId: currentCtx!.orgId, visibility: "closed" });
-    const spaceReader = await createTestUser();
-    await addOrgMember(currentCtx!.orgId, spaceReader.id, "member");
-    await seedSpaceMember({
-      spaceId: currentCtx!.defaultSpaceId,
-      userId: spaceReader.id,
-      presetRole: "admin",
-    });
+    const reader = await memberContext(currentCtx!, "member", "admin");
 
     const ask = (ctx: TestContext, spaceId: string) =>
       app.request(`/api/webhooks?spaceId=${spaceId}`, { headers: authHeaders(ctx) });
-
-    const reader: TestContext = { ...currentCtx!, user: spaceReader, cookie: spaceReader.cookie };
     // Their own space: allowed.
     expect((await ask(reader, currentCtx!.defaultSpaceId)).status).toBe(200);
     // A space they hold no role in: refused, even though they hold
@@ -194,6 +193,10 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     // The by-id routes must read the row before they can know its level, so
     // without the guard in `loadWebhookForAction` a permission-less caller
     // would get 404 for an unknown id and 403 for a real one.
+    const denials: string[] = [];
+    setPermissionDenialHandler((ctx: PermissionDenialContext) => {
+      denials.push(ctx.required);
+    });
     const real = await app.request(`/api/webhooks/${orgWebhookId}`, {
       headers: { "X-Test-Perms": "runs:read" },
     });
@@ -202,6 +205,66 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     });
     expect(real.status).toBe(403);
     expect(fake.status).toBe(403);
+    // The hit is decided by the level guard (the row's level is known); the
+    // miss by the fallback in `loadWebhookForAction`, where neither half alone
+    // was the requirement — so THAT record names the disjunction. One naming a
+    // single half would send an operator to grant a permission that was never
+    // the whole requirement.
+    expect(denials).toEqual(["org-webhooks:read", "webhooks:read|org-webhooks:read"]);
+    expect(((await fake.json()) as { detail: string }).detail).toBe(
+      "Insufficient permissions: webhooks:read|org-webhooks:read required",
+    );
+  });
+
+  it("POST /api/webhooks tells a permission-less caller nothing about the space it names", async () => {
+    // Everything the create body drives — org membership of the space, whether
+    // the caller may enter it — answers differently per case, so without the
+    // disjunction guard ahead of the body read a member with no webhook
+    // authority could probe space existence through the create route.
+    const hidden = await seedSpace({ orgId: currentCtx!.orgId, visibility: "private" });
+    const fakeSpaceId = "spc_00000000-0000-0000-0000-000000000000";
+
+    const asRole = (presetRole: "viewer" | "admin") =>
+      memberContext(currentCtx!, "member", presetRole);
+
+    const create = (as: TestContext, spaceId: string) =>
+      app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(as), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "space",
+          spaceId,
+          url: "https://example.com/probe",
+          events: ["run.success"],
+        }),
+      });
+
+    const outsider = await asRole("viewer");
+    const onHidden = await create(outsider, hidden.id);
+    const onFake = await create(outsider, fakeSpaceId);
+    expect(onHidden.status).toBe(403);
+    expect(onFake.status).toBe(403);
+    expect(((await onHidden.json()) as { detail: string }).detail).toBe(
+      ((await onFake.json()) as { detail: string }).detail,
+    );
+
+    // Discriminator: the two ids ARE distinguishable to a caller the guard
+    // admits, so the single answer above is the guard's doing and not an
+    // accident of both spaces being unreachable.
+    const writer = await asRole("admin");
+    expect((await create(writer, hidden.id)).status).toBe(404);
+    expect((await create(writer, fakeSpaceId)).status).toBe(403);
+  });
+
+  it("a lookup failure that is not a miss stays a 500 for the same caller", async () => {
+    // A NUL byte makes the driver reject the statement, so `getWebhook` raises
+    // something that is not the not-found. Only the miss converts to 403; a
+    // failure laundered into an authz answer would read as "you may not know"
+    // and nobody would page on the outage.
+    const res = await app.request("/api/webhooks/wh_%00bad", {
+      headers: { "X-Test-Perms": "runs:read" },
+    });
+    expect(res.status).toBe(500);
   });
 
   it("a reader still gets 404 for an id that does not exist", async () => {

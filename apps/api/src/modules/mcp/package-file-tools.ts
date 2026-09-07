@@ -25,7 +25,12 @@ interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
   actor: Actor;
   scope: SpaceScope;
-  authorizeBundle?: Parameters<typeof preflightBundleImport>[2];
+  /**
+   * Package-level authorisation for the bundle about to be read. Required:
+   * the preflight and the import both hand it every package they found,
+   * and a context without it would install unauthorised ones.
+   */
+  authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
 }
 
 interface PackageFileBytes {
@@ -145,8 +150,6 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
     const uri = asString(args.file_uri);
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
     try {
-      if (!ctx.authorizeBundle)
-        return textResult({ error: "Package authorization is unavailable." }, true);
       const file = await readPackageFileBytes(ctx, uri);
       const { bundle, conflicts } = await preflightBundleImport(
         file.bytes,
@@ -203,8 +206,6 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
     const uri = asString(args.file_uri);
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
     try {
-      if (!ctx.authorizeBundle)
-        return textResult({ error: "Package authorization is unavailable." }, true);
       const file = await readPackageFileBytes(ctx, uri);
       const result = await handleImportBundle(
         file.bytes,

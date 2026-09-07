@@ -738,7 +738,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(html).toContain("n&#39;est pas membre");
     });
 
-    it("POST /login reports stale signup assignments and leaves no partial membership", async () => {
+    it("POST /login hides the stale assignment's space id and leaves no partial membership", async () => {
       const outsider = await createTestUser({ email: "stale-signup@example.com" });
       const { clientId } = await registerOrgClient(ctx, {
         allowSignup: true,
@@ -762,13 +762,55 @@ describe("Public end-user pages — /api/oauth/*", () => {
         }).toString(),
       });
       expect(response.status).toBe(403);
-      expect(await response.text()).toContain("Invalid signup space assignments");
+      const html = await response.text();
+      // The underlying message names the space that went missing. This page is
+      // public and unauthenticated, so it says nothing about the org's layout —
+      // the detail goes to the server log instead.
+      expect(html).not.toContain(ctx.defaultSpaceId);
+      expect(html).not.toContain("Invalid signup space assignments");
+      expect(html).toContain(
+        "La configuration d&#39;inscription de cette application est invalide. Contactez votre administrateur.",
+      );
       expect(
         await db
           .select()
           .from(organizationMembers)
           .where(eq(organizationMembers.userId, outsider.id)),
       ).toEqual([]);
+    });
+
+    it("POST /register hides the stale assignment's space id too", async () => {
+      // The register page reaches the same configuration failure through a
+      // fresh sign-up rather than a sign-in, and is just as public.
+      const { clientId } = await registerOrgClient(ctx, {
+        allowSignup: true,
+        signupRole: "guest",
+        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+      });
+      await db.delete(spaces).where(eq(spaces.id, ctx.defaultSpaceId));
+      const url = `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`;
+      const page = await app.request(url);
+      const csrfCookie = (page.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="))!;
+      const response = await app.request(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", cookie: csrfCookie },
+        body: new URLSearchParams({
+          _csrf: csrfCookie.slice("oidc_csrf=".length).split(";")[0]!,
+          name: "Stale Signup",
+          email: "stale-register@example.com",
+          password: "TestPassword123!",
+        }).toString(),
+      });
+      expect(response.status).toBe(403);
+      const html = await response.text();
+      expect(html).not.toContain(ctx.defaultSpaceId);
+      expect(html).not.toContain("Invalid signup space assignments");
+      expect(html).toContain(
+        "La configuration d&#39;inscription de cette application est invalide. Contactez votre administrateur.",
+      );
     });
 
     it("POST /login auto-joins an existing auth user as signupRole when allowSignup=true", async () => {

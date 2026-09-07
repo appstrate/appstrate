@@ -41,10 +41,7 @@ export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {
   return [...SESSIONS_QUERY_KEY, spaceId];
 }
 
-/**
- * One conversation's stored history, in one space. The id stays at index 2 —
- * the shell's chat-session matcher reads that position.
- */
+/** One conversation's stored history, in one space. */
 export function sessionQueryKey(spaceId: string | null, id: string): readonly unknown[] {
   return ["chat", "session", id, spaceId];
 }
