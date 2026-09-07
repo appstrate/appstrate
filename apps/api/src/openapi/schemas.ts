@@ -1315,7 +1315,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`.",
+          "Canonical providerId backing the credential. Always set for a `custom` credential (the model form matches a custom endpoint's saved keys on it); `null` for a `built-in` one, whose backing is hidden.",
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
@@ -1323,7 +1323,7 @@ export const schemas = {
         type: ["array", "null"],
         items: { type: "string" },
         description:
-          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
+          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },

@@ -11,6 +11,7 @@ describe("core-providers module", () => {
       .sort();
     expect(ids).toEqual([
       "anthropic",
+      "anthropic-compatible",
       "cerebras",
       "deepseek",
       "fireworks-ai",
@@ -35,11 +36,16 @@ describe("core-providers module", () => {
     }
   });
 
-  it("openai-compatible is the only baseUrl-overridable entry", () => {
-    const overridable = (coreProvidersModule.modelProviders?.() ?? [])
+  it("offers at most one custom endpoint per wire format", () => {
+    // A `baseUrlOverridable` entry exists to reach an endpoint no named preset
+    // covers, and what distinguishes one from another is the wire format —
+    // two sharing an apiShape could not be told apart when a credential's
+    // (apiShape, baseUrl) is resolved back to its provider.
+    const shapes = (coreProvidersModule.modelProviders?.() ?? [])
       .filter((p) => p.baseUrlOverridable)
-      .map((p) => p.providerId);
-    expect(overridable).toEqual(["openai-compatible"]);
+      .map((p) => p.apiShape);
+    expect(shapes.length).toBeGreaterThan(0);
+    expect(new Set(shapes).size).toBe(shapes.length);
   });
 
   it("pins each provider to its canonical apiShape", () => {
@@ -49,6 +55,7 @@ describe("core-providers module", () => {
     expect(byId.get("openai")?.apiShape).toBe("openai-responses");
     expect(byId.get("anthropic")?.apiShape).toBe("anthropic-messages");
     expect(byId.get("openai-compatible")?.apiShape).toBe("openai-completions");
+    expect(byId.get("anthropic-compatible")?.apiShape).toBe("anthropic-messages");
     expect(byId.get("mistral")?.apiShape).toBe("mistral-conversations");
     expect(byId.get("google-ai")?.apiShape).toBe("google-generative-ai");
     expect(byId.get("groq")?.apiShape).toBe("openai-completions");

@@ -1898,6 +1898,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model-provider-credentials/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enumerate the models an endpoint serves
+         * @description Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.
+         */
+        post: operations["discoverModelProviderCredentialModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/model-provider-credentials/registry": {
         parameters: {
             query?: never;
@@ -1973,7 +1993,7 @@ export interface paths {
         put?: never;
         /**
          * Discover the models this credential serves
-         * @description Discovers the models a credential serves. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read — `probed_count` is 0 and the response carries the freshly derived list. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the probe path an auth failure or an all-failure round leaves the previously persisted list untouched.
+         * @description Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked once for its model listing (`GET <base_url>/models`) and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing or an empty intersection leaves the previously persisted list untouched.
          */
         post: operations["refreshModelProviderCredentialModels"];
         delete?: never;
@@ -4989,11 +5009,11 @@ export interface components {
             source: "built-in" | "custom";
             /** @enum {string} */
             authMode: "api_key" | "oauth2";
-            /** @description Canonical providerId backing the credential. Set when `authMode === 'oauth2'`. */
+            /** @description Canonical providerId backing the credential. Always set for a `custom` credential (the model form matches a custom endpoint's saved keys on it); `null` for a `built-in` one, whose backing is hidden. */
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
+            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
             available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
@@ -12171,7 +12191,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Display name for the model provider credential. Optional — the server derives one from the provider's `displayName` when omitted, deduping against existing org credentials. */
+                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `baseUrlOverride` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials. */
                     label?: string;
                     /** @description Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow. */
                     providerId: string;
@@ -12216,6 +12236,95 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    discoverModelProviderCredentialModels: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description An existing organization credential to enumerate. Built-in/system credentials are refused (`operation_not_allowed`).
+                     */
+                    credential_id?: string;
+                    /** @description Canonical registry providerId (`openai-compatible`, `openai`, …). Discovered via `GET /api/model-provider-credentials/registry`. */
+                    provider_id?: string;
+                    /** @description API key for the endpoint. Used for this one request and never stored or echoed back. */
+                    api_key?: string;
+                    /**
+                     * Format: uri
+                     * @description Endpoint base URL. Accepted only for providers with `baseUrlOverridable: true`; defaults to the provider's `defaultBaseUrl`.
+                     */
+                    base_url_override?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description `ok` — the endpoint answered with a readable listing. `auth_failed` — 401/403. `rate_limited` — 429. `blocked_url` — the base URL targets a blocked network (SSRF guard, no request sent). `unreachable` — timeout, DNS/TCP/TLS failure or refused redirect. `bad_response` — the body is not JSON or not a listing. `http_error` — any other non-2xx.
+                         * @enum {string}
+                         */
+                        outcome: "ok" | "auth_failed" | "rate_limited" | "blocked_url" | "unreachable" | "bad_response" | "http_error";
+                        models: {
+                            /** @description Model id exactly as served. */
+                            id: string;
+                            label: string | null;
+                            context_window: number | null;
+                            max_tokens: number | null;
+                            /** @description Accepted input modalities (`text`, `image`). */
+                            input: string[] | null;
+                            reasoning: boolean | null;
+                            /**
+                             * @description Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it.
+                             * @enum {string|null}
+                             */
+                            source: "endpoint" | "catalog" | null;
+                        }[];
+                        /** @description Human-readable detail for a non-`ok` outcome (e.g. "URL targets a blocked network"); null on `ok`. */
+                        message: string | null;
+                    };
+                };
+            };
+            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `provider_id` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credential_id` refers to a built-in/system credential. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -12450,12 +12559,12 @@ export interface operations {
                 content: {
                     "application/json": {
                         /**
-                         * @description `ok` — list resolved (persisted on the probe path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider resolves no discovery candidate.
+                         * @description `ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, or no candidate appeared in it; previous list kept. `no_candidates` — provider resolves no discovery candidate.
                          * @enum {string}
                          */
                         outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
-                        /** @description Number of models live-probed against the credential. Always 0 for `offline`-validation providers (codex, claude-code): their list is derived, never probed. */
-                        probed_count: number;
+                        /** @description Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that. */
+                        candidate_count: number;
                         available_model_ids: string[] | null;
                     };
                 };

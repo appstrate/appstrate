@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ComponentType, SVGProps } from "react";
+import { Server } from "lucide-react";
 
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
+import { resolveProviderEntry } from "../lib/provider-registry-helpers";
 
 export function GoogleIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -169,6 +170,9 @@ export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement
   "fireworks-ai": FireworksIcon,
   zai: ZaiIcon,
   "opencode-go": OpenCodeIcon,
+  // The custom-endpoint entries: the API they speak says nothing about who
+  // serves the model. Same glyph as the picker's "Endpoint personnalisé" row.
+  "custom-endpoint": Server,
 };
 
 /**
@@ -207,8 +211,9 @@ function AliasIcon(props: SVGProps<SVGSVGElement>) {
  * Unified model-icon resolver used by every model row/picker. Precedence:
  *  1. The model's own `iconUrl` (a deliberate public key — set on aliases so
  *     they show an icon without exposing the backing model).
- *  2. The provider resolved from the visible `apiShape`/`baseUrl` (normal
- *     non-aliased models — unchanged behaviour).
+ *  2. The provider the row is bound to — by `providerId`, so a model on an
+ *     operator's own endpoint carries its wire format's icon; by the visible
+ *     `apiShape`/`baseUrl` where the binding is hidden.
  *  3. A generic {@link AliasIcon} for aliases that declare no icon, so an
  *     aliased model is never icon-less.
  */
@@ -216,6 +221,7 @@ function AliasIcon(props: SVGProps<SVGSVGElement>) {
 export function getModelIcon(
   m: {
     iconUrl: string | null;
+    providerId?: string | null;
     apiShape: string | null;
     baseUrl: string | null;
     aliased: boolean;
@@ -226,8 +232,7 @@ export function getModelIcon(
     const icon = PROVIDER_ICONS[m.iconUrl];
     if (icon) return icon;
   }
-  const provider = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry);
-  const providerIcon = getProviderIcon(provider);
+  const providerIcon = getProviderIcon(resolveProviderEntry(m, registry));
   if (providerIcon) return providerIcon;
   return m.aliased ? AliasIcon : undefined;
 }

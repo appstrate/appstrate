@@ -10,6 +10,7 @@
 import type { ApiClient } from "./api-client.ts";
 import type { APIRequestContext } from "@playwright/test";
 import { createOrgOnlyClient } from "./api-client.ts";
+import { E2E_BASE_URL } from "./base-url.ts";
 
 // ─── Auth ───────────────────────────────────────
 
@@ -34,7 +35,7 @@ export async function registerUser(
   const password = overrides.password ?? "TestPassword123!";
 
   const res = await request.post("/api/auth/sign-up/email", {
-    headers: { Origin: "http://localhost:3000" },
+    headers: { Origin: E2E_BASE_URL },
     data: { email, password, name },
   });
 

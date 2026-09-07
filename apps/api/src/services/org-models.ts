@@ -1007,16 +1007,9 @@ export function validateGenerationOverride(
 // --- Connection test ---
 
 /**
- * Build the discovery URL + headers used to probe a model provider. Pure for
- * unit testing.
- *
- * Note what this does NOT take: a model id. Every branch below builds a plain
- * `GET <baseUrl>/models` listing request, so the result identifies the
- * CREDENTIAL, never a particular model. Callers that pass a `modelId` through
- * `testModelConfig` (the model-test routes, and `discoverAvailableModels`'
- * per-candidate loop) are handing over a value nothing reads — see the warning
- * at the top of `services/model-providers/model-discovery.ts` for what that
- * costs and why it is not quietly patched here.
+ * Build the URL + headers of a model provider's model listing. Pure for unit
+ * testing. Takes no model id: a `GET <baseUrl>/models` identifies the
+ * CREDENTIAL, never one model.
  */
 export function buildModelTestRequest(config: {
   apiShape: string;
@@ -1066,6 +1059,78 @@ export function buildModelTestRequest(config: {
   return { url, headers };
 }
 
+/** A delivered response, or the structured failure that stopped it from being one. */
+type ModelListingFetchResult =
+  { ok: true; res: Response; latency: number } | (TestResult & { ok: false });
+
+/**
+ * The guarded `GET <baseUrl>/models` request, shared by {@link testModelConfig}
+ * (reads the status) and `listServedModels` (parses the body): the SSRF
+ * pre-flight, the pinned transport and the pre-response failure mapping exist once.
+ */
+export async function fetchModelListing(config: {
+  apiShape: string;
+  baseUrl: string;
+  apiKey: string;
+  providerId?: string;
+}): Promise<ModelListingFetchResult> {
+  // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
+  // DNS-rebind host gate) before the fetch: a public hostname resolving to a
+  // private/loopback/link-local address is refused, fail-closed, with the same
+  // BLOCKED_URL result (the resolution reason is never surfaced).
+  const egress = await checkEgressUrl(config.baseUrl);
+  if (!egress.ok) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
+    };
+  }
+
+  const { url, headers } = buildModelTestRequest(config);
+
+  const start = performance.now();
+  try {
+    // SSRF-guarded transport (per-hop DNS + blocklist, connection pinned to
+    // the validated address) — the pre-flight `checkEgressUrl` above cannot by
+    // itself stop a DNS-rebind between check and connect, so the wire call
+    // must own the pin. `maxRedirects: 0`: the request carries the provider
+    // API key and a model endpoint has no legitimate reason to redirect — a
+    // 3xx here is either a misconfigured baseUrl or an attempt to replay the
+    // key elsewhere, so refuse to follow rather than follow-and-strip.
+    const res = await egressGuardedFetch(
+      url,
+      {
+        headers,
+        signal: AbortSignal.timeout(10_000),
+      },
+      { maxRedirects: 0, logger },
+    );
+    return { ok: true, res, latency: Math.round(performance.now() - start) };
+  } catch (err) {
+    const latency = Math.round(performance.now() - start);
+    // Guard verdicts map to the same structured results the routes already
+    // return — never the resolved host/address (`checkEgressUrl` above sets
+    // the precedent: the block reason stays server-side).
+    if (err instanceof SsrfBlockedError) {
+      if (err.reason === "too-many-redirects") {
+        // `maxRedirects: 0` — the endpoint answered with a 3xx we refuse to
+        // follow (the request carries the API key). Surface it as a provider
+        // problem, not a blocked network.
+        return {
+          ok: false,
+          latency,
+          error: "PROVIDER_ERROR",
+          message: "Provider endpoint redirected; use the final URL as base URL",
+        };
+      }
+      return { ok: false, latency, error: "BLOCKED_URL", message: "URL targets a blocked network" };
+    }
+    return { ...mapFetchErrorToTestResult(err, latency), ok: false };
+  }
+}
+
 /** Test a model config directly (no DB lookup). */
 export async function testModelConfig(config: {
   apiShape: string;
@@ -1096,84 +1161,27 @@ export async function testModelConfig(config: {
       : { ok: false, latency: 0, error: result.error, message: result.message };
   }
 
-  // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
-  // DNS-rebind host gate) before the test fetch: a public hostname resolving to
-  // a private/loopback/link-local address is refused, fail-closed, with the
-  // same BLOCKED_URL result (the resolution reason is never surfaced).
-  const egress = await checkEgressUrl(config.baseUrl);
-  if (!egress.ok) {
-    return {
-      ok: false,
-      latency: 0,
-      error: "BLOCKED_URL",
-      message: "URL targets a blocked network",
-    };
-  }
+  const listing = await fetchModelListing(config);
+  if (!listing.ok) return listing;
 
-  const { url, headers } = buildModelTestRequest(config);
-
-  const start = performance.now();
-  try {
-    // SSRF-guarded transport (per-hop DNS + blocklist, connection pinned to
-    // the validated address) — the pre-flight `checkEgressUrl` above cannot by
-    // itself stop a DNS-rebind between check and connect, so the wire call
-    // must own the pin. `maxRedirects: 0`: the request carries the provider
-    // API key and a model endpoint has no legitimate reason to redirect — a
-    // 3xx here is either a misconfigured baseUrl or an attempt to replay the
-    // key elsewhere, so refuse to follow rather than follow-and-strip.
-    const res = await egressGuardedFetch(
-      url,
-      {
-        headers,
-        signal: AbortSignal.timeout(10_000),
-      },
-      { maxRedirects: 0, logger },
-    );
-    const latency = Math.round(performance.now() - start);
-
-    if (res.ok) return { ok: true, latency, status: res.status };
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        latency,
-        error: "AUTH_FAILED",
-        message: "Authentication failed",
-        status: res.status,
-      };
-    }
+  const { res, latency } = listing;
+  if (res.ok) return { ok: true, latency, status: res.status };
+  if (res.status === 401 || res.status === 403) {
     return {
       ok: false,
       latency,
-      error: "PROVIDER_ERROR",
-      message: `Provider returned ${res.status}`,
+      error: "AUTH_FAILED",
+      message: "Authentication failed",
       status: res.status,
     };
-  } catch (err) {
-    const latency = Math.round(performance.now() - start);
-    // Guard verdicts map to the same structured results the route already
-    // returns — never the resolved host/address (`checkEgressUrl` above sets
-    // the precedent: the block reason stays server-side).
-    if (err instanceof SsrfBlockedError) {
-      if (err.reason === "too-many-redirects") {
-        // `maxRedirects: 0` — the endpoint answered with a 3xx we refuse to
-        // follow (the request carries the API key). Surface it as a provider
-        // problem, not a blocked network.
-        return {
-          ok: false,
-          latency,
-          error: "PROVIDER_ERROR",
-          message: "Provider endpoint redirected; use the final URL as base URL",
-        };
-      }
-      return {
-        ok: false,
-        latency,
-        error: "BLOCKED_URL",
-        message: "URL targets a blocked network",
-      };
-    }
-    return mapFetchErrorToTestResult(err, latency);
   }
+  return {
+    ok: false,
+    latency,
+    error: "PROVIDER_ERROR",
+    message: `Provider returned ${res.status}`,
+    status: res.status,
+  };
 }
 
 /** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */

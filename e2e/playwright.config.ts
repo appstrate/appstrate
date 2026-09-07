@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { defineConfig } from "@playwright/test";
+import { E2E_BASE_URL, E2E_PORT } from "./helpers/base-url.ts";
 
 export default defineConfig({
   testDir: "./tests",
@@ -11,7 +12,7 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
 
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: E2E_BASE_URL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -33,8 +34,29 @@ export default defineConfig({
 
   webServer: {
     command: "cd .. && bun --hot apps/api/src/index.ts",
-    url: "http://localhost:3000",
+    url: E2E_BASE_URL,
     reuseExistingServer: true,
     timeout: 120_000,
+    // Playwright already spreads `process.env` underneath this map, so only the
+    // keys the suite pins are listed. The port-derived values match the API's own
+    // defaults at the default port; the data directories are deliberately not
+    // the API's defaults (see below).
+    env: {
+      PORT: String(E2E_PORT),
+      APP_URL: E2E_BASE_URL,
+      TRUSTED_ORIGINS: `${E2E_BASE_URL},http://localhost:5173`,
+      // tests/models/custom-model.ui.spec.ts points the platform at a mock
+      // OpenAI-compatible endpoint on 127.0.0.1; the SSRF guard blocks
+      // loopback unless the operator trusts it explicitly.
+      EGRESS_ALLOW_INTERNAL_HOSTS: "127.0.0.1,localhost",
+      // The API defaults both to `./data/{pglite,storage}` — the very
+      // directories a developer's `bun run dev` holds open in this checkout.
+      // PGlite tolerates a single process per directory: the second one aborts
+      // (`RuntimeError: Aborted()`) and the concurrent open can corrupt the
+      // first one's catalog. The suite seeds its own users and orgs per test,
+      // so it needs no shared state — only its own place to keep it.
+      PGLITE_DATA_DIR: "./data/e2e/pglite",
+      FS_STORAGE_PATH: "./data/e2e/storage",
+    },
   },
 });

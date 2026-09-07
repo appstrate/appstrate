@@ -50,8 +50,9 @@ export function seedTestModelProviders(): void {
   // (`api.openai.test`, `api.anthropic.test`, …) without each test having to
   // monkey-patch the registry. In production, `core-providers` ships these
   // entries with `baseUrlOverridable: false` (only the explicit
-  // `openai-compatible` entry is overridable) — flipping the flag in tests is
-  // strictly a fixture flexibility, the prod registry is untouched.
+  // custom-endpoint entries, `openai-compatible` and `anthropic-compatible`,
+  // are overridable) — flipping the flag in tests is strictly a fixture
+  // flexibility, the prod registry is untouched.
   const moduleContributions = getDiscoveredModules()
     .map((m) => m.modelProviders?.() ?? [])
     .flat()

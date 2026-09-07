@@ -45,6 +45,7 @@ const synthProvider: ModelProviderDefinition = {
   // boot validation doesn't reject it. The placeholder hooks under test
   // don't depend on a populated featured list.
   featuredModels: [],
+  modelDiscovery: { mode: "static" },
   hooks: {
     /**
      * Returns a fixed synthetic placeholder when the token looks "structured"

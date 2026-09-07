@@ -217,7 +217,7 @@ export function resolveFeaturedModels(
  * Concrete discovery candidates. Falls back to the featured selection when
  * `modelDiscoveryCandidates` is absent, mirroring the contract documented on
  * the field. Unlike featured ids these need NOT exist in the catalog (the
- * probe path may legitimately try an uncatalogued id).
+ * listing path may legitimately confirm an uncatalogued id).
  */
 export function resolveDiscoveryCandidates(
   def: Pick<
@@ -238,7 +238,7 @@ export function resolveDiscoveryCandidates(
  * catalog-derived by construction: an explicit array (codex) can perfectly
  * well name an id the vendored catalog does not carry yet.
  *
- * The probe path deliberately does not use this — an empirically verified id
+ * The listing path deliberately does not use this — an empirically verified id
  * is served whether or not the catalog knows about it, and the model form
  * falls back to an id-only entry for such ids.
  */

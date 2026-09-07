@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -35,17 +36,17 @@ import {
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ApiError } from "../../api/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { getModelIcon, getProviderIcon } from "../../components/icons";
-import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
+import { resolveProviderEntry } from "../../lib/provider-registry-helpers";
 import { formatDateField } from "../../lib/format-date";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
-import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
@@ -230,7 +231,6 @@ function CredentialsSection({
   onCreate,
   onEdit,
   onDelete,
-  onRename,
   onConnectOAuth,
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
@@ -239,7 +239,6 @@ function CredentialsSection({
   onCreate: () => void;
   onEdit: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
-  onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -275,12 +274,7 @@ function CredentialsSection({
             </TableHeader>
             <TableBody>
               {credentials.map((pk) => {
-                const provider = findProviderByApiShapeAndBaseUrl(
-                  pk.apiShape,
-                  pk.baseUrl,
-                  registry ?? [],
-                );
-                const ProviderIcon = getProviderIcon(provider);
+                const ProviderIcon = getProviderIcon(resolveProviderEntry(pk, registry ?? []));
                 const isOauth = pk.authMode === "oauth2";
                 return (
                   <TableRow key={pk.id} data-testid={`credential-row-${pk.id}`}>
@@ -290,11 +284,7 @@ function CredentialsSection({
                           <ProviderIcon className="text-muted-foreground size-4 shrink-0" />
                         )}
                         <div className="min-w-0">
-                          <InlineEditableLabel
-                            value={pk.label}
-                            editable={pk.source === "custom" && !isOauth}
-                            onSave={(newLabel) => onRename(pk, newLabel)}
-                          />
+                          <div className="truncate text-sm font-medium">{pk.label}</div>
                           {isOauth && pk.oauth_email && (
                             <div className="text-muted-foreground truncate text-[0.65rem]">
                               {t("credentials.oauth.connectedAs", { email: pk.oauth_email })}
@@ -447,6 +437,23 @@ export function OrgSettingsModelsPage() {
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
+  // `org_models.credential_id` is ON DELETE RESTRICT (409 `credential_in_use`):
+  // the dialog says so before asking the server.
+  const modelsOnCredential =
+    confirmState?.type === "deleteCredential"
+      ? (models ?? []).filter((m) => m.credentialId === confirmState.id).length
+      : 0;
+
+  const closeConfirm = () => setConfirmState(null);
+  const reportDeleteFailure = (err: unknown) => {
+    toast.error(
+      err instanceof ApiError && err.code === "credential_in_use"
+        ? t("credentials.deleteRefused")
+        : t("error.prefix", { ns: "common", message: getErrorMessage(err) }),
+    );
+    closeConfirm();
+  };
+
   return (
     <>
       <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
@@ -490,12 +497,6 @@ export function OrgSettingsModelsPage() {
           onDelete={(pk) =>
             setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
           }
-          onRename={(pk, newLabel) => {
-            updatePkMutation.mutate({
-              params: { path: { id: pk.id } },
-              body: { label: newLabel },
-            });
-          }}
           onConnectOAuth={(credential) => {
             setEditPk(credential);
             setPkModalOpen(true);
@@ -546,29 +547,30 @@ export function OrgSettingsModelsPage() {
 
       <ConfirmModal
         open={!!confirmState}
-        onClose={() => setConfirmState(null)}
+        onClose={closeConfirm}
         title={t("btn.confirm", { ns: "common" })}
         description={
           confirmState?.type === "deleteModel"
             ? t("models.deleteConfirm", { label: confirmState.label })
             : confirmState?.type === "deleteCredential"
-              ? t("credentials.deleteConfirm", { label: confirmState.label })
+              ? modelsOnCredential > 0
+                ? t("credentials.deleteInUse", {
+                    label: confirmState.label,
+                    count: modelsOnCredential,
+                  })
+                : t("credentials.deleteConfirm", { label: confirmState.label })
               : ""
         }
+        confirmDisabled={modelsOnCredential > 0}
         isPending={deleteModelMutation.isPending || deletePkMutation.isPending}
         onConfirm={() => {
           if (!confirmState) return;
-          const close = () => setConfirmState(null);
+          const options = { onSuccess: closeConfirm, onError: reportDeleteFailure };
+          const params = { path: { id: confirmState.id } };
           if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate(
-              { params: { path: { id: confirmState.id } } },
-              { onSuccess: close },
-            );
+            deleteModelMutation.mutate({ params }, options);
           } else {
-            deletePkMutation.mutate(
-              { params: { path: { id: confirmState.id } } },
-              { onSuccess: close },
-            );
+            deletePkMutation.mutate({ params }, options);
           }
         }}
       />

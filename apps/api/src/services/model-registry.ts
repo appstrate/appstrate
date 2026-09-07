@@ -114,9 +114,9 @@ const rawModelProviderCredentialSchema = z.object({
   providerId: z.string().min(1),
   /**
    * Override the registry's `defaultBaseUrl`. Honored ONLY when the
-   * provider declares `baseUrlOverridable: true` (today: `openai-compatible`).
-   * For any other provider, supplying this is a configuration error and
-   * the env entry is rejected at boot.
+   * provider declares `baseUrlOverridable: true` — the custom-endpoint
+   * entries, one per wire format. For any other provider, supplying this
+   * is a configuration error and the env entry is rejected at boot.
    */
   baseUrlOverride: z.string().min(1).optional(),
   apiKey: z.string().min(1),
@@ -147,8 +147,8 @@ type RawModelProviderCredential = z.infer<typeof rawModelProviderCredentialSchem
  * }]
  * ```
  *
- * For `openai-compatible` (the only `baseUrlOverridable: true` provider),
- * add `"baseUrlOverride": "https://my-endpoint/v1"`.
+ * For a `baseUrlOverridable: true` provider (`openai-compatible`,
+ * `anthropic-compatible`), add `"baseUrlOverride": "https://my-endpoint/v1"`.
  */
 export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
   const mdlMap = new Map<string, ModelDefinition>();

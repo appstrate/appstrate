@@ -167,8 +167,12 @@ describe("resolveCredentialDelivery (oauth-class classification)", () => {
   // "oauth2") resolves off the same registration the launcher reads.
   beforeAll(() => {
     resetModelProviders();
-    registerModelProvider(fakeProvider("claude-code", { authMode: "oauth2" }));
-    registerModelProvider(fakeProvider("codex", { authMode: "oauth2" }));
+    registerModelProvider(
+      fakeProvider("claude-code", { authMode: "oauth2", modelDiscovery: { mode: "static" } }),
+    );
+    registerModelProvider(
+      fakeProvider("codex", { authMode: "oauth2", modelDiscovery: { mode: "static" } }),
+    );
     registerModelProvider(fakeProvider("openai", { authMode: "api_key" }));
   });
   afterAll(() => {

@@ -32,9 +32,11 @@
  *
  * OAuth-flavoured providers live in their own opt-in workspace modules
  * (`@appstrate/module-codex`, `@appstrate/module-claude-code`, …). The
- * `openai-compatible` entry stays as the escape hatch for self-hosted
- * or third-party OpenAI-compatible endpoints not covered by a named
- * preset (vLLM, Ollama, LiteLLM, etc.).
+ * `baseUrlOverridable` entries — one per wire format — are the escape
+ * hatch for self-hosted or third-party endpoints not covered by a named
+ * preset: `openai-compatible` for the OpenAI chat-completions API,
+ * `anthropic-compatible` for the Anthropic Messages API. Each carries
+ * its own base URL on the credential.
  *
  * Routing: api_key flows fetch the provider's `defaultBaseUrl` (or the
  * per-credential override when `baseUrlOverridable: true`) directly.
@@ -285,11 +287,27 @@ const opencodeGo: ModelProviderDefinition = {
 const openaiCompatible: ModelProviderDefinition = {
   providerId: "openai-compatible",
   displayName: "OpenAI-compatible (custom)",
-  iconUrl: "openai",
+  iconUrl: "custom-endpoint",
   description:
     "Self-hosted or third-party endpoint exposing the OpenAI chat-completions API (Ollama, vLLM, LiteLLM, …).",
   apiShape: "openai-completions",
   defaultBaseUrl: "http://localhost:11434",
+  baseUrlOverridable: true,
+  authMode: "api_key",
+  featuredModels: [],
+};
+
+const anthropicCompatible: ModelProviderDefinition = {
+  providerId: "anthropic-compatible",
+  displayName: "Anthropic-compatible (custom)",
+  iconUrl: "custom-endpoint",
+  description:
+    "Self-hosted or third-party endpoint exposing the Anthropic Messages API (LiteLLM proxy, vendors publishing an Anthropic-compatible endpoint, …).",
+  docsUrl: "https://docs.anthropic.com/en/api/messages",
+  apiShape: "anthropic-messages",
+  // LiteLLM's default proxy port — the usual way to serve this wire format
+  // locally. Ollama's 11434 speaks chat-completions, not Messages.
+  defaultBaseUrl: "http://localhost:4000",
   baseUrlOverridable: true,
   authMode: "api_key",
   featuredModels: [],
@@ -319,6 +337,7 @@ const coreProvidersModule: AppstrateModule = {
       zai,
       opencodeGo,
       openaiCompatible,
+      anthropicCompatible,
     ];
   },
 };

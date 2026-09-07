@@ -98,15 +98,30 @@ export function useTestModelProviderCredential() {
 }
 
 /**
- * Empirical model discovery — probes which models the credential's
- * account/plan actually serves and persists them server-side (the seed
- * gate reads the persisted list). The model form reads the fresh ids
- * straight off the mutation response to populate its dropdown, so nothing
- * cached needs invalidating: the credentials list surfaces no probe-derived
- * field and the registry is a pure, org-independent catalog.
+ * Model discovery — reports which models the credential's account/plan serves,
+ * from the provider's own listing intersected with its candidates (or, for a
+ * static provider, derived with no request at all), and persists them
+ * server-side (the seed gate reads the persisted list). The model form reads
+ * the fresh ids straight off the mutation response to populate its dropdown,
+ * so nothing cached needs invalidating: the credentials list surfaces no
+ * discovery-derived field and the registry is a pure, org-independent catalog.
  */
 export function useRefreshCredentialModels() {
   return $api.useMutation("post", "/api/model-provider-credentials/{id}/refresh-models");
+}
+
+/** Wire shape of `POST /api/model-provider-credentials/discover`'s 200 body. */
+export type DiscoveredModelsResponse =
+  paths["/api/model-provider-credentials/discover"]["post"]["responses"][200]["content"]["application/json"];
+export type DiscoveredModel = DiscoveredModelsResponse["models"][number];
+
+/**
+ * Lists what an endpoint serves, for a saved credential or for a key typed
+ * inline. Persists nothing — the form reads the models straight off the
+ * response, so no cache is invalidated.
+ */
+export function useDiscoverModels() {
+  return $api.useMutation("post", "/api/model-provider-credentials/discover");
 }
 
 export function deduplicateLabel(label: string, existingKeys: { label: string }[]): string {
