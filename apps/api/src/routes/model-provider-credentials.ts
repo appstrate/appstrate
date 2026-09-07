@@ -26,6 +26,8 @@ import {
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
+import { listServedModelIds } from "../services/model-providers/model-listing.ts";
+import { describeServedModel } from "../services/model-providers/model-metadata.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
@@ -89,6 +91,104 @@ function pgErrorCode(err: unknown): string | undefined {
     cur = (cur as { cause?: unknown }).cause;
   }
   return undefined;
+}
+
+/**
+ * `POST /discover` body — exactly one of the two forms: an existing
+ * `credential_id`, or an inline `provider_id` + `api_key` (+ optional
+ * `base_url_override`) for an endpoint no credential exists for yet. Both
+ * forms and neither form are rejected by the route, which names the offending
+ * field; Zod only pins the field types.
+ */
+export const discoverSchema = z
+  .object({
+    credential_id: z.uuid().optional(),
+    provider_id: z.string().min(1).optional(),
+    api_key: z.string().min(1).optional(),
+    base_url_override: z.url().optional(),
+  })
+  .strict();
+
+/** Resolved inference target for one discovery call. */
+interface DiscoverTarget {
+  providerId: string;
+  apiShape: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
+/**
+ * Enumeration must never spend a subscription token: the platform issues no
+ * platform-side request on an OAuth provider's behalf
+ * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`).
+ */
+function assertApiKeyProvider(cfg: ModelProviderDefinition, param: string): void {
+  if (cfg.authMode !== "api_key") {
+    throw invalidRequest(
+      `Provider ${cfg.providerId} authenticates with OAuth; its models are not enumerated`,
+      param,
+    );
+  }
+}
+
+/** Resolve the `POST /discover` body into the endpoint to enumerate. */
+async function resolveDiscoverTarget(
+  orgId: string,
+  body: z.infer<typeof discoverSchema>,
+): Promise<DiscoverTarget> {
+  const inline =
+    body.provider_id !== undefined ||
+    body.api_key !== undefined ||
+    body.base_url_override !== undefined;
+
+  if (body.credential_id !== undefined) {
+    if (inline) {
+      throw invalidRequest(
+        "Provide either credential_id or an inline provider_id + api_key, not both",
+        "credential_id",
+      );
+    }
+    if (isSystemModelProviderCredential(body.credential_id)) {
+      throw systemEntityForbidden("model provider credential", body.credential_id);
+    }
+    const creds = await loadInferenceCredentials(orgId, body.credential_id);
+    if (!creds) throw notFound("Model provider credential not found");
+    const cfg = getModelProvider(creds.providerId);
+    if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credential_id");
+    assertApiKeyProvider(cfg, "credential_id");
+    return {
+      providerId: creds.providerId,
+      apiShape: creds.apiShape,
+      baseUrl: creds.baseUrl,
+      apiKey: creds.apiKey,
+    };
+  }
+
+  if (!inline) {
+    throw invalidRequest(
+      "Provide either credential_id or an inline provider_id + api_key",
+      "credential_id",
+    );
+  }
+  if (body.provider_id === undefined)
+    throw invalidRequest("provider_id is required", "provider_id");
+  if (body.api_key === undefined) throw invalidRequest("api_key is required", "api_key");
+
+  const cfg = getModelProvider(body.provider_id);
+  if (!cfg) throw invalidRequest(`Unknown providerId: ${body.provider_id}`, "provider_id");
+  assertApiKeyProvider(cfg, "provider_id");
+  if (body.base_url_override !== undefined && !cfg.baseUrlOverridable) {
+    throw invalidRequest(
+      `Provider ${cfg.providerId} does not accept a base URL override`,
+      "base_url_override",
+    );
+  }
+  return {
+    providerId: cfg.providerId,
+    apiShape: cfg.apiShape,
+    baseUrl: body.base_url_override ?? cfg.defaultBaseUrl,
+    apiKey: body.api_key,
+  };
 }
 
 export const testInlineSchema = z
@@ -269,6 +369,48 @@ export function createModelProviderCredentialsRouter() {
         });
         throw internalError();
       }
+    },
+  );
+
+  // POST /api/model-provider-credentials/discover — enumerate what an endpoint
+  // actually serves, and prefill what the catalog knows about each id, BEFORE a
+  // credential exists (the operator types URL + key inline and saves both at
+  // once). `refresh-models` cannot answer this: it needs a persisted
+  // credential, it persists its verdict, and it intersects the listing with the
+  // provider's discovery candidates — of which `openai-compatible` declares
+  // none. This endpoint persists NOTHING and never echoes the key. Same
+  // rate limit and permission as `refresh-models`: it spends the user's key.
+  router.post(
+    "/discover",
+    rateLimit(6),
+    requirePermission("model-provider-credentials", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const body = await readJsonBody(c, discoverSchema);
+      const target = await resolveDiscoverTarget(orgId, body);
+      const listing = await listServedModelIds(target);
+      if (!listing.ok) {
+        return c.json({
+          outcome: listing.error.toLowerCase(),
+          models: [],
+          message: listing.message,
+        });
+      }
+      return c.json({
+        outcome: "ok",
+        models: listing.modelIds.map((id) => {
+          const described = describeServedModel(target.providerId, id);
+          return {
+            id,
+            label: described.label,
+            context_window: described.contextWindow,
+            max_tokens: described.maxTokens,
+            input: described.input,
+            reasoning: described.reasoning,
+          };
+        }),
+        message: null,
+      });
     },
   );
 

@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`POST /api/model-provider-credentials/discover`** — asks an endpoint once
+  for its model listing (`GET <base_url>/models`) and returns the ids it serves.
+  Accepts either an existing `credential_id` or an inline
+  `provider_id` + `api_key` (+ `base_url_override`), so the model form can offer
+  what a custom OpenAI-compatible endpoint actually serves BEFORE the credential
+  exists — which `POST /{id}/refresh-models` cannot do: it needs a persisted
+  credential, it persists its verdict, and it intersects the listing with
+  discovery candidates, of which `openai-compatible` declares none.
+- Each returned id is prefilled from the vendored pricing catalog (`label`,
+  `context_window`, `max_tokens`, `input`, `reasoning`) — the provider's own
+  catalog first, then any catalog by exact id, then by the id with one leading
+  `<vendor>/` segment stripped. An id in no catalog comes back all-null rather
+  than guessed. Per-token cost is deliberately never returned: an endpoint
+  serving a vendor's model id is not billed at the vendor's rate, and a wrong
+  price would corrupt the `llm_usage` ledger.
+- The endpoint persists nothing (no credential, no `available_model_ids`), never
+  echoes the key back, and refuses any provider whose `authMode` is not
+  `api_key` — a subscription token is never read or spent to enumerate models
+  (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). Rate limited to 6/min behind
+  `model-provider-credentials:write`, the same gate as `refresh-models`.
+
 - **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
   out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
   re-imported by `lib/boot.ts`, `services/input-parser.ts` and
