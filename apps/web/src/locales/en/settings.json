@@ -478,8 +478,6 @@
   "models.form.title": "Add model",
   "models.form.editTitle": "Edit model",
   "models.form.label": "Name",
-  "models.form.api": "API type",
-  "models.form.apiPlaceholder": "Select an API type",
   "models.form.baseUrl": "Base URL",
   "models.form.baseUrlHint": "Provider API URL",
   "models.form.modelId": "Model",

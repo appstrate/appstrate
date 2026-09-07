@@ -10,36 +10,15 @@
  * `modelProviders()`).
  */
 
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 
-/** Sentinel used by the form modals to mean "I want to fill in custom fields myself". */
-export const CUSTOM_ID = "__custom__";
-
 /**
- * Supported Pi SDK adapter shapes (in-container LLM client) offered by the UI's
- * "custom provider" picker — the operator chooses one of these when their
- * endpoint isn't in the registry.
- *
- * A deliberate SUBSET of `ModelApiShape`, not a mirror of it:
- * `openai-codex-responses` is excluded because it is reachable only through an
- * oauth subscription, so no operator-supplied endpoint can ever serve it.
- * Offering it would be a picker entry that cannot work.
- *
- * The `satisfies` below is what keeps the subset honest — a shape retired from
- * core stops compiling here, while the exclusion above stays a choice rather
- * than drift nobody noticed. Do NOT "complete" this list from the union.
+ * Sentinel for the MODEL-level "custom" entry: a model id the picked provider's
+ * catalog doesn't list, typed in by hand. It is never a `providerId` — a custom
+ * endpoint is the registry's own `openai-compatible` provider, whose credential
+ * carries the apiShape and base URL the model runs on.
  */
-export const PI_ADAPTER_TYPES = [
-  { value: "openai-completions", label: "OpenAI / Compatible" },
-  { value: "openai-responses", label: "OpenAI Responses" },
-  { value: "mistral-conversations", label: "Mistral" },
-  { value: "anthropic-messages", label: "Anthropic" },
-  { value: "google-generative-ai", label: "Google AI" },
-  { value: "google-vertex", label: "Google Vertex AI" },
-  { value: "azure-openai-responses", label: "Azure OpenAI" },
-  { value: "bedrock-converse-stream", label: "AWS Bedrock" },
-] as const satisfies ReadonlyArray<{ value: ModelApiShape; label: string }>;
+export const CUSTOM_ID = "__custom__";
 
 /**
  * Locate the provider that owns a given `(apiShape, baseUrl)` combination.
@@ -96,8 +75,8 @@ function findRegistryModel(
  * Tries the curated model catalog first when a `modelId` is supplied
  * (`org_models` rows), then falls back to the base-URL match
  * (`model_provider_credentials` rows have no `modelId`). Returns
- * {@link CUSTOM_ID} when no registry entry claims the row — what the form
- * modals surface as the "Custom" picker entry.
+ * {@link CUSTOM_ID} when no registry entry claims the row; no picker carries
+ * that value, so the provider select renders unselected.
  */
 export function resolveProviderId(
   spec: {

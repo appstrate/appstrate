@@ -41,34 +41,16 @@ import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import {
   CUSTOM_ID,
-  PI_ADAPTER_TYPES,
   getProviderById,
   resolveModelEntryId,
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
+import {
+  buildModelFormPayload,
+  type ModelFormData,
+  type ModelFormFields,
+} from "@/lib/model-form-payload";
 import { getProviderIcon } from "./icons";
-
-export interface ModelFormData {
-  /**
-   * Optional — server derives from the catalog label (`<catalog>.label`)
-   * and dedupes against existing org rows when absent. Sent only when the
-   * user explicitly customized it.
-   */
-  label?: string;
-  modelId: string;
-  credentialId: string;
-  newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
-  /**
-   * Catalog-derivable overrides. Sent only when the user edited them after
-   * picking a preset (RHF `dirtyFields`) — keeps existing rows in sync with
-   * the weekly `refresh-pricing-catalog.ts` bump.
-   */
-  input?: string[];
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoning?: boolean;
-  cost?: ModelCost;
-}
 
 interface ModelFormModalProps {
   open: boolean;
@@ -76,20 +58,6 @@ interface ModelFormModalProps {
   model: OrgModelInfo | null;
   isPending: boolean;
   onSubmit: (data: ModelFormData) => void;
-}
-
-interface ModelFormFields {
-  label: string;
-  apiShape: string;
-  baseUrl: string;
-  modelId: string;
-  credentialId: string;
-  inlineApiKey: string;
-  inputText: boolean;
-  inputImage: boolean;
-  contextWindow: string;
-  maxTokens: string;
-  reasoning: boolean;
 }
 
 function OpenRouterCombobox({
@@ -195,34 +163,32 @@ function OpenRouterCombobox({
   );
 }
 
-function ModelFormBody({
+/**
+ * The form itself, without the dialog chrome — `ModelFormModal` owns the
+ * `<Modal>`, its title and its footer buttons (which submit through
+ * `form="model-form"`). Exported so the rendered form can be asserted on: a
+ * Radix dialog renders nothing at all without a DOM.
+ */
+export function ModelFormBody({
   model,
-  isPending,
   onSubmit,
-  onClose,
 }: {
   model: OrgModelInfo | null;
-  isPending: boolean;
   onSubmit: (data: ModelFormData) => void;
-  onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
 
   const registryQuery = useProvidersRegistry();
-  const registry = useMemo(() => registryQuery.data ?? [], [registryQuery.data]);
-  // openai-compatible is the operator escape hatch (free-form baseUrl, no
-  // catalog) and surfaces as the "Custom" option instead of a picker entry.
-  // OpenRouter has no curated catalog — its row stays so users can pick it
-  // and search models via the dedicated combobox.
+  // Every registry entry is a picker entry, `openai-compatible` (the
+  // free-form-baseUrl escape hatch, displayed "OpenAI-compatible (custom)")
+  // included — its credential carries the apiShape and base URL the model
+  // will run on, so it has to be the provider the form names.
   //
   // The picker is split into two visual sections — "Featured" (the
   // module-declared canonical providers operators usually want) and
   // "Other" (everything else). The flag is metadata only; no write path
   // gates on it, so any entry remains selectable from either group.
-  const pickerEntries = useMemo(
-    () => registry.filter((p) => p.providerId !== "openai-compatible"),
-    [registry],
-  );
+  const registry = useMemo(() => registryQuery.data ?? [], [registryQuery.data]);
 
   // User-driven provider/model overrides — `null` means "follow auto-detect".
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
@@ -336,10 +302,6 @@ function ModelFormBody({
   }, [credentialsQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
 
   const selectedCredential = availableCredentials.find((k) => k.id === credentialId);
-  // For api-key providers, the third state is "no selection + about to type
-  // a new key inline". For OAuth providers there's no inline path — the
-  // user must either pick or click "Connect".
-  const inlineCredentialMode = !isOauthProvider && !selectedCredential && !credentialId;
 
   // OAuth connect dialog — the pairing endpoint now returns the new
   // credentialId directly via `onConnected`, so we auto-select it in the
@@ -406,12 +368,15 @@ function ModelFormBody({
 
   const isOpenRouter = providerId === "openrouter";
   const openRouterSearch = useOpenRouterSearch(isOpenRouter);
-  const isCustomProvider = providerId === CUSTOM_ID;
+  const selectedProvider = getProviderById(providerId, registry);
+  // A provider that lets the operator point the credential at their own
+  // endpoint has no catalog behind it: base URL, model id, label and
+  // capabilities are all typed in. Read off the registry flag, so a second
+  // such provider needs no client edit.
+  const isCustomProvider = selectedProvider?.baseUrlOverridable === true;
   const isCustomModel = selectedModelId === CUSTOM_ID;
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
   const isCustom = isCustomProvider || isCustomModel;
-
-  const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId, registry);
 
   // Models offered in the dropdown. For OAuth (subscription) providers the
   // list is EXACTLY what discovery reported for the selected credential —
@@ -449,17 +414,13 @@ function ModelFormBody({
     setProviderId(id);
     clearErrors();
 
-    if (id === CUSTOM_ID) {
-      setSelectedModelId(CUSTOM_ID);
-      setValue("apiShape", "");
-      setValue("baseUrl", "");
-    } else {
-      setSelectedModelId("");
-      const provider = getProviderById(id, registry);
-      if (provider) {
-        setValue("apiShape", provider.apiShape);
-        setValue("baseUrl", provider.defaultBaseUrl);
-      }
+    setSelectedModelId("");
+    const provider = getProviderById(id, registry);
+    if (provider) {
+      setValue("apiShape", provider.apiShape);
+      // Pre-seeded even when overridable: the operator edits the value they
+      // are customising rather than typing a whole URL from scratch.
+      setValue("baseUrl", provider.defaultBaseUrl);
     }
     resetModelFields();
     openRouterSearch.setSearch("");
@@ -490,72 +451,18 @@ function ModelFormBody({
   };
 
   const onFormSubmit = handleSubmit((data) => {
-    const inputArr = [data.inputText && "text", data.inputImage && "image"].filter(
-      Boolean,
-    ) as string[];
-    const cw = data.contextWindow.trim() ? parseInt(data.contextWindow.trim(), 10) : undefined;
-    const mt = data.maxTokens.trim() ? parseInt(data.maxTokens.trim(), 10) : undefined;
-
-    // Inline api-key creation only applies to api_key providers — OAuth
-    // credentials must exist before the model is saved (they're created via
-    // the pairing dialog and auto-selected into `credentialId`).
-    const willCreateNewCredential =
-      !isOauthProvider && inlineCredentialMode && data.inlineApiKey.trim().length > 0;
-
-    // OAuth path requires a selected credential — there's no "type your key
-    // inline" affordance, so emptiness is a hard error. The api-key path
-    // accepts either an existing selection OR an inline new key; the route
-    // handler validates the latter further down.
-    if (isOauthProvider && !data.credentialId) {
-      setError("credentialId", { message: t("models.form.connectionRequired") });
-      return;
-    }
-    if (!isOauthProvider && !data.credentialId && !willCreateNewCredential) {
-      setError("credentialId", { message: t("models.form.apiKeyRequired") });
-      return;
-    }
-
-    // Per-field dirty tracking: handleModelChange uses raw setValue (no
-    // shouldDirty) so preset-derived values never mark fields dirty. Only
-    // values the user actually edited after the preset (or that came from
-    // OpenRouter live-search) are flagged. Catalog-derivable fields that
-    // stayed at their preset values are omitted from the payload — the
-    // server's `resolveCatalogDefaults` resolves them on read so weekly
-    // catalog refreshes propagate. Same rationale for `label` (custom
-    // input only) and `cost` (imported from OpenRouter, tracked outside RHF).
-    const labelDirty = dirtyFields.label === true;
-    const inputDirty = dirtyFields.inputText === true || dirtyFields.inputImage === true;
-    const cwDirty = dirtyFields.contextWindow === true;
-    const mtDirty = dirtyFields.maxTokens === true;
-    const reasoningDirty = dirtyFields.reasoning === true;
-
-    onSubmit({
-      ...(labelDirty && data.label.trim() ? { label: data.label.trim() } : {}),
-      modelId: data.modelId.trim(),
-      credentialId: willCreateNewCredential ? "" : data.credentialId,
-      // Inline credential creation needs the providerId (and optionally a
-      // baseUrlOverride for `openai-compatible`) — the caller wires this up
-      // through POST /api/model-provider-credentials before saving the model.
-      ...(willCreateNewCredential
-        ? {
-            newCredential: {
-              apiKey: data.inlineApiKey.trim(),
-              providerId,
-              ...(isCustomProvider && data.baseUrl.trim()
-                ? { baseUrlOverride: data.baseUrl.trim() }
-                : {}),
-            },
-          }
-        : {}),
-      ...(inputDirty && inputArr.length > 0 ? { input: inputArr } : {}),
-      ...(cwDirty && cw ? { contextWindow: cw } : {}),
-      ...(mtDirty && mt ? { maxTokens: mt } : {}),
-      ...(reasoningDirty ? { reasoning: data.reasoning } : {}),
-      ...(importedCost ? { cost: importedCost } : {}),
+    const result = buildModelFormPayload({
+      fields: data,
+      dirtyFields,
+      provider: selectedProvider,
+      importedCost,
     });
+    if (!result.ok) {
+      setError(result.field, { message: t(result.messageKey) });
+      return;
+    }
+    onSubmit(result.data);
   });
-
-  const title = model ? t("models.form.editTitle") : t("models.form.title");
 
   // Model dropdown. OAuth (subscription) providers show a FLAT list of the
   // models discovery reported — every entry is equally "available on the plan",
@@ -735,11 +642,269 @@ function ModelFormBody({
     </div>
   );
 
+  // The four typed fields. Built only when they render, so RHF registers
+  // (and validates) them under exactly the condition it did before.
+  const labelFieldJsx = isCustom ? (
+    <div className="space-y-2">
+      <Label htmlFor="mdl-label">{t("models.form.label")}</Label>
+      <Input
+        id="mdl-label"
+        type="text"
+        {...register("label", {
+          validate: (v) => {
+            if (isPreset) return undefined;
+            if (!v.trim()) return t("validation.required", { ns: "common" });
+            return undefined;
+          },
+        })}
+        placeholder="ex: Claude Sonnet"
+        aria-invalid={showError("label") ? true : undefined}
+        className={cn(showError("label") && "border-destructive")}
+      />
+      {showError("label") && errors.label?.message && (
+        <div className="text-destructive text-sm">{errors.label.message}</div>
+      )}
+    </div>
+  ) : null;
+
+  const baseUrlFieldJsx = isCustom ? (
+    <div className="space-y-2">
+      <Label htmlFor="mdl-baseUrl">{t("models.form.baseUrl")}</Label>
+      <Input
+        id="mdl-baseUrl"
+        type="url"
+        {...register("baseUrl", {
+          validate: (v) => {
+            if (isPreset) return undefined;
+            if (!v.trim()) return t("validation.required", { ns: "common" });
+            try {
+              new URL(v.trim());
+            } catch {
+              return t("validation.required", { ns: "common" });
+            }
+            return undefined;
+          },
+        })}
+        placeholder="https://api.openai.com/v1"
+        aria-invalid={showError("baseUrl") ? true : undefined}
+        className={cn(showError("baseUrl") && "border-destructive")}
+      />
+      <div className="text-muted-foreground text-sm">{t("models.form.baseUrlHint")}</div>
+      {showError("baseUrl") && errors.baseUrl?.message && (
+        <div className="text-destructive text-sm">{errors.baseUrl.message}</div>
+      )}
+    </div>
+  ) : null;
+
+  const modelIdFieldJsx = isCustom ? (
+    <div className="space-y-2">
+      <Label htmlFor="mdl-modelId">{t("models.form.modelId")}</Label>
+      <Input
+        id="mdl-modelId"
+        type="text"
+        {...register("modelId", {
+          validate: (v) => {
+            if (isPreset) return undefined;
+            if (!v.trim()) return t("validation.required", { ns: "common" });
+            return undefined;
+          },
+        })}
+        placeholder="ex: claude-sonnet-4-5-20250929"
+        aria-invalid={showError("modelId") ? true : undefined}
+        className={cn(showError("modelId") && "border-destructive")}
+      />
+      {showError("modelId") && errors.modelId?.message && (
+        <div className="text-destructive text-sm">{errors.modelId.message}</div>
+      )}
+    </div>
+  ) : null;
+
+  // Capabilities — custom provider/model only; preset and OpenRouter auto-fill
+  // them from their source of truth.
+  const capabilitiesJsx = isCustom ? (
+    <CapabilitiesSection
+      contextWindowProps={register("contextWindow")}
+      maxTokensProps={register("maxTokens")}
+      inputText={inputText}
+      inputImage={inputImage}
+      reasoning={reasoning}
+      onInputTextChange={(v) => setValue("inputText", v)}
+      onInputImageChange={(v) => setValue("inputImage", v)}
+      onReasoningChange={(v) => setValue("reasoning", v)}
+    />
+  ) : null;
+
+  return (
+    <form id="model-form" onSubmit={onFormSubmit} className="space-y-4">
+      {/* Provider select */}
+      <div className="space-y-2">
+        <Label htmlFor="mdl-provider">{t("models.form.provider")}</Label>
+        <Select value={providerId} onValueChange={handleProviderChange}>
+          <SelectTrigger id="mdl-provider">
+            <SelectValue placeholder={t("models.form.providerPlaceholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            <ProviderPickerGroups
+              items={registry}
+              featuredLabel={t("models.form.providerGroupFeatured")}
+              otherLabel={t("models.form.providerGroupOther")}
+              renderItem={(p) => {
+                const Icon = getProviderIcon(p);
+                return (
+                  <SelectItem key={p.providerId} value={p.providerId}>
+                    <span className="flex items-center gap-2">
+                      {Icon && <Icon className="size-4" />}
+                      {p.displayName}
+                    </span>
+                  </SelectItem>
+                );
+              }}
+            />
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isCustomProvider ? (
+        /* An operator-supplied endpoint has no model list to wait for — the
+           base URL and the model id are typed — so every field is available
+           the moment the provider is picked, in the order it gets filled in:
+           endpoint → key → model → name → capabilities. */
+        <>
+          {baseUrlFieldJsx}
+          {credentialBlockJsx}
+          {modelIdFieldJsx}
+          {labelFieldJsx}
+          {capabilitiesJsx}
+        </>
+      ) : (
+        <>
+          {/* OAuth (subscription) providers need the connection FIRST: the
+              served model list depends on the account's plan, known only by
+              probing the live credential. So the order flips to connection →
+              probe → model. API-key / OpenRouter providers keep model-first
+              (static catalog, no per-credential discovery). */}
+          {isOauthProvider ? (
+            <>
+              {credentialBlockJsx}
+              {/* Model dropdown is gated on the probe: it appears only once
+                  refresh-models has returned the plan's verified ids (metadata
+                  comes from the already-loaded registry catalog). A probe that
+                  found nothing shows the empty-state instead of an empty
+                  dropdown. */}
+              {selectedCredential &&
+                (() => {
+                  const fresh = probeResult?.id === credentialId ? probeResult : null;
+                  // No result yet → call in flight (or, rarely, the registry
+                  // catalog is still loading) → detector spinner.
+                  if (!fresh || (fresh.modelIds.length > 0 && modelOptions.length === 0)) {
+                    return (
+                      <div className="text-muted-foreground flex items-center gap-2 text-sm">
+                        <Spinner /> {t("models.form.detectingModels")}
+                      </div>
+                    );
+                  }
+                  if (fresh.modelIds.length === 0) {
+                    return (
+                      <div className="text-muted-foreground text-sm">
+                        {t("models.form.noModelsDetected")}
+                      </div>
+                    );
+                  }
+                  return modelSelectJsx;
+                })()}
+            </>
+          ) : (
+            modelSelectJsx
+          )}
+
+          {/* OpenRouter model search (combobox) */}
+          {isOpenRouter && (
+            <div className="space-y-2">
+              <Label>{t("models.form.modelId")}</Label>
+              <OpenRouterCombobox
+                value={modelId}
+                search={openRouterSearch.search}
+                onSearchChange={openRouterSearch.setSearch}
+                models={openRouterSearch.models}
+                isLoading={openRouterSearch.isLoading}
+                placeholder={t("models.form.openRouterSearchPlaceholder")}
+                emptyText={t("models.form.openRouterNoResults")}
+                searchingText={t("models.form.openRouterSearching")}
+                onSelect={(m) => {
+                  // OpenRouter has no vendored catalog, so every field comes
+                  // from the live API and must be persisted as an explicit
+                  // override — including cost. We mark each setValue as dirty
+                  // so the submit handler ships them.
+                  setSelectedModelId(m.id);
+                  setValue("modelId", m.id, { shouldDirty: true });
+                  setValue("label", m.name, { shouldDirty: true });
+                  if (m.contextWindow)
+                    setValue("contextWindow", m.contextWindow.toString(), { shouldDirty: true });
+                  if (m.maxTokens)
+                    setValue("maxTokens", m.maxTokens.toString(), { shouldDirty: true });
+                  setValue("inputText", m.input?.includes("text") !== false, { shouldDirty: true });
+                  setValue("inputImage", m.input?.includes("image") ?? false, {
+                    shouldDirty: true,
+                  });
+                  setValue("reasoning", m.reasoning ?? false, { shouldDirty: true });
+                  // `useOpenRouterModels` already narrows the wire cost to
+                  // `ModelCost | null` in its `select`, so no re-normalisation here.
+                  setImportedCost(m.cost);
+                }}
+              />
+            </div>
+          )}
+
+          {labelFieldJsx}
+
+          {/* API-key / OpenRouter credential block — surfaced AFTER a model
+              is chosen. OAuth providers render their connection block above
+              (before the model select), so they're excluded here. */}
+          {!isOauthProvider &&
+            (!!selectedModelId || (isOpenRouter && !!modelId)) &&
+            credentialBlockJsx}
+
+          {baseUrlFieldJsx}
+          {modelIdFieldJsx}
+          {capabilitiesJsx}
+        </>
+      )}
+
+      {oauthDialogOpen && (
+        <Modal
+          open
+          onClose={oauthDismiss.requestClose}
+          title={t("credentials.oauth.cliStageTitle")}
+          actions={
+            <Button variant="ghost" onClick={oauthDismiss.requestClose}>
+              {t("credentials.oauth.close")}
+            </Button>
+          }
+        >
+          <OAuthPairingBody
+            providerId={providerId}
+            onConnected={(newId) => {
+              handleOauthConnected(newId);
+              setOauthDialogOpen(false);
+            }}
+            onBusyChange={oauthDismiss.onBusyChange}
+          />
+        </Modal>
+      )}
+      {oauthDismiss.confirmDialog}
+    </form>
+  );
+}
+
+export function ModelFormModal({ open, onClose, model, isPending, onSubmit }: ModelFormModalProps) {
+  const { t } = useTranslation(["settings", "common"]);
+  if (!open) return null;
+
   return (
     <Modal
       open
       onClose={onClose}
-      title={title}
+      title={model ? t("models.form.editTitle") : t("models.form.title")}
       actions={
         <>
           <Button type="button" variant="outline" onClick={onClose}>
@@ -751,280 +916,8 @@ function ModelFormBody({
         </>
       }
     >
-      <form id="model-form" onSubmit={onFormSubmit} className="space-y-4">
-        {/* Provider select */}
-        <div className="space-y-2">
-          <Label htmlFor="mdl-provider">{t("models.form.provider")}</Label>
-          <Select value={providerId} onValueChange={handleProviderChange}>
-            <SelectTrigger id="mdl-provider">
-              <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <ProviderPickerGroups
-                items={pickerEntries}
-                featuredLabel={t("models.form.providerGroupFeatured")}
-                otherLabel={t("models.form.providerGroupOther")}
-                renderItem={(p) => {
-                  const Icon = getProviderIcon(p);
-                  return (
-                    <SelectItem key={p.providerId} value={p.providerId}>
-                      <span className="flex items-center gap-2">
-                        {Icon && <Icon className="size-4" />}
-                        {p.displayName}
-                      </span>
-                    </SelectItem>
-                  );
-                }}
-              />
-              <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* OAuth (subscription) providers need the connection FIRST: the
-            served model list depends on the account's plan, known only by
-            probing the live credential. So the order flips to connection →
-            probe → model. API-key / OpenRouter providers keep model-first
-            (static catalog, no per-credential discovery). */}
-        {isOauthProvider ? (
-          <>
-            {credentialBlockJsx}
-            {/* Model dropdown is gated on the probe: it appears only once
-                refresh-models has returned the plan's verified ids (metadata
-                comes from the already-loaded registry catalog). A probe that
-                found nothing shows the empty-state instead of an empty
-                dropdown. */}
-            {selectedCredential &&
-              (() => {
-                const fresh = probeResult?.id === credentialId ? probeResult : null;
-                // No result yet → call in flight (or, rarely, the registry
-                // catalog is still loading) → detector spinner.
-                if (!fresh || (fresh.modelIds.length > 0 && modelOptions.length === 0)) {
-                  return (
-                    <div className="text-muted-foreground flex items-center gap-2 text-sm">
-                      <Spinner /> {t("models.form.detectingModels")}
-                    </div>
-                  );
-                }
-                if (fresh.modelIds.length === 0) {
-                  return (
-                    <div className="text-muted-foreground text-sm">
-                      {t("models.form.noModelsDetected")}
-                    </div>
-                  );
-                }
-                return modelSelectJsx;
-              })()}
-          </>
-        ) : (
-          modelSelectJsx
-        )}
-
-        {/* OpenRouter model search (combobox) */}
-        {isOpenRouter && (
-          <div className="space-y-2">
-            <Label>{t("models.form.modelId")}</Label>
-            <OpenRouterCombobox
-              value={modelId}
-              search={openRouterSearch.search}
-              onSearchChange={openRouterSearch.setSearch}
-              models={openRouterSearch.models}
-              isLoading={openRouterSearch.isLoading}
-              placeholder={t("models.form.openRouterSearchPlaceholder")}
-              emptyText={t("models.form.openRouterNoResults")}
-              searchingText={t("models.form.openRouterSearching")}
-              onSelect={(m) => {
-                // OpenRouter has no vendored catalog, so every field comes
-                // from the live API and must be persisted as an explicit
-                // override — including cost. We mark each setValue as dirty
-                // so the submit handler ships them.
-                setSelectedModelId(m.id);
-                setValue("modelId", m.id, { shouldDirty: true });
-                setValue("label", m.name, { shouldDirty: true });
-                if (m.contextWindow)
-                  setValue("contextWindow", m.contextWindow.toString(), { shouldDirty: true });
-                if (m.maxTokens)
-                  setValue("maxTokens", m.maxTokens.toString(), { shouldDirty: true });
-                setValue("inputText", m.input?.includes("text") !== false, { shouldDirty: true });
-                setValue("inputImage", m.input?.includes("image") ?? false, { shouldDirty: true });
-                setValue("reasoning", m.reasoning ?? false, { shouldDirty: true });
-                // `useOpenRouterModels` already narrows the wire cost to
-                // `ModelCost | null` in its `select`, so no re-normalisation here.
-                setImportedCost(m.cost);
-              }}
-            />
-          </div>
-        )}
-
-        {/* Label — only for custom provider/model */}
-        {isCustom && (
-          <div className="space-y-2">
-            <Label htmlFor="mdl-label">{t("models.form.label")}</Label>
-            <Input
-              id="mdl-label"
-              type="text"
-              {...register("label", {
-                validate: (v) => {
-                  if (isPreset) return undefined;
-                  if (!v.trim()) return t("validation.required", { ns: "common" });
-                  return undefined;
-                },
-              })}
-              placeholder="ex: Claude Sonnet"
-              autoFocus
-              aria-invalid={showError("label") ? true : undefined}
-              className={cn(showError("label") && "border-destructive")}
-            />
-            {showError("label") && errors.label?.message && (
-              <div className="text-destructive text-sm">{errors.label.message}</div>
-            )}
-          </div>
-        )}
-
-        {/* API-key / OpenRouter credential block — surfaced AFTER a model
-            is chosen. OAuth providers render their connection block above
-            (before the model select), so they're excluded here. */}
-        {!isOauthProvider &&
-          (!!selectedModelId || (isOpenRouter && !!modelId)) &&
-          credentialBlockJsx}
-
-        {oauthDialogOpen && (
-          <Modal
-            open
-            onClose={oauthDismiss.requestClose}
-            title={t("credentials.oauth.cliStageTitle")}
-            actions={
-              <Button variant="ghost" onClick={oauthDismiss.requestClose}>
-                {t("credentials.oauth.close")}
-              </Button>
-            }
-          >
-            <OAuthPairingBody
-              providerId={providerId}
-              onConnected={(newId) => {
-                handleOauthConnected(newId);
-                setOauthDialogOpen(false);
-              }}
-              onBusyChange={oauthDismiss.onBusyChange}
-            />
-          </Modal>
-        )}
-        {oauthDismiss.confirmDialog}
-
-        {/* Custom fields — visible for custom provider or custom model */}
-        {isCustom && (
-          <>
-            {isCustomProvider && (
-              <div className="space-y-2">
-                <Label htmlFor="mdl-api">{t("models.form.api")}</Label>
-                <Select
-                  value={apiShape}
-                  onValueChange={(v) => {
-                    setValue("apiShape", v);
-                    clearErrors("apiShape");
-                  }}
-                >
-                  <SelectTrigger
-                    id="mdl-api"
-                    className={cn(showError("apiShape") && "border-destructive")}
-                  >
-                    <SelectValue placeholder={t("models.form.apiPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PI_ADAPTER_TYPES.map((apiType) => (
-                      <SelectItem key={apiType.value} value={apiType.value}>
-                        {apiType.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {showError("apiShape") && errors.apiShape?.message && (
-                  <div className="text-destructive text-sm">{errors.apiShape.message}</div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="mdl-baseUrl">{t("models.form.baseUrl")}</Label>
-              <Input
-                id="mdl-baseUrl"
-                type="url"
-                {...register("baseUrl", {
-                  validate: (v) => {
-                    if (isPreset) return undefined;
-                    if (!v.trim()) return t("validation.required", { ns: "common" });
-                    try {
-                      new URL(v.trim());
-                    } catch {
-                      return t("validation.required", { ns: "common" });
-                    }
-                    return undefined;
-                  },
-                })}
-                placeholder="https://api.openai.com/v1"
-                aria-invalid={showError("baseUrl") ? true : undefined}
-                className={cn(showError("baseUrl") && "border-destructive")}
-              />
-              <div className="text-muted-foreground text-sm">{t("models.form.baseUrlHint")}</div>
-              {showError("baseUrl") && errors.baseUrl?.message && (
-                <div className="text-destructive text-sm">{errors.baseUrl.message}</div>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="mdl-modelId">{t("models.form.modelId")}</Label>
-              <Input
-                id="mdl-modelId"
-                type="text"
-                {...register("modelId", {
-                  validate: (v) => {
-                    if (isPreset) return undefined;
-                    if (!v.trim()) return t("validation.required", { ns: "common" });
-                    return undefined;
-                  },
-                })}
-                placeholder="ex: claude-sonnet-4-5-20250929"
-                aria-invalid={showError("modelId") ? true : undefined}
-                className={cn(showError("modelId") && "border-destructive")}
-              />
-              {showError("modelId") && errors.modelId?.message && (
-                <div className="text-destructive text-sm">{errors.modelId.message}</div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Capabilities — visible for custom provider/model only (preset + OpenRouter auto-fill from source of truth) */}
-        {isCustom && (
-          <CapabilitiesSection
-            contextWindowProps={register("contextWindow")}
-            maxTokensProps={register("maxTokens")}
-            inputText={inputText}
-            inputImage={inputImage}
-            reasoning={reasoning}
-            onInputTextChange={(v) => setValue("inputText", v)}
-            onInputImageChange={(v) => setValue("inputImage", v)}
-            onReasoningChange={(v) => setValue("reasoning", v)}
-          />
-        )}
-      </form>
+      {/* Key forces remount when the target model changes, resetting all state */}
+      <ModelFormBody key={model?.id ?? "__create__"} model={model} onSubmit={onSubmit} />
     </Modal>
-  );
-}
-
-export function ModelFormModal({ open, onClose, model, isPending, onSubmit }: ModelFormModalProps) {
-  if (!open) return null;
-
-  // Key forces remount when model changes, resetting all state
-  const key = model?.id ?? "__create__";
-
-  return (
-    <ModelFormBody
-      key={key}
-      model={model}
-      isPending={isPending}
-      onSubmit={onSubmit}
-      onClose={onClose}
-    />
   );
 }

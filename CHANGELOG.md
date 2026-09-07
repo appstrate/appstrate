@@ -383,6 +383,17 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **A custom (OpenAI-compatible) model can be created from the model form
+  again.** The provider picker offered a client-only `__custom__` entry and
+  submitted it as the credential's `providerId`, which
+  `POST /api/model-provider-credentials` answers with
+  `400 Unknown providerId`. The custom entry is now the registry's own
+  `openai-compatible` provider — the credential it creates carries the
+  `openai-completions` shape and the typed base URL, which is where the server
+  reads both from. The form's "Type d'API" selector is gone with it: the
+  payload never carried an `apiShape`, and no shape other than the provider's
+  own could have been honoured.
+
 - **A Dynamic Client Registration body without `scope` now yields the full
   self-service scope set (#1267).** An MCP client registering without `scope`
   got the identity scopes alone, so authorizing for `mcp:read` / `mcp:invoke`

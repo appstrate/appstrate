@@ -478,8 +478,6 @@
   "models.form.title": "Ajouter un modèle",
   "models.form.editTitle": "Modifier le modèle",
   "models.form.label": "Nom",
-  "models.form.api": "Type d'API",
-  "models.form.apiPlaceholder": "Sélectionnez un type d'API",
   "models.form.baseUrl": "URL de base",
   "models.form.baseUrlHint": "URL de l'API du provider",
   "models.form.modelId": "Modèle",

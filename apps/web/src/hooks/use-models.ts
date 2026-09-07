@@ -7,7 +7,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
 import type { ModelCost } from "@appstrate/core/module";
-import type { ModelFormData } from "../components/model-form-modal";
+import type { ModelFormData } from "../lib/model-form-payload";
 import {
   useCreateModelProviderCredential,
   useModelProviderCredentials,

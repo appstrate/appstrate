@@ -206,7 +206,7 @@ describe("model-providers runtime registry", () => {
     });
 
     it("still accepts a deliberately empty array with no catalog", () => {
-      // openrouter (live search) and openai-compatible (Custom only) declare
+      // openrouter (live search) and openai-compatible (free-form model ids) declare
       // exactly this — the arm the selector check must not swallow.
       registerModelProvider(fakeDef("no-featured", { featuredModels: [] }));
       expect(getModelProvider("no-featured")).not.toBeNull();
