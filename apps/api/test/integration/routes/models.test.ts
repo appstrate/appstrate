@@ -1542,4 +1542,68 @@ describe("Models API", () => {
       expect(res.status).not.toBe(400);
     });
   });
+
+  describe("custom (OpenAI-compatible) endpoint — the sequence the SPA emits", () => {
+    it("creates the credential then the model, and lists it", async () => {
+      const credentialRes = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          apiKey: "sk-test",
+          baseUrlOverride: "http://localhost:11434/v1",
+        }),
+      });
+      expect(credentialRes.status).toBe(201);
+      const credential = (await credentialRes.json()) as any;
+
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Local Qwen",
+          modelId: "qwen3:8b",
+          credentialId: credential.id,
+          contextWindow: 32768,
+          maxTokens: 8192,
+          input: ["text"],
+          reasoning: false,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as any;
+      // The credential's provider owns both — `org_models` stores neither.
+      expect(created.apiShape).toBe("openai-completions");
+      expect(created.baseUrl).toBe("http://localhost:11434/v1");
+      // No catalog backs this provider, so the typed capabilities are the
+      // only source there is and must round-trip verbatim.
+      expect(created.contextWindow).toBe(32768);
+      expect(created.maxTokens).toBe(8192);
+      expect(created.input).toEqual(["text"]);
+      expect(created.reasoning).toBe(false);
+
+      const listRes = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(listRes.status).toBe(200);
+      const list = (await listRes.json()) as any;
+      expect(list.data.map((m: any) => m.id)).toContain(created.id);
+    });
+
+    it("refuses a client-side sentinel as a providerId", async () => {
+      // What the model form used to send for a custom endpoint. The registry
+      // is the only namespace of provider ids — pinned here so the client can
+      // never quietly go back to inventing one.
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "__custom__",
+          apiKey: "sk-test",
+          baseUrlOverride: "http://localhost:11434/v1",
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.param).toBe("providerId");
+    });
+  });
 });

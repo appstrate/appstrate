@@ -211,7 +211,8 @@ const codexProvider: ModelProviderDefinition = {
   // subscription never serves, so deriving from it would over-list by a wide
   // margin. Reviewed against
   // https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in,
-  // fetched 2026-07-27) and re-reviewed whenever
+  // fetched 2026-07-27, re-read 2026-09-07 when `gpt-6-astra` reached the
+  // catalog) and re-reviewed whenever
   // `apps/api/src/data/subscription-watch/chatgpt.json` drifts.
   //
   // That review is no longer trust-based: `apps/api/test/unit/services/
@@ -220,10 +221,12 @@ const codexProvider: ModelProviderDefinition = {
   // serve is recorded — after checking the doc above — in
   // `apps/api/src/data/subscription-watch/reviewed.json`, never just dropped.
   //
-  // Recommended set, newest first. `gpt-5.3-codex-spark` (Pro-only research
-  // preview) is also recommended but is absent from openai.json, so the boot
-  // check forbids featuring it — it lives in the candidate list only.
-  featuredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  // Recommended set, newest first. `gpt-6-astra` is documented for Pro plans
+  // and above — like `gpt-5.3-codex-spark`, which is also recommended but is
+  // absent from openai.json, so the boot check forbids featuring it and it
+  // lives in the candidate list only. A plan that does not serve a featured
+  // id finds out at the first run, as for every other id here.
+  featuredModels: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
   // OFFLINE validation: the platform issues ZERO Codex API calls to test
   // a credential or discover models. The connection test runs the
   // `validateCredential` hook below (local JWT decode) — its mere presence is
@@ -239,6 +242,7 @@ const codexProvider: ModelProviderDefinition = {
   // `gpt-5.3-codex` are deprecated for ChatGPT sign-in and were dropped from
   // both lists.
   modelDiscoveryCandidates: [
+    "gpt-6-astra",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",

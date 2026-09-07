@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
@@ -7,7 +8,13 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
 import type { ModelCost } from "@appstrate/core/module";
-import type { ModelFormData } from "../components/model-form-modal";
+import type {
+  ModelFormData,
+  ModelFormMultiData,
+  ModelFormSubmission,
+  ModelFormSubmitOutcome,
+} from "../lib/model-form-payload";
+import { toCreateModelBody } from "../lib/model-form-payload";
 import {
   useCreateModelProviderCredential,
   useModelProviderCredentials,
@@ -152,9 +159,18 @@ export function useSetAgentModel(packageId: string) {
   });
 }
 
+/** `label` is omitted: the server derives and dedupes one. */
+function credentialBody(credential: NonNullable<ModelFormData["newCredential"]>) {
+  return {
+    providerId: credential.providerId,
+    apiKey: credential.apiKey,
+    ...(credential.baseUrlOverride ? { baseUrlOverride: credential.baseUrlOverride } : {}),
+  };
+}
+
 /**
- * Handles ModelFormModal submission: creates provider key inline if needed,
- * then creates or updates the model.
+ * ModelFormModal submission: the inline key first if any, then one create or
+ * update — or, for a batch, one create per entry against that one key.
  */
 export function useModelFormHandler(opts: {
   editModel?: OrgModelInfo | null;
@@ -163,62 +179,68 @@ export function useModelFormHandler(opts: {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
   const createCredential = useCreateModelProviderCredential();
-  // Kept warm so the modal's credential picker has data ready, but no
-  // longer used here — the server now derives the credential's label
-  // from the registry's `displayName` and dedupes against existing rows.
+  // Kept warm for the modal's credential picker.
   useModelProviderCredentials();
 
-  const isPending = createModel.isPending || updateModel.isPending || createCredential.isPending;
+  // Spans the whole submission: the per-mutation flags drop between calls.
+  const [submitPending, setSubmitPending] = useState(false);
+  const isPending =
+    submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
 
-  const onSubmit = (data: ModelFormData) => {
-    const createCredentialAndThen = (onKeyCreated: (keyId: string) => void) => {
-      // Omit `label` — the server derives it from the provider's `displayName`
-      // and dedupes against existing org credentials. Operator-side scripts
-      // can pass `label` explicitly to override.
-      createCredential.mutate(
-        {
-          body: {
-            providerId: data.newCredential!.providerId,
-            apiKey: data.newCredential!.apiKey,
-            ...(data.newCredential!.baseUrlOverride
-              ? { baseUrlOverride: data.newCredential!.baseUrlOverride }
-              : {}),
-          },
-        },
-        { onSuccess: (result) => onKeyCreated(result.id) },
-      );
-    };
+  /** The credential the model(s) bind to: the picked one, or the typed key created first. */
+  const bindCredential = async (data: ModelFormSubmission): Promise<string> =>
+    data.newCredential
+      ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
+      : data.credentialId;
 
-    if (opts.editModel) {
-      if (data.newCredential) {
-        createCredentialAndThen((keyId) => {
-          const { newCredential: _, ...modelData } = data;
-          updateModel.mutate(
-            {
-              params: { path: { id: opts.editModel!.id } },
-              body: { ...modelData, credentialId: keyId },
-            },
-            { onSuccess: opts.onSuccess },
-          );
-        });
-      } else {
-        updateModel.mutate(
-          { params: { path: { id: opts.editModel.id } }, body: data },
-          { onSuccess: opts.onSuccess },
-        );
+  /** No bulk create: one POST per entry, refusals collected rather than aborting. */
+  const submitBatch = async (data: ModelFormMultiData): Promise<ModelFormSubmitOutcome> => {
+    setSubmitPending(true);
+    try {
+      const credentialId = await bindCredential(data);
+      const failedModelIds: string[] = [];
+      for (const entry of data.models) {
+        try {
+          await createModel.mutateAsync({ body: { ...entry, credentialId } });
+        } catch {
+          failedModelIds.push(entry.modelId);
+        }
       }
-    } else if (data.newCredential) {
-      createCredentialAndThen((keyId) => {
-        const { newCredential: _, ...modelData } = data;
-        createModel.mutate(
-          { body: { ...modelData, credentialId: keyId } },
-          { onSuccess: opts.onSuccess },
-        );
-      });
-    } else {
-      createModel.mutate({ body: data }, { onSuccess: opts.onSuccess });
+      if (failedModelIds.length === 0) opts.onSuccess();
+      return { failedModelIds, credentialId };
+    } catch {
+      // The key itself was refused.
+      return { failedModelIds: data.models.map((m) => m.modelId) };
+    } finally {
+      setSubmitPending(false);
     }
   };
+
+  /** A refusal (of the key or the model) is reported the way a batch reports its own. */
+  const submitOne = async (data: ModelFormData): Promise<ModelFormSubmitOutcome> => {
+    setSubmitPending(true);
+    try {
+      const credentialId = await bindCredential(data);
+      if (opts.editModel) {
+        const { newCredential: _, ...modelData } = data;
+        await updateModel.mutateAsync({
+          params: { path: { id: opts.editModel.id } },
+          body: { ...modelData, credentialId },
+        });
+      } else {
+        await createModel.mutateAsync({ body: toCreateModelBody(data, credentialId) });
+      }
+      opts.onSuccess();
+      return { failedModelIds: [] };
+    } catch {
+      return { failedModelIds: [data.modelId] };
+    } finally {
+      setSubmitPending(false);
+    }
+  };
+
+  const onSubmit = (data: ModelFormSubmission) =>
+    "models" in data ? submitBatch(data) : submitOne(data);
 
   return { onSubmit, isPending };
 }

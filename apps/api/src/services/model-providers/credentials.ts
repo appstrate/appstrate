@@ -464,6 +464,19 @@ export async function dedupeCredentialLabel(orgId: string, base: string): Promis
 }
 
 /**
+ * Default label: `<host> · <displayName>` for a credential on its own endpoint,
+ * the display name otherwise. A base label — run it through {@link dedupeCredentialLabel}.
+ */
+export function deriveCredentialLabel(
+  cfg: Pick<ModelProviderDefinition, "displayName" | "baseUrlOverridable">,
+  baseUrlOverride: string | null | undefined,
+): string {
+  if (!cfg.baseUrlOverridable || !baseUrlOverride) return cfg.displayName;
+  const host = URL.parse(baseUrlOverride)?.host;
+  return host ? `${host} · ${cfg.displayName}` : cfg.displayName;
+}
+
+/**
  * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
  * upstream didn't return (e.g. `email`, `accountId` when not rotated).

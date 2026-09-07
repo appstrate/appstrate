@@ -64,6 +64,7 @@ import {
   createSchema as createModelProviderCredentialSchema,
   updateSchema as updateModelProviderCredentialSchema,
   testInlineSchema as modelProviderCredentialsTestInlineSchema,
+  discoverSchema as modelProviderCredentialsDiscoverSchema,
 } from "../routes/model-provider-credentials.ts";
 
 // --- Profile schemas (routes/profile.ts) ---
@@ -374,6 +375,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/model-provider-credentials/test",
     jsonSchema: toJsonSchema(modelProviderCredentialsTestInlineSchema),
     description: "Test model provider credential inline",
+  },
+  {
+    method: "POST",
+    path: "/api/model-provider-credentials/discover",
+    jsonSchema: toJsonSchema(modelProviderCredentialsDiscoverSchema),
+    description: "Discover the models an endpoint serves",
   },
 
   // ─── Profile ────────────────────────────────────────────────────────────

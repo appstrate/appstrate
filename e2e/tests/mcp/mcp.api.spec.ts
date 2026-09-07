@@ -30,9 +30,10 @@
 
 import { test, expect } from "../../fixtures/api.fixture.ts";
 import { createApiKey } from "../../helpers/seed.ts";
+import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 import type { APIRequestContext } from "@playwright/test";
 
-const BASE = "http://localhost:3000";
+const BASE = E2E_BASE_URL;
 const MCP_ACCEPT = "application/json, text/event-stream";
 
 /** The per-org MCP endpoint + its canonical RFC 8707 resource URI (identical). */

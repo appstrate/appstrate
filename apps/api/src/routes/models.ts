@@ -350,10 +350,11 @@ export function createModelsRouter() {
     const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
     // Foreign-catalog (subscription OAuth) gate: a model is seedable when
     // it's in the featured list OR in the credential's servable set
-    // (`available_model_ids`) — probe-verified for API-key providers (the
-    // probe knows the account's plan, the featured list doesn't), derived
-    // from the catalog for static providers. Reading it off the credential
-    // DTO is what keeps the gate from consulting a stale persisted copy.
+    // (`available_model_ids`) — the candidates the provider's `GET /models`
+    // listing confirmed for API-key providers (the listing knows the
+    // account's plan, the featured list doesn't), derived from the catalog
+    // for static providers. Reading it off the credential DTO is what keeps
+    // the gate from consulting a stale persisted copy.
     const credentialInfo = registry.catalogProviderId
       ? await getOrgModelProviderCredential(orgId, data.credentialId)
       : undefined;

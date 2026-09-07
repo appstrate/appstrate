@@ -134,11 +134,11 @@ are now **offline**:
   truthful no-op that reports the current list
   (`apps/api/src/services/model-providers/model-discovery.ts` →
   `discoverAvailableModels`, static branch). Not persisting is the point:
-  with no probe the answer is a pure function of (provider definition,
+  with no upstream listing the answer is a pure function of (provider definition,
   vendored catalog) and therefore identical for every credential of the
   provider, so a stored copy would hold no per-credential information and
   could only fall behind — which is how connections kept offering a model list
-  two generations old. `available_model_ids` is written by the probe path only.
+  two generations old. `available_model_ids` is written by the listing path only.
   Real per-model availability still surfaces at the first agent run, not via a
   platform-side request.
 

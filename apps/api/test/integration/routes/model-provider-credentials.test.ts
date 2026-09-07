@@ -151,6 +151,28 @@ describe("Model Provider Keys API", () => {
       }
     });
 
+    it("lists the anthropic-messages custom endpoint with no featured models", async () => {
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          providerId: string;
+          apiShape: string;
+          baseUrlOverridable: boolean;
+          models: unknown[];
+        }[];
+      };
+      const custom = body.data.find((p) => p.providerId === "anthropic-compatible");
+      expect(custom).toBeDefined();
+      expect(custom!.baseUrlOverridable).toBe(true);
+      expect(custom!.apiShape).toBe("anthropic-messages");
+      // No catalog and no featured list: the form enumerates the endpoint
+      // itself via /discover instead of offering a picker.
+      expect(custom!.models).toEqual([]);
+    });
+
     it("projects only requested fields and drops the heavy models catalog", async () => {
       const res = await app.request(
         "/api/model-provider-credentials/registry?fields=providerId,authMode",
@@ -250,6 +272,24 @@ describe("Model Provider Keys API", () => {
       expect(serialized).not.toContain("sk-test-key-123");
       expect(body).not.toHaveProperty("apiKey");
       expect(body).not.toHaveProperty("credentialsEncrypted");
+    });
+
+    it("names an unlabelled custom-endpoint credential after its host", async () => {
+      // Several endpoints behind one provider entry would otherwise all be
+      // called "OpenAI-compatible (custom)", told apart only by a ` (2)` suffix.
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          apiKey: "sk-local",
+          baseUrlOverride: "http://10.255.255.9:9/v1",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.label).toStartWith("10.255.255.9:9 · ");
     });
   });
 
@@ -561,7 +601,7 @@ describe("Model Provider Keys API", () => {
    * form drives both provider kinds through the same call, and the response
    * still has to be the credential's current list. The harness validates
    * every JSON body against the OpenAPI response schema, so these tests also
-   * gate the documented shape (`outcome`, `probed_count`,
+   * gate the documented shape (`outcome`, `candidate_count`,
    * `available_model_ids`).
    */
   describe("POST /api/model-provider-credentials/:id/refresh-models (static provider)", () => {
@@ -573,7 +613,7 @@ describe("Model Provider Keys API", () => {
     });
     beforeEach(registerStaticRefreshProvider);
 
-    it("returns the derived list with probed_count 0 and writes nothing", async () => {
+    it("returns the derived list and writes nothing", async () => {
       const cred = await seedOrgModelProviderOAuth({
         orgId: ctx.org.id,
         providerId: STATIC_PROVIDER_ID,
@@ -587,13 +627,13 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         outcome: string;
-        probed_count: number;
+        candidate_count: number;
         available_model_ids: string[] | null;
       };
       expect(body.outcome).toBe("ok");
-      // Zero upstream requests — the platform never spends a subscription
-      // quota to enumerate models.
-      expect(body.probed_count).toBe(0);
+      // Every declared candidate is counted, none requested — the platform
+      // never spends a subscription quota to enumerate models.
+      expect(body.candidate_count).toBe(3);
       // "s-absent" is filtered out: seeding would reject an uncatalogued id.
       expect(body.available_model_ids).toEqual(["s-one", "s-two"]);
 

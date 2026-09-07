@@ -107,6 +107,11 @@ export function listCatalogModels(providerId: string): Array<CatalogModelEntry &
   return Object.entries(file).map(([id, entry]) => ({ id, ...entry }));
 }
 
+/** Every catalogued `providerId`, in registration order. */
+export function listCatalogProviderIds(): string[] {
+  return Object.keys(PROVIDER_INDEX);
+}
+
 /** True iff `providerId` has a vendored catalog file. Used at boot to gate `featuredModels` validation. */
 export function hasCatalog(providerId: string): boolean {
   return providerId in PROVIDER_INDEX;

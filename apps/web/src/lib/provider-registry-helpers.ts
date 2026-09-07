@@ -1,61 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Registry-driven provider/model lookup helpers.
- *
- * Every lookup is a function over `ProviderRegistryEntry[]` (what the
- * `useProvidersRegistry()` hook resolves to). No constants live in the
- * client anymore — adding a provider is a server-side edit to the
- * `core-providers` module (or any other module that contributes via
- * `modelProviders()`).
+ * Registry-driven provider/model lookup helpers. Every lookup is a function
+ * over `ProviderRegistryEntry[]` (what `useProvidersRegistry()` resolves to);
+ * no provider constant lives in the client.
  */
 
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 
-/** Sentinel used by the form modals to mean "I want to fill in custom fields myself". */
-export const CUSTOM_ID = "__custom__";
-
 /**
- * Supported Pi SDK adapter shapes (in-container LLM client) offered by the UI's
- * "custom provider" picker — the operator chooses one of these when their
- * endpoint isn't in the registry.
- *
- * A deliberate SUBSET of `ModelApiShape`, not a mirror of it:
- * `openai-codex-responses` is excluded because it is reachable only through an
- * oauth subscription, so no operator-supplied endpoint can ever serve it.
- * Offering it would be a picker entry that cannot work.
- *
- * The `satisfies` below is what keeps the subset honest — a shape retired from
- * core stops compiling here, while the exclusion above stays a choice rather
- * than drift nobody noticed. Do NOT "complete" this list from the union.
+ * Picker value of the single "custom endpoint" row every `baseUrlOverridable`
+ * entry collapses into. Picker-only: the form always holds a real `providerId`.
  */
-export const PI_ADAPTER_TYPES = [
-  { value: "openai-completions", label: "OpenAI / Compatible" },
-  { value: "openai-responses", label: "OpenAI Responses" },
-  { value: "mistral-conversations", label: "Mistral" },
-  { value: "anthropic-messages", label: "Anthropic" },
-  { value: "google-generative-ai", label: "Google AI" },
-  { value: "google-vertex", label: "Google Vertex AI" },
-  { value: "azure-openai-responses", label: "Azure OpenAI" },
-  { value: "bedrock-converse-stream", label: "AWS Bedrock" },
-] as const satisfies ReadonlyArray<{ value: ModelApiShape; label: string }>;
+export const CUSTOM_ENDPOINT_ID = "__custom_endpoint__";
 
-/**
- * Locate the provider that owns a given `(apiShape, baseUrl)` combination.
- * Used by run-overrides, agent-configuration, and the credential form's
- * "what icon should this row show?" lookup. Matches on apiShape AND
- * baseUrl prefix — `baseUrl` is normalized (trailing slashes stripped)
- * because the DB column may or may not carry a trailing `/` depending on
- * how the credential was created.
- */
-export function findProviderByApiShapeAndBaseUrl(
+type ProviderPickerRow<T> =
+  { kind: "provider"; featured: boolean; entry: T } | { kind: "customEndpoint"; featured: false };
+
+/** Pinned-endpoint entries, then one custom-endpoint row (in the "other" group) if any qualifies. */
+export function buildProviderPickerRows<
+  T extends { featured: boolean; baseUrlOverridable: boolean },
+>(entries: readonly T[]): ProviderPickerRow<T>[] {
+  const rows: ProviderPickerRow<T>[] = entries
+    .filter((e) => !e.baseUrlOverridable)
+    .map((entry) => ({ kind: "provider", featured: entry.featured, entry }));
+  if (entries.some((e) => e.baseUrlOverridable)) {
+    rows.push({ kind: "customEndpoint", featured: false });
+  }
+  return rows;
+}
+
+/** The `providerId` a picker value stands for: the custom row opens on the first overridable entry. */
+export function pickedProviderId<T extends { providerId: string; baseUrlOverridable: boolean }>(
+  picked: string,
+  entries: readonly T[],
+): string {
+  if (picked !== CUSTOM_ENDPOINT_ID) return picked;
+  return entries.find((e) => e.baseUrlOverridable)?.providerId ?? "";
+}
+
+/** Match on `apiShape` and `baseUrl` prefix; trailing slashes are ignored. */
+function findProviderByApiShapeAndBaseUrl(
   apiShape: string | null,
   baseUrl: string | null | undefined,
   registry: readonly ProviderRegistryEntry[],
 ): ProviderRegistryEntry | undefined {
-  // Model aliases project `apiShape`/`baseUrl` to null (binding hidden) — no
-  // provider can be resolved, and the UI shows an alias badge instead.
   if (!apiShape || !baseUrl) return undefined;
   const normalized = baseUrl.replace(/\/+$/, "");
   return registry.find(
@@ -63,7 +52,6 @@ export function findProviderByApiShapeAndBaseUrl(
   );
 }
 
-/** Lookup by `providerId`. Returns undefined for unknown ids (custom rows). */
 export function getProviderById(
   id: string,
   registry: readonly ProviderRegistryEntry[],
@@ -72,32 +60,23 @@ export function getProviderById(
 }
 
 /**
- * Match a model by apiShape + modelId across the entire registry. Returns
- * both the owning provider and the matching model entry — callers use
- * this to seed the model-form fields (label, context window, …) from the
- * curated catalog.
+ * The registry entry behind a saved row. `providerId` answers for any endpoint,
+ * a custom URL included; the `(apiShape, baseUrl)` match is the fallback for
+ * rows whose binding is hidden (built-in credentials, aliased models).
  */
-function findRegistryModel(
-  apiShape: string | null,
-  modelId: string | null,
+export function resolveProviderEntry(
+  row: { providerId?: string | null; apiShape: string | null; baseUrl: string | null },
   registry: readonly ProviderRegistryEntry[],
-): { provider: ProviderRegistryEntry; model: ProviderRegistryEntry["models"][number] } | null {
-  if (!apiShape || !modelId) return null;
-  for (const provider of registry) {
-    if (provider.apiShape !== apiShape) continue;
-    const model = provider.models.find((m) => m.id === modelId);
-    if (model) return { provider, model };
-  }
-  return null;
+): ProviderRegistryEntry | undefined {
+  return (
+    (row.providerId ? getProviderById(row.providerId, registry) : undefined) ??
+    findProviderByApiShapeAndBaseUrl(row.apiShape, row.baseUrl, registry)
+  );
 }
 
 /**
- * Resolve the `providerId` that owns a `(apiShape, baseUrl, modelId?)` row.
- * Tries the curated model catalog first when a `modelId` is supplied
- * (`org_models` rows), then falls back to the base-URL match
- * (`model_provider_credentials` rows have no `modelId`). Returns
- * {@link CUSTOM_ID} when no registry entry claims the row — what the form
- * modals surface as the "Custom" picker entry.
+ * The `providerId` owning a `(apiShape, baseUrl, modelId?)` row: the catalog
+ * owner of `modelId` first, then the base-URL match. `""` when none claims it.
  */
 export function resolveProviderId(
   spec: {
@@ -107,32 +86,11 @@ export function resolveProviderId(
   },
   registry: readonly ProviderRegistryEntry[],
 ): string {
-  if (spec.modelId) {
-    const match = findRegistryModel(spec.apiShape, spec.modelId, registry);
-    if (match) return match.provider.providerId;
+  if (spec.apiShape && spec.modelId) {
+    const owner = registry.find(
+      (p) => p.apiShape === spec.apiShape && p.models.some((m) => m.id === spec.modelId),
+    );
+    if (owner) return owner.providerId;
   }
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
-  return byApiAndUrl ? byApiAndUrl.providerId : CUSTOM_ID;
-}
-
-/**
- * Resolve the model entry id that owns an `(apiShape, baseUrl, modelId)`
- * row, falling back to {@link CUSTOM_ID} when the row doesn't map to any
- * curated catalog model. Providers with no curated catalog (e.g.
- * OpenRouter, codex) keep the raw `modelId` instead of collapsing to
- * "Custom" — operators set it via the dedicated combobox / inline input.
- */
-export function resolveModelEntryId(
-  spec: { apiShape: string | null; baseUrl: string | null; modelId: string | null } | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!spec) return "";
-  const match = findRegistryModel(spec.apiShape, spec.modelId, registry);
-  if (match) return match.model.id;
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
-  if (byApiAndUrl) {
-    if (byApiAndUrl.models.length === 0) return spec.modelId ?? CUSTOM_ID;
-    return CUSTOM_ID;
-  }
-  return CUSTOM_ID;
+  return findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry)?.providerId ?? "";
 }

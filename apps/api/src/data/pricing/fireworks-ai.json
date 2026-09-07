@@ -1081,6 +1081,38 @@
       "cacheRead": 0.007
     }
   },
+  "accounts/fireworks/models/deepseek-v4-flash-vision-exp": {
+    "label": "Accounts/fireworks/models/deepseek V4 Flash Vision Exp",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.22,
+      "output": 0.66,
+      "cacheRead": 0.007
+    }
+  },
   "accounts/fireworks/models/deepseek-v4-pro": {
     "label": "Accounts/fireworks/models/deepseek V4 Pro",
     "contextWindow": 1048576,
@@ -1761,21 +1793,23 @@
     "contextWindow": 1048576,
     "maxTokens": 128000,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -1783,6 +1817,38 @@
       "input": 1.4,
       "output": 4.4,
       "cacheRead": 0.26
+    }
+  },
+  "accounts/fireworks/models/glm-5p3-flash": {
+    "label": "Accounts/fireworks/models/glm 5p3 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.15,
+      "output": 0.5,
+      "cacheRead": 0.03
     }
   },
   "accounts/fireworks/models/gpt-oss-120b": {
@@ -1905,6 +1971,28 @@
     "cost": {
       "input": 0.2,
       "output": 0.2
+    }
+  },
+  "accounts/fireworks/models/inkling": {
+    "label": "Accounts/fireworks/models/inkling",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1,
+      "output": 4.05,
+      "cacheRead": 0.17
     }
   },
   "accounts/fireworks/models/internvl3-38b": {
@@ -2178,21 +2266,23 @@
     "maxTokens": 131072,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -3294,21 +3384,23 @@
     "maxTokens": 16384,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -3343,21 +3435,23 @@
     "contextWindow": 262144,
     "maxTokens": 32768,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -3372,21 +3466,23 @@
     "contextWindow": 262144,
     "maxTokens": 32768,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -5144,21 +5240,23 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -5524,21 +5622,23 @@
     "contextWindow": 1048576,
     "maxTokens": 131072,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -5553,21 +5653,23 @@
     "contextWindow": 1048576,
     "maxTokens": 131072,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -5647,21 +5749,23 @@
     "maxTokens": 131072,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -5677,21 +5781,23 @@
     "maxTokens": 131072,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -5758,9 +5864,41 @@
       }
     },
     "cost": {
-      "input": 0.14,
-      "output": 0.28,
-      "cacheRead": 0.028
+      "input": 0.22,
+      "output": 0.66,
+      "cacheRead": 0.007
+    }
+  },
+  "deepseek-v4-flash-vision-exp": {
+    "label": "Deepseek V4 Flash Vision Exp",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.22,
+      "output": 0.66,
+      "cacheRead": 0.007
     }
   },
   "deepseek-v4-pro": {
@@ -6197,21 +6335,23 @@
     "maxTokens": 131072,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -6227,21 +6367,23 @@
     "maxTokens": 131072,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -6257,21 +6399,23 @@
     "maxTokens": 131072,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -6371,21 +6515,23 @@
     "maxTokens": 16384,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -6400,21 +6546,23 @@
     "contextWindow": 262144,
     "maxTokens": 32768,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -6429,21 +6577,23 @@
     "contextWindow": 262144,
     "maxTokens": 32768,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -6491,21 +6641,23 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
