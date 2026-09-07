@@ -270,8 +270,7 @@ export const packagesPaths = {
                       "Draft import only: the version the draft manifest declares, i.e. what a later publish would create.",
                   },
                   lock_version: {
-                    type: "integer",
-                    nullable: true,
+                    type: ["integer", "null"],
                     description:
                       "Draft import only: the package's optimistic lock after this write. Pass it back as `?lock_version=` on the next draft import to re-push without `force`.",
                   },
