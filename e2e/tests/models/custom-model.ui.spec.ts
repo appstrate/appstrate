@@ -321,9 +321,8 @@ test.describe("Custom endpoint model — UI", () => {
 
     // Nothing describes a typed-in id — no listing, and no catalog entry for a
     // name the operator invented — so the limits and modalities are a question
-    // only they can answer. The fold is closed on a create and the toggle
-    // inside it is off: what is shown is the fallback chain, not empty fields.
-    await dialog.getByRole("button", { name: "Avancé" }).click();
+    // only they can answer. The toggle is off on a create: what is shown is
+    // the fallback chain, not empty fields.
     await expect(dialog.locator("#mdl-ctx")).toBeHidden();
     await dialog
       .getByRole("checkbox", { name: "Définir moi-même les limites et capacités" })

@@ -134,9 +134,8 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   the endpoint and lists what it serves, "Configurer manuellement" types the
   id in. On the manual path the name is optional on creation — left empty,
   the server names the row after the catalog entry or the model id — and the
-  capabilities sit behind an "Avancé" collapsible, unfolded only when the row
-  already carries one. Editing a row is always the manual arrangement:
-  detection adds rows, an edit changes one.
+  limits and capabilities are one toggle (see below). Editing a row is always
+  the manual arrangement: detection adds rows, an edit changes one.
 
 - **Detected models are added several at a time, and a custom endpoint's
   saved keys are offered whatever URL is typed.** After "Détecter les
@@ -161,11 +160,11 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   catalog by model id → nothing, and the runtime fills nothing with fixed
   defaults (128k context, 16k output tokens, text only, no reasoning). And the
   fields shipped only when touched, so an unticked box meant "undefined" or
-  `false` depending on whether it had been clicked. Now a single toggle,
-  "Définir moi-même les limites et capacités", opens the fields — grouped as
-  "Limites" and "Ce que le modèle accepte", placeholders set to the real
-  defaults — and every one of them ships when it is on; off, a sentence states
-  the fallback chain instead. On an edit, leaving the toggle off (or blanking a
+  `false` depending on whether it had been clicked. The fold is gone; in its
+  place a single toggle, "Définir moi-même les limites et capacités", opens
+  the fields — grouped as "Limites" and "Ce que le modèle accepte",
+  placeholders set to the real defaults — and every one of them ships when it
+  is on; off, a sentence states the fallback chain instead. On an edit, leaving the toggle off (or blanking a
   limit with it on) sends `null`, so a stored override is dropped rather than
   silently kept. A model added from a detection stores only what the listing
   or the catalog described — nothing is invented for a model neither knew —

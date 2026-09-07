@@ -606,7 +606,6 @@
   "models.form.discoverButton": "Détecter les modèles",
   "models.form.manualButton": "Configurer manuellement",
   "models.form.modelStepRequired": "Complète l'endpoint, puis détecte les modèles ou configure-les manuellement avant d'enregistrer.",
-  "models.form.advanced": "Avancé",
   "models.form.labelPlaceholder": "Par défaut : l'identifiant du modèle",
   "models.form.discoverCount_one": "{{count}} modèle détecté",
   "models.form.discoverCount_other": "{{count}} modèles détectés",

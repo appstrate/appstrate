@@ -27,12 +27,7 @@ import {
   CommandGroup,
   CommandItem,
 } from "@appstrate/ui/components/command";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
-import { Check, ChevronDown, ChevronsUpDown, Plug, Server } from "lucide-react";
+import { Check, ChevronsUpDown, Plug, Server } from "lucide-react";
 import { type OrgModelInfo } from "../hooks/use-models";
 import type { ModelCost } from "@appstrate/core/module";
 import { CapabilitiesSection } from "./model-form/capabilities-section";
@@ -524,10 +519,6 @@ export function ModelFormBody({
     setModelModeState({ key: discoveryKey, mode: next });
   };
 
-  // Capabilities are the rare edit — folded away unless the row already
-  // carries one, which is the same condition the toggle inside opens on.
-  const [advancedOpen, setAdvancedOpen] = useState(() => hasStoredCapabilities);
-
   const handleDiscover = () => {
     if (!selectedProvider) return;
     const key = discoveryKey;
@@ -1003,23 +994,7 @@ export function ModelFormBody({
           <>
             {renderModelIdInput()}
             {labelFieldJsx}
-            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-              <CollapsibleTrigger asChild>
-                <button
-                  type="button"
-                  className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
-                >
-                  <span>{t("models.form.advanced")}</span>
-                  <ChevronDown
-                    className={cn(
-                      "text-muted-foreground size-4 transition-transform",
-                      advancedOpen && "rotate-180",
-                    )}
-                  />
-                </button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>{capabilitiesJsx}</CollapsibleContent>
-            </Collapsible>
+            {capabilitiesJsx}
           </>
         ))}
     </>

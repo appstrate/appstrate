@@ -133,7 +133,7 @@ function form(target: OrgModelInfo, credentials: ModelProviderCredentialInfo[] =
 }
 
 describe("ModelFormBody — editing a custom endpoint", () => {
-  // A saved row carries a capability, so the "Avancé" fold opens on it.
+  // A saved row carries a capability, so the capabilities toggle opens on.
   const html = form(model({ contextWindow: 32768 }), [LOCAL_KEY]);
 
   it("describes the endpoint: which API it speaks, where it is, which key opens it", () => {
@@ -158,7 +158,6 @@ describe("ModelFormBody — editing a custom endpoint", () => {
     // The name is required on a saved row: PATCH reads an absent one as "keep",
     // so promising a derived one would describe a save that changes nothing.
     expect(html).not.toContain(settingsFr["models.form.labelPlaceholder"]);
-    expect(html).toContain(settingsFr["models.form.advanced"]);
   });
 
   it("opens the capabilities on the row's own values, the toggle already on", () => {
@@ -183,14 +182,14 @@ describe("ModelFormBody — editing a custom endpoint", () => {
   });
 
   it("orders the fields the way they are filled in", () => {
-    // endpoint (type → URL → key) → the model → its name → the capabilities fold.
+    // endpoint (type → URL → key) → the model → its name → the capabilities.
     const order = [
       'id="mdl-apiType"',
       'id="mdl-baseUrl"',
       settingsFr["credentials.form.apiKey"],
       'id="mdl-modelId"',
       'id="mdl-label"',
-      settingsFr["models.form.advanced"],
+      'id="mdl-capabilities-explicit"',
     ].map((marker) => html.indexOf(marker));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
