@@ -170,6 +170,59 @@ describe("buildModelFormPayload — custom endpoint", () => {
   });
 });
 
+describe("buildModelFormPayload — the model's name", () => {
+  const CUSTOM_ENDPOINT = fields({
+    apiShape: "openai-completions",
+    baseUrl: "http://localhost:11434/v1",
+    modelId: "qwen3:8b",
+    inlineApiKey: "sk-test",
+  });
+
+  it("omits it when nothing was typed, leaving the server to derive it", () => {
+    // `POST /api/models` names the row after the catalog entry, or after the
+    // model id — sending "" would name it after nothing.
+    const result = build({ provider: OPENAI_COMPATIBLE, fields: CUSTOM_ENDPOINT });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.label).toBeUndefined();
+    expect("label" in result.data).toBe(false);
+  });
+
+  it("sends it once the operator types one", () => {
+    const result = build({
+      provider: OPENAI_COMPATIBLE,
+      fields: { ...CUSTOM_ENDPOINT, label: "  Qwen local  " },
+      dirtyFields: { label: true },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.label).toBe("Qwen local");
+  });
+
+  it("sends the one a discovered model brought with it", () => {
+    // The combobox writes every field of the pick as dirty, name included.
+    const result = build({
+      provider: OPENAI_COMPATIBLE,
+      fields: { ...CUSTOM_ENDPOINT, label: "Qwen3 8B" },
+      dirtyFields: { label: true, modelId: true },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.label).toBe("Qwen3 8B");
+  });
+
+  it("omits it when a name was typed then cleared again", () => {
+    const result = build({
+      provider: OPENAI_COMPATIBLE,
+      fields: { ...CUSTOM_ENDPOINT, label: "   " },
+      dirtyFields: { label: true },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect("label" in result.data).toBe(false);
+  });
+});
+
 describe("buildModelFormPayload — missing credential", () => {
   it("refuses an OAuth provider with no connection selected", () => {
     const result = build({

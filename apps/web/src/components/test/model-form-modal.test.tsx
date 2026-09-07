@@ -3,14 +3,16 @@
 /**
  * Which fields the model form puts on screen, by provider.
  *
- * The whole point of the fix is that `openai-compatible` is a normal registry
- * provider now: picking it must surface the endpoint, the key and a free-text
- * model id, and must NOT surface an API-type selector (the credential's
- * provider pins the shape). A catalogued provider must surface none of that.
+ * An endpoint the operator supplies is described in two steps: what it is and
+ * how to open it (API type, base URL, key), then which model to run on it —
+ * and the second step only exists once the first one is answered. A catalogued
+ * provider must surface none of that: its endpoint is not the operator's.
  *
  * `ModelFormBody` is rendered rather than `ModelFormModal` because the dialog
  * chrome is a Radix portal, which renders nothing at all without a DOM — and
- * the web runner has none.
+ * the web runner has none. Select ITEMS are portalled too, so what a picker
+ * offers is asserted on `buildProviderPickerRows` instead (see
+ * `lib/test/provider-registry-helpers.test.ts`).
  */
 
 import { describe, it, expect } from "bun:test";
@@ -120,56 +122,17 @@ function form(target: OrgModelInfo, credentials: ModelProviderCredentialInfo[] =
   return render(<ModelFormBody model={target} onSubmit={() => {}} />, { queryClient: qc });
 }
 
-describe("ModelFormBody — custom (OpenAI-compatible) endpoint", () => {
-  const html = form(model({}));
+describe("ModelFormBody — editing a custom endpoint", () => {
+  // A saved row carries a capability, so the "Avancé" fold opens on it.
+  const html = form(model({ contextWindow: 32768 }), [LOCAL_KEY]);
 
-  it("lets the operator type the endpoint and the model id", () => {
+  it("describes the endpoint: which API it speaks, where it is, which key opens it", () => {
+    expect(html).toContain('id="mdl-apiType"');
+    expect(html).toContain(settingsFr["models.form.apiType"]);
     expect(html).toContain('id="mdl-baseUrl"');
-    expect(html).toContain('id="mdl-modelId"');
-    expect(html).toContain(settingsFr["models.form.baseUrl"]);
-  });
-
-  it("offers the api-key block", () => {
     expect(html).toContain(settingsFr["credentials.form.apiKey"]);
-    expect(html).toContain('placeholder="sk-..."');
+    expect(html).toContain(LOCAL_KEY.label);
   });
-
-  it("offers to ask the endpoint which models it serves", () => {
-    // Rendered on `baseUrlOverridable` alone, so it is on screen before any
-    // key is typed — disabled until there is something to authenticate with.
-    expect(html).toContain(settingsFr["models.form.discoverButton"]);
-  });
-
-  it("orders the fields the way they are filled in", () => {
-    // endpoint → key → detect → model → name → capabilities. The credential
-    // block is part of the sequence rather than gated on a model selection,
-    // which for a typed endpoint never happens (nothing selects a model for
-    // it); discovery sits right after the key it needs.
-    const order = [
-      'id="mdl-baseUrl"',
-      'placeholder="sk-..."',
-      settingsFr["models.form.discoverButton"],
-      'id="mdl-modelId"',
-      'id="mdl-label"',
-      'id="mdl-input-text"',
-    ].map((marker) => html.indexOf(marker));
-    expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(order.every((i) => i >= 0)).toBe(true);
-  });
-
-  it("shows the capabilities section and a label field", () => {
-    expect(html).toContain(settingsFr["models.form.capabilities"]);
-    expect(html).toContain('id="mdl-input-text"');
-    expect(html).toContain('id="mdl-label"');
-  });
-
-  it("offers no API-type selector — the credential's provider pins the shape", () => {
-    expect(html).not.toContain('id="mdl-api"');
-  });
-});
-
-describe("ModelFormBody — custom endpoint bound to an existing key", () => {
-  const html = form(model({}), [LOCAL_KEY]);
 
   it("locks the base URL, which belongs to the selected key", () => {
     // Editing it here would save a 200 that changes nothing: the URL rides on
@@ -177,6 +140,49 @@ describe("ModelFormBody — custom endpoint bound to an existing key", () => {
     const input = html.slice(html.indexOf('id="mdl-baseUrl"'));
     expect(input.slice(0, input.indexOf(">"))).toContain("disabled");
     expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
+  });
+
+  it("opens on the model the row already names, editable and free-text", () => {
+    expect(html).toContain('id="mdl-modelId"');
+    expect(html).toContain('id="mdl-label"');
+    expect(html).toContain(settingsFr["models.form.advanced"]);
+    // "Avancé" is open, so the capabilities the row carries are on screen.
+    expect(html).toContain(settingsFr["models.form.capabilities"]);
+    expect(html).toContain('id="mdl-input-text"');
+  });
+
+  it("still offers to ask the endpoint what it serves", () => {
+    expect(html).toContain(settingsFr["models.form.discoverButton"]);
+    expect(html).toContain(settingsFr["models.form.manualButton"]);
+  });
+
+  it("orders the fields the way they are filled in", () => {
+    // endpoint (type → URL → key) → the two ways to name a model → the model
+    // → its name → the capabilities fold.
+    const order = [
+      'id="mdl-apiType"',
+      'id="mdl-baseUrl"',
+      settingsFr["credentials.form.apiKey"],
+      settingsFr["models.form.discoverButton"],
+      'id="mdl-modelId"',
+      'id="mdl-label"',
+      settingsFr["models.form.advanced"],
+    ].map((marker) => html.indexOf(marker));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+});
+
+describe("ModelFormBody — custom endpoint with no key to open it", () => {
+  // Same row, but the key it names is not in the list: step 1 is unanswered.
+  const html = form(model({}));
+
+  it("asks for a key before asking which model to run", () => {
+    expect(html).toContain('id="mdl-baseUrl"');
+    expect(html).toContain('placeholder="sk-..."');
+    expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
+    expect(html).not.toContain('id="mdl-modelId"');
+    expect(html).not.toContain('id="mdl-label"');
   });
 });
 
@@ -194,12 +200,13 @@ describe("ModelFormBody — catalogued provider", () => {
 
   it("picks the model from the catalog instead of exposing the binding", () => {
     expect(html).toContain('id="mdl-model"');
+    expect(html).not.toContain('id="mdl-apiType"');
     expect(html).not.toContain('id="mdl-baseUrl"');
     expect(html).not.toContain('id="mdl-modelId"');
-    expect(html).not.toContain('id="mdl-api"');
   });
 
   it("offers no endpoint discovery — the catalog already lists the models", () => {
     expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
+    expect(html).not.toContain(settingsFr["models.form.manualButton"]);
   });
 });

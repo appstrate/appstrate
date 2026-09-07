@@ -21,6 +21,36 @@ import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credenti
 export const CUSTOM_ID = "__custom__";
 
 /**
+ * Sentinel for the provider picker's single "custom endpoint" row. Every
+ * registry entry that lets the operator point at their own endpoint collapses
+ * into it; which one is actually selected is then an "API type" choice inside
+ * the endpoint arrangement. Like {@link CUSTOM_ID} it is a picker value only —
+ * the form always holds, and submits, a real registry `providerId`.
+ */
+export const CUSTOM_ENDPOINT_ID = "__custom_endpoint__";
+
+/** A picker row: one registry entry, or the collapsed custom-endpoint row. */
+type ProviderPickerRow<T> =
+  { kind: "provider"; featured: boolean; entry: T } | { kind: "customEndpoint"; featured: false };
+
+/**
+ * The rows a provider picker offers: the entries that pin their own endpoint,
+ * plus — last, and only once however many entries qualify — the custom-endpoint
+ * row. `featured: false` puts it in the "other" group, after everything else.
+ */
+export function buildProviderPickerRows<
+  T extends { featured: boolean; baseUrlOverridable: boolean },
+>(entries: readonly T[]): ProviderPickerRow<T>[] {
+  const rows: ProviderPickerRow<T>[] = entries
+    .filter((e) => !e.baseUrlOverridable)
+    .map((entry) => ({ kind: "provider", featured: entry.featured, entry }));
+  if (entries.some((e) => e.baseUrlOverridable)) {
+    rows.push({ kind: "customEndpoint", featured: false });
+  }
+  return rows;
+}
+
+/**
  * Locate the provider that owns a given `(apiShape, baseUrl)` combination.
  * Used by run-overrides, agent-configuration, and the credential form's
  * "what icon should this row show?" lookup. Matches on apiShape AND

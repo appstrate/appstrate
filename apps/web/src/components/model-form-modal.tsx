@@ -27,10 +27,16 @@ import {
   CommandGroup,
   CommandItem,
 } from "@appstrate/ui/components/command";
-import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
+import { Check, ChevronDown, ChevronsUpDown, KeyRound, Plug, Server, X } from "lucide-react";
 import { type OrgModelInfo } from "../hooks/use-models";
 import type { ModelCost } from "@appstrate/core/module";
 import { CapabilitiesSection } from "./model-form/capabilities-section";
+import { ApiKeyRow, EndpointFields } from "./model-form/endpoint-fields";
 import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
   useDiscoverModels,
@@ -43,6 +49,8 @@ import {
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import {
+  buildProviderPickerRows,
+  CUSTOM_ENDPOINT_ID,
   CUSTOM_ID,
   getProviderById,
   resolveModelEntryId,
@@ -252,10 +260,11 @@ export function ModelFormBody({
   const { t } = useTranslation(["settings", "common"]);
 
   const registryQuery = useProvidersRegistry();
-  // Every registry entry is a picker entry, `openai-compatible` (the
-  // free-form-baseUrl escape hatch, displayed "OpenAI-compatible (custom)")
-  // included — its credential carries the apiShape and base URL the model
-  // will run on, so it has to be the provider the form names.
+  // Every registry entry is a picker entry, except that the ones an operator
+  // can point at their own endpoint collapse into a single "custom endpoint"
+  // row: which of them it is becomes the "API type" question inside that
+  // arrangement. The provider the form names is always a registry one — its
+  // credential carries the apiShape and base URL the model will run on.
   //
   // The picker is split into two visual sections — "Featured" (the
   // module-declared canonical providers operators usually want) and
@@ -448,9 +457,17 @@ export function ModelFormBody({
   // capabilities are all typed in. Read off the registry flag, so a second
   // such provider needs no client edit.
   const isCustomProvider = selectedProvider?.baseUrlOverridable === true;
-  const isCustomModel = selectedModelId === CUSTOM_ID;
+  // A custom endpoint types its model id too, but through the endpoint
+  // arrangement below rather than the catalogued provider's escape hatch.
+  const isCustomModel = !isCustomProvider && selectedModelId === CUSTOM_ID;
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
   const isCustom = isCustomProvider || isCustomModel;
+  /** Registry entries that let the operator point at their own endpoint. */
+  const overridableProviders = useMemo(
+    () => registry.filter((p) => p.baseUrlOverridable),
+    [registry],
+  );
+  const providerRows = useMemo(() => buildProviderPickerRows(registry), [registry]);
 
   // "Ask the endpoint what it serves." Persists nothing, so the listing lives
   // here for this form-open — and only for what it was run against, which
@@ -463,8 +480,36 @@ export function ModelFormBody({
   const freshDiscovery = discovery?.key === discoveryKey ? discovery : null;
   const discoveredModels = freshDiscovery?.outcome === "ok" ? freshDiscovery.models : [];
 
-  const canDiscover =
+  /** Step 1 answered: an endpoint that parses, and something to authenticate with. */
+  const endpointReady =
     !!selectedProvider && parsesAsUrl(baseUrl) && (!!selectedCredential || !!inlineApiKey.trim());
+
+  // How the model gets named, once the endpoint is known: ask it, or type it.
+  // Keyed on the same endpoint as the listing, so editing step 1 puts step 2
+  // back to its two buttons instead of describing an endpoint left behind.
+  // An existing row already names a model, so it opens on the typed fields.
+  const [modelModeState, setModelModeState] = useState<{
+    key: string;
+    mode: "detect" | "manual";
+  } | null>(null);
+  const modelMode =
+    modelModeState?.key === discoveryKey ? modelModeState.mode : model ? "manual" : null;
+
+  const switchModelMode = (next: "detect" | "manual") => {
+    if (modelMode !== next) resetModelFields();
+    setModelModeState({ key: discoveryKey, mode: next });
+  };
+
+  // Capabilities are the rare edit — folded away unless the row already
+  // carries one, or a discovered pick just filled them in.
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () =>
+      !!model &&
+      (!!model.contextWindow ||
+        !!model.maxTokens ||
+        !!model.reasoning ||
+        (model.input?.includes("image") ?? false)),
+  );
 
   const handleDiscover = () => {
     if (!selectedProvider) return;
@@ -499,6 +544,12 @@ export function ModelFormBody({
     setValue("inputText", next.inputText, dirty);
     setValue("inputImage", next.inputImage, dirty);
     setValue("reasoning", next.reasoning, dirty);
+    setAdvancedOpen(true);
+  };
+
+  const handleDetect = () => {
+    switchModelMode("detect");
+    handleDiscover();
   };
 
   // Models offered in the dropdown. For OAuth (subscription) providers the
@@ -632,6 +683,20 @@ export function ModelFormBody({
       </div>
     ) : null;
 
+  // The "or pick one you already saved" half of every api-key control here.
+  const existingKeys = {
+    items: availableCredentials,
+    selected: selectedCredential ?? null,
+    onSelect: (id: string) => {
+      setValue("credentialId", id);
+      setValue("inlineApiKey", "");
+    },
+    onClear: () => {
+      setValue("credentialId", "");
+      setValue("inlineApiKey", "");
+    },
+  };
+
   // Credential block — placement differs by authMode (see the form body):
   // OAuth surfaces it BEFORE the model select (connection drives the plan-
   // scoped model list); API-key surfaces it after a model is chosen.
@@ -727,35 +792,12 @@ export function ModelFormBody({
           </Button>
         </div>
       ) : (
-        <div className="flex gap-2">
-          <Input
-            type="password"
-            {...register("inlineApiKey")}
-            placeholder="sk-..."
-            className={cn("min-w-0 flex-1", showError("credentialId") && "border-destructive")}
-            aria-invalid={showError("credentialId") ? true : undefined}
-          />
-          {availableCredentials.length > 0 && (
-            <Select
-              value=""
-              onValueChange={(id) => {
-                setValue("credentialId", id);
-                setValue("inlineApiKey", "");
-              }}
-            >
-              <SelectTrigger className="w-32 shrink-0">
-                <SelectValue placeholder={t("models.form.useExistingKey")} />
-              </SelectTrigger>
-              <SelectContent>
-                {availableCredentials.map((k) => (
-                  <SelectItem key={k.id} value={k.id}>
-                    {k.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+        <ApiKeyRow
+          id="mdl-apiKey"
+          apiKeyProps={register("inlineApiKey")}
+          invalid={showError("credentialId")}
+          existingKeys={existingKeys}
+        />
       )}
 
       {!selectedCredential && !isOauthProvider && inlineApiKey.trim() && (
@@ -770,40 +812,48 @@ export function ModelFormBody({
     </div>
   );
 
-  // A preset fills the typed fields from its catalog entry; a custom entry has
-  // to carry them, so blank is an error there and only there.
-  const requiredUnlessPreset = (v: string) =>
-    isPreset || v.trim() ? undefined : t("validation.required", { ns: "common" });
+  /**
+   * Step 2 answered: the model is being picked from what the endpoint serves,
+   * or typed in. Until then the two buttons are all there is.
+   */
+  const showModelFields =
+    modelMode === "manual" || (modelMode === "detect" && discoveredModels.length > 0);
 
-  // The four typed fields. Built only when they render, so RHF registers
-  // (and validates) them under exactly the condition it did before.
+  // A preset carries its own values; anywhere else they are typed or picked.
+  const baseUrlValidate = (v: string) =>
+    isPreset || parsesAsUrl(v) ? undefined : t("validation.required", { ns: "common" });
+  // A custom endpoint has to get through step 2 before there is an id to require,
+  // so an empty one names the step rather than the field.
+  const modelIdValidate = (v: string) =>
+    isPreset || v.trim()
+      ? undefined
+      : isCustomProvider && !showModelFields
+        ? t("models.form.modelStepRequired")
+        : t("validation.required", { ns: "common" });
+
+  // The typed fields. Built only where they render, so RHF registers (and
+  // validates) each under exactly the condition it did before.
   const labelFieldJsx = isCustom ? (
     <div className="space-y-2">
       <Label htmlFor="mdl-label">{t("models.form.label")}</Label>
+      {/* Optional: with nothing typed the server names the row after the
+          catalog entry, or after the model id. */}
       <Input
         id="mdl-label"
         type="text"
-        {...register("label", { validate: requiredUnlessPreset })}
-        placeholder="ex: Claude Sonnet"
-        aria-invalid={showError("label") ? true : undefined}
-        className={cn(showError("label") && "border-destructive")}
+        {...register("label")}
+        placeholder={t("models.form.labelPlaceholder")}
       />
-      {showError("label") && errors.label?.message && (
-        <div className="text-destructive text-sm">{errors.label.message}</div>
-      )}
     </div>
   ) : null;
 
-  const baseUrlFieldJsx = isCustom ? (
+  const baseUrlFieldJsx = isCustomModel ? (
     <div className="space-y-2">
       <Label htmlFor="mdl-baseUrl">{t("models.form.baseUrl")}</Label>
       <Input
         id="mdl-baseUrl"
         type="url"
-        {...register("baseUrl", {
-          validate: (v) =>
-            isPreset || parsesAsUrl(v) ? undefined : t("validation.required", { ns: "common" }),
-        })}
+        {...register("baseUrl", { validate: baseUrlValidate })}
         // The URL is a property of the credential (`baseUrlOverride`), not of
         // the model, so it only moves when a credential is created with it.
         disabled={!!selectedCredential}
@@ -848,33 +898,13 @@ export function ModelFormBody({
       <div className="text-destructive text-sm">{errors.modelId.message}</div>
     ) : null;
 
-  // Once an endpoint has answered, the id is picked from what it serves. The
-  // hidden input keeps RHF validating the field the picker now writes.
-  const modelIdFieldJsx = !isCustom ? null : discoveredModels.length > 0 ? (
-    <div className="space-y-2">
-      <Label>{t("models.form.modelId")}</Label>
-      <ModelCombobox
-        value={modelId}
-        search={discoverySearch}
-        onSearchChange={setDiscoverySearch}
-        models={discoveredRows}
-        isLoading={discoverModels.isPending}
-        placeholder={t("models.form.discoverSearchPlaceholder")}
-        emptyText={t("models.form.discoverNoMatch")}
-        searchingText={t("models.form.discovering")}
-        onSelect={applyDiscoveredModel}
-        freeTextItem={freeTextItem}
-      />
-      <input type="hidden" {...register("modelId", { validate: requiredUnlessPreset })} />
-      {modelIdErrorJsx}
-    </div>
-  ) : (
+  const renderModelIdInput = () => (
     <div className="space-y-2">
       <Label htmlFor="mdl-modelId">{t("models.form.modelId")}</Label>
       <Input
         id="mdl-modelId"
         type="text"
-        {...register("modelId", { validate: requiredUnlessPreset })}
+        {...register("modelId", { validate: modelIdValidate })}
         placeholder="ex: claude-sonnet-4-5-20250929"
         aria-invalid={showError("modelId") ? true : undefined}
         className={cn(showError("modelId") && "border-destructive")}
@@ -882,30 +912,6 @@ export function ModelFormBody({
       {modelIdErrorJsx}
     </div>
   );
-
-  // Custom (operator-supplied) endpoints only — a catalog already lists its models.
-  const discoverJsx = isCustomProvider ? (
-    <div className="space-y-2">
-      <Button
-        type="button"
-        variant="outline"
-        onClick={handleDiscover}
-        disabled={!canDiscover || discoverModels.isPending}
-      >
-        {discoverModels.isPending ? <Spinner /> : t("models.form.discoverButton")}
-      </Button>
-      {freshDiscovery &&
-        (freshDiscovery.outcome === "ok" ? (
-          <div className="text-muted-foreground text-sm">
-            {freshDiscovery.models.length > 0
-              ? t("models.form.discoverCount", { count: freshDiscovery.models.length })
-              : t("models.form.discoverEmpty")}
-          </div>
-        ) : (
-          <div className="text-destructive text-sm">{discoveryErrorText(freshDiscovery, t)}</div>
-        ))}
-    </div>
-  ) : null;
 
   // Capabilities — custom provider/model only; preset and OpenRouter auto-fill
   // them from their source of truth.
@@ -922,27 +928,138 @@ export function ModelFormBody({
     />
   ) : null;
 
+  // Step 2 — the model, once the endpoint is reachable. Ask it what it serves
+  // or type the id in; nothing below the two buttons until one is chosen.
+  // Built only for an endpoint that has one, so RHF registers `modelId` under
+  // exactly the arrangement that puts it on screen.
+  const modelStepJsx = isCustomProvider ? (
+    <>
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant={modelMode === "detect" ? "default" : "outline"}
+            onClick={handleDetect}
+            disabled={discoverModels.isPending}
+          >
+            {discoverModels.isPending ? <Spinner /> : t("models.form.discoverButton")}
+          </Button>
+          <Button
+            type="button"
+            variant={modelMode === "manual" ? "default" : "outline"}
+            onClick={() => switchModelMode("manual")}
+          >
+            {t("models.form.manualButton")}
+          </Button>
+        </div>
+        {modelMode === "detect" &&
+          freshDiscovery &&
+          (freshDiscovery.outcome === "ok" ? (
+            <div className="text-muted-foreground text-sm">
+              {freshDiscovery.models.length > 0
+                ? t("models.form.discoverCount", { count: freshDiscovery.models.length })
+                : t("models.form.discoverEmpty")}
+            </div>
+          ) : (
+            <div className="text-destructive text-sm">{discoveryErrorText(freshDiscovery, t)}</div>
+          ))}
+        {!showModelFields && (
+          <>
+            <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
+            {modelIdErrorJsx}
+          </>
+        )}
+      </div>
+
+      {showModelFields && (
+        <>
+          {modelMode === "detect" ? (
+            <div className="space-y-2">
+              <Label>{t("models.form.modelId")}</Label>
+              {/* The id is picked from what the endpoint serves; the hidden
+                  input keeps RHF validating the field the picker writes. */}
+              <ModelCombobox
+                value={modelId}
+                search={discoverySearch}
+                onSearchChange={setDiscoverySearch}
+                models={discoveredRows}
+                isLoading={discoverModels.isPending}
+                placeholder={t("models.form.discoverSearchPlaceholder")}
+                emptyText={t("models.form.discoverNoMatch")}
+                searchingText={t("models.form.discovering")}
+                onSelect={applyDiscoveredModel}
+                freeTextItem={freeTextItem}
+              />
+              <input type="hidden" {...register("modelId", { validate: modelIdValidate })} />
+              {modelIdErrorJsx}
+            </div>
+          ) : (
+            renderModelIdInput()
+          )}
+          {labelFieldJsx}
+          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
+              >
+                <span>{t("models.form.advanced")}</span>
+                <ChevronDown
+                  className={cn(
+                    "text-muted-foreground size-4 transition-transform",
+                    advancedOpen && "rotate-180",
+                  )}
+                />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>{capabilitiesJsx}</CollapsibleContent>
+          </Collapsible>
+        </>
+      )}
+    </>
+  ) : null;
+
   return (
     <form id="model-form" onSubmit={onFormSubmit} className="space-y-4">
       {/* Provider select */}
       <div className="space-y-2">
         <Label htmlFor="mdl-provider">{t("models.form.provider")}</Label>
-        <Select value={providerId} onValueChange={handleProviderChange}>
+        <Select
+          value={isCustomProvider ? CUSTOM_ENDPOINT_ID : providerId}
+          onValueChange={(id) =>
+            handleProviderChange(
+              id === CUSTOM_ENDPOINT_ID ? (overridableProviders[0]?.providerId ?? "") : id,
+            )
+          }
+        >
           <SelectTrigger id="mdl-provider">
             <SelectValue placeholder={t("models.form.providerPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             <ProviderPickerGroups
-              items={registry}
+              items={providerRows}
               featuredLabel={t("models.form.providerGroupFeatured")}
               otherLabel={t("models.form.providerGroupOther")}
-              renderItem={(p) => {
-                const Icon = getProviderIcon(p);
+              renderItem={(row) => {
+                // Every endpoint the operator can point somewhere else is one
+                // picker entry; which of them it is becomes the "API type"
+                // question inside the arrangement below.
+                if (row.kind === "customEndpoint") {
+                  return (
+                    <SelectItem key={CUSTOM_ENDPOINT_ID} value={CUSTOM_ENDPOINT_ID}>
+                      <span className="flex items-center gap-2">
+                        <Server className="size-4" />
+                        {t("models.form.customEndpoint")}
+                      </span>
+                    </SelectItem>
+                  );
+                }
+                const Icon = getProviderIcon(row.entry);
                 return (
-                  <SelectItem key={p.providerId} value={p.providerId}>
+                  <SelectItem key={row.entry.providerId} value={row.entry.providerId}>
                     <span className="flex items-center gap-2">
                       {Icon && <Icon className="size-4" />}
-                      {p.displayName}
+                      {row.entry.displayName}
                     </span>
                   </SelectItem>
                 );
@@ -953,17 +1070,30 @@ export function ModelFormBody({
       </div>
 
       {isCustomProvider ? (
-        /* An operator-supplied endpoint has no model list to wait for — the
-           base URL and the model id are typed — so every field is available
-           the moment the provider is picked, in the order it gets filled in:
-           endpoint → key → model → name → capabilities. */
+        /* An operator-supplied endpoint answers for itself: describe and open
+           it (step 1), then ask it — or tell it — which model to run (step 2). */
         <>
-          {baseUrlFieldJsx}
-          {credentialBlockJsx}
-          {discoverJsx}
-          {modelIdFieldJsx}
-          {labelFieldJsx}
-          {capabilitiesJsx}
+          <EndpointFields
+            idPrefix="mdl"
+            providers={overridableProviders}
+            providerId={providerId}
+            onProviderChange={handleProviderChange}
+            // The endpoint belongs to the saved row; changing it would rebind
+            // the model to a service it was never verified against.
+            providerLocked={!!model}
+            baseUrlProps={register("baseUrl", { validate: baseUrlValidate })}
+            baseUrlLocked={!!selectedCredential}
+            baseUrlError={showError("baseUrl") ? errors.baseUrl?.message : undefined}
+            apiKeyProps={register("inlineApiKey")}
+            apiKeyError={showError("credentialId") ? errors.credentialId?.message : undefined}
+            apiKeyHint={
+              !selectedCredential && inlineApiKey.trim()
+                ? t("models.form.createCredentialHint")
+                : undefined
+            }
+            existingKeys={existingKeys}
+          />
+          {endpointReady && modelStepJsx}
         </>
       ) : (
         <>
@@ -1054,7 +1184,7 @@ export function ModelFormBody({
             credentialBlockJsx}
 
           {baseUrlFieldJsx}
-          {modelIdFieldJsx}
+          {isCustomModel && renderModelIdInput()}
           {capabilitiesJsx}
         </>
       )}
