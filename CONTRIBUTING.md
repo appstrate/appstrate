@@ -150,6 +150,7 @@ git config commit.gpgsign true
 - No unrelated changes bundled
 - New features include tests
 - API changes include OpenAPI spec updates
+- A change to a request the SPA sends includes a test that pins the emitted payload (see `apps/web/CLAUDE.md`, Tests) — the typed client checks shapes, not values
 
 ## Contributor License Agreement (CLA)
 
