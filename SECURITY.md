@@ -498,15 +498,20 @@ rather than for a role (`principalPermissions`, RBAC spec §4.2 — cloud's bill
 managers): each module declares up front what it may ever grant, anything else
 its resolver returns is dropped, the strings may never be API-key- or
 end-user-grantable, and the surface is evaluated for session-shaped callers
-only, so no delegated credential can carry such a grant.
+only, so no delegated credential can carry such a grant. The answers are cached
+per `(orgId, userId)` behind a 10s TTL and dropped across replicas by the
+granting module's own `invalidatePrincipalPermissions(orgId, userId?)`; the
+`userId`-less form clears every cached principal, because the cache is keyed
+rather than prefixed.
 
 `applySpacePermissions(c, space)` (`middleware/space-context.ts`) is the single
 place the space slice is added: it loads the caller's `space_members` row, runs
 the resolver, and refuses with 403 `not_a_space_member` (or 404 for a `private`
-space) when there is no role. It is exported, and a module gating a space-level
-resource on a route family the platform does not space-scope reaches it through
-the core seam `enterSpaceContext` — a module that skips it holds no space-level
-string, so its own guard fails closed.
+space) when there is no role. It is exported: the in-tree `mcp` module calls it
+directly, and a module gating a space-level resource on a route family the
+platform does not space-scope reaches it through the core seam
+`enterSpaceContext` (`chat`, `webhooks`) — a module that skips both holds no
+space-level string, so its own guard fails closed.
 
 Four properties matter for the threat model:
 

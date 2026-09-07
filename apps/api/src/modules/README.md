@@ -234,9 +234,12 @@ their own role gives them.
 **Invalidation is yours.** Results are cached per `(orgId, userId)` with a 10s
 TTL. The platform cannot know when your table changed, so call
 `invalidatePrincipalPermissions(orgId, userId?)` from
-`@appstrate/core/principal-permissions` after every write the resolver reads —
-omit `userId` to drop the whole org. The TTL is only the backstop for a lost
-bus broadcast, not the invalidation mechanism.
+`@appstrate/core/principal-permissions` after every write the resolver reads.
+The cache is keyed by `(orgId, userId)`, not prefixed by org, so the `userId`-less
+form clears **every** cached principal on every replica, not just this org's —
+correct but blunt, which is why the per-user form is the one to reach for. The
+TTL is only the backstop for a lost bus broadcast, not the invalidation
+mechanism.
 
 ### A space-level resource on a route the platform does not space-scope
 
@@ -273,13 +276,16 @@ a space (`c.get("spaceId") ?? c.req.header("X-Space-Id")`) and skip otherwise �
 permission is org-level, so an unconditional entry would 400 a caller who needs
 no space. Skipping leaves `permissions` at the org half, which is the correct
 authority for those rows; a route that then wants either half gates on both
-strings rather than on one (`requireAnyWebhookRead` in
-`modules/webhooks/routes.ts`).
+strings rather than on one (`requireAnyWebhookPermission` in
+`modules/webhooks/routes.ts`; core routes reach for `requireAnyPermission`,
+which a module cannot import).
 
 This is not optional: a caller outside a space holds **org-level strings only**,
 so a space-level guard on a route that never entered a space can never pass. It
-fails closed, which is the right default and the wrong behaviour. `chat`, `mcp`
-and `webhooks` are the three in-repo examples. A caller with no role in the
+fails closed, which is the right default and the wrong behaviour. `chat` and
+`webhooks` are the two examples of the seam; the in-tree `mcp` module imports
+`applySpacePermissions` from the middleware directly, which is the same code
+path without the indirection an out-of-tree module needs. A caller with no role in the
 resolved space is refused there (403 `not_a_space_member`, or 404 for a
 `private` space) — the same answer the core middleware gives.
 

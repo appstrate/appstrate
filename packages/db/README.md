@@ -8,7 +8,7 @@ Every `exports` subpath of the package, in manifest order:
 
 | Import                         | Description                                                                                |
 | ------------------------------ | ------------------------------------------------------------------------------------------ |
-| `@appstrate/db/schema`         | Drizzle ORM schema (50 tables, 9 enums)                                                    |
+| `@appstrate/db/schema`         | Drizzle ORM schema (51 tables, 9 enums)                                                    |
 | `@appstrate/db/run-status`     | Import-free run-status literals + the terminal/active sets derived from them               |
 | `@appstrate/db/pricing-status` | Import-free `pricing_status` literals (`priced` / `partial` / `unpriced`)                  |
 | `@appstrate/db/client`         | `db` instance + `listenClient` for PostgreSQL LISTEN/NOTIFY                                |
