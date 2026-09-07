@@ -290,6 +290,17 @@ export function ModelFormBody({
   const setProviderId = (id: string) => setProviderOverride(id);
   const setSelectedModelId = (id: string) => setModelOverride(id);
 
+  /**
+   * Does the saved row carry limits or modalities of its own? `GET /api/models`
+   * returns RESOLVED values, so a catalog-known id reports the catalog's — the
+   * toggle then opens on values that are already true of the model, and saving
+   * them again writes them as overrides. Harmless: the row keeps describing the
+   * same model, it only stops following the weekly catalog refresh.
+   */
+  const hasStoredCapabilities =
+    !!model &&
+    (!!model.input?.length || !!model.contextWindow || !!model.maxTokens || !!model.reasoning);
+
   const {
     register,
     handleSubmit,
@@ -307,6 +318,7 @@ export function ModelFormBody({
       modelId: model?.modelId ?? "",
       credentialId: model?.credentialId ?? "",
       inlineApiKey: "",
+      capabilitiesExplicit: hasStoredCapabilities,
       inputText: model?.input?.includes("text") !== false,
       inputImage: model?.input?.includes("image") ?? false,
       contextWindow: model?.contextWindow?.toString() ?? "",
@@ -315,20 +327,30 @@ export function ModelFormBody({
     },
   });
 
-  const [apiShape, baseUrl, modelId, credentialId, inlineApiKey, inputText, inputImage, reasoning] =
-    useWatch({
-      control,
-      name: [
-        "apiShape",
-        "baseUrl",
-        "modelId",
-        "credentialId",
-        "inlineApiKey",
-        "inputText",
-        "inputImage",
-        "reasoning",
-      ],
-    });
+  const [
+    apiShape,
+    baseUrl,
+    modelId,
+    credentialId,
+    inlineApiKey,
+    capabilitiesExplicit,
+    inputText,
+    inputImage,
+    reasoning,
+  ] = useWatch({
+    control,
+    name: [
+      "apiShape",
+      "baseUrl",
+      "modelId",
+      "credentialId",
+      "inlineApiKey",
+      "capabilitiesExplicit",
+      "inputText",
+      "inputImage",
+      "reasoning",
+    ],
+  });
 
   const credentialsQuery = useModelProviderCredentials();
 
@@ -435,6 +457,14 @@ export function ModelFormBody({
   const isCustomModel = !isCustomProvider && selectedModelId === CUSTOM_ID;
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
   const isCustom = isCustomProvider || isCustomModel;
+  /**
+   * What the capabilities section answered. `auto` and `hidden` differ on an
+   * edit: a preset row never showed the section, so there is nothing of the
+   * operator's to clear, while a custom one showed it and was left off — which
+   * means "drop whatever was stored". An OpenRouter pick renders no section but
+   * flags itself explicit, so its imported values still ship.
+   */
+  const capabilities = capabilitiesExplicit ? "explicit" : isCustom ? "auto" : "hidden";
   /** Registry entries that let the operator point at their own endpoint. */
   const overridableProviders = useMemo(
     () => registry.filter((p) => p.baseUrlOverridable),
@@ -495,15 +525,8 @@ export function ModelFormBody({
   };
 
   // Capabilities are the rare edit — folded away unless the row already
-  // carries one.
-  const [advancedOpen, setAdvancedOpen] = useState(
-    () =>
-      !!model &&
-      (!!model.contextWindow ||
-        !!model.maxTokens ||
-        !!model.reasoning ||
-        (model.input?.includes("image") ?? false)),
-  );
+  // carries one, which is the same condition the toggle inside opens on.
+  const [advancedOpen, setAdvancedOpen] = useState(() => hasStoredCapabilities);
 
   const handleDiscover = () => {
     if (!selectedProvider) return;
@@ -559,6 +582,7 @@ export function ModelFormBody({
   const resetModelFields = () => {
     setValue("label", "");
     setValue("modelId", "");
+    setValue("capabilitiesExplicit", false);
     setValue("inputText", true);
     setValue("inputImage", false);
     setValue("contextWindow", "");
@@ -613,6 +637,10 @@ export function ModelFormBody({
     if (!preset) return;
 
     const caps = preset.capabilities;
+    // Seeded so the fields describe the pick, but not as the operator's own
+    // answer: a preset's capabilities belong to the catalog, which keeps
+    // resolving (and refreshing) them server-side.
+    setValue("capabilitiesExplicit", false);
     setValue("label", preset.label ?? preset.id);
     setValue("modelId", preset.id);
     setValue("inputText", caps.includes("text"));
@@ -651,6 +679,8 @@ export function ModelFormBody({
       provider: selectedProvider,
       selectedCredentialId: selectedCredential?.id ?? null,
       importedCost,
+      capabilities,
+      isEdit: !!model,
     });
     if (!result.ok) {
       setError(result.field, { message: t(result.messageKey) });
@@ -897,14 +927,16 @@ export function ModelFormBody({
   // them from their source of truth.
   const capabilitiesJsx = isCustom ? (
     <CapabilitiesSection
+      explicit={capabilitiesExplicit}
       contextWindowProps={register("contextWindow")}
       maxTokensProps={register("maxTokens")}
       inputText={inputText}
       inputImage={inputImage}
       reasoning={reasoning}
-      onInputTextChange={(v) => setValue("inputText", v, { shouldDirty: true })}
-      onInputImageChange={(v) => setValue("inputImage", v, { shouldDirty: true })}
-      onReasoningChange={(v) => setValue("reasoning", v, { shouldDirty: true })}
+      onExplicitChange={(v) => setValue("capabilitiesExplicit", v)}
+      onInputTextChange={(v) => setValue("inputText", v)}
+      onInputImageChange={(v) => setValue("inputImage", v)}
+      onReasoningChange={(v) => setValue("reasoning", v)}
     />
   ) : null;
 
@@ -1137,20 +1169,18 @@ export function ModelFormBody({
                 onSelect={(m) => {
                   // OpenRouter has no vendored catalog, so every field comes
                   // from the live API and must be persisted as an explicit
-                  // override — including cost. We mark each setValue as dirty
-                  // so the submit handler ships them.
+                  // override — including cost. The pick IS the explicit answer
+                  // the capabilities toggle asks for elsewhere (no section is
+                  // rendered here), and the name ships as a typed-in one.
                   setSelectedModelId(m.id);
-                  setValue("modelId", m.id, { shouldDirty: true });
+                  setValue("modelId", m.id);
                   setValue("label", m.name, { shouldDirty: true });
-                  if (m.contextWindow)
-                    setValue("contextWindow", m.contextWindow.toString(), { shouldDirty: true });
-                  if (m.maxTokens)
-                    setValue("maxTokens", m.maxTokens.toString(), { shouldDirty: true });
-                  setValue("inputText", m.input?.includes("text") !== false, { shouldDirty: true });
-                  setValue("inputImage", m.input?.includes("image") ?? false, {
-                    shouldDirty: true,
-                  });
-                  setValue("reasoning", m.reasoning ?? false, { shouldDirty: true });
+                  setValue("capabilitiesExplicit", true);
+                  if (m.contextWindow) setValue("contextWindow", m.contextWindow.toString());
+                  if (m.maxTokens) setValue("maxTokens", m.maxTokens.toString());
+                  setValue("inputText", m.input?.includes("text") !== false);
+                  setValue("inputImage", m.input?.includes("image") ?? false);
+                  setValue("reasoning", m.reasoning ?? false);
                   // `useOpenRouterModels` already narrows the wire cost to
                   // `ModelCost | null` in its `select`, so no re-normalisation here.
                   setImportedCost(m.cost);

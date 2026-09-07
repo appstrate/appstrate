@@ -159,9 +159,22 @@ describe("ModelFormBody — editing a custom endpoint", () => {
     // so promising a derived one would describe a save that changes nothing.
     expect(html).not.toContain(settingsFr["models.form.labelPlaceholder"]);
     expect(html).toContain(settingsFr["models.form.advanced"]);
-    // "Avancé" is open, so the capabilities the row carries are on screen.
-    expect(html).toContain(settingsFr["models.form.capabilities"]);
-    expect(html).toContain('id="mdl-input-text"');
+  });
+
+  it("opens the capabilities on the row's own values, the toggle already on", () => {
+    // The row carries a context window, so it answered these questions once —
+    // the fold and the toggle inside it both open on that.
+    expect(html).toContain('id="mdl-capabilities-explicit"');
+    expect(checkedState(html, "mdl-capabilities-explicit")).toBe("true");
+    for (const id of [
+      "mdl-ctx",
+      "mdl-maxtok",
+      "mdl-input-text",
+      "mdl-input-image",
+      "mdl-reasoning",
+    ])
+      expect(html).toContain(`id="${id}"`);
+    expect(html).not.toContain(settingsFr["models.form.capabilitiesAuto"]);
   });
 
   it("does not offer detection: that adds rows, and an edit changes this one", () => {
@@ -246,3 +259,40 @@ describe("ModelFormBody — catalogued provider", () => {
     expect(html).not.toContain(settingsFr["models.form.manualButton"]);
   });
 });
+
+describe("ModelFormBody — a custom model id on a catalogued provider", () => {
+  // The provider is catalogued but the id is not one of its entries, so the
+  // form is on the custom-model path: capabilities are asked for, unfolded.
+  // Nothing was ever overridden on this row, so the toggle opens off.
+  const html = form(
+    model({
+      label: "Claude X",
+      apiShape: "anthropic-messages",
+      providerId: "anthropic",
+      providerName: "Anthropic",
+      baseUrl: "https://api.anthropic.com",
+      modelId: "claude-unreleased",
+      input: null,
+      contextWindow: null,
+      maxTokens: null,
+      reasoning: null,
+    }),
+  );
+
+  it("offers the capabilities toggle, off", () => {
+    expect(html).toContain('id="mdl-capabilities-explicit"');
+    expect(checkedState(html, "mdl-capabilities-explicit")).toBe("false");
+  });
+
+  it("states what answers for the model instead of showing empty fields", () => {
+    expect(html).toContain(settingsFr["models.form.capabilitiesAuto"]);
+    expect(html).not.toContain('id="mdl-ctx"');
+    expect(html).not.toContain('id="mdl-maxtok"');
+  });
+});
+
+/** A Radix checkbox is a `button`, so its state reads off `aria-checked`. */
+function checkedState(html: string, id: string): string | undefined {
+  const tag = html.slice(html.lastIndexOf("<button", html.indexOf(`id="${id}"`)));
+  return /aria-checked="(\w+)"/.exec(tag.slice(0, tag.indexOf(">")))?.[1];
+}

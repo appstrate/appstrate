@@ -318,6 +318,19 @@ test.describe("Custom endpoint model — UI", () => {
 
     await dialog.getByRole("button", { name: "Configurer manuellement" }).click();
     await dialog.locator("#mdl-modelId").fill("llama3");
+
+    // Nothing describes a typed-in id — no listing, and no catalog entry for a
+    // name the operator invented — so the limits and modalities are a question
+    // only they can answer. The fold is closed on a create and the toggle
+    // inside it is off: what is shown is the fallback chain, not empty fields.
+    await dialog.getByRole("button", { name: "Avancé" }).click();
+    await expect(dialog.locator("#mdl-ctx")).toBeHidden();
+    await dialog
+      .getByRole("checkbox", { name: "Définir moi-même les limites et capacités" })
+      .click();
+    await dialog.getByRole("checkbox", { name: "Image", exact: true }).click();
+    await dialog.locator("#mdl-ctx").fill("32768");
+
     // Name left empty on purpose: the server derives it from the model id.
     await dialog.getByRole("button", { name: "Enregistrer" }).click();
 
@@ -325,7 +338,15 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(page.getByText("llama3").first()).toBeVisible();
 
     const created = (await listModels(apiClient)).find((m) => m.modelId === "llama3");
-    expect(created).toMatchObject({ modelId: "llama3", label: "llama3" });
+    // The ticked boxes ARE the answer: `text` was already on, `image` was
+    // added, and the context window is the one typed rather than the runtime's
+    // 128k default.
+    expect(created).toMatchObject({
+      modelId: "llama3",
+      label: "llama3",
+      input: ["text", "image"],
+      contextWindow: 32768,
+    });
   });
 
   test("discovers an Anthropic-shaped endpoint's models", async ({

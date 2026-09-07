@@ -14,6 +14,7 @@ import type {
   ModelFormSubmission,
   ModelFormSubmitOutcome,
 } from "../lib/model-form-payload";
+import { toCreateModelBody } from "../lib/model-form-payload";
 import {
   useCreateModelProviderCredential,
   useModelProviderCredentials,
@@ -253,14 +254,13 @@ export function useModelFormHandler(opts: {
       }
     } else if (data.newCredential) {
       createCredentialAndThen((keyId) => {
-        const { newCredential: _, ...modelData } = data;
-        createModel.mutate(
-          { body: { ...modelData, credentialId: keyId } },
-          { onSuccess: opts.onSuccess },
-        );
+        createModel.mutate({ body: toCreateModelBody(data, keyId) }, { onSuccess: opts.onSuccess });
       });
     } else {
-      createModel.mutate({ body: data }, { onSuccess: opts.onSuccess });
+      createModel.mutate(
+        { body: toCreateModelBody(data, data.credentialId) },
+        { onSuccess: opts.onSuccess },
+      );
     }
   };
 

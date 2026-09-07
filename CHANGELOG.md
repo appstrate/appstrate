@@ -154,6 +154,21 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   `providerId` is documented as always set for a `custom` credential — it
   already was; the OpenAPI prose said "when `authMode === 'oauth2'`".
 
+- **The model form says what happens when limits and capabilities are left
+  alone, and one toggle owns them.** The "Avancé" fold used to show four
+  fields under "Optionnel : ces valeurs remplacent la détection automatique du
+  SDK" — nothing detects anything: the server resolves row override → vendored
+  catalog by model id → nothing, and the runtime fills nothing with fixed
+  defaults (128k context, 16k output tokens, text only, no reasoning). And the
+  fields shipped only when touched, so an unticked box meant "undefined" or
+  `false` depending on whether it had been clicked. Now a single toggle,
+  "Définir moi-même les limites et capacités", opens the fields — grouped as
+  "Limites" and "Ce que le modèle accepte", placeholders set to the real
+  defaults — and every one of them ships when it is on; off, a sentence states
+  the fallback chain instead. On an edit, leaving the toggle off (or blanking a
+  limit with it on) sends `null`, so a stored override is dropped rather than
+  silently kept.
+
 - **Model discovery for API-key providers lists the provider's models once
   instead of issuing N identical requests that verified nothing.**
   `discoverAvailableModels` now calls `listServedModelIds`

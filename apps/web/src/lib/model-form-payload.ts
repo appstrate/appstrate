@@ -17,6 +17,12 @@ export interface ModelFormFields {
   modelId: string;
   credentialId: string;
   inlineApiKey: string;
+  /**
+   * "I answer for the limits and modalities myself." Off, the four fields
+   * below are not on screen and not on the wire — the server resolves them
+   * from the catalog and the runtime falls back to fixed defaults.
+   */
+  capabilitiesExplicit: boolean;
   inputText: boolean;
   inputImage: boolean;
   contextWindow: string;
@@ -24,8 +30,22 @@ export interface ModelFormFields {
   reasoning: boolean;
 }
 
+/**
+ * Catalog-derivable overrides, in the shape a create takes. Sent only when the
+ * operator answered for them (the capabilities toggle, or an OpenRouter
+ * import) — otherwise the server keeps resolving them from the vendored
+ * catalog and the weekly `refresh-pricing-catalog.ts` bump still reaches
+ * existing rows.
+ */
+interface ModelCapabilityOverrides {
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+}
+
 /** One `POST /api/models` body, minus the credential every entry shares. */
-export interface ModelFormModelEntry {
+export interface ModelFormModelEntry extends ModelCapabilityOverrides {
   /**
    * Optional — server derives from the catalog label (`<catalog>.label`)
    * and dedupes against existing org rows when absent. Sent only when the
@@ -33,15 +53,6 @@ export interface ModelFormModelEntry {
    */
   label?: string;
   modelId: string;
-  /**
-   * Catalog-derivable overrides. Sent only when the user edited them after
-   * picking a preset (RHF `dirtyFields`) — keeps existing rows in sync with
-   * the weekly `refresh-pricing-catalog.ts` bump.
-   */
-  input?: string[];
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoning?: boolean;
   cost?: ModelCost;
 }
 
@@ -51,7 +62,41 @@ interface ModelFormCredentialBinding {
   newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
 }
 
-export interface ModelFormData extends ModelFormModelEntry, ModelFormCredentialBinding {}
+/**
+ * One model, ready to submit. The four capability overrides widen to `null`
+ * here: `PATCH /api/models/{id}` reads `null` as "drop the stored override and
+ * resolve from the catalog again", which is how the form clears one. `POST`
+ * has nothing to clear and refuses `null`, so a create body goes through
+ * {@link toCreateModelBody}.
+ */
+export type ModelFormData = ModelFormCredentialBinding &
+  Omit<ModelFormModelEntry, keyof ModelCapabilityOverrides> & {
+    input?: string[] | null;
+    contextWindow?: number | null;
+    maxTokens?: number | null;
+    reasoning?: boolean | null;
+  };
+
+/**
+ * A submission → the `POST /api/models` body that creates it. The builder only
+ * emits `null` capabilities when editing, so dropping them here is a type
+ * narrowing rather than a behaviour change. The credential id is passed in
+ * because an inline key is created first and only then has one.
+ */
+export function toCreateModelBody(
+  data: ModelFormData,
+  credentialId: string,
+): ModelFormModelEntry & { credentialId: string } {
+  const { newCredential: _, input, contextWindow, maxTokens, reasoning, ...rest } = data;
+  return {
+    ...rest,
+    credentialId,
+    ...(input ? { input } : {}),
+    ...(contextWindow != null ? { contextWindow } : {}),
+    ...(maxTokens != null ? { maxTokens } : {}),
+    ...(reasoning != null ? { reasoning } : {}),
+  };
+}
 
 /** Several models against ONE credential — one `POST /api/models` per entry. */
 export interface ModelFormMultiData extends ModelFormCredentialBinding {
@@ -84,8 +129,21 @@ export interface ModelFormProvider {
 
 export interface ModelFormPayloadInput {
   fields: ModelFormFields;
-  /** RHF `dirtyFields` — catalog-derivable values ship only when edited. */
+  /** RHF `dirtyFields` — the row's name ships only when the operator typed one. */
   dirtyFields: { [K in keyof ModelFormFields]?: boolean };
+  /**
+   * What the capabilities section answered, or that it never rendered:
+   * - `explicit` — the operator ticked the toggle (or an OpenRouter import
+   *   filled the fields): all four values ship, an unticked box included.
+   * - `auto` — the section was offered and left off. Nothing to send on a
+   *   create; on an edit every field ships as `null`, so a previously stored
+   *   override is dropped and the catalog resolves it again.
+   * - `hidden` — the section never rendered (catalogued preset), so there is
+   *   nothing the operator declined and nothing of theirs to clear.
+   */
+  capabilities: "explicit" | "auto" | "hidden";
+  /** Editing an existing row. Only `auto` reads it — clear vs. omit. */
+  isEdit: boolean;
   /** The picked registry entry; undefined until the user picks a provider. */
   provider: ModelFormProvider | undefined;
   /**
@@ -149,6 +207,39 @@ export function resolveCredentialBinding(input: {
   };
 }
 
+/** The capability half of the body — see `ModelFormPayloadInput.capabilities`. */
+function capabilityOverrides(
+  input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit">,
+): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
+  const { fields } = input;
+  if (input.capabilities === "hidden") return {};
+  if (input.capabilities === "auto") {
+    if (!input.isEdit) return {};
+    return { input: null, contextWindow: null, maxTokens: null, reasoning: null };
+  }
+  const modalities = [fields.inputText && "text", fields.inputImage && "image"].filter(
+    Boolean,
+  ) as string[];
+  const contextWindow = parseInt(fields.contextWindow.trim(), 10);
+  const maxTokens = parseInt(fields.maxTokens.trim(), 10);
+  // A blank limit, or neither box ticked (the server refuses an empty array),
+  // is a question left to the catalog and the runtime default: omitted on a
+  // create, and on an edit sent as `null` so a stored override is dropped
+  // rather than silently kept behind the blank the operator just made.
+  const answered: Pick<ModelFormData, "input" | "contextWindow" | "maxTokens"> = {};
+  if (modalities.length > 0) answered.input = modalities;
+  else if (input.isEdit) answered.input = null;
+  if (contextWindow > 0) answered.contextWindow = contextWindow;
+  else if (input.isEdit) answered.contextWindow = null;
+  if (maxTokens > 0) answered.maxTokens = maxTokens;
+  else if (input.isEdit) answered.maxTokens = null;
+  return {
+    ...answered,
+    // Booleans have no blank state, so an unticked box IS the answer `false`.
+    reasoning: fields.reasoning,
+  };
+}
+
 export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPayloadResult {
   const { fields, dirtyFields, importedCost } = input;
   const credential = resolveCredentialBinding({
@@ -159,13 +250,6 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
   });
   if (!credential.ok) return credential;
 
-  const inputArr = [fields.inputText && "text", fields.inputImage && "image"].filter(
-    Boolean,
-  ) as string[];
-  const cw = fields.contextWindow.trim() ? parseInt(fields.contextWindow.trim(), 10) : undefined;
-  const mt = fields.maxTokens.trim() ? parseInt(fields.maxTokens.trim(), 10) : undefined;
-  const inputDirty = dirtyFields.inputText === true || dirtyFields.inputImage === true;
-
   return {
     ok: true,
     data: {
@@ -174,10 +258,7 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
       ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
       modelId: fields.modelId.trim(),
       ...credential.binding,
-      ...(inputDirty && inputArr.length > 0 ? { input: inputArr } : {}),
-      ...(dirtyFields.contextWindow === true && cw ? { contextWindow: cw } : {}),
-      ...(dirtyFields.maxTokens === true && mt ? { maxTokens: mt } : {}),
-      ...(dirtyFields.reasoning === true ? { reasoning: fields.reasoning } : {}),
+      ...capabilityOverrides(input),
       ...(importedCost ? { cost: importedCost } : {}),
     },
   };
