@@ -100,7 +100,7 @@ DECLARE
   v_expected   bigint;
   v_existing   bigint;
   v_pending    bigint;
-  v_clients    bigint;
+  v_clients     bigint;
 BEGIN
   SELECT count(*) INTO v_viewers FROM mig0008_viewers;
   -- The viewer x space product: how many (user, space) pairs must be covered
@@ -181,6 +181,7 @@ DECLARE
   v_viewer_rows bigint;
   v_clients     bigint;
   v_missing_invite_assignments bigint;
+  v_spaceless_clients bigint;
   v_missing_client_assignments bigint;
 BEGIN
   SELECT count(*) INTO v_viewers FROM org_members WHERE role = 'viewer';
@@ -194,10 +195,24 @@ BEGIN
     JOIN space_members m ON m.space_id = s.id AND m.user_id = v.user_id;
   v_uncovered := v_expected - v_covered;
   SELECT count(*) INTO v_viewer_rows FROM space_members WHERE preset_role = 'viewer';
-  SELECT count(*) INTO v_clients FROM mig0008_oauth_clients;
+  -- Post-state, not the captured set: the captured count reads the same whether
+  -- step 4 wrote anything or not.
+  SELECT count(*) INTO v_clients
+    FROM mig0008_oauth_clients o JOIN oauth_clients c ON c.id = o.id
+    WHERE c.signup_space_assignments <> '[]'::jsonb;
+  SELECT count(*) INTO v_spaceless_clients
+    FROM mig0008_oauth_clients o
+    WHERE NOT EXISTS (SELECT 1 FROM spaces s WHERE s.org_id = o.referenced_org_id);
 
-  RAISE NOTICE 'after: % org viewer(s), % pending viewer invitation(s); % of % (user, space) pair(s) covered, % total viewer space_members row(s), % legacy OAuth client(s) snapshotted',
-    v_viewers, v_pending, v_covered, v_expected, v_viewer_rows, v_clients;
+  RAISE NOTICE 'after: % org viewer(s), % pending viewer invitation(s); % of % (user, space) pair(s) covered, % total viewer space_members row(s), % legacy OAuth client(s) snapshotted, % left empty because their org has no space',
+    v_viewers, v_pending, v_covered, v_expected, v_viewer_rows, v_clients, v_spaceless_clients;
+  IF v_spaceless_clients <> 0 THEN
+    -- Not an abort: there is nothing to snapshot. Named so the operator can
+    -- decide whether such a client should keep provisioning at all.
+    RAISE NOTICE 'OAuth client(s) with an empty snapshot because their org has no space: %',
+      (SELECT string_agg(o.id, ', ') FROM mig0008_oauth_clients o
+        WHERE NOT EXISTS (SELECT 1 FROM spaces s WHERE s.org_id = o.referenced_org_id));
+  END IF;
 
   IF v_viewers <> 0 OR v_pending <> 0 THEN
     RAISE EXCEPTION 'org role viewer survives the rewrite (% member(s), % invitation(s)) — aborting', v_viewers, v_pending;

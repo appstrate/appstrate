@@ -37,11 +37,12 @@ export class Sidebar {
 
   /** Open the space submenu and click a space by name. */
   async switchSpace(spaceName: string) {
-    // The item's accessible name is the space name followed by the role label,
-    // so anchor the match: an unanchored "Default" also matches "Default 2".
-    const escaped = spaceName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // The item's accessible name appends the role label, so match the name on
+    // its own element, exactly: "Default" must not pick "Default 2" or "My Default".
     await this.clickSpaceItem(
-      this.page.getByRole("menuitem", { name: new RegExp(`^${escaped}\\b`) }),
+      this.page
+        .getByRole("menuitem")
+        .filter({ has: this.page.getByText(spaceName, { exact: true }) }),
     );
   }
 

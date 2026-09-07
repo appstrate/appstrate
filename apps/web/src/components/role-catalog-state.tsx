@@ -39,7 +39,8 @@ export function RoleCatalogState({
     return (
       <Alert variant="destructive" className={className}>
         <AlertDescription>
-          <p>{getErrorMessage(error)}</p>
+          <p>{t("spaceMembers.rolesLoadError")}</p>
+          <p className="text-xs opacity-80">{getErrorMessage(error)}</p>
           <Button type="button" variant="outline" size="sm" onClick={refetch}>
             {t("btn.retry", { ns: "common" })}
           </Button>

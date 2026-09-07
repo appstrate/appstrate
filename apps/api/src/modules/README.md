@@ -276,9 +276,10 @@ a space (`c.get("spaceId") ?? c.req.header("X-Space-Id")`) and skip otherwise â€
 permission is org-level, so an unconditional entry would 400 a caller who needs
 no space. Skipping leaves `permissions` at the org half, which is the correct
 authority for those rows; a route that then wants either half gates on both
-strings rather than on one (`requireAnyWebhookPermission` in
-`modules/webhooks/routes.ts`; core routes reach for `requireAnyPermission`,
-which a module cannot import).
+strings rather than on one (`requireAnyPermission` from
+`middleware/require-permission.ts`, which an in-tree module imports like
+`webhooks` does; an out-of-tree module composes `makePermissionGuard` from
+`@appstrate/core/permissions` the same way).
 
 This is not optional: a caller outside a space holds **org-level strings only**,
 so a space-level guard on a route that never entered a space can never pass. It

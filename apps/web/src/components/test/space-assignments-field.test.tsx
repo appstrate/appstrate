@@ -51,7 +51,7 @@ describe("space assignment catalog recovery", () => {
   it("reports a failed catalog and leaves removal available so a stale draft can be repaired", () => {
     const html = field({ error: new Error("Catalogue inaccessible") });
     expect(html).toContain('role="alert"');
-    expect(html).toContain("Catalogue inaccessible");
+    expect(html).toContain("Impossible de charger les rôles disponibles.");
     expect(html).toContain("Réessayer");
     const removeButton = html.match(/<button[^>]*aria-label="Retirer cet espace"[^>]*>/)?.[0];
     expect(removeButton).toBeDefined();
@@ -90,7 +90,7 @@ describe("space assignment catalog recovery", () => {
     );
     expect(html).toContain("Tous les espaces — tous les droits");
     expect(html).toContain('disabled=""');
-    expect(html).not.toContain("Catalogue inaccessible");
+    expect(html).not.toContain("Impossible de charger les rôles disponibles.");
     expect(html).not.toContain('role="status"');
   });
 });

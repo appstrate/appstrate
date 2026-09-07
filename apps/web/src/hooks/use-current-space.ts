@@ -50,7 +50,7 @@ const SPACE_SCOPED_KEYS = new Set([
  * leaves entries keyed on the previous space (or on no space at all, right
  * after login) to be served as if they belonged to the new one.
  */
-function selectSpace(queryClient: QueryClient, spaceId: string): void {
+function selectSpace(queryClient: QueryClient, spaceId: string | null): void {
   if (spaceId === spaceStore.getState().id) return;
 
   spaceStore.getState().setId(spaceId);
@@ -80,18 +80,19 @@ export function useSpaceSwitcher() {
 }
 
 /**
- * Forget a persisted space the caller can no longer enter — their membership
- * was removed, the space was closed, or a preview sees less than they do.
- * Auto-selection only ever SETS, so without this the stale id keeps riding on
- * `X-Space-Id` and 403s every space-scoped request while `usePermissions()`
- * still reports itself ready.
+ * Forget a persisted space when NOTHING is enterable any more — the caller's
+ * memberships were removed, or a preview sees less than they do. With at least
+ * one enterable space `useAutoSelect` replaces a stale id itself; with none it
+ * has nothing to pick, and the stale id would keep riding on `X-Space-Id`,
+ * 403-ing every space-scoped request while `usePermissions()` reports ready.
+ * Goes through `selectSpace` so the previous space's cached rows go with it.
  */
 export function dropUnenterableSpace(
+  queryClient: QueryClient,
   enterable: { id: string }[] | undefined,
   currentSpaceId: string | null,
 ): void {
-  if (!enterable || !currentSpaceId) return;
-  if (!enterable.some((s) => s.id === currentSpaceId)) spaceStore.getState().setId(null);
+  if (enterable?.length === 0 && currentSpaceId) selectSpace(queryClient, null);
 }
 
 /**
@@ -103,6 +104,7 @@ export function dropUnenterableSpace(
  * would make every space-scoped request 403.
  */
 export function useSpaceResolver(): void {
+  const queryClient = useQueryClient();
   const currentSpaceId = useStore(spaceStore, (s) => s.id);
   const { data: spaces } = useSpaces();
   const { switchSpace } = useSpaceSwitcher();
@@ -113,6 +115,9 @@ export function useSpaceResolver(): void {
     [],
   );
 
-  useEffect(() => dropUnenterableSpace(enterable, currentSpaceId), [enterable, currentSpaceId]);
+  useEffect(
+    () => dropUnenterableSpace(queryClient, enterable, currentSpaceId),
+    [queryClient, enterable, currentSpaceId],
+  );
   useAutoSelect(enterable, currentSpaceId, switchSpace, findDefault);
 }

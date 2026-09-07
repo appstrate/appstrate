@@ -965,6 +965,7 @@
   "spaceMembers.source.open_space": "Open space",
   "spaceMembers.orgRoleOf": "Organization {{role}}",
   "spaceMembers.accessHint": "Access comes from a direct assignment, an open space or an organization role. A direct assignment replaces the open space's role.",
+  "spaceMembers.rolesLoadError": "Could not load available roles.",
   "spaceMembers.rolesLoading": "Loading available roles…",
   "spaceMembers.noAssignableRoles": "Your current permissions do not allow assigning any roles.",
   "spaceMembers.spaceLoadError": "Could not check which access would remain after removal.",

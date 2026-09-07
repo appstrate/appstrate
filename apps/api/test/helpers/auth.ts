@@ -19,11 +19,11 @@
 import { eq, sql } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
 import { db } from "./db.ts";
+import { seedSpaceMember } from "./seed.ts";
 import { prefixedId, SPACE_ID_RE } from "../../src/lib/ids.ts";
 import {
   organizations,
   organizationMembers,
-  spaceMembers,
   spaces,
   user as userTable,
   session as sessionTable,
@@ -240,9 +240,11 @@ export async function memberContext(
   const member = await createTestUser();
   await addOrgMember(ctx.orgId, member.id, role);
   if (spaceRole) {
-    await db
-      .insert(spaceMembers)
-      .values({ spaceId: ctx.defaultSpaceId, userId: member.id, presetRole: spaceRole });
+    await seedSpaceMember({
+      spaceId: ctx.defaultSpaceId,
+      userId: member.id,
+      presetRole: spaceRole,
+    });
   }
   return {
     ...ctx,

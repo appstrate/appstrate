@@ -965,6 +965,7 @@
   "spaceMembers.source.open_space": "Espace ouvert",
   "spaceMembers.orgRoleOf": "{{role}} de l'organisation",
   "spaceMembers.accessHint": "L'accès vient d'une attribution directe, d'un espace ouvert ou d'un rôle d'organisation. Une attribution directe remplace le rôle de l'espace ouvert.",
+  "spaceMembers.rolesLoadError": "Impossible de charger les rôles disponibles.",
   "spaceMembers.rolesLoading": "Chargement des rôles disponibles…",
   "spaceMembers.noAssignableRoles": "Aucun rôle attribuable avec vos permissions actuelles.",
   "spaceMembers.spaceLoadError": "Impossible de vérifier l'accès qui subsisterait après le retrait.",
