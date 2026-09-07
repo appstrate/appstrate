@@ -15,7 +15,8 @@
  * upstream exchange at all.
  *
  * Tier 0 has no Redis, so `withRedisLock` is a pass-through here and what is
- * exercised is exactly the in-process singleflight map.
+ * exercised is exactly the in-process halves: the singleflight map and the
+ * per-key serialization chain.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -118,6 +119,71 @@ describe("dedupedRefresh", () => {
 
     expect(await Promise.all(all)).toEqual(["STORED", "STORED"]);
     expect(reReads).toBe(1);
+  });
+
+  it("serializes a forced and a proactive flight for the same key", async () => {
+    const gate = deferred();
+    let stored = "STALE";
+    let storedIsFresh = false;
+    let exchanges = 0;
+    let inFlight = 0;
+    let peak = 0;
+
+    const run = (force: boolean) =>
+      dedupedRefresh<string>("cred_serialized", {
+        lockKey: "test:cred_serialized",
+        lockLabel: "test",
+        force,
+        // The proactive verdict: hand back the stored row when a peer (here,
+        // the forced flight) has already written a fresh token to it.
+        reReadFreshness: async ({ force: f }) => (!f && storedIsFresh ? `STORED:${stored}` : null),
+        doRefresh: async () => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await gate.promise;
+          exchanges += 1;
+          stored = `ROTATED-${exchanges}`;
+          storedIsFresh = true;
+          inFlight -= 1;
+          return stored;
+        },
+      });
+
+    // The forced flight is held inside `doRefresh` while the proactive one is
+    // created: unserialized, the proactive re-read would run against the row
+    // as it stands BEFORE the rotation and exchange a second time.
+    const forced = run(true);
+    const proactive = run(false);
+    gate.resolve();
+
+    expect(await forced).toBe("ROTATED-1");
+    expect(await proactive).toBe("STORED:ROTATED-1");
+    expect(peak).toBe(1);
+    expect(exchanges).toBe(1);
+  });
+
+  it("a rejected flight does not block the next flight on the same key", async () => {
+    const run = (force: boolean, fail: boolean) =>
+      dedupedRefresh<string>("cred_rejected", {
+        lockKey: "test:cred_rejected",
+        lockLabel: "test",
+        force,
+        reReadFreshness: async () => null,
+        doRefresh: async () => {
+          if (fail) throw new Error("upstream 503");
+          return "EXCHANGED";
+        },
+      });
+
+    const failing = run(true, true);
+    const following = run(false, false);
+
+    await expect(failing).rejects.toThrow("upstream 503");
+    expect(await following).toBe("EXCHANGED");
+
+    // The chain is released once it settles — a later flight runs immediately
+    // rather than waiting on a tail that will never be cleared.
+    expect(await run(true, false)).toBe("EXCHANGED");
   });
 
   it("releases the flight so a later forced caller runs its own refresh", async () => {
