@@ -433,6 +433,17 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Unit tests green again after the 2026-09-07 LiteLLM catalog refresh
+  (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
+  `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor
+  page (https://learn.chatgpt.com/docs/models) lists it as recommended for
+  ChatGPT sign-in (Pro plans and above), so it joins the Codex
+  `modelDiscoveryCandidates` and `featuredModels`, newest first. The same
+  refresh marks the whole 5.6 family `temperature: "unsupported"` on the
+  OpenAI API, so the `resolveCatalogDefaults` test that proves the Codex
+  override rejects temperature now reads `gpt-5.4`, an id the API still
+  supports it on.
+
 - **A custom endpoint's key and models show a neutral icon.** Rows resolve
   their registry entry by `providerId` (`resolveProviderEntry`), falling back
   to the `(apiShape, baseUrl)` match only where the binding is hidden; the

@@ -1775,10 +1775,9 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -1807,10 +1806,9 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -1839,10 +1837,9 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -1904,10 +1901,9 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -1937,10 +1933,9 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -1970,10 +1965,9 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -1991,6 +1985,37 @@
       "output": 12,
       "cacheRead": 0.2,
       "cacheWrite": 2.5
+    }
+  },
+  "gpt-6-astra": {
+    "label": "Gpt 6 Astra",
+    "contextWindow": 922000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 10,
+      "output": 50,
+      "cacheRead": 1,
+      "cacheWrite": 12.5
     }
   },
   "gpt-audio": {
