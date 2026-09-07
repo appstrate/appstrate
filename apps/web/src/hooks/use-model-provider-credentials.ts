@@ -109,6 +109,20 @@ export function useRefreshCredentialModels() {
   return $api.useMutation("post", "/api/model-provider-credentials/{id}/refresh-models");
 }
 
+/** Wire shape of `POST /api/model-provider-credentials/discover`'s 200 body. */
+export type DiscoveredModelsResponse =
+  paths["/api/model-provider-credentials/discover"]["post"]["responses"][200]["content"]["application/json"];
+export type DiscoveredModel = DiscoveredModelsResponse["models"][number];
+
+/**
+ * Lists what an endpoint serves, for a saved credential or for a key typed
+ * inline. Persists nothing — the form reads the models straight off the
+ * response, so no cache is invalidated.
+ */
+export function useDiscoverModels() {
+  return $api.useMutation("post", "/api/model-provider-credentials/discover");
+}
+
 export function deduplicateLabel(label: string, existingKeys: { label: string }[]): string {
   return dedupeLabel(
     label,

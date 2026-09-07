@@ -28,14 +28,17 @@ import {
   CommandItem,
 } from "@appstrate/ui/components/command";
 import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
-import { type OpenRouterModel, type OrgModelInfo } from "../hooks/use-models";
+import { type OrgModelInfo } from "../hooks/use-models";
 import type { ModelCost } from "@appstrate/core/module";
 import { CapabilitiesSection } from "./model-form/capabilities-section";
 import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
+  useDiscoverModels,
   useModelProviderCredentials,
   useProvidersRegistry,
   useRefreshCredentialModels,
+  type DiscoveredModel,
+  type DiscoveredModelsResponse,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
@@ -50,7 +53,41 @@ import {
   type ModelFormData,
   type ModelFormFields,
 } from "@/lib/model-form-payload";
+import { discoveredModelToFieldValues } from "@/lib/discovered-model-fields";
 import { getProviderIcon } from "./icons";
+
+/** This-session discovery, flattened: a failed request is one more outcome. */
+interface DiscoveryState {
+  /** Identifies the endpoint+key the listing came from — see `discoveryKey`. */
+  key: string;
+  outcome: DiscoveredModelsResponse["outcome"] | "request_failed";
+  models: DiscoveredModel[];
+  message: string | null;
+}
+
+/** The line under the discovery button when no listing came back. */
+function discoveryErrorText(discovery: DiscoveryState, t: (key: string) => string): string {
+  switch (discovery.outcome) {
+    case "auth_failed":
+      return t("models.form.discoverAuthFailed");
+    case "blocked_url":
+      return t("models.form.discoverBlockedUrl");
+    case "request_failed":
+      return t("models.form.discoverRequestFailed");
+    // unreachable | http_error | bad_response | rate_limited.
+    default:
+      return t("models.form.discoverFailed") + (discovery.message ? ` ${discovery.message}` : "");
+  }
+}
+
+function parsesAsUrl(value: string): boolean {
+  try {
+    new URL(value.trim());
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 interface ModelFormModalProps {
   open: boolean;
@@ -60,7 +97,20 @@ interface ModelFormModalProps {
   onSubmit: (data: ModelFormData) => void;
 }
 
-function OpenRouterCombobox({
+/** What the combobox reads off a row, whatever the listing it came from. */
+interface ComboboxModel {
+  id: string;
+  name: string;
+  contextWindow: number | null;
+}
+
+/**
+ * Searchable model picker over any listing the form can offer. Filtering is
+ * the host's job — `shouldFilter={false}` — so a remote search and a
+ * client-side one plug in the same way, and `freeTextItem` adds a row adopting
+ * the raw typed text so an id the listing omits stays enterable.
+ */
+function ModelCombobox<T extends ComboboxModel>({
   value,
   search,
   onSearchChange,
@@ -70,16 +120,18 @@ function OpenRouterCombobox({
   emptyText,
   searchingText,
   onSelect,
+  freeTextItem,
 }: {
   value: string;
   search: string;
   onSearchChange: (v: string) => void;
-  models: OpenRouterModel[];
+  models: T[];
   isLoading: boolean;
   placeholder: string;
   emptyText: string;
   searchingText: string;
-  onSelect: (m: OpenRouterModel) => void;
+  onSelect: (m: T) => void;
+  freeTextItem?: { label: string; onSelect: () => void };
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -127,7 +179,22 @@ function OpenRouterCombobox({
                 {searchingText}
               </div>
             )}
-            {!isLoading && models.length === 0 && <CommandEmpty>{emptyText}</CommandEmpty>}
+            {!isLoading && models.length === 0 && !freeTextItem && (
+              <CommandEmpty>{emptyText}</CommandEmpty>
+            )}
+            {freeTextItem && (
+              <CommandGroup>
+                <CommandItem
+                  value={freeTextItem.label}
+                  onSelect={() => {
+                    freeTextItem.onSelect();
+                    setOpen(false);
+                  }}
+                >
+                  <span className="truncate">{freeTextItem.label}</span>
+                </CommandItem>
+              </CommandGroup>
+            )}
             {models.length > 0 && (
               <CommandGroup>
                 {models.map((m) => (
@@ -377,6 +444,57 @@ export function ModelFormBody({
   const isCustomModel = selectedModelId === CUSTOM_ID;
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
   const isCustom = isCustomProvider || isCustomModel;
+
+  // "Ask the endpoint what it serves." Persists nothing, so the listing lives
+  // here for this form-open — and only for what it was run against, which
+  // `discoveryKey` pins: editing the URL, the key or the provider makes it
+  // stale rather than offering ids from an endpoint the form left behind.
+  const discoverModels = useDiscoverModels();
+  const [discovery, setDiscovery] = useState<DiscoveryState | null>(null);
+  const [discoverySearch, setDiscoverySearch] = useState("");
+  const discoveryKey = [providerId, baseUrl.trim(), credentialId, inlineApiKey.trim()].join("|");
+  const freshDiscovery = discovery?.key === discoveryKey ? discovery : null;
+  const discoveredModels = freshDiscovery?.outcome === "ok" ? freshDiscovery.models : [];
+
+  const canDiscover =
+    !!selectedProvider && parsesAsUrl(baseUrl) && (!!credentialId || !!inlineApiKey.trim());
+
+  const handleDiscover = () => {
+    if (!selectedProvider) return;
+    const key = discoveryKey;
+    setDiscoverySearch("");
+    discoverModels.mutate(
+      {
+        body: credentialId
+          ? { credential_id: credentialId }
+          : {
+              provider_id: selectedProvider.providerId,
+              api_key: inlineApiKey.trim(),
+              ...(selectedProvider.baseUrlOverridable ? { base_url_override: baseUrl.trim() } : {}),
+            },
+      },
+      {
+        onSuccess: (data) =>
+          setDiscovery({ key, outcome: data.outcome, models: data.models, message: data.message }),
+        onError: () => setDiscovery({ key, outcome: "request_failed", models: [], message: null }),
+      },
+    );
+  };
+
+  // Same reason as the OpenRouter import below: nothing resolves these on read
+  // for such an endpoint, so each write is dirty and ships as an override.
+  const applyDiscoveredModel = (m: DiscoveredModel) => {
+    const next = discoveredModelToFieldValues(m);
+    setValue("modelId", next.modelId, { shouldDirty: true });
+    setValue("label", next.label, { shouldDirty: true });
+    if (next.contextWindow !== undefined)
+      setValue("contextWindow", next.contextWindow, { shouldDirty: true });
+    if (next.maxTokens !== undefined) setValue("maxTokens", next.maxTokens, { shouldDirty: true });
+    if (next.inputText !== undefined) setValue("inputText", next.inputText, { shouldDirty: true });
+    if (next.inputImage !== undefined)
+      setValue("inputImage", next.inputImage, { shouldDirty: true });
+    if (next.reasoning !== undefined) setValue("reasoning", next.reasoning, { shouldDirty: true });
+  };
 
   // Models offered in the dropdown. For OAuth (subscription) providers the
   // list is EXACTLY what discovery reported for the selected credential —
@@ -642,6 +760,11 @@ export function ModelFormBody({
     </div>
   );
 
+  // A preset fills the typed fields from its catalog entry; a custom entry has
+  // to carry them, so blank is an error there and only there.
+  const requiredUnlessPreset = (v: string) =>
+    isPreset || v.trim() ? undefined : t("validation.required", { ns: "common" });
+
   // The four typed fields. Built only when they render, so RHF registers
   // (and validates) them under exactly the condition it did before.
   const labelFieldJsx = isCustom ? (
@@ -650,13 +773,7 @@ export function ModelFormBody({
       <Input
         id="mdl-label"
         type="text"
-        {...register("label", {
-          validate: (v) => {
-            if (isPreset) return undefined;
-            if (!v.trim()) return t("validation.required", { ns: "common" });
-            return undefined;
-          },
-        })}
+        {...register("label", { validate: requiredUnlessPreset })}
         placeholder="ex: Claude Sonnet"
         aria-invalid={showError("label") ? true : undefined}
         className={cn(showError("label") && "border-destructive")}
@@ -674,16 +791,8 @@ export function ModelFormBody({
         id="mdl-baseUrl"
         type="url"
         {...register("baseUrl", {
-          validate: (v) => {
-            if (isPreset) return undefined;
-            if (!v.trim()) return t("validation.required", { ns: "common" });
-            try {
-              new URL(v.trim());
-            } catch {
-              return t("validation.required", { ns: "common" });
-            }
-            return undefined;
-          },
+          validate: (v) =>
+            isPreset || parsesAsUrl(v) ? undefined : t("validation.required", { ns: "common" }),
         })}
         placeholder="https://api.openai.com/v1"
         aria-invalid={showError("baseUrl") ? true : undefined}
@@ -696,26 +805,90 @@ export function ModelFormBody({
     </div>
   ) : null;
 
-  const modelIdFieldJsx = isCustom ? (
+  // Rows for the discovered-model combobox: filtered here (the picker itself
+  // never filters) and named the way every listing names its rows.
+  const typedModelId = discoverySearch.trim();
+  const discoveryQuery = typedModelId.toLowerCase();
+  const discoveredRows = discoveredModels
+    .filter(
+      (m) =>
+        !discoveryQuery ||
+        m.id.toLowerCase().includes(discoveryQuery) ||
+        (m.label ?? "").toLowerCase().includes(discoveryQuery),
+    )
+    .map((m) => ({ ...m, name: m.label ?? m.id, contextWindow: m.context_window }));
+  // Offered only for text that names nothing in the listing — picking a row
+  // puts its label in the search box, which must not read as a new id.
+  const freeTextItem =
+    typedModelId &&
+    !discoveredModels.some((m) => m.id === typedModelId || (m.label ?? m.id) === typedModelId)
+      ? {
+          label: t("models.form.discoverUseTyped", { id: typedModelId }),
+          onSelect: () => setValue("modelId", typedModelId, { shouldDirty: true }),
+        }
+      : undefined;
+
+  const modelIdErrorJsx =
+    showError("modelId") && errors.modelId?.message ? (
+      <div className="text-destructive text-sm">{errors.modelId.message}</div>
+    ) : null;
+
+  // Once an endpoint has answered, the id is picked from what it serves. The
+  // hidden input keeps RHF validating the field the picker now writes.
+  const modelIdFieldJsx = !isCustom ? null : discoveredModels.length > 0 ? (
+    <div className="space-y-2">
+      <Label>{t("models.form.modelId")}</Label>
+      <ModelCombobox
+        value={modelId}
+        search={discoverySearch}
+        onSearchChange={setDiscoverySearch}
+        models={discoveredRows}
+        isLoading={discoverModels.isPending}
+        placeholder={t("models.form.discoverSearchPlaceholder")}
+        emptyText={t("models.form.discoverNoMatch")}
+        searchingText={t("models.form.discovering")}
+        onSelect={applyDiscoveredModel}
+        freeTextItem={freeTextItem}
+      />
+      <input type="hidden" {...register("modelId", { validate: requiredUnlessPreset })} />
+      {modelIdErrorJsx}
+    </div>
+  ) : (
     <div className="space-y-2">
       <Label htmlFor="mdl-modelId">{t("models.form.modelId")}</Label>
       <Input
         id="mdl-modelId"
         type="text"
-        {...register("modelId", {
-          validate: (v) => {
-            if (isPreset) return undefined;
-            if (!v.trim()) return t("validation.required", { ns: "common" });
-            return undefined;
-          },
-        })}
+        {...register("modelId", { validate: requiredUnlessPreset })}
         placeholder="ex: claude-sonnet-4-5-20250929"
         aria-invalid={showError("modelId") ? true : undefined}
         className={cn(showError("modelId") && "border-destructive")}
       />
-      {showError("modelId") && errors.modelId?.message && (
-        <div className="text-destructive text-sm">{errors.modelId.message}</div>
-      )}
+      {modelIdErrorJsx}
+    </div>
+  );
+
+  // Custom (operator-supplied) endpoints only — a catalog already lists its models.
+  const discoverJsx = isCustomProvider ? (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={handleDiscover}
+        disabled={!canDiscover || discoverModels.isPending}
+      >
+        {discoverModels.isPending ? <Spinner /> : t("models.form.discoverButton")}
+      </Button>
+      {freshDiscovery &&
+        (freshDiscovery.outcome === "ok" ? (
+          <div className="text-muted-foreground text-sm">
+            {freshDiscovery.models.length > 0
+              ? t("models.form.discoverCount", { count: freshDiscovery.models.length })
+              : t("models.form.discoverEmpty")}
+          </div>
+        ) : (
+          <div className="text-destructive text-sm">{discoveryErrorText(freshDiscovery, t)}</div>
+        ))}
     </div>
   ) : null;
 
@@ -772,6 +945,7 @@ export function ModelFormBody({
         <>
           {baseUrlFieldJsx}
           {credentialBlockJsx}
+          {discoverJsx}
           {modelIdFieldJsx}
           {labelFieldJsx}
           {capabilitiesJsx}
@@ -821,7 +995,7 @@ export function ModelFormBody({
           {isOpenRouter && (
             <div className="space-y-2">
               <Label>{t("models.form.modelId")}</Label>
-              <OpenRouterCombobox
+              <ModelCombobox
                 value={modelId}
                 search={openRouterSearch.search}
                 onSearchChange={openRouterSearch.setSearch}

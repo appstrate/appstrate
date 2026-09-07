@@ -118,13 +118,21 @@ describe("ModelFormBody — custom (OpenAI-compatible) endpoint", () => {
     expect(html).toContain('placeholder="sk-..."');
   });
 
+  it("offers to ask the endpoint which models it serves", () => {
+    // Rendered on `baseUrlOverridable` alone, so it is on screen before any
+    // key is typed — disabled until there is something to authenticate with.
+    expect(html).toContain(settingsFr["models.form.discoverButton"]);
+  });
+
   it("orders the fields the way they are filled in", () => {
-    // endpoint → key → model → name → capabilities. The credential block is
-    // part of the sequence rather than gated on a model selection, which for a
-    // typed endpoint never happens (nothing selects a model for it).
+    // endpoint → key → detect → model → name → capabilities. The credential
+    // block is part of the sequence rather than gated on a model selection,
+    // which for a typed endpoint never happens (nothing selects a model for
+    // it); discovery sits right after the key it needs.
     const order = [
       'id="mdl-baseUrl"',
       'placeholder="sk-..."',
+      settingsFr["models.form.discoverButton"],
       'id="mdl-modelId"',
       'id="mdl-label"',
       'id="mdl-input-text"',
@@ -161,5 +169,9 @@ describe("ModelFormBody — catalogued provider", () => {
     expect(html).not.toContain('id="mdl-baseUrl"');
     expect(html).not.toContain('id="mdl-modelId"');
     expect(html).not.toContain('id="mdl-api"');
+  });
+
+  it("offers no endpoint discovery — the catalog already lists the models", () => {
+    expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
   });
 });
