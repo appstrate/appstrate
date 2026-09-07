@@ -493,13 +493,16 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
-- **A custom endpoint's key and models show their wire format's icon.** The
+- **A custom endpoint's key and models show an icon — a neutral one.** The
   credentials table and every model list resolved the provider by matching
   `(apiShape, baseUrl)` against the registry's `defaultBaseUrl`, which an
   operator's own host never matches, so `openai-compatible` and
   `anthropic-compatible` rows rendered icon-less. Both now read the entry off
   the row's `providerId` (`resolveProviderEntry`) and fall back to the endpoint
   match only where the binding is hidden (built-in credentials, aliased models).
+  The two entries' `iconUrl` is `custom-endpoint`, a server glyph, instead of
+  the vendor logo of the API they speak: an OpenAI mark next to a Qwen model on
+  Ollama read as a vendor claim.
 
 - **Deleting a key a model still runs on says so.** The server refuses it
   (409 `credential_in_use`, `org_models.credential_id` is ON DELETE RESTRICT)

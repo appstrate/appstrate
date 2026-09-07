@@ -287,7 +287,7 @@ const opencodeGo: ModelProviderDefinition = {
 const openaiCompatible: ModelProviderDefinition = {
   providerId: "openai-compatible",
   displayName: "OpenAI-compatible (custom)",
-  iconUrl: "openai",
+  iconUrl: "custom-endpoint",
   description:
     "Self-hosted or third-party endpoint exposing the OpenAI chat-completions API (Ollama, vLLM, LiteLLM, …).",
   apiShape: "openai-completions",
@@ -300,7 +300,7 @@ const openaiCompatible: ModelProviderDefinition = {
 const anthropicCompatible: ModelProviderDefinition = {
   providerId: "anthropic-compatible",
   displayName: "Anthropic-compatible (custom)",
-  iconUrl: "anthropic",
+  iconUrl: "custom-endpoint",
   description:
     "Self-hosted or third-party endpoint exposing the Anthropic Messages API (LiteLLM proxy, vendors publishing an Anthropic-compatible endpoint, …).",
   docsUrl: "https://docs.anthropic.com/en/api/messages",
