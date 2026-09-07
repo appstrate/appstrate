@@ -1,15 +1,15 @@
 -- One pending invitation per (organization, email).
 --
--- `createInvitation` used to cancel every pending row for the pair and insert a
--- fresh one, so inviting the same address into a second space before the first
--- link was accepted silently dropped the first assignment and invalidated the
--- link already shared. The service now refuses the second create (409
--- `invitation_already_pending`) and this index is what makes two concurrent
--- creates safe: exactly one INSERT matches, the other hits 23505.
+-- `createInvitation` refuses a second pending row for the pair (409
+-- `invitation_already_pending`); this index makes two concurrent creates safe —
+-- one INSERT lands, the other raises 23505, mapped to that same 409. `email` is
+-- stored lower-cased and trimmed, so a plain column index is exact. Failing here
+-- rolls the whole drizzle batch back, so `scripts/migration/README.md`'s rollout
+-- counts duplicate pairs first and repairs them with its `0009`.
 --
--- `email` is written lower-cased and trimmed by the service, so a plain column
--- index is exact. Duplicates can only pre-exist from a racing pair of creates
--- under the old code; if this CREATE fails on a deployment, run
--- `scripts/migration/0009-org-invitations-dedupe-pending.sql` first — it keeps
--- the newest pending row per pair and cancels the others.
-CREATE UNIQUE INDEX "uq_org_invitations_pending" ON "org_invitations" USING btree ("org_id","email") WHERE "org_invitations"."status" = 'pending';
+-- FENCES, same instrument and values as 0056.
+SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+SET LOCAL statement_timeout = '60s';--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_org_invitations_pending" ON "org_invitations" USING btree ("org_id","email") WHERE "org_invitations"."status" = 'pending';--> statement-breakpoint
+SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
+SET LOCAL lock_timeout = DEFAULT;

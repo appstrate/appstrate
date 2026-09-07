@@ -4,7 +4,9 @@
 --
 -- `org_role` keeps its `viewer` value: `ALTER TYPE … DROP VALUE` does not
 -- exist, so the value is removed by a later migration that recreates the type
--- once `scripts/migration/0008` has moved the rows. `meta/0056_snapshot.json`
+-- once `scripts/migration/0008` has moved the rows — tracked as
+-- https://github.com/appstrate/appstrate/issues/1275, which owns the window in
+-- which the type still carries a value no row uses. `meta/0056_snapshot.json`
 -- deliberately does NOT list `viewer` — the snapshot tracks the CODE's enum
 -- (`packages/db/src/schema`), which is what drizzle-kit diffs against, so
 -- listing the value there would make every later `db:generate` emit an
@@ -25,10 +27,9 @@
 -- FENCES, set once for the whole file, same instrument as 0039/0047/0055.
 -- `lock_timeout` bounds acquisition, `statement_timeout` bounds execution;
 -- neither bounds the hold, which lasts until drizzle commits the batch. The two
--- writes scan chat sessions and OAuth clients (including their org spaces);
--- every other statement is catalog-only or a
--- create-on-empty-table. On expiry the statement errors, the batch aborts, boot
--- fails its health gate — a failed deploy, not a silent skip.
+-- writes scan chat sessions and OAuth clients; every other statement is
+-- catalog-only or a create-on-empty-table. On expiry the statement errors, the
+-- batch aborts, boot fails its health gate — a failed deploy, not a silent skip.
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint
 SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 
@@ -181,15 +182,17 @@ CREATE INDEX IF NOT EXISTS "idx_chat_sessions_space_user" ON "chat_sessions" USI
 -- ═══ G. The OIDC auto-provision role allowlist admits `guest` ════════════════
 --
 -- `oauth_clients.signup_role` writes straight into `org_members.role`, so it
--- shares the org-role vocabulary. The rewrite is the precondition of the
+-- shares the org-role vocabulary. The role rewrite is the precondition of the
 -- narrowed CHECK below, which Postgres validates against every existing row as
--- it adds it.
+-- it adds it, and is therefore the only write this section carries (§2).
+--
+-- The space snapshot those clients need — a `guest` with no assignment
+-- provisions nobody — preconditions nothing here: the column is new and
+-- defaults to `'[]'`, so the CHECK never scans it. It is a one-off data
+-- rewrite and lives in `scripts/migration/0008`, step 4, beside the identical
+-- snapshot for pending invitations.
 ALTER TABLE "oauth_clients" ADD COLUMN IF NOT EXISTS "signup_space_assignments" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
-UPDATE oauth_clients c SET signup_space_assignments = c.signup_space_assignments || COALESCE((
-  SELECT jsonb_agg(jsonb_build_object('space_id', s.id, 'preset_role', 'viewer') ORDER BY s.id)
-  FROM spaces s WHERE s.org_id = c.referenced_org_id
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(c.signup_space_assignments) a WHERE a->>'space_id' = s.id)
-), '[]'::jsonb), signup_role = 'guest' WHERE signup_role = 'viewer';--> statement-breakpoint
+UPDATE oauth_clients SET signup_role = 'guest' WHERE signup_role = 'viewer';--> statement-breakpoint
 ALTER TABLE "oauth_clients" DROP CONSTRAINT IF EXISTS "oauth_clients_signup_role_check";--> statement-breakpoint
 ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_signup_role_check" CHECK (signup_role IN ('admin', 'member', 'guest'));--> statement-breakpoint
 SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint

@@ -1,12 +1,12 @@
 -- 0009 — one pending invitation per (organization, email).
 --
--- Run BEFORE `packages/db/drizzle/0057_org_invitations_pending_unique.sql`
--- when — and only when — that migration's `CREATE UNIQUE INDEX` fails with
--- `could not create unique index "uq_org_invitations_pending"`. Under the old
--- `createInvitation` a duplicate pending pair could only be produced by two
--- creates racing each other (each cancelled the other's predecessor, then both
--- inserted), so most deployments have nothing to repair and the migration
--- simply succeeds.
+-- Run BEFORE the drizzle batch that carries
+-- `packages/db/drizzle/0057_org_invitations_pending_unique.sql`, when — and only
+-- when — the rollout pre-flight in `README.md` counts a duplicate pending pair.
+-- Not afterwards: the batch is one transaction, so letting `0057`'s
+-- `CREATE UNIQUE INDEX` raise 23505 rolls `0056` back with it. A duplicate pair
+-- needs two `createInvitation` calls that raced, so most deployments count zero
+-- and never run this.
 --
 -- Keeps the NEWEST pending row per pair (the one whose link was shared last)
 -- and cancels the older ones. Nothing is deleted.

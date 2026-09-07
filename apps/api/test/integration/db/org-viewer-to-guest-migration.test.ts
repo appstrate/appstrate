@@ -6,7 +6,8 @@
  * The script is what stands between `0056_space_roles` and a running platform,
  * so the counts it prints are the deploy's go/no-go signal, and this file
  * asserts the ones that discriminate — a `viewer` becomes a `guest` and gains
- * one explicit `viewer` row per space that existed.
+ * one explicit `viewer` row per space that existed, and the pending invitations
+ * and OAuth signup clients that owed a space snapshot get one.
  *
  * Like `application-ids-to-space-ids-migration.test.ts`, it seeds with raw SQL
  * and does not use `createTestContext`: the pre-migration state (`role =
@@ -203,7 +204,7 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     ]);
   });
 
-  it("0056 snapshots legacy OAuth viewer signups and never adds later spaces on replay", async () => {
+  it("snapshots legacy OAuth viewer signups in 0008, not 0056, and never widens on replay", async () => {
     await execScript(`
       ALTER TABLE oauth_clients DROP CONSTRAINT oauth_clients_signup_role_check;
       INSERT INTO oauth_clients (id, client_id, name, level, referenced_org_id, signup_role, redirect_uris)
@@ -212,14 +213,24 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     const migration = await Bun.file(
       new URL("../../../../../packages/db/drizzle/0056_space_roles.sql", import.meta.url),
     ).text();
-    const section = migration.slice(migration.indexOf("-- ═══ G."));
-    await execScript(`BEGIN; ${section} COMMIT;`);
+    await execScript(`BEGIN; ${migration.slice(migration.indexOf("-- ═══ G."))} COMMIT;`);
     const policy = async () =>
       toRows<{ role: string; assignments: unknown }>(
         await db.execute(sql`
       SELECT signup_role AS role, signup_space_assignments AS assignments FROM oauth_clients WHERE id = 'oac_0008'
     `),
       )[0]!;
+
+    // 0056 carries only the write its CHECK preconditions: the role flips, the
+    // snapshot stays empty. Moving the snapshot back into the migration fails
+    // here (§2 — the column is new and defaults to `[]`, so it preconditions
+    // nothing).
+    expect(await policy()).toEqual({ role: "guest", assignments: [] });
+
+    // 0008 finds the client by the pair `guest` + empty snapshot: `guest` was
+    // unwritable before 0056 and the new application is not up yet.
+    const source = await Bun.file(SCRIPT).text();
+    await execScript(source);
     const expected = {
       role: "guest",
       assignments: [
@@ -228,11 +239,28 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
       ],
     };
     expect(await policy()).toEqual(expected);
+
     await execScript(
       `INSERT INTO spaces (id, org_id, name) VALUES ('spc_d0080000-0000-4000-8000-000000000003','${ORG}','Later')`,
     );
-    await execScript(`BEGIN; ${section} COMMIT;`);
+    await execScript(source);
     expect(await policy()).toEqual(expected);
+  });
+
+  it("leaves an OAuth client that already carries a snapshot alone", async () => {
+    await execScript(`
+      INSERT INTO oauth_clients (id, client_id, name, level, referenced_org_id, signup_role, signup_space_assignments, redirect_uris)
+      VALUES ('oac_0008_set','oauth_0008_set','Configured guest','org','${ORG}','guest',
+              '[{"space_id":"${SPACE_OTHER}","preset_role":"builder"}]'::jsonb,'{}');
+    `);
+    await execScript(await Bun.file(SCRIPT).text());
+    expect(
+      toRows<{ assignments: unknown }>(
+        await db.execute(sql`
+      SELECT signup_space_assignments AS assignments FROM oauth_clients WHERE id = 'oac_0008_set'
+    `),
+      )[0]!.assignments,
+    ).toEqual([{ space_id: SPACE_OTHER, preset_role: "builder" }]);
   });
 
   it("snapshots pending invitations without changing explicit choices or widening on rerun", async () => {
