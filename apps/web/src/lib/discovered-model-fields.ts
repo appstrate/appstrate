@@ -1,60 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One discovered model → the model-form fields it fills in.
+ * One discovered model → the `POST /api/models` body that adds it.
  *
  * A discovery runs against an operator-supplied endpoint, which has no vendored
- * catalog behind it: whatever the listing reported has to be written as an
- * explicit override or nothing resolves it on read. Every capability field is
- * therefore always written — the listing's value when it described one, the
- * form's blank default otherwise — so a pick describes the model it names and
- * nothing else.
+ * catalog behind it: whatever the listing (or the catalog lookup the server
+ * did) reported has to be written as an explicit override or nothing resolves
+ * it on read. Whatever it did NOT report is left out — not filled with a
+ * default — so a model nobody described stores no override at all, and its
+ * row keeps reading as "auto" (catalog if the id is known, runtime defaults
+ * otherwise) rather than as an answer the operator never gave.
  */
 
 import type { DiscoveredModel } from "../hooks/use-model-provider-credentials";
 import {
   resolveCredentialBinding,
-  type ModelFormFields,
   type ModelFormModelEntry,
   type ModelFormMultiData,
   type ModelFormProvider,
 } from "./model-form-payload";
 
-/** The complete set of fields a pick owns. */
-type DiscoveredModelFields = Pick<
-  ModelFormFields,
-  "modelId" | "label" | "contextWindow" | "maxTokens" | "inputText" | "inputImage" | "reasoning"
->;
-
-export function discoveredModelToFieldValues(model: DiscoveredModel): DiscoveredModelFields {
-  return {
-    modelId: model.id,
-    label: model.label ?? model.id,
-    contextWindow: model.context_window !== null ? String(model.context_window) : "",
-    maxTokens: model.max_tokens !== null ? String(model.max_tokens) : "",
-    inputText: model.input?.includes("text") ?? true,
-    inputImage: model.input?.includes("image") ?? false,
-    reasoning: model.reasoning ?? false,
-  };
-}
-
-/** One discovered model → the `POST /api/models` body that adds it. */
 function discoveredModelToEntry(model: DiscoveredModel): ModelFormModelEntry {
-  const fields = discoveredModelToFieldValues(model);
-  const input = [fields.inputText && "text", fields.inputImage && "image"].filter(
-    Boolean,
-  ) as string[];
-  const contextWindow = parseInt(fields.contextWindow, 10);
-  const maxTokens = parseInt(fields.maxTokens, 10);
   return {
-    // The field falls back to the id so the form always shows a name; the wire
-    // must not, or the server stops deriving one and dedupe never runs.
+    // The wire carries a name only when the listing had one, or the server
+    // stops deriving one and dedupe never runs.
     ...(model.label ? { label: model.label } : {}),
-    modelId: fields.modelId,
-    ...(input.length > 0 ? { input } : {}),
-    ...(contextWindow ? { contextWindow } : {}),
-    ...(maxTokens ? { maxTokens } : {}),
-    reasoning: fields.reasoning,
+    modelId: model.id,
+    // An empty list describes no model at all and the server refuses it.
+    ...(model.input?.length ? { input: model.input } : {}),
+    ...(model.context_window !== null ? { contextWindow: model.context_window } : {}),
+    ...(model.max_tokens !== null ? { maxTokens: model.max_tokens } : {}),
+    ...(model.reasoning !== null ? { reasoning: model.reasoning } : {}),
   };
 }
 

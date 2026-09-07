@@ -167,7 +167,9 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   defaults — and every one of them ships when it is on; off, a sentence states
   the fallback chain instead. On an edit, leaving the toggle off (or blanking a
   limit with it on) sends `null`, so a stored override is dropped rather than
-  silently kept.
+  silently kept. A model added from a detection stores only what the listing
+  or the catalog described — nothing is invented for a model neither knew —
+  so its row opens on "auto" rather than on defaults presented as answers.
 
 - **Model discovery for API-key providers lists the provider's models once
   instead of issuing N identical requests that verified nothing.**

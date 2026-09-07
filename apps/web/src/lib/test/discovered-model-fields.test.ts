@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What picking a discovered model writes into the form.
+ * What adding detected models puts on the wire.
  *
- * Completeness is the point: every field lands on every pick, so a model the
- * listing describes poorly cannot inherit the previous pick's context window.
- * The form ships every value it holds as an explicit override — an endpoint
- * discovery ran against has no catalog to resolve one from later.
+ * Only what the description carried ships: a field the listing and the catalog
+ * both left null is omitted, never filled with a default, so a model nobody
+ * described stores no override and its row keeps resolving as "auto".
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  buildDiscoveredModelsPayload,
-  discoveredModelToFieldValues,
-} from "../discovered-model-fields.ts";
+import { buildDiscoveredModelsPayload } from "../discovered-model-fields.ts";
 import type { ModelFormProvider } from "../model-form-payload.ts";
 import type { DiscoveredModel } from "../../hooks/use-model-provider-credentials.ts";
 
@@ -29,57 +25,6 @@ function discovered(overrides: Partial<DiscoveredModel> = {}): DiscoveredModel {
     ...overrides,
   };
 }
-
-describe("discoveredModelToFieldValues", () => {
-  it("maps a fully described model onto every field", () => {
-    expect(discoveredModelToFieldValues(discovered())).toEqual({
-      modelId: "qwen3:8b",
-      label: "Qwen 3 8B",
-      contextWindow: "32768",
-      maxTokens: "8192",
-      inputText: true,
-      inputImage: true,
-      reasoning: true,
-    });
-  });
-
-  it("falls back to the id when the listing carries no label", () => {
-    expect(discoveredModelToFieldValues(discovered({ label: null })).label).toBe("qwen3:8b");
-  });
-
-  it("writes the form's blank defaults for every field the listing left null", () => {
-    expect(
-      discoveredModelToFieldValues(
-        discovered({ context_window: null, max_tokens: null, input: null, reasoning: null }),
-      ),
-    ).toEqual({
-      modelId: "qwen3:8b",
-      label: "Qwen 3 8B",
-      contextWindow: "",
-      maxTokens: "",
-      inputText: true,
-      inputImage: false,
-      reasoning: false,
-    });
-  });
-
-  it("reads the modalities out of the input list", () => {
-    expect(discoveredModelToFieldValues(discovered({ input: ["text"] }))).toMatchObject({
-      inputText: true,
-      inputImage: false,
-    });
-    expect(discoveredModelToFieldValues(discovered({ input: [] }))).toMatchObject({
-      inputText: false,
-      inputImage: false,
-    });
-  });
-
-  it("keeps a reported false rather than dropping it", () => {
-    expect(discoveredModelToFieldValues(discovered({ reasoning: false }))).toMatchObject({
-      reasoning: false,
-    });
-  });
-});
 
 /**
  * What adding several detected models at once puts on the wire: one entry per
@@ -127,6 +72,38 @@ describe("buildDiscoveredModelsPayload", () => {
       // for the server to derive rather than invented here.
       { modelId: "llama3", input: ["text"], contextWindow: 8192, reasoning: false },
     ]);
+  });
+
+  it("sends nothing but the id for a model nobody described", () => {
+    // Neither the listing nor the catalog knew it: no override is invented,
+    // so the row reads as "auto" when edited rather than as an answer given.
+    const result = buildDiscoveredModelsPayload({
+      ...SAVED_KEY,
+      models: [
+        discovered({
+          label: null,
+          context_window: null,
+          max_tokens: null,
+          input: null,
+          reasoning: null,
+          source: null,
+        }),
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.models).toEqual([{ modelId: "qwen3:8b" }]);
+  });
+
+  it("keeps a reported false and drops an empty modality list", () => {
+    const result = buildDiscoveredModelsPayload({
+      ...SAVED_KEY,
+      models: [discovered({ input: [], reasoning: false })],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.models[0]).toMatchObject({ reasoning: false });
+    expect("input" in result.data.models[0]!).toBe(false);
   });
 
   it("creates the typed key ONCE, for the whole batch", () => {
