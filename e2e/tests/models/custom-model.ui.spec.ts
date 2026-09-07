@@ -226,7 +226,30 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(dialog.getByText("2 modèles détectés")).toBeVisible();
 
     await dialog.getByRole("checkbox", { name: "Tout sélectionner" }).click();
+    const pendingRequest = Promise.withResolvers<void>();
+    const releaseRequest = Promise.withResolvers<void>();
+    await page.route("**/api/models", async (route) => {
+      if (
+        route.request().method() === "POST" &&
+        route.request().postDataJSON().modelId === REFUSED_MODEL
+      ) {
+        pendingRequest.resolve();
+        await releaseRequest.promise;
+      }
+      await route.continue();
+    });
     await addModelsButton(dialog, 2).click();
+    await pendingRequest.promise;
+    try {
+      // A partial result must not restore the old key into a changed endpoint.
+      await expect(dialog.locator("#mdl-provider")).toBeDisabled();
+      await expect(dialog.locator("#mdl-apiType")).toBeDisabled();
+      await expect(dialog.locator("#mdl-baseUrl")).toBeDisabled();
+      await expect(dialog.getByPlaceholder("sk-...")).toBeDisabled();
+      await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeDisabled();
+    } finally {
+      releaseRequest.resolve();
+    }
 
     // One `POST /api/models` per checked row, each refusal collected rather
     // than aborting the rest: the accepted model is saved, the refused one is
@@ -235,6 +258,18 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeChecked();
     await expect(discoveredRow(dialog, ADDABLE_MODEL)).not.toBeChecked();
     await expect(addModelsButton(dialog, 1)).toBeVisible();
+    await expect(dialog.locator("#mdl-provider")).toBeEnabled();
+    await expect(dialog.locator("#mdl-baseUrl")).toBeEnabled();
+
+    const retryRequest = page.waitForRequest(
+      (request) => request.url().endsWith("/api/models") && request.method() === "POST",
+    );
+    await addModelsButton(dialog, 1).click();
+    const retry = await retryRequest;
+    const credentials = await apiClient.get("/model-provider-credentials");
+    const keys = (await credentials.json()).data as Array<{ id: string }>;
+    expect(keys).toHaveLength(1);
+    expect(retry.postDataJSON().credentialId).toBe(keys[0]!.id);
 
     const models = await listModels(apiClient);
     expect(models.find((m) => m.modelId === ADDABLE_MODEL)).toBeDefined();

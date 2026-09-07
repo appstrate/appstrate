@@ -569,13 +569,16 @@ function ModelFormDialog({
         </>
       }
     >
-      {/* Key forces remount when the target model changes, resetting all state */}
-      <ModelFormBody
-        key={model?.id ?? "__create__"}
-        model={model}
-        onSubmit={onSubmit}
-        onMultiSelectionChange={setSelectionCount}
-      />
+      {/* Keep the submitted endpoint stable until partial results have been applied. */}
+      <fieldset disabled={isPending} className="min-w-0">
+        {/* Key forces remount when the target model changes, resetting all state */}
+        <ModelFormBody
+          key={model?.id ?? "__create__"}
+          model={model}
+          onSubmit={onSubmit}
+          onMultiSelectionChange={setSelectionCount}
+        />
+      </fieldset>
     </Modal>
   );
 }
