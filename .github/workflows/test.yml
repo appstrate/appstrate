@@ -18,7 +18,18 @@ jobs:
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 10, not 5. The suite itself is ~257 s on a runner (7 950 tests), and the
+    # single most expensive case is `scripts/test/lint.test.ts`'s subprocess
+    # lint, which by construction has to lint the whole repo before
+    # `--max-warnings 0` can trip. Backend type-aware rules and jsx-a11y took a
+    # cold whole-repo lint from ~21 s to ~56 s and past 120 s on a runner —
+    # this job restores no `.eslintcache` (only `check.yml` does), so it pays
+    # that cold number every run. It blew that test's own ceiling AND this one
+    # (run
+    # 34213836495: every other job in it succeeded, `Unit tests` was cancelled
+    # at the wall). This bounds a hang; it is not a target — a healthy run
+    # finishes in about half of it.
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
