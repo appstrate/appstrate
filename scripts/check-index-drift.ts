@@ -31,6 +31,10 @@
  * `max(created_at)` in `drizzle.__drizzle_migrations` → the journal entry whose
  * `when` equals it → that entry's snapshot.
  *
+ * Actual set: the indexes on the TABLES that snapshot declares. Everything else
+ * in `public` belongs to a module with a migration tree of its own and is left
+ * alone.
+ *
  * SCOPE — this compares index NAMES ONLY. An index that exists under the
  * expected name with a different definition (other columns, a lost partial
  * predicate, lost uniqueness) reads as present. That is a real variant of this
@@ -45,8 +49,15 @@
 
 const META_DIR = `${import.meta.dir}/../packages/db/drizzle/meta`;
 
-/** Actual index names in the database. Exported so the migration-replay test runs the same query. */
-export const PUBLIC_INDEXES_QUERY = "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'";
+/**
+ * Actual indexes in the database, each with the table it sits on. Exported so
+ * the migration-replay test runs the same query. The table comes back because
+ * the comparison is restricted to the tables the platform snapshot declares:
+ * a module-owned table (`ee_*`) carries its own migration journal and its own
+ * indexes, which appear in no platform snapshot and are not this check's.
+ */
+export const PUBLIC_INDEXES_QUERY =
+  "SELECT indexname, tablename FROM pg_indexes WHERE schemaname = 'public'";
 
 /**
  * Does the drizzle tracking table exist at all?
@@ -102,6 +113,12 @@ export interface DrizzleJournal {
 /** The subset of `meta/NNNN_snapshot.json` this script reads. */
 export interface DrizzleSnapshot {
   tables: Record<string, { schema?: string; indexes?: Record<string, unknown> }>;
+}
+
+/** One row of `PUBLIC_INDEXES_QUERY`. */
+export interface ActualIndex {
+  indexname: string;
+  tablename: string;
 }
 
 interface IndexDiff {
@@ -184,6 +201,21 @@ export function declaredIndexes(snapshot: DrizzleSnapshot): Set<string> {
 }
 
 /**
+ * Table names DECLARED by a snapshot, in the public schema — the population the
+ * diff is restricted to. Keys are `<schema>.<table>`; the schema filter is the
+ * one `declaredIndexes` applies, for the same reason.
+ */
+export function declaredTables(snapshot: DrizzleSnapshot): Set<string> {
+  const names = new Set<string>();
+  for (const [key, table] of Object.entries(snapshot.tables)) {
+    const schema = table.schema ?? "";
+    if (schema !== "" && schema !== "public") continue;
+    names.add(key.slice(key.indexOf(".") + 1));
+  }
+  return names;
+}
+
+/**
  * Two-way set difference between declared and actual index names.
  *
  * `missing` is the failure signal: the schema says the index exists, the
@@ -240,7 +272,7 @@ export async function runCheck(input: {
   trackingTableExists: boolean;
   /** Null when the tracking table exists but holds no applied migration. */
   watermark: number | null;
-  actual: Set<string>;
+  actual: ActualIndex[];
   constraintBacked: Set<string>;
   loadSnapshot: (snapshotName: string) => Promise<DrizzleSnapshot>;
 }): Promise<{ exitCode: number; lines: string[] }> {
@@ -281,8 +313,16 @@ export async function runCheck(input: {
   );
   lines.push("");
 
-  const declared = declaredIndexes(await input.loadSnapshot(at.snapshotName));
-  const { missing, undeclared } = diffIndexes(declared, input.actual);
+  const snapshot = await input.loadSnapshot(at.snapshotName);
+  const declared = declaredIndexes(snapshot);
+  // A module-owned table (`ee_*`) migrates under a journal of its own, so its
+  // indexes are in no platform snapshot and every one of them would read as
+  // reverse drift. Only the tables this snapshot declares are compared.
+  const tables = declaredTables(snapshot);
+  const actual = new Set(
+    input.actual.filter((row) => tables.has(row.tablename)).map((row) => row.indexname),
+  );
+  const { missing, undeclared } = diffIndexes(declared, actual);
   const { expected, reverseDrift } = classifyUndeclared(undeclared, input.constraintBacked);
 
   if (expected.length > 0) {
@@ -307,7 +347,7 @@ export async function runCheck(input: {
 
   lines.push(
     `No missing index: all ${declared.size} indexes declared by ${at.snapshotName} are present ` +
-      `among the ${input.actual.size} in the database.`,
+      `among the ${actual.size} on those tables in the database.`,
   );
   lines.push(
     "Names only — index DEFINITIONS (columns, uniqueness, partial predicates) are not compared.",
@@ -335,7 +375,7 @@ async function main(): Promise<number> {
   const sql = new Bun.SQL(url);
   let trackingTableExists: boolean;
   let watermark: number | null = null;
-  const actual = new Set<string>();
+  const actual: ActualIndex[] = [];
   const constraintBacked = new Set<string>();
   try {
     // `.unsafe` rather than tagged templates so each query stays a named
@@ -352,8 +392,8 @@ async function main(): Promise<number> {
       watermark = raw === null ? null : Number(raw);
     }
 
-    for (const row of await sql.unsafe<{ indexname: string }[]>(PUBLIC_INDEXES_QUERY)) {
-      actual.add(row.indexname);
+    for (const row of await sql.unsafe<ActualIndex[]>(PUBLIC_INDEXES_QUERY)) {
+      actual.push(row);
     }
     for (const row of await sql.unsafe<{ indexname: string }[]>(CONSTRAINT_BACKED_INDEXES_QUERY)) {
       constraintBacked.add(row.indexname);
