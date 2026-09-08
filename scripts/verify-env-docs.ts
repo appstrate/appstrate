@@ -18,9 +18,25 @@
  *
  * So this gate checks the half a machine can check and leaves the prose alone:
  *
- *   keys(envSchema)        ⊆ rows(ENV.md)
- *   keys(*.env.example)    ⊆ rows(ENV.md) ∪ INFRA_ALLOWLIST
- *   required(envSchema)    ⊆ keys(EACH shipped .env.example)
+ *   keys(envSchema) ∪ keys(module env schemas)  ⊆ rows(ENV.md)
+ *   keys(*.env.example)                         ⊆ rows(ENV.md) ∪ INFRA_ALLOWLIST
+ *   required(envSchema)                         ⊆ keys(EACH shipped .env.example)
+ *
+ * ─── Why the first line is a union ───────────────────────────────────
+ *
+ * `packages/module-ee/src/env.ts` declares seven variables of its own, and this
+ * gate read `packages/env` alone: a key added there was documented nowhere and
+ * passed. From an operator's side there is no distinction to make — the module
+ * ships in the same image, reads the same `process.env`, and refuses to boot
+ * with the same "Required". The module schemas are DISCOVERED
+ * (`scripts/lib/module-env-schemas.ts`), so the next module joins on its own.
+ *
+ * The THIRD line is deliberately NOT unioned. "Required" there means "the
+ * platform cannot boot without it", and a module's hard-required key is
+ * required only when that module is named in `MODULES` — the platform boots
+ * fine without `STRIPE_SECRET_KEY`. Forcing it into every shipped
+ * `.env.example` would put Stripe credentials in the self-hosting template of
+ * an operator who will never enable billing.
  *
  * ─── Why the third line exists ───────────────────────────────────────
  *
@@ -56,6 +72,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { envSchema } from "../packages/env/src/index.ts";
+import { moduleEnvSchemas, type ModuleEnvFiles } from "./lib/module-env-schemas.ts";
 import { ENV_EXAMPLE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
@@ -228,14 +245,20 @@ export function findUndocumented(
   schemaKeys: ReadonlySet<string>,
   envExampleKeys: ReadonlyMap<string, string>,
   documented: ReadonlySet<string>,
+  /** Key → the module env file that declares it, for the finding's wording. */
+  moduleSources: ReadonlyMap<string, string> = new Map(),
 ): Finding[] {
   const findings: Finding[] = [];
 
   for (const name of [...schemaKeys].sort()) {
     if (documented.has(name)) continue;
+    const moduleFile = moduleSources.get(name);
     findings.push({
       name,
-      source: "declared in the @appstrate/env Zod schema",
+      source:
+        moduleFile === undefined
+          ? "declared in the @appstrate/env Zod schema"
+          : `declared in ${moduleFile}`,
       fix: `add a row to ${ENV_DOC} — it is validated and fail-fast at boot, so an operator can hit it`,
     });
   }
@@ -269,20 +292,28 @@ export interface MainDeps {
   exampleFiles?: readonly string[];
   /** Reads one repo-relative path. Default: from disk. */
   readFile?: (relativePath: string) => string;
-  /** The schema key set. Default: the real `envSchema`'s keys. */
+  /** The PLATFORM schema key set. Default: the real `envSchema`'s keys. */
   schemaKeys?: ReadonlySet<string>;
+  /** The module env schemas. Default: discovered from `packages/module-*`. */
+  moduleEnv?: ModuleEnvFiles;
   /** The keys that reject `undefined`. Default: derived from the real `envSchema`. */
   required?: ReadonlySet<string>;
   out?: (message: string) => void;
   err?: (message: string) => void;
 }
 
-export function main(deps: MainDeps = {}): number {
+export async function main(deps: MainDeps = {}): Promise<number> {
   const readFile =
     deps.readFile ?? ((rel: string): string => readFileSync(join(REPO_ROOT, rel), "utf-8"));
   const out = deps.out ?? ((m: string): void => console.log(m));
   const err = deps.err ?? ((m: string): void => console.error(m));
-  const schemaKeys = deps.schemaKeys ?? new Set(Object.keys(envSchema.shape));
+  const platformKeys = deps.schemaKeys ?? new Set(Object.keys(envSchema.shape));
+  const moduleEnv = deps.moduleEnv ?? (await moduleEnvSchemas(REPO_ROOT));
+  const moduleSources = new Map<string, string>();
+  for (const module of moduleEnv.schemas) {
+    for (const name of Object.keys(module.shape)) moduleSources.set(name, module.file);
+  }
+  const schemaKeys = new Set([...platformKeys, ...moduleSources.keys()]);
   const required = deps.required ?? requiredSchemaKeys(envSchema.shape);
   const documented = readDocumentedVars(readFile(ENV_DOC));
 
@@ -343,16 +374,23 @@ export function main(deps: MainDeps = {}): number {
     return 1;
   }
 
-  const findings = findUndocumented(schemaKeys, envExampleKeys, documented);
+  const findings = findUndocumented(schemaKeys, envExampleKeys, documented, moduleSources);
 
   if (findings.length === 0) {
     const schemaBacked = [...documented].filter((n) => schemaKeys.has(n)).length;
+    const moduleNote =
+      `${moduleSources.size} from ${moduleEnv.schemas.length} module schema(s)` +
+      (moduleEnv.unstructured.length > 0
+        ? `; ${moduleEnv.unstructured.length} module(s) read process.env by hand and are ` +
+          `hand-documented`
+        : "");
     out(
       `\x1b[32m✓\x1b[0m verify-env-docs: ${ENV_DOC} documents all ${schemaKeys.size} schema ` +
-        `vars and every var in ${exampleFiles.length} .env.example file(s) ` +
+        `vars (${moduleNote}) and every var in ${exampleFiles.length} .env.example file(s) ` +
         `(${documented.size} rows: ${schemaBacked} schema-backed, ${documented.size - schemaBacked} ` +
         `read straight from process.env; ${Object.keys(INFRA_ALLOWLIST).length} infra vars ` +
-        `allowlisted), and all ${required.size} hard-required vars appear in every example file.`,
+        `allowlisted), and all ${required.size} hard-required platform vars appear in every ` +
+        `example file.`,
     );
     return 0;
   }
@@ -375,5 +413,5 @@ export function main(deps: MainDeps = {}): number {
 // Guarded so the test file can import the pure helpers above without the gate
 // exiting the test process on import — same pattern as verify-compose-defaults.ts.
 if (import.meta.main) {
-  process.exit(main());
+  process.exit(await main());
 }

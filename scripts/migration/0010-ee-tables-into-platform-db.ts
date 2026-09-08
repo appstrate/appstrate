@@ -325,6 +325,9 @@ function shippedMigrations(): number {
  * module in a literal one — the same shape `scripts/lib/module-openapi.ts` uses.
  */
 async function applyModuleMigrations(url: string): Promise<void> {
+  // Crossing the licence boundary AT RUNTIME is the point: do not "fix" this by
+  // copying `migrateEeDb` into the Apache-2.0 tree — that would put commercial
+  // schema management under the wrong LICENSE and fork the module's journal.
   const db = (await import(resolve(MODULE_ROOT, "src/db.ts"))) as {
     migrateEeDb: (databaseUrl: string) => Promise<void>;
   };

@@ -150,14 +150,20 @@ Tier 0 (zero-install) requires only Bun.
 - **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
 - **DB migration (core)**: edit the domain file under `packages/db/src/schema/<domain>.ts` (the barrel is `packages/db/src/schema/index.ts` — nothing is defined there) → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
 - **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step. The one exception is `packages/module-ee`, which keeps a drizzle tree of its OWN and self-migrates its seven `ee_*` tables into the platform database at `init()`, under its own journal `drizzle.ee_migrations` — the platform's `drizzle.__drizzle_migrations` is untouched. That is the escape hatch of `apps/api/src/modules/README.md` § "Database ownership rules" (rule 4), for tables the Apache-2.0 core schema must not carry.
-- **Quality gate**: `bun run check` — 19 task names, not 2: `turbo typecheck lint format:check` plus
+- **Quality gate**: `bun run check` — 20 task names, not 2: `turbo typecheck lint format:check` plus
   `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
   `verify:release-version`, `verify:env-docs`, `detect:breaking`, `build:system-packages:check`,
-  `lint:manifest-casing`, `conformance:check`, `verify:module-isolation`, `verify:license-boundary`,
-  `typecheck:scripts`, `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`.
-  turbo fans those out to **40** actual tasks (`typecheck` alone runs in 22 workspaces) — count them
-  with `bunx turbo run <the 19 names> --dry=json`, never by reading this line.
+  `lint:manifest-casing`, `conformance:check`, `verify:module-isolation`,
+  `verify:module-sql-boundary`, `verify:license-boundary`, `typecheck:scripts`,
+  `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`.
+  turbo fans those out to **41** actual tasks (`typecheck` alone runs in 22 workspaces) — count them
+  with `bunx turbo run <the 20 names> --dry=json`, never by reading this line.
   There is no `turbo check` task — the root script drives turbo directly.
+  `verify:module-sql-boundary` is what enforces "a module never joins across the licence boundary"
+  (`apps/api/src/modules/README.md` rule 4): `@appstrate/module-ee` keeps its tables in the PLATFORM
+  database, so a `SELECT … FROM organizations` written there compiles and runs. The gate refuses any
+  import of the platform's drizzle schema from a module that owns a migration journal, and any table
+  named in that module's raw SQL that its own drizzle snapshot does not declare.
 - **Dead code**: `verify:dead-code` runs knip over every workspace and fails on an exported symbol
   with no reader, a file nothing reaches, or a declared dependency nothing imports. `eslint`'s
   `no-unused-vars` cannot see any of that — it only sees locals. Config and the reasoning behind

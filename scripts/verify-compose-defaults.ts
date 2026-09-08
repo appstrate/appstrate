@@ -15,6 +15,18 @@
  * --upgrade-compose`, issue #515) share one source of truth and can
  * never disagree about what counts as a duplication.
  *
+ * ─── The module half ─────────────────────────────────────────────────
+ *
+ * A module declares environment variables of its own
+ * (`packages/module-ee/src/env.ts`), and this gate read `packages/env` alone:
+ * a compose file could pin a default for one of them and nothing compared the
+ * two values. Worse, `docker-compose.yml`'s pass-through block for those names
+ * is a hand-maintained COPY of the module's schema — add a key there and forget
+ * the block and the variable never reaches the container, with no error
+ * anywhere. So the schema populations are unioned with every discovered module
+ * schema, and a compose file that passes through SOME of a module's variables
+ * must pass through all of them.
+ *
  * Usage: bun scripts/verify-compose-defaults.ts
  */
 import { readFileSync } from "node:fs";
@@ -28,6 +40,7 @@ import {
   type ComposeDefaultForm,
   type ComposeFinding,
 } from "../apps/cli/src/lib/compose-defaults.ts";
+import { moduleEnvSchemas } from "./lib/module-env-schemas.ts";
 import { COMPOSE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
@@ -168,11 +181,71 @@ export function findTableGaps(
   return gaps;
 }
 
-function main(): number {
+/** One compose file forwarding part of a module's environment and not the rest. */
+export interface PassThroughGap {
+  file: string;
+  /** Module id, `module-` stripped. */
+  module: string;
+  /** Repo-relative path of the schema the names come from. */
+  declaredIn: string;
+  /** Declared names the file does not forward. */
+  missing: string[];
+  /** How many it does forward — 0 means the file is out of scope, not a gap. */
+  present: number;
+}
+
+/** Every `- NAME` / `- NAME=…` entry a compose file lists. */
+const COMPOSE_ENV_ENTRY = /^\s*-\s*([A-Z][A-Z0-9_]*)\s*(?:=|$)/gm;
+
+/**
+ * The pass-through gaps in one compose file. Pure, so the test can hold a
+ * synthetic compose against a synthetic module schema.
+ *
+ * A file that forwards NONE of a module's variables is not a gap — the
+ * self-hosting templates legitimately do not run the module, and demanding the
+ * block everywhere would put Stripe variables in every example. A file that
+ * forwards SOME of them has taken the position that the module may run there,
+ * and a half-forwarded environment is the failure this catches: the module
+ * reads `process.env`, sees nothing, and either silently falls back to a
+ * default or refuses to boot, with nothing pointing at the compose file.
+ */
+export function findPassThroughGaps(
+  content: string,
+  modules: readonly { id: string; file: string; keys: readonly string[] }[],
+): Omit<PassThroughGap, "file">[] {
+  const forwarded = new Set<string>();
+  for (const match of content.matchAll(COMPOSE_ENV_ENTRY)) forwarded.add(match[1]!);
+
+  const gaps: Omit<PassThroughGap, "file">[] = [];
+  for (const module of modules) {
+    const missing = module.keys.filter((name) => !forwarded.has(name));
+    const present = module.keys.length - missing.length;
+    if (present === 0 || missing.length === 0) continue;
+    gaps.push({ module: module.id, declaredIn: module.file, missing, present });
+  }
+  return gaps;
+}
+
+async function main(): Promise<number> {
   const findings: FileFinding[] = [];
   const gaps: TableGapFinding[] = [];
+  const passThrough: PassThroughGap[] = [];
 
-  const { keys: schemaKeys, defaulted: schemaDefaulted } = readSchemaDefaults();
+  const { keys: platformKeys, defaulted: platformDefaulted } = readSchemaDefaults();
+  const moduleEnv = await moduleEnvSchemas(REPO_ROOT);
+  const modules = moduleEnv.schemas.map((module) => ({
+    id: module.id,
+    file: module.file,
+    keys: Object.keys(module.shape),
+  }));
+  const schemaKeys = new Set(platformKeys);
+  const schemaDefaulted = new Set(platformDefaulted);
+  for (const module of moduleEnv.schemas) {
+    for (const [name, field] of Object.entries(module.shape)) {
+      schemaKeys.add(name);
+      if (suppliesValue(field)) schemaDefaulted.add(name);
+    }
+  }
 
   for (const file of COMPOSE_FILES) {
     const content = readFileSync(join(REPO_ROOT, file), "utf-8");
@@ -182,16 +255,21 @@ function main(): number {
     for (const gap of findTableGaps(content, schemaDefaulted)) {
       gaps.push({ ...gap, file });
     }
+    for (const gap of findPassThroughGaps(content, modules)) {
+      passThrough.push({ ...gap, file });
+    }
   }
 
-  if (findings.length === 0 && gaps.length === 0) {
+  if (findings.length === 0 && gaps.length === 0 && passThrough.length === 0) {
     // What was compared, so a reader can tell at a glance which two populations
     // met: the compose files scanned, and the schema vars they were checked
     // against. Not a diagnostic — nothing here is load-bearing for correctness.
+    const moduleKeyCount = modules.reduce((n, m) => n + m.keys.length, 0);
     console.log(
       `\x1b[32m✓\x1b[0m verify-compose-defaults: no duplicated env defaults across ${COMPOSE_FILES.length} compose files ` +
-        `(${schemaDefaulted.size} of ${SCHEMA_SOURCE}'s ${schemaKeys.size} env vars carry a schema default; ` +
-        `all compose-pinned vars covered by the table).`,
+        `(${schemaDefaulted.size} of ${schemaKeys.size} env vars carry a schema default — ` +
+        `${SCHEMA_SOURCE} plus ${moduleKeyCount} var(s) from ${modules.length} module schema(s); ` +
+        `all compose-pinned vars covered by the table, every module pass-through block complete).`,
     );
     return 0;
   }
@@ -200,9 +278,30 @@ function main(): number {
   const drifts = findings.filter((f) => f.kind === "allowlist-drift");
 
   console.error(
-    `\x1b[31m✗\x1b[0m verify-compose-defaults: ${findings.length + gaps.length} issue(s) found ` +
-      `(${duplicates.length} duplicates, ${drifts.length} ALLOWLIST drift, ${gaps.length} table gap).\n`,
+    `\x1b[31m✗\x1b[0m verify-compose-defaults: ${findings.length + gaps.length + passThrough.length} ` +
+      `issue(s) found (${duplicates.length} duplicates, ${drifts.length} ALLOWLIST drift, ` +
+      `${gaps.length} table gap, ${passThrough.length} incomplete module pass-through).\n`,
   );
+
+  if (passThrough.length > 0) {
+    console.error(`\x1b[1m── Class 4: incomplete module env pass-through ──\x1b[0m`);
+    console.error(
+      `These compose files forward SOME of a module's environment variables and not the rest.\n` +
+        `A name absent from the block is not forwarded into the container at all: the module\n` +
+        `reads process.env, sees nothing, and either falls back to a default or refuses to boot —\n` +
+        `with nothing anywhere pointing at the compose file.\n` +
+        `Fix: add the missing names to the same block, or drop the block entirely if that compose\n` +
+        `file is not meant to run the module.\n`,
+    );
+    for (const g of passThrough) {
+      console.error(
+        `  \x1b[1m${g.file}\x1b[0m  module \`${g.module}\` (${g.declaredIn}): ` +
+          `${g.present} of ${g.present + g.missing.length} var(s) forwarded`,
+      );
+      console.error(`    \x1b[33m[missing]\x1b[0m ${g.missing.join(", ")}`);
+    }
+    console.error("");
+  }
 
   if (gaps.length > 0) {
     console.error(`\x1b[1m── Class 3: variable not covered by CODE_DEFAULTS ──\x1b[0m`);
@@ -272,5 +371,5 @@ function main(): number {
 // Guarded so the test file can import the pure helpers above without the gate
 // exiting the test process on import — same pattern as check-index-drift.ts.
 if (import.meta.main) {
-  process.exit(main());
+  process.exit(await main());
 }

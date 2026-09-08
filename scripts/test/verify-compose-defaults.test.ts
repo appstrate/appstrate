@@ -16,7 +16,12 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { findTableGaps, readSchemaDefaults, suppliesValue } from "../verify-compose-defaults.ts";
+import {
+  findPassThroughGaps,
+  findTableGaps,
+  readSchemaDefaults,
+  suppliesValue,
+} from "../verify-compose-defaults.ts";
 import { analyzeComposeDefaults, CODE_DEFAULTS } from "../../apps/cli/src/lib/compose-defaults.ts";
 import { envSchema } from "../../packages/env/src/index.ts";
 
@@ -261,5 +266,50 @@ describe("verify-compose-defaults as a process", () => {
     } finally {
       writeFileSync(COMPOSE, original);
     }
+  });
+});
+
+/**
+ * The module env pass-through block.
+ *
+ * `docker-compose.yml` lists `@appstrate/module-ee`'s seven variables by hand,
+ * and nothing compared that list to the module's schema: add a key to
+ * `packages/module-ee/src/env.ts` and forget the block, and the variable never
+ * reaches the container — the module reads `process.env`, sees nothing, and
+ * either falls back to a default or refuses to boot, with no error naming the
+ * compose file.
+ */
+describe("findPassThroughGaps", () => {
+  const MODULE = [
+    { id: "ee", file: "packages/module-ee/src/env.ts", keys: ["ALPHA", "BETA", "GAMMA"] },
+  ];
+  const compose = (names: string[]): string =>
+    ["services:", "  api:", "    environment:", ...names.map((n) => `      - ${n}`)].join("\n");
+
+  it("POSITIVE CONTROL: reports the names a partial block omits", () => {
+    const gaps = findPassThroughGaps(compose(["APP_URL", "ALPHA", "GAMMA"]), MODULE);
+    expect(gaps).toEqual([
+      {
+        module: "ee",
+        declaredIn: "packages/module-ee/src/env.ts",
+        missing: ["BETA"],
+        present: 2,
+      },
+    ]);
+  });
+
+  it("NEGATIVE CONTROL: a complete block is not a gap", () => {
+    expect(findPassThroughGaps(compose(["ALPHA", "BETA", "GAMMA"]), MODULE)).toEqual([]);
+  });
+
+  it("leaves a file that forwards NONE of them alone", () => {
+    // The self-hosting templates do not run the module. Demanding the block
+    // everywhere would put Stripe variables in every example file.
+    expect(findPassThroughGaps(compose(["APP_URL", "DATABASE_URL"]), MODULE)).toEqual([]);
+  });
+
+  it("counts a `- NAME=${VAR}` entry as forwarded, the other spelling of the same thing", () => {
+    const content = compose(["ALPHA", "BETA"]) + "\n      - GAMMA=${GAMMA:-1}\n";
+    expect(findPassThroughGaps(content, MODULE)).toEqual([]);
   });
 });

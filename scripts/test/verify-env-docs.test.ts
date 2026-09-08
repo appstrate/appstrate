@@ -290,35 +290,53 @@ describe("findMissingRequired", () => {
  */
 describe("main", () => {
   const EXAMPLE = ".env.example";
-  const run = (
+  const run = async (
     files: Record<string, string>,
-    over: { schemaKeys?: Set<string>; required?: Set<string> } = {},
-  ): { code: number; out: string; err: string } => {
+    over: {
+      schemaKeys?: Set<string>;
+      required?: Set<string>;
+      moduleKeys?: Record<string, { safeParse: (v: unknown) => { success: boolean } }>;
+    } = {},
+  ): Promise<{ code: number; out: string; err: string }> => {
     const out: string[] = [];
     const err: string[] = [];
-    const code = main({
+    const code = await main({
       exampleFiles: Object.keys(files).filter((f) => f !== "docs/ENV.md"),
       readFile: (f) => files[f]!,
       schemaKeys: over.schemaKeys ?? new Set(["LIVE_ONE"]),
       required: over.required ?? new Set(["LIVE_ONE"]),
+      moduleEnv: {
+        schemas:
+          over.moduleKeys === undefined
+            ? []
+            : [
+                {
+                  id: "fixture",
+                  file: "packages/module-fixture/src/env.ts",
+                  exportName: "fixtureEnvSchema",
+                  shape: over.moduleKeys,
+                },
+              ],
+        unstructured: [],
+      },
       out: (m) => out.push(m),
       err: (m) => err.push(m),
     });
     return { code, out: out.join("\n"), err: err.join("\n") };
   };
 
-  it("passes when the doc covers the schema and the example carries the required key", () => {
-    const r = run({ "docs/ENV.md": DOC, [EXAMPLE]: "LIVE_ONE=x\n" });
+  it("passes when the doc covers the schema and the example carries the required key", async () => {
+    const r = await run({ "docs/ENV.md": DOC, [EXAMPLE]: "LIVE_ONE=x\n" });
     expect(r.code).toBe(0);
-    expect(r.out).toContain("hard-required vars appear in every example file");
+    expect(r.out).toContain("hard-required platform vars appear in every example file");
   });
 
-  it("FAILS the ENV.md vacuity floor — a doc that parses to zero rows", () => {
+  it("FAILS the ENV.md vacuity floor — a doc that parses to zero rows", async () => {
     // Mutation caught: deleting the `documented.size === 0` branch. With no
     // rows, `keys(schema) ⊆ rows` is false for everything, so the gate would
     // report N doc findings instead of the ONE fact that matters — the parser
     // stopped working. Worse, with an empty schema too it passes outright.
-    const r = run({
+    const r = await run({
       "docs/ENV.md": "# Environment Variables\n\nno tables here\n",
       [EXAMPLE]: "LIVE_ONE=x\n",
     });
@@ -326,17 +344,17 @@ describe("main", () => {
     expect(r.err).toContain("parsed ZERO rows");
   });
 
-  it("FAILS the .env.example vacuity floor — files read, zero variables", () => {
+  it("FAILS the .env.example vacuity floor — files read, zero variables", async () => {
     // Mutation caught: deleting the `envExampleKeys.size === 0` branch. An
     // example file that stopped parsing makes `keys(example) ⊆ rows` trivially
     // true, and the gate prints a tick over a population it never read.
-    const r = run({ "docs/ENV.md": DOC, [EXAMPLE]: "# just a comment, no assignments\n" });
+    const r = await run({ "docs/ENV.md": DOC, [EXAMPLE]: "# just a comment, no assignments\n" });
     expect(r.code).toBe(1);
     expect(r.err).toContain("parsed ZERO variables");
   });
 
-  it("FAILS when a hard-required key is absent, naming the key AND the file", () => {
-    const r = run({
+  it("FAILS when a hard-required key is absent, naming the key AND the file", async () => {
+    const r = await run({
       "docs/ENV.md": DOC,
       [EXAMPLE]: "LIVE_ONE=x\n",
       "examples/self-hosting/.env.example": "LIVE_TWO=y\n",
@@ -347,8 +365,8 @@ describe("main", () => {
     expect(r.err).toContain("hard-required");
   });
 
-  it("FAILS when a schema key has no row", () => {
-    const r = run(
+  it("FAILS when a schema key has no row", async () => {
+    const r = await run(
       { "docs/ENV.md": DOC, [EXAMPLE]: "LIVE_ONE=x\n" },
       { schemaKeys: new Set(["LIVE_ONE", "ZZ_NO_ROW"]) },
     );
@@ -357,11 +375,48 @@ describe("main", () => {
     expect(r.err).toContain("have no row");
   });
 
-  it("reports the broken install BEFORE the doc gap when both are present", () => {
+  it("POSITIVE CONTROL: FAILS when a MODULE schema key has no row, naming its file", async () => {
+    // The gap this union closes: `packages/module-ee/src/env.ts` declares seven
+    // variables, and the gate read `packages/env` alone — a key added there was
+    // documented nowhere and passed both env gates.
+    const r = await run(
+      { "docs/ENV.md": DOC, [EXAMPLE]: "LIVE_ONE=x\n" },
+      { moduleKeys: { ZZ_MODULE_ONLY: { safeParse: () => ({ success: true }) } } },
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("ZZ_MODULE_ONLY");
+    expect(r.err).toContain("packages/module-fixture/src/env.ts");
+  });
+
+  it("NEGATIVE CONTROL: passes when that same module key HAS a row", async () => {
+    const r = await run(
+      { "docs/ENV.md": DOC, [EXAMPLE]: "LIVE_ONE=x\n" },
+      { moduleKeys: { LIVE_TWO: { safeParse: () => ({ success: true }) } } },
+    );
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("1 module schema(s)");
+  });
+
+  it("does NOT force a module's hard-required key into every .env.example", async () => {
+    // A module is opt-in through MODULES: the platform boots without
+    // STRIPE_SECRET_KEY, so demanding it in the self-hosting template would put
+    // Stripe credentials in front of an operator who will never enable billing.
+    const r = await run(
+      {
+        "docs/ENV.md": DOC,
+        [EXAMPLE]: "LIVE_ONE=x\n",
+        "examples/self-hosting/.env.example": "LIVE_ONE=x\n",
+      },
+      { moduleKeys: { LIVE_TWO: { safeParse: () => ({ success: false }) } } },
+    );
+    expect(r.code).toBe(0);
+  });
+
+  it("reports the broken install BEFORE the doc gap when both are present", async () => {
     // Ordering, asserted: an example missing a required key is an aborted
     // `docker compose up`, not a documentation nit, and burying it under N doc
     // findings is how it goes unread.
-    const r = run(
+    const r = await run(
       { "docs/ENV.md": DOC, [EXAMPLE]: "LIVE_TWO=y\n" },
       { schemaKeys: new Set(["LIVE_ONE", "ZZ_NO_ROW"]), required: new Set(["LIVE_ONE"]) },
     );

@@ -103,6 +103,12 @@ tree, no `__drizzle_migrations_<id>` table.
    (`drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`).
    It still reads platform data through `ctx.services`
    (e.g. `services.usage.list`), never a SQL join across the licence boundary.
+   `bun run verify:module-sql-boundary` (in `bun run check`) enforces that last
+   sentence: because those tables sit in the platform database, a `SELECT …
+FROM organizations` written in the module compiles, runs and returns rows, so
+   the gate refuses any import of the platform's drizzle schema from such a
+   module and any table named in its raw SQL that its own drizzle snapshot does
+   not declare.
 
 ## Permissions
 
