@@ -33,7 +33,6 @@ WORKDIR /build
 # pattern as runtime-pi/Dockerfile — so a newly added workspace package never
 # breaks this build (no hand-maintained list to forget to update).
 COPY package.json bun.lock ./
-COPY patches/ patches/
 COPY --parents */package.json */*/package.json ./
 
 # `--filter=appstrate-sidecar` restricts the install to the sidecar's

@@ -21,7 +21,6 @@ WORKDIR /app
 # it up. The deps layer still caches on manifest/lockfile changes only.
 COPY package.json bun.lock turbo.json ./
 COPY --parents */package.json */*/package.json ./
-COPY patches/ patches/
 
 # ── Stage 2a: Full install (build toolchain) ──────────────────────
 # Everything the BUILD needs: Vite/Rolldown, TypeScript, Turbo, the SPA's

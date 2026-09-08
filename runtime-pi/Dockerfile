@@ -41,7 +41,6 @@ WORKDIR /build
 # Adding a new workspace package requires ZERO edits here.
 COPY package.json bun.lock ./
 COPY --parents */package.json */*/package.json ./
-COPY patches/ patches/
 
 # `--filter=appstrate-pi-runtime` restricts the install to runtime-pi's
 # subgraph (the Pi SDK pair, @appstrate/afps-runtime, @appstrate/runner-pi
