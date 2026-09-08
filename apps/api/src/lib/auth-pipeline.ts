@@ -33,7 +33,7 @@ import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
 import { principalGrants } from "./principal-permissions.ts";
-import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
+import { getClientIp, propagateRequestClientIp, stampClientIpHeader } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
@@ -110,7 +110,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
     const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
-    return getAuth().handler(req);
+    // Stamp the resolved client IP last, so the header Better Auth reads
+    // survives both rewrites above (`stampClientIpHeader`).
+    return getAuth().handler(stampClientIpHeader(c, req));
   });
 
   // Auth middleware: module strategies → Bearer API key → session cookie.

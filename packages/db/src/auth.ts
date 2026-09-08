@@ -391,6 +391,30 @@ export type BetterAuthPluginList = NonNullable<Parameters<typeof betterAuth>[0][
 export type BetterAuthPluginFactory = () => BetterAuthPluginList;
 
 /**
+ * Atomic check-and-increment backing Better Auth's built-in rate limiter.
+ * The implementation lives in `apps/api` (it needs the platform's limiter
+ * factory, which this package must not depend on) and reaches the auth
+ * builder through {@link CreateAuthOptions}.
+ */
+export type BetterAuthRateLimitStorage = NonNullable<
+  NonNullable<Parameters<typeof betterAuth>[0]["rateLimit"]>["customStorage"]
+>;
+
+/** Everything the platform supplies to {@link createAuth}. */
+export interface CreateAuthOptions {
+  /**
+   * Module-contributed plugins, as a THUNK — plugin objects are single-use
+   * (see {@link BetterAuthPluginFactory}), and the thunk is what lets
+   * {@link _rebuildAuthForTesting} mint a fresh set.
+   */
+  plugins: BetterAuthPluginFactory;
+  /** Shared storage for the built-in rate limiter. */
+  rateLimitStorage: BetterAuthRateLimitStorage;
+  /** Header the platform stamps with the resolved client IP. */
+  clientIpHeader: string;
+}
+
+/**
  * BA's OAuth callback endpoint path. Exposed as a constant so the create
  * hook and its unit tests reference the same string (if BA ever renames
  * the route, both sides fail together).
@@ -548,7 +572,8 @@ function buildBasePlugins(
 // Test harness: `test/setup/preload.ts` calls `createAuth()` during
 // preload so module test runs boot cleanly.
 
-function buildAuth(extraPlugins: BetterAuthPluginList = []) {
+function buildAuth(options: CreateAuthOptions) {
+  const extraPlugins = options.plugins();
   const env = getEnv();
   const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
   // Tests set `SMTP_HOST=__test_json__` to exercise the SMTP-enabled BA flow
@@ -675,6 +700,16 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     },
 
     plugins: [...basePlugins, ...extraPlugins],
+
+    rateLimit: {
+      // Better Auth arms its limiter in production only and counts in
+      // per-process memory, so a fleet of replicas grants each caller one
+      // budget per replica. On, everywhere, against the shared platform
+      // limiter: one budget per caller, and the same rules exercised in
+      // development and in tests as in production.
+      enabled: true,
+      customStorage: options.rateLimitStorage,
+    },
 
     emailAndPassword: {
       enabled: true,
@@ -828,6 +863,15 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     trustedOrigins: env.TRUSTED_ORIGINS,
 
     advanced: {
+      ipAddress: {
+        // The platform resolves the client IP under its own `TRUST_PROXY`
+        // model (a hop COUNT, which `trustedProxies` — a list of proxy
+        // addresses — cannot express) and states the answer on this header.
+        // Naming it alone keeps Better Auth from parsing `x-forwarded-for`
+        // on its own, so its rate limiter and its session records key on the
+        // same address every other platform limiter does.
+        ipAddressHeaders: [options.clientIpHeader],
+      },
       // Explicit per-cookie defaults — Better Auth applies these to the
       // session cookie + every plugin-issued cookie (CSRF, etc.). Pinning
       // them here removes "what does BA's default do?" from every
@@ -1078,7 +1122,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
 type AuthInstance = ReturnType<typeof buildAuth>;
 
 let _auth: AuthInstance | null = null;
-let _extraPlugins: BetterAuthPluginFactory = () => [];
+let _options: CreateAuthOptions | null = null;
 
 /**
  * Construct the Better Auth singleton. Idempotent — subsequent calls are
@@ -1086,15 +1130,11 @@ let _extraPlugins: BetterAuthPluginFactory = () => [];
  * that any plugins contributed via `AppstrateModule.betterAuthPlugins()`
  * are merged with `basePlugins`. Module tables already live in the core
  * schema, so the Drizzle adapter resolves them from the barrel directly.
- *
- * Takes a {@link BetterAuthPluginFactory}, not a list: plugin objects are
- * single-use (see that type's doc), and the factory is what lets
- * {@link _rebuildAuthForTesting} mint a fresh set.
  */
-export function createAuth(extraPlugins: BetterAuthPluginFactory = () => []): void {
+export function createAuth(options: CreateAuthOptions): void {
   if (_auth) return;
-  _extraPlugins = extraPlugins;
-  _auth = buildAuth(extraPlugins());
+  _options = options;
+  _auth = buildAuth(options);
 }
 
 /**
@@ -1112,7 +1152,10 @@ export function createAuth(extraPlugins: BetterAuthPluginFactory = () => []): vo
  * having to reload the entire process.
  */
 export function _rebuildAuthForTesting(): void {
-  _auth = buildAuth(_extraPlugins());
+  if (!_options) {
+    throw new Error("auth not initialized — createAuth() must run before a rebuild");
+  }
+  _auth = buildAuth(_options);
 }
 
 /** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */

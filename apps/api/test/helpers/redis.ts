@@ -37,6 +37,10 @@ function getRedis(): Redis {
  *        LocalCache map used for idempotency) so the next access recreates
  *        empty adapters — the in-memory equivalent of FLUSHALL.
  *
+ * Better Auth's own limiter rides the same factory under the `rl:better-auth:`
+ * prefix, so FLUSHALL already covers it; tier0 needs its limiter cache dropped
+ * alongside the middleware's.
+ *
  * Call in beforeEach() when testing rate-limit / idempotency / cache features.
  */
 export async function flushRedis(): Promise<void> {
@@ -45,8 +49,11 @@ export async function flushRedis(): Promise<void> {
     return;
   }
   const { resetRateLimiters } = await import("../../src/middleware/rate-limit.ts");
+  const { resetBetterAuthRateLimitStorage } =
+    await import("../../src/infra/rate-limit/better-auth-storage.ts");
   const { shutdownInfra } = await import("../../src/infra/index.ts");
   resetRateLimiters();
+  resetBetterAuthRateLimitStorage();
   await shutdownInfra();
 }
 

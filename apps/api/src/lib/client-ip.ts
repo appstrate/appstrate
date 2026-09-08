@@ -94,6 +94,34 @@ export function getClientIp(c: Context): string {
 }
 
 /**
+ * Header stating the platform-resolved client IP on the `Request` handed to
+ * Better Auth.
+ *
+ * Better Auth resolves the address for its rate limiter and its session
+ * tracking from headers alone, and the two trust models do not translate:
+ * `TRUST_PROXY` is a hop COUNT, while `advanced.ipAddress.trustedProxies`
+ * is a list of proxy addresses. So the platform resolves the address with
+ * its own model and states it here, and Better Auth reads this header and
+ * nothing else — it never walks a forwarded chain of its own.
+ */
+export const CLIENT_IP_HEADER = "x-appstrate-client-ip";
+
+/**
+ * Return `request` carrying the resolved client IP in {@link CLIENT_IP_HEADER}.
+ * Any inbound value is dropped first, so a caller cannot state its own
+ * address; the header stays absent when nothing resolves.
+ */
+export function stampClientIpHeader(c: Context, request: Request): Request {
+  const ip = getClientIp(c);
+  const headers = new Headers(request.headers);
+  headers.delete(CLIENT_IP_HEADER);
+  if (ip !== "unknown") headers.set(CLIENT_IP_HEADER, ip);
+  const stamped = new Request(request, { headers });
+  propagateRequestClientIp(request, stamped);
+  return stamped;
+}
+
+/**
  * Resolve the client IP from a raw `Request`. Used inside contexts that do
  * not own a Hono `Context` (e.g. Better Auth plugin hooks). Reads, in order:
  *   1. Trusted forwarded headers (`X-Forwarded-For`, `X-Real-IP`) per

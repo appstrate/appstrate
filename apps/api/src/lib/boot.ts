@@ -27,6 +27,8 @@ import {
   type BetterAuthPluginList,
 } from "@appstrate/db/auth";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { betterAuthRateLimitStorage } from "../infra/rate-limit/better-auth-storage.ts";
+import { CLIENT_IP_HEADER } from "./client-ip.ts";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
@@ -132,7 +134,11 @@ export async function bootCritical(): Promise<void> {
   // plugin list type. Module tables (e.g. OIDC's oauth_clients/jwks) now live
   // in the core schema barrel, so the Better Auth adapter resolves them
   // directly — no module schema injection.
-  createAuth(() => getModuleContributions().betterAuthPlugins as BetterAuthPluginList);
+  createAuth({
+    plugins: () => getModuleContributions().betterAuthPlugins as BetterAuthPluginList,
+    rateLimitStorage: betterAuthRateLimitStorage(),
+    clientIpHeader: CLIENT_IP_HEADER,
+  });
 
   // Wire module contributions that were declared on the module contract
   for (const mod of getModules().values()) {

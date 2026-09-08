@@ -268,6 +268,20 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // path issues — advertising it in discovery invites a request that can
       // only fail.
       grantTypes: ["authorization_code", "refresh_token"],
+      // Per-IP budgets for the unauthenticated endpoints the provider mounts,
+      // enforced by Better Auth against the platform's shared limiter
+      // (`rateLimit.customStorage`), so one budget spans the fleet. Each value
+      // is the tighter of the provider's default and the platform's own
+      // ceiling. `register` inserts an `oauth_clients` row per call, hence the
+      // smallest budget. `userinfo` keeps the provider default: it is
+      // session-authenticated.
+      rateLimit: {
+        token: { window: 60, max: 20 },
+        authorize: { window: 60, max: 30 },
+        introspect: { window: 60, max: 60 },
+        revoke: { window: 60, max: 30 },
+        register: { window: 60, max: 5 },
+      },
       storeClientSecret: {
         hash: hashSecret,
         verify: sha256HexVerify,

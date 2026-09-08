@@ -371,6 +371,9 @@ const {
 const { setModulePermissionsProvider, setPermissionDenialHandler } =
   await import("@appstrate/core/permissions");
 const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
+const { betterAuthRateLimitStorage } =
+  await import("../../apps/api/src/infra/rate-limit/better-auth-storage.ts");
+const { CLIENT_IP_HEADER } = await import("../../apps/api/src/lib/client-ip.ts");
 
 // Register module RBAC contributions BEFORE the plugins are built — mirrors
 // boot.ts, where `loadModules()` runs ahead of `createAuth()`. Plugin
@@ -394,11 +397,19 @@ setModulePermissionsProvider(() => preloadRbacSnapshot);
 // whichever subset the last-loaded test file happened to leave behind. The
 // harness restores its own view on the next `getTestApp()` call, which is
 // already how it recovers from the resets `module-loader.test.ts` does.
-createAuth(() => {
-  setModulePermissionsProvider(() => preloadRbacSnapshot);
-  return collectModuleContributions(importedModules).betterAuthPlugins as ReturnType<
-    Parameters<typeof createAuth>[0]
-  >;
+//
+// `rateLimitStorage` and `clientIpHeader` are the production values, not
+// stand-ins: the storage rides the same limiter factory (real Redis in tier3,
+// in-memory in tier0) so the tests exercise Better Auth's limiter for real.
+createAuth({
+  plugins: () => {
+    setModulePermissionsProvider(() => preloadRbacSnapshot);
+    return collectModuleContributions(importedModules).betterAuthPlugins as ReturnType<
+      Parameters<typeof createAuth>[0]["plugins"]
+    >;
+  },
+  rateLimitStorage: betterAuthRateLimitStorage(),
+  clientIpHeader: CLIENT_IP_HEADER,
 });
 
 // Phase 3: run each module's `init(ctx)` — the same topo-sorted pipeline

@@ -24,13 +24,11 @@
  *    confine self-service (DCR / CIMD) clients to exactly one protected
  *    resource — a rule with no upstream equivalent.
  *
- * 2. **IP rate limiting** — `/oauth2/token`, `/oauth2/authorize`,
- *    `/oauth2/introspect`, `/oauth2/revoke` are all unauthenticated and
- *    reachable by any client. Without IP-based limits, an attacker can
- *    brute-force `client_secret` at the token endpoint, enumerate
- *    `client_id`s at authorize, or probe tokens at introspect. We reuse
- *    the same `rate-limiter-flexible` Redis backend the rest of the API
- *    uses so limits are distributed across instances.
+ * 2. **Rate limiting the endpoints upstream does not cover** — the
+ *    `/oauth2/*` endpoints are limited per IP by the oauth-provider's own
+ *    rules (`oauthProvider({ rateLimit })` in `plugins.ts`), applied against
+ *    the platform's shared limiter. What has no upstream rule stays here:
+ *    the device-flow and CLI-token endpoints.
  *
  * 3. **Registration defaults** — `/oauth2/register` bodies get the
  *    `application_type` the oauth-provider exposes no option to default,
@@ -63,15 +61,11 @@ import {
 } from "./realm-check.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-const TOKEN_RL_POINTS = 30;
-const AUTHORIZE_RL_POINTS = 30;
-const INTROSPECT_RL_POINTS = 60;
-const REVOKE_RL_POINTS = 60;
-// Unauthenticated Dynamic Client Registration (RFC 7591) — each call inserts
-// an oauth_clients row, so an unbounded endpoint is a DB-bloat / resource-
-// exhaustion vector. A real client registers once (then reuses its client_id),
-// so 10/min/IP is generous for legitimate use and tight against abuse.
-const REGISTER_RL_POINTS = 10;
+// The categories below have no upstream rule, and Better Auth answers a 429
+// with `{ message }` + `X-Retry-After` where these answer the RFC 8628 /
+// RFC 6749 `{ error, error_description }` + `Retry-After` the CLI parses
+// (`apps/cli/src/lib/device-flow.ts`), so they stay local.
+//
 // CLI device flow — per-IP limit on `/device/code`. The endpoint is a
 // write (inserts a row) and rarely called more than once per login;
 // 10/min/IP is a loose ceiling.
@@ -84,29 +78,14 @@ const DEVICE_CODE_RL_POINTS = 10;
 // family-revocation UPDATE.
 const CLI_TOKEN_RL_POINTS = 30;
 const CLI_REVOKE_RL_POINTS = 30;
-// Per-IP budget on Better Auth's `GET /device?user_code=…` endpoint
-// (mounted by `deviceAuthorization()` — see
-// `node_modules/better-auth/dist/plugins/device-authorization/routes.mjs:285-337`,
-// public, no auth, returns the device code's `status` for a given
-// `user_code`). Without a guard here this becomes an unrate-limited
-// user_code probe endpoint: an attacker can enumerate the ~34.6-bit
-// user_code space looking for a `pending` row before the legitimate
-// user reaches the consent screen, then race them to `/device/approve`
-// (where the realm guard + per-row attempts counter take over).
+// `GET /device?user_code=…` carries no rule here: `deviceAuthorization()`
+// declares its own (`window: expiresIn`, `max: 5` — 5 probes per 10 minutes
+// per IP against the ~34.6-bit user_code space), which is tighter than any
+// per-minute budget this file could state. The `/activate` SSR page reaches
+// the endpoint through `getOidcAuthApi().deviceVerify()`, an in-process call
+// that never passes the handler, so the rule costs legitimate consent
+// renders nothing.
 //
-// Happy-path traffic audit (grep anchor for future operators surprised
-// by a 429 on `/device`):
-//   - `/device` is consumed SERVER-SIDE only by the `/activate` SSR
-//     page (`apps/api/src/modules/oidc/pages/activate.ts`) at consent
-//     render — one GET per device-authorization session, from the
-//     platform's own IP.
-//   - The web SPA (`apps/web/src/`) does NOT call `/device`; there is
-//     no `fetch("/device")` in the client bundle.
-//   - The CLI client does NOT poll `/device` either — it polls
-//     `/cli/token`, covered by `CLI_TOKEN_RL_POINTS = 30`.
-// Net: legit flows cost 1 hit/session, so 10/min/IP is intentionally
-// generous for legit traffic and tight against probe enumeration.
-const DEVICE_VERIFY_RL_POINTS = 10;
 // Per-IP budget on the BA-mounted `/device/approve` and `/device/deny`
 // endpoints. The SSR wrapper at `/activate/approve` already has its own
 // stricter limiter (5 / 15 min / IP via `rateLimitByIp`) but the direct
@@ -126,17 +105,6 @@ const DEVICE_APPROVE_RL_POINTS = 10;
 // single browser click. Pure brute-force of the 20⁸ user-code space is
 // separately constrained by the per-IP rate limits on these endpoints.
 const MAX_APPROVE_ATTEMPTS = 5;
-
-/**
- * Per-client_id brute-force limit on `/oauth2/token`. Complements the
- * per-IP limiter above: an attacker distributing a `client_secret`
- * brute-force attack across many IPs (or spoofing XFF behind a
- * misconfigured `TRUST_PROXY`) is constrained by this secondary limit
- * keyed on `client_id` alone. Legitimate satellites exchange codes at a
- * rate far below this ceiling; anything approaching 20 attempts/minute
- * per client_id is either a misbehaving client or an attack.
- */
-const TOKEN_CLIENT_RL_POINTS = 20;
 
 const LOGIN_EMAIL_POINTS = 5;
 const LOGIN_EMAIL_DURATION_SEC = 900;
@@ -246,9 +214,10 @@ interface TokenRequestBody {
 
 /**
  * Extract the `client_id` a token request is acting on, either from the
- * parsed body or from HTTP Basic auth header (`client_secret_basic`).
- * Returns `null` if neither path yields a value — the downstream limiter
- * then degrades to IP-only limiting for that specific request.
+ * parsed body or from the HTTP Basic auth header (`client_secret_basic`).
+ * Returns `null` if neither path yields a value — the self-service audience
+ * rule then has no client to resolve and leaves the request to the
+ * oauth-provider, which rejects an unidentifiable client itself.
  */
 function extractClientId(body: TokenRequestBody, request: Request | undefined): string | null {
   if (typeof body.client_id === "string" && body.client_id.length > 0) return body.client_id;
@@ -261,87 +230,13 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
     // RFC 6749 §2.3.1: the `client_id` and `client_secret` are
     // `application/x-www-form-urlencoded` BEFORE being joined with `:` and
     // base64-encoded. Reverse that here (`+` → space, then percent-decode) so
-    // a client_id containing reserved characters keys the rate limiter under
-    // its true value rather than its still-encoded form. `decodeURIComponent`
-    // throws on a malformed `%` sequence — the enclosing try/catch degrades to
-    // IP-only limiting for that request.
+    // a client_id containing reserved characters resolves to its true value
+    // rather than its still-encoded form. `decodeURIComponent` throws on a
+    // malformed `%` sequence — the enclosing try/catch answers `null`.
     const rawClientId = decoded.slice(0, sep);
     return decodeURIComponent(rawClientId.replace(/\+/g, " "));
   } catch {
     return null;
-  }
-}
-
-/**
- * Compute the per-client token-limiter key. Keyed on `client_id` + source IP,
- * NOT `client_id` alone: a single OAuth client is shared by MANY end users
- * (e.g. the dashboard SPA / CLI use one `client_id` for the whole instance),
- * so a global-per-client bucket lets any one caller exhaust the budget and
- * DoS every other user's login through that client. Scoping to the source IP
- * confines the blast radius to one caller while still catching a single IP
- * hammering `client_secret` against one client. The complementary per-IP
- * limiter (`enforceRateLimit("oauth-token", …)`) already caps raw IP volume.
- */
-function clientRateLimitKey(clientId: string, request: Request | undefined): string {
-  const ip = getClientIpFromRequest(request) ?? "unknown";
-  return `client:${clientId}:${ip}`;
-}
-
-async function enforceClientRateLimit(
-  clientId: string,
-  request: Request | undefined,
-): Promise<void> {
-  const limiter = await getLimiter("oauth-token-client", TOKEN_CLIENT_RL_POINTS);
-  try {
-    await limiter.consume(clientRateLimitKey(clientId, request));
-  } catch (rej) {
-    const retry =
-      rej && typeof rej === "object" && "msBeforeNext" in rej
-        ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
-        : 60;
-    // Log the discriminator internally so operators can triage which
-    // limiter fired without surfacing the keying strategy in the
-    // response body. Externally we emit the same generic
-    // `error_description` as `enforceRateLimit` — an attacker probing
-    // rate limits can infer SOME limit exists from the 429, but giving
-    // them "we key on client_id" in plaintext makes it trivial to plan
-    // the distributed-IP bypass the secondary limiter is meant to
-    // catch. The distinguishing `X-RateLimit-Scope` header lets tests
-    // assert which limiter fired without leaking the info to anonymous
-    // token-endpoint callers who already know they were throttled.
-    logger.warn("oidc: /oauth2/token per-client rate limit tripped", {
-      module: "oidc",
-      audit: true,
-      event: "oauth.token.rate_limited.client",
-      clientId,
-      retryAfterSeconds: retry,
-    });
-    throw new APIError(
-      "TOO_MANY_REQUESTS",
-      {
-        error: "rate_limited",
-        error_description: `Too many token requests. Retry after ${retry}s.`,
-      },
-      { "Retry-After": String(retry), "X-RateLimit-Scope": "client" },
-    );
-  }
-}
-
-/**
- * Release the per-(client + IP) token-limiter reservation on a SUCCESSFUL
- * token exchange, so a legitimate `authorization_code` / `refresh_token`
- * grant does not count against the budget — the limiter degrades to a
- * failed-attempt counter (same reserve-then-reset-on-success shape as the
- * login-email limiter). Without this a burst of legit logins from one IP
- * through a shared client could self-DoS. Best-effort: a cleanup failure
- * must never turn a successful token response into an error.
- */
-async function resetClientRateLimit(clientId: string, request: Request | undefined): Promise<void> {
-  try {
-    const limiter = await getLimiter("oauth-token-client", TOKEN_CLIENT_RL_POINTS);
-    await limiter.delete(clientRateLimitKey(clientId, request));
-  } catch {
-    // Best-effort — see doc comment.
   }
 }
 
@@ -769,34 +664,9 @@ export function oidcGuardsPlugin() {
           }),
         },
         {
-          // BA's device-authorization plugin exposes `GET /device?user_code=…`
-          // for the SSR consent page to look up the status of a code. Public,
-          // no auth — without this guard it is an unrate-limited user_code
-          // probe surface. See `DEVICE_VERIFY_RL_POINTS` above for the
-          // rationale. The exact path is `/device` (not `/device/verify`),
-          // matching the upstream endpoint registration in
-          // `better-auth/plugins/device-authorization/routes.mjs`.
-          matcher: (ctx: { path?: string }) => ctx.path === "/device",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("device-verify", DEVICE_VERIFY_RL_POINTS, ctx.request);
-          }),
-        },
-        {
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/token",
           handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-token", TOKEN_RL_POINTS, ctx.request);
-
             const body = (ctx.body ?? {}) as TokenRequestBody;
-            // Per-client_id throttle on top of per-IP — protects against
-            // distributed `client_secret` brute-force that spreads the
-            // attack across many source IPs (or bypasses per-IP limits
-            // entirely via XFF spoofing behind a misconfigured
-            // TRUST_PROXY). Keyed on `client_id` so a single
-            // misbehaving / compromised satellite is rate-limited
-            // regardless of where its requests come from.
-            const clientId = extractClientId(body, ctx.request);
-            if (clientId) await enforceClientRateLimit(clientId, ctx.request);
-
             // The two grants the AS supports (`oauthProvider({ grantTypes })`),
             // both of which mint a user token and may carry a `resource`.
             const grantType = body.grant_type;
@@ -833,6 +703,7 @@ export function oidcGuardsPlugin() {
               // replayed off its resource. No-op when no protected resource is
               // registered (mcp module disabled) — `isProtectedResourceUri` is
               // false for everything, so a self-service client simply cannot mint.
+              const clientId = extractClientId(body, ctx.request);
               if (clientId && (await isSelfServiceClient(clientId))) {
                 if (resources.length !== 1 || !isProtectedResourceUri(resources[0]!)) {
                   logger.warn(
@@ -857,58 +728,11 @@ export function oidcGuardsPlugin() {
           }),
         },
         {
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/authorize",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-authorize", AUTHORIZE_RL_POINTS, ctx.request);
-          }),
-        },
-        {
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/introspect",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-introspect", INTROSPECT_RL_POINTS, ctx.request);
-          }),
-        },
-        {
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/revoke",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-revoke", REVOKE_RL_POINTS, ctx.request);
-          }),
-        },
-        {
-          // RFC 7591 Dynamic Client Registration — unauthenticated + write, so
-          // rate-limit per IP (see REGISTER_RL_POINTS).
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/register",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-register", REGISTER_RL_POINTS, ctx.request);
-          }),
-        },
-        {
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/register",
           handler: createAuthMiddleware(defaultRegistrationToNativeClient),
         },
       ],
       after: [
-        {
-          // Release the per-(client + IP) token-limiter reservation when the
-          // token exchange SUCCEEDED, so legitimate grants don't erode the
-          // shared budget (see `resetClientRateLimit`). We re-derive the same
-          // key from the request body + IP and only reset when the response
-          // carries an `access_token` — a rejected exchange leaves the
-          // reservation in place so brute-force attempts still accrue.
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/token",
-          handler: createAuthMiddleware(async (ctx) => {
-            const returned = (ctx.context as { returned?: unknown }).returned;
-            const succeeded =
-              returned &&
-              typeof returned === "object" &&
-              "access_token" in returned &&
-              typeof (returned as { access_token?: unknown }).access_token === "string";
-            if (!succeeded) return;
-            const body = (ctx.body ?? {}) as TokenRequestBody;
-            const clientId = extractClientId(body, ctx.request);
-            if (clientId) await resetClientRateLimit(clientId, ctx.request);
-          }),
-        },
         {
           // Stamp the freshly-registered DCR client as a self-service instance
           // client. Done in an AFTER-hook (not before) because the RFC 7591
