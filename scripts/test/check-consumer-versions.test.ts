@@ -160,7 +160,9 @@ describe("fetchPackageJson", () => {
     // package and therefore HAS a package.json, so 404 is always a read
     // failure — it must reach main()'s fail-closed catch.
     stubFetch(404, "Not Found");
-    await expect(fetchPackageJson("appstrate/cloud", "package.json")).rejects.toThrow(/404/);
+    await expect(fetchPackageJson("appstrate/connect-helper", "package.json")).rejects.toThrow(
+      /404/,
+    );
   });
 
   it("names the token and the likely causes in the 404 message", async () => {
@@ -168,20 +170,20 @@ describe("fetchPackageJson", () => {
     // "the file was deleted" and sends them to look in the wrong place.
     process.env.GITHUB_TOKEN = "test-token";
     stubFetch(404, "Not Found");
-    const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
+    const err = await fetchPackageJson("appstrate/connect-helper", "package.json").catch(
       (e: unknown) => e as Error,
     );
     expect(err.message).toContain("READ failure");
     expect(err.message).toContain("CONSUMER_LOCKSTEP_TOKEN");
     expect(err.message).toContain("missing scope");
     expect(err.message).toContain("SSO not authorized");
-    expect(err.message).toContain("appstrate/cloud");
+    expect(err.message).toContain("appstrate/connect-helper");
   });
 
   it("names the publish-core secret when GITHUB_TOKEN is absent", async () => {
     delete process.env.GITHUB_TOKEN;
     stubFetch(404, "Not Found");
-    const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
+    const err = await fetchPackageJson("appstrate/connect-helper", "package.json").catch(
       (e: unknown) => e as Error,
     );
     expect(err.message).toContain("GITHUB_TOKEN is not configured");
@@ -190,15 +192,17 @@ describe("fetchPackageJson", () => {
 
   it("still throws on other non-2xx statuses", async () => {
     stubFetch(403, "Forbidden");
-    await expect(fetchPackageJson("appstrate/cloud", "package.json")).rejects.toThrow(/403/);
+    await expect(fetchPackageJson("appstrate/connect-helper", "package.json")).rejects.toThrow(
+      /403/,
+    );
   });
 
   it("returns the parsed package.json on success", async () => {
     stubFetch(200, "OK", {
-      name: "@appstrate/cloud",
-      dependencies: { "@appstrate/core": "^6.1.0" },
+      name: "@appstrate/connect-helper",
+      devDependencies: { "@appstrate/core": "^6.1.0" },
     });
-    const pkg = await fetchPackageJson("appstrate/cloud", "package.json");
-    expect(pkg.name).toBe("@appstrate/cloud");
+    const pkg = await fetchPackageJson("appstrate/connect-helper", "package.json");
+    expect(pkg.name).toBe("@appstrate/connect-helper");
   });
 });

@@ -126,10 +126,17 @@ COPY --from=build --parents /app/./apps/api/src /app/./apps/api/package.json ./
 COPY --from=build --parents /app/./packages/*/src /app/./packages/*/package.json ./
 
 # Non-`src` package assets that must ship alongside their package source:
-#   core/schema — JSON schemas resolved at runtime
-#   db/drizzle  — SQL migrations applied at boot
+#   core/schema       — JSON schemas resolved at runtime
+#   db/drizzle        — SQL migrations applied at boot
+#   module-ee/drizzle — the EE module's own schema + migrations, applied against
+#                       its own database at init. The globs above ship `src/`
+#                       only, so without this the image loads the module and
+#                       dies on `Cannot find module '../drizzle/schema.ts'` —
+#                       which is what `ee-container-e2e` boots the image to
+#                       catch.
 COPY --from=build /app/packages/core/schema ./packages/core/schema
 COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
+COPY --from=build /app/packages/module-ee/drizzle ./packages/module-ee/drizzle
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist

@@ -37,7 +37,10 @@ interface Consumer {
  * That anecdote is now history: PR #460 (2026-05-14) moved the module in-tree
  * as `packages/module-claude-code`, and the standalone repo is dead. It is
  * therefore NOT in the list below, per rule 3. `registry` and `portal` left the
- * list the same way and for the same reason — not absorbed, retired.
+ * list the same way and for the same reason — not absorbed, retired. So did
+ * `appstrate/cloud`, on the #460 precedent: it is now `packages/module-ee`,
+ * resolving core as `workspace:*`, which leaves `connect-helper` as the only
+ * repo this gate has left to read.
  *
  * The rule, in three parts:
  *
@@ -53,7 +56,6 @@ interface Consumer {
  *      permanent failure that no bump anywhere can clear.
  */
 const CONSUMERS: Consumer[] = [
-  { repo: "appstrate/cloud", paths: ["package.json"] },
   // Published to npm (public package, private source repo) — installed by
   // end users via `npx`, so a stale core range ships to them directly.
   { repo: "appstrate/connect-helper", paths: ["package.json"] },
@@ -181,7 +183,8 @@ export function assessDeclaredRange(
  *
  * Returning null on 404 is what let the gate report `Summary: 0 failure(s)`
  * while verifying nothing: `CONSUMER_LOCKSTEP_TOKEN` was present but could not
- * read either private consumer, both 404'd, both were logged as
+ * read either private consumer of the day (`cloud` and `connect-helper`, when
+ * both were still out of tree), both 404'd, both were logged as
  * "not present, skipping", and core@6.1.0 published unverified. The caller
  * already fails closed on fetch errors — 404 now takes that same path instead
  * of routing around it.
@@ -264,18 +267,13 @@ async function main(): Promise<void> {
         continue;
       }
 
-      // `peerDependencies` is inspected too, and it is LOAD-BEARING, not
-      // speculative: `cloud` declares `@appstrate/core` under
-      // `peerDependencies` ONLY (the host platform supplies it, and the range
-      // is exactly the compatibility claim the module makes to operators). It
-      // appears in neither `dependencies` nor `devDependencies`, so this
-      // spread is the only thing that verifies half the consumer list — drop
-      // it and the gate reports `cloud` as "does not depend on
-      // @appstrate/core" and passes.
+      // `peerDependencies` is deliberately not read: no consumer declares
+      // `@appstrate/core` there. `cloud` was the only one that ever did, and
+      // it is in-tree now — spreading a field nothing produces would only
+      // widen the shape this gate claims to verify.
       const deps = {
         ...(pkg.dependencies as Record<string, string> | undefined),
         ...(pkg.devDependencies as Record<string, string> | undefined),
-        ...(pkg.peerDependencies as Record<string, string> | undefined),
       };
       const range = deps[DEPENDENCY_NAME];
       if (!range) {
