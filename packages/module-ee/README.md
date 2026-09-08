@@ -23,6 +23,17 @@ but production use needs a written agreement. Every `.ts` file carries
 - **No lockstep.** `@appstrate/core` is a `workspace:*` dependency, so there is
   no npm publish, no version gate and no peer range to keep in step.
 
+### Removing the module from a redistribution
+
+Deleting `packages/module-ee/` alone leaves `bun run check` red — stale
+allowlist entries fail it by design. Also drop the seven `Ee*` rows from
+`apps/api/src/openapi/response-type-registry.ts` (`EeBillingAccount`,
+`EeBillingPlan`, `EeBillingUpgradePlan`, `EeCheckoutPlanId`, `EeBillingManager`,
+`EeBillingManagerList`, `EeBillingContact`) and the `POST /api/billing/webhooks`
+row from `apps/api/src/openapi/zod-schema-registry.ts`; remove
+`@appstrate/module-ee` from `apps/api/package.json` and its `knip.config.ts`
+block; regenerate `apps/web/src/api/schema.d.ts` with `bun run generate:api`.
+
 ## Architecture
 
 EE implements the `AppstrateModule` contract from `@appstrate/core/module`. The platform loads it via dynamic import at boot through the module system (`apps/api/src/lib/modules/`). The module must be declared in `MODULES` env var — all declared modules are required (if declared but not installed, the platform crashes at boot with a clear error).

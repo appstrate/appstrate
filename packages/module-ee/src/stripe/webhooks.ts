@@ -7,9 +7,11 @@ import { getEeDb } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
 import { and, eq } from "drizzle-orm";
 import { logger } from "../logger.ts";
-import { getPlans, type Plans, type PlanDefinition } from "../config.ts";
+import { getPlans, isPlanId, type Plans, type PlanDefinition } from "../config.ts";
 import { getEeEnv } from "../env.ts";
 import { sendBillingEmail } from "../emails/send.ts";
+import { billingSettingsUrl } from "../emails/layout.ts";
+import { getAppUrl } from "../platform.ts";
 import { syncOrgStorageEntitlement } from "../billing/storage-entitlement.ts";
 
 type BillingUpdate = Partial<typeof billingAccounts.$inferInsert>;
@@ -161,7 +163,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       }
       const { orgId, planId } = metadata;
 
-      const plan = plans[planId];
+      const plan = isPlanId(planId) ? plans[planId] : undefined;
       if (!plan || !plan.stripePriceId) break;
 
       const customerId = refId(session.customer);
@@ -515,7 +517,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // Email: subscription expired
       if (deleted) {
         sendBillingEmail(orgId, "subscription-expired", {
-          resubscribeUrl: "/settings/billing",
+          resubscribeUrl: billingSettingsUrl(getAppUrl()),
           locale: "fr",
         });
       }
@@ -543,7 +545,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           .where(eq(billingAccounts.stripeCustomerId, failedCustomerId));
 
         if (failedAccount) {
-          const plan = plans[failedAccount.planId];
+          const plan = isPlanId(failedAccount.planId) ? plans[failedAccount.planId] : undefined;
           const amountDue = (invoice.amount_due ?? 0) / 100;
           const attemptCount = invoice.attempt_count ?? 1;
 
@@ -555,7 +557,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
             amount: amountDue,
             cardLast4,
             attemptNumber: attemptCount,
-            updateUrl: "/settings/billing",
+            updateUrl: billingSettingsUrl(getAppUrl()),
             locale: "fr",
           });
         }
@@ -578,7 +580,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           sendBillingEmail(expiringAccount.orgId, "card-expiring", {
             cardLast4: source.last4 ?? "????",
             expiryMonth: `${String(source.exp_month).padStart(2, "0")}/${String(source.exp_year).slice(-2)}`,
-            updateUrl: "/settings/billing",
+            updateUrl: billingSettingsUrl(getAppUrl()),
             locale: "fr",
           });
         }

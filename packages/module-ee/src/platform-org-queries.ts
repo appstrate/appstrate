@@ -15,10 +15,9 @@
  * They are declared in EE rather than read off `ModuleInitContext` verbatim
  * because EE is the consumer that defines them; the platform satisfies the
  * shape through {@link EeInitContext}, which is what the module's `init`
- * signature actually asks for. A platform that does not provide them cannot
- * load this module at all — the core-version gate refuses a platform below the
- * `@appstrate/core` floor in `package.json`, which is the release where they
- * land.
+ * signature actually asks for. Nothing at runtime checks that the platform
+ * provides them: the module is a `workspace:*` package typechecked against the
+ * workspace `ModuleInitContext`, so `tsc` is the guarantee.
  */
 
 import type { ModuleInitContext } from "@appstrate/core/module";

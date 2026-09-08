@@ -17,7 +17,7 @@ export function initBillingEmail(deps: {
    * module stays testable without a database.
    */
   getRecipients: (orgId: string) => Promise<string[]>;
-  /** Required on `ModuleInitContext` at this module's `@appstrate/core` floor. */
+  /** A required member of the workspace `ModuleInitContext`. */
   getOrgName: (orgId: string) => Promise<string | null>;
 }): void {
   _sendMail = deps.sendMail;

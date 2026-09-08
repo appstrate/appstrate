@@ -3,8 +3,8 @@
 import type { AppstrateModule, BeforeUsageParams, UsageRejection } from "@appstrate/core/module";
 import { initEeDb, migrateEeDb, closeEeDb } from "./db.ts";
 import { initEeRedis, getEeRedis } from "./redis.ts";
-import { getEeEnv } from "./env.ts";
-import { setPlatformServices } from "./platform.ts";
+import { describeEnvIssues, getEeEnv } from "./env.ts";
+import { getAppUrl, setAppUrl, setPlatformServices } from "./platform.ts";
 import { setOrgQueries, type EeInitContext } from "./platform-org-queries.ts";
 import { checkQuota, QuotaExceededError } from "./billing/quota-check.ts";
 import { quoteUsage, assertExecutionFacts } from "./billing/usage-quote.ts";
@@ -53,13 +53,6 @@ const emailOverrides = {
   "reset-password": renderEeResetPasswordEmail,
 };
 
-let _appUrl: string | null = null;
-
-function getAppUrl(): string {
-  if (!_appUrl) throw new Error("EE not initialized. Call init() first.");
-  return _appUrl;
-}
-
 // ---------------------------------------------------------------------------
 // AppstrateModule — native contract implementation
 // ---------------------------------------------------------------------------
@@ -76,22 +69,25 @@ const eeModule: AppstrateModule = {
   // method on the contract, so the narrowing is accepted — and it puts EE's
   // requirement in the signature instead of in a comment.
   async init(ctx: EeInitContext) {
-    // Fail-fast: validate all EE env vars (incl. EE_DATABASE_URL) first.
+    // Fail-fast: validate all EE env vars (incl. EE_DATABASE_URL) first. The
+    // rethrow names the offending variables — an operator reading a boot crash
+    // needs to know WHICH of the module's env vars is wrong, not that one is.
     let eeEnv;
     try {
       eeEnv = getEeEnv();
-    } catch {
-      throw new Error("EE env vars not configured (Stripe keys / EE_DATABASE_URL missing)");
+    } catch (cause) {
+      throw new Error(`Invalid ee module environment: ${describeEnvIssues(cause)}`, { cause });
     }
 
-    _appUrl = ctx.appUrl;
+    setAppUrl(ctx.appUrl);
     // Capture the platform handle — EE's ONLY platform reads are the
     // append-only `llm_usage` ledger cursor (`services.usage.list` /
     // `services.usage.settledFrontier`), never a cross-DB join.
     setPlatformServices(ctx.services);
     // The org queries answer what EE's own database cannot: who owns this
     // org, and whether a user id is a member of it. Read directly — the
-    // `@appstrate/core` floor in `package.json` is what guarantees they exist.
+    // workspace `ModuleInitContext` type is what guarantees they exist, and
+    // `tsc` is what checks it.
     setOrgQueries(ctx);
 
     // EE owns its database: connect + self-migrate against EE_DATABASE_URL.
@@ -105,9 +101,8 @@ const eeModule: AppstrateModule = {
       initEeRedis(ctx.redisUrl);
     }
 
-    // Initialize billing email transport. `getOrgName` is REQUIRED on
-    // `ModuleInitContext` at this module's declared `@appstrate/core` floor, so
-    // it is read directly — no fallback.
+    // Initialize billing email transport. `getOrgName` is a required member of
+    // the workspace `ModuleInitContext`, so it is read directly — no fallback.
     initBillingEmail({
       sendMail: await ctx.getSendMail(),
       getRecipients: resolveBillingRecipients,

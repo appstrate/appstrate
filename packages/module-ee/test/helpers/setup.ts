@@ -3,7 +3,7 @@
 // This module reads the platform only through `services.usage` and the two org
 // queries, so its tests seed those two seams in memory instead of platform rows.
 
-import { setPlatformServices } from "../../src/platform.ts";
+import { setAppUrl, setPlatformServices } from "../../src/platform.ts";
 import { setOrgQueries } from "../../src/platform-org-queries.ts";
 import { mockPlatformServices } from "./mock-platform.ts";
 import { orgQueries } from "./org-queries.ts";
@@ -24,4 +24,6 @@ export function useEeTestSeams(): void {
 
   setPlatformServices(mockPlatformServices);
   setOrgQueries(orgQueries);
+  // The billing emails build absolute CTA links from it, exactly as at boot.
+  setAppUrl("http://localhost:3000");
 }

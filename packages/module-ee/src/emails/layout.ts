@@ -97,6 +97,16 @@ export function formatDate(iso: string, locale: string): string {
   }
 }
 
+/**
+ * The dashboard's billing page, absolute. An email client has no origin to
+ * resolve a root-relative href against, so every billing CTA pointing there is
+ * built from the platform's public base URL, here — the same SPA route the
+ * Stripe checkout and portal return URLs target.
+ */
+export function billingSettingsUrl(appUrl: string): string {
+  return `${appUrl}/org-settings/billing`;
+}
+
 export function ctaButton(label: string, url: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
   <tr>

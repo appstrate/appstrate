@@ -4,7 +4,7 @@ import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { and, eq, isNull } from "drizzle-orm";
-import { getPlans } from "../config.ts";
+import { getPlans, isPlanId } from "../config.ts";
 import { resolvePrimaryBillingEmail } from "../billing/contact.ts";
 
 export async function createCheckoutSession(
@@ -13,7 +13,7 @@ export async function createCheckoutSession(
   appUrl: string,
   returnUrl?: string,
 ): Promise<string> {
-  const plan = getPlans()[planId];
+  const plan = isPlanId(planId) ? getPlans()[planId] : undefined;
   if (!plan || !plan.stripePriceId) throw new Error(`Invalid plan: ${planId}`);
 
   const db = getEeDb();

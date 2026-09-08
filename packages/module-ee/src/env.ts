@@ -89,6 +89,17 @@ export function getEeEnv(): EeEnv {
 }
 
 /**
+ * One line naming every environment variable {@link getEeEnv} rejected, and why
+ * — `EE_DATABASE_URL (Required), STRIPE_SECRET_KEY (…)`. A boot crash has to
+ * say WHICH of the module's variables is wrong; "not configured" sends an
+ * operator to read the schema.
+ */
+export function describeEnvIssues(err: unknown): string {
+  if (!(err instanceof z.ZodError)) return err instanceof Error ? err.message : String(err);
+  return err.issues.map((issue) => `${issue.path.join(".")} (${issue.message})`).join(", ");
+}
+
+/**
  * Test-only — drop the cached parsed env so the next `getEeEnv()` re-
  * reads `process.env`. Lets a single test file flip env vars between
  * cases without spawning a fresh process.

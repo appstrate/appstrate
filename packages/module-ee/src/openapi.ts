@@ -9,7 +9,7 @@
  * nothing — the zero-footprint invariant holds.
  */
 
-import { CHECKOUT_PLAN_IDS } from "./config.ts";
+import { CHECKOUT_PLAN_IDS, PLAN_IDS } from "./config.ts";
 
 const billingAccountSchemaRef = { $ref: "#/components/schemas/EeBillingAccount" } as const;
 const billingPlanSchemaRef = { $ref: "#/components/schemas/EeBillingPlan" } as const;
@@ -43,7 +43,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
       type: "object",
       required: ["id", "name", "price", "credit_quota", "file_storage_bytes"],
       properties: {
-        id: { type: "string", enum: ["free", "starter", "pro"] },
+        id: { type: "string", enum: [...PLAN_IDS] },
         name: { type: "string", description: 'Display name (e.g. "Free", "Starter")' },
         price: { type: "number", description: "Monthly price in dollars" },
         credit_quota: { type: "integer", description: "Credits granted per billing cycle" },
@@ -196,7 +196,7 @@ export function openApiPaths(): Record<string, unknown> {
                   return_url: {
                     type: "string",
                     description:
-                      "Path-relative redirect target (must start with `/`). Defaults to `/settings/billing`.",
+                      "Path-relative redirect target (must start with `/`). Defaults to `/org-settings/billing`.",
                   },
                 },
               },

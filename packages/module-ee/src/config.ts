@@ -17,6 +17,25 @@ export interface PlanDefinition {
 export const GIB = 1024 * 1024 * 1024;
 
 /**
+ * The catalog's plan ids — the ONE place a plan is declared to exist. The
+ * `Plans` record, the checkout subset, and the wire enum in `openapi.ts` are
+ * all derived from it, so adding a fourth plan is a single edit here plus its
+ * definition in {@link getPlans}, and `tsc` names every site that has to follow.
+ */
+export const PLAN_IDS = ["free", "starter", "pro"] as const;
+
+export type PlanId = (typeof PLAN_IDS)[number];
+
+/** Narrow a string of unknown provenance (a DB column, Stripe metadata) to a catalog id. */
+export function isPlanId(id: string): id is PlanId {
+  return (PLAN_IDS as readonly string[]).includes(id);
+}
+
+function isCheckoutPlanId(id: PlanId): id is Exclude<PlanId, "free"> {
+  return id !== "free";
+}
+
+/**
  * The plans checkout accepts — every plan with a Stripe price, which is the
  * catalog minus `free`. Declared here rather than at either consumer because
  * the fact it encodes is a property of the catalog below (`free` is the one
@@ -24,14 +43,10 @@ export const GIB = 1024 * 1024 * 1024;
  * schema (`routes/billing.ts`) and the wire contract (`openapi.ts`) have to
  * mean the same set.
  */
-export const CHECKOUT_PLAN_IDS = ["starter", "pro"] as const;
+export const CHECKOUT_PLAN_IDS: readonly Exclude<PlanId, "free">[] =
+  PLAN_IDS.filter(isCheckoutPlanId);
 
-export interface Plans {
-  free: PlanDefinition;
-  starter: PlanDefinition;
-  pro: PlanDefinition;
-  [key: string]: PlanDefinition | undefined;
-}
+export type Plans = Record<PlanId, PlanDefinition>;
 
 /**
  * Build plan definitions from env config. Not cached independently

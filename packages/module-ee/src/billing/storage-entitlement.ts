@@ -32,7 +32,7 @@
 import { eq } from "drizzle-orm";
 import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
-import { getPlans } from "../config.ts";
+import { getPlans, isPlanId } from "../config.ts";
 import { getPlatformServices } from "../platform.ts";
 import { logger } from "../logger.ts";
 
@@ -57,7 +57,7 @@ function getSetter(): (orgId: string, bytes: number | null) => Promise<void> {
 /** Resolve a plan id to its storage entitlement in bytes (unknown → free). */
 export function storageEntitlementForPlan(planId: string): number {
   const plans = getPlans();
-  return (plans[planId] ?? plans.free).fileStorageBytes;
+  return (isPlanId(planId) ? plans[planId] : plans.free).fileStorageBytes;
 }
 
 /**

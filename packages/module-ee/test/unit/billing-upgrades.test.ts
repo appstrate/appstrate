@@ -10,7 +10,13 @@
  */
 import { describe, expect, it } from "bun:test";
 import { upgradeOptions } from "../../src/routes/billing.ts";
-import { GIB, type PlanDefinition } from "../../src/config.ts";
+import {
+  CHECKOUT_PLAN_IDS,
+  GIB,
+  PLAN_IDS,
+  getPlans,
+  type PlanDefinition,
+} from "../../src/config.ts";
 
 function plan(id: string, tier: number, stripePriceId: string | null): PlanDefinition {
   return {
@@ -61,5 +67,21 @@ describe("upgradeOptions", () => {
         file_storage_bytes: GIB,
       },
     ]);
+  });
+});
+
+describe("plan catalog", () => {
+  it("declares exactly the plans PLAN_IDS names", () => {
+    // `PLAN_IDS` is what the wire enum and the `Plans` record are built from,
+    // so a plan added to `getPlans()` alone would ship an id no client accepts.
+    expect(Object.keys(getPlans())).toEqual([...PLAN_IDS]);
+  });
+
+  it("gives every checkout plan a Stripe price", () => {
+    const plans = getPlans();
+    for (const id of CHECKOUT_PLAN_IDS) {
+      expect(plans[id].stripePriceId).toBeTruthy();
+    }
+    expect([...CHECKOUT_PLAN_IDS]).toEqual(["starter", "pro"]);
   });
 });

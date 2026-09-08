@@ -11,6 +11,7 @@ import { renderQuotaWarningEmail } from "../../src/emails/templates/quota-warnin
 import { renderRenewalReminderEmail } from "../../src/emails/templates/renewal-reminder.ts";
 import { renderCardExpiringEmail } from "../../src/emails/templates/card-expiring.ts";
 import { renderBillingEmail } from "../../src/emails/registry.ts";
+import { billingSettingsUrl } from "../../src/emails/layout.ts";
 
 describe("billing email templates", () => {
   // -----------------------------------------------------------------------
@@ -452,5 +453,41 @@ describe("billing email templates", () => {
       });
       expect(result.subject).not.toMatch(/[\r\n]/);
     });
+  });
+});
+
+describe("billing CTA links", () => {
+  const url = billingSettingsUrl("https://app.example.com");
+
+  it("points at the SPA billing route, absolutely", () => {
+    expect(url).toBe("https://app.example.com/org-settings/billing");
+  });
+
+  it("renders quota-warning and payment-failed with a clickable absolute CTA", () => {
+    const rendered = [
+      renderQuotaWarningEmail({
+        planName: "Starter",
+        usagePercent: 85,
+        creditsUsed: 17000,
+        creditQuota: 20000,
+        upgradeUrl: url,
+        locale: "fr",
+      }),
+      renderPaymentFailedEmail({
+        planName: "Starter",
+        amount: 29,
+        cardLast4: "4242",
+        attemptNumber: 1,
+        updateUrl: url,
+        locale: "fr",
+      }),
+    ];
+
+    for (const result of rendered) {
+      expect(result.html).toContain(`href="${url}"`);
+      // A mail client has no origin to resolve a root-relative href against:
+      // `href="/org-settings/billing"` is a dead link in every inbox.
+      expect(result.html).not.toContain('href="/');
+    }
   });
 });

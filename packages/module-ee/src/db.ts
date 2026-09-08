@@ -6,6 +6,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as schema from "../drizzle/schema.ts";
+import { logger } from "./logger.ts";
 
 export type EeDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -89,6 +90,12 @@ async function ensureEeDatabase(databaseUrl: string): Promise<void> {
     if (existing) return;
     try {
       await sql`CREATE DATABASE ${sql(name)}`;
+      logger.warn(
+        "Created the EE database — it did not exist. On a deployment that already had billing data, " +
+          "EE_DATABASE_URL names the WRONG database: every organization starts over on an empty free " +
+          "plan while Stripe keeps charging.",
+        { database: name },
+      );
     } catch (err) {
       if (pgErrorCode(err) === PG_INSUFFICIENT_PRIVILEGE) {
         throw new Error(

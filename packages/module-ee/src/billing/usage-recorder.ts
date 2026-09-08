@@ -10,11 +10,12 @@ import {
 import { eq, sql, type SQL } from "drizzle-orm";
 import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
-import { getPlatformServices } from "../platform.ts";
+import { getAppUrl, getPlatformServices } from "../platform.ts";
 import { getEeEnv } from "../env.ts";
 import { dollarsToCredits, CREDITS_PER_DOLLAR } from "../credits.ts";
 import { sendBillingEmail } from "../emails/send.ts";
-import { getPlans } from "../config.ts";
+import { billingSettingsUrl } from "../emails/layout.ts";
+import { getPlans, isPlanId } from "../config.ts";
 
 /** Threshold at which we send a quota warning email (80%) */
 const QUOTA_WARNING_THRESHOLD = 0.8;
@@ -694,13 +695,13 @@ function emitQuotaSignals(debit: AccountDebit): void {
     const currentPercent = creditsUsed / creditQuota;
 
     if (previousPercent < QUOTA_WARNING_THRESHOLD && currentPercent >= QUOTA_WARNING_THRESHOLD) {
-      const plan = getPlans()[planId];
+      const plan = isPlanId(planId) ? getPlans()[planId] : undefined;
       sendBillingEmail(orgId, "quota-warning", {
         planName: plan?.name ?? planId,
         usagePercent: Math.round(currentPercent * 100),
         creditsUsed,
         creditQuota,
-        upgradeUrl: "/settings/billing",
+        upgradeUrl: billingSettingsUrl(getAppUrl()),
         locale: "fr",
       });
     }

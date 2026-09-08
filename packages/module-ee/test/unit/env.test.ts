@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import { describe, expect, it } from "bun:test";
-import { getEeEnv, _resetEeEnvForTests } from "../../src/env.ts";
+import { describeEnvIssues, getEeEnv, _resetEeEnvForTests } from "../../src/env.ts";
 
 describe("env", () => {
   describe("getEeEnv()", () => {
@@ -90,5 +90,34 @@ describe("env", () => {
         _resetEeEnvForTests();
       }
     });
+  });
+});
+
+describe("describeEnvIssues()", () => {
+  it("names every rejected variable and its reason", () => {
+    const saved = { ...process.env };
+    delete process.env.EE_DATABASE_URL;
+    delete process.env.STRIPE_SECRET_KEY;
+    _resetEeEnvForTests();
+    try {
+      let message = "";
+      try {
+        getEeEnv();
+      } catch (err) {
+        message = describeEnvIssues(err);
+      }
+      // An operator reading a boot crash needs the variable, not "misconfigured".
+      expect(message).toContain("EE_DATABASE_URL");
+      expect(message).toContain("STRIPE_SECRET_KEY");
+      expect(message).not.toContain("STRIPE_PRICE_ID_PRO");
+    } finally {
+      process.env.EE_DATABASE_URL = saved.EE_DATABASE_URL;
+      process.env.STRIPE_SECRET_KEY = saved.STRIPE_SECRET_KEY;
+      _resetEeEnvForTests();
+    }
+  });
+
+  it("passes a non-Zod failure through unchanged", () => {
+    expect(describeEnvIssues(new Error("boom"))).toBe("boom");
   });
 });
