@@ -343,6 +343,6 @@ describe("isolation from the platform test database", () => {
     const [applied] = await live.execute<{ count: number }>(sql`
       SELECT count(*)::int AS count FROM drizzle.ee_migrations
     `);
-    expect(applied?.count).toBe(6);
+    expect(applied?.count).toBe(7);
   });
 });

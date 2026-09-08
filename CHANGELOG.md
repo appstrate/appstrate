@@ -576,6 +576,77 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   no control could clear. Permissions the platform no longer knows are now
   listed as unavailable, with a way to remove them.
 
+- **Billing: a Stripe cancellation that fails on org deletion is now retried
+  instead of forgotten (`@appstrate/module-ee`).** `onOrgDelete` logged the
+  failure and deleted the billing account anyway, so the subscription id died
+  with the row: a Stripe blip left a subscription charging a customer every month
+  for an organization that no longer existed, with nothing able to name it. The
+  intent is now stamped on `ee_billing_accounts.cancel_requested_at` before the
+  call, the rows survive an unconfirmed cancellation, and every billing tick
+  retries them until Stripe confirms — a subscription Stripe no longer has counts
+  as confirmed, and a second `onOrgDelete` for the same org is a no-op.
+
+- **Billing: the shutdown drain no longer closes the database under a running
+  storage reconcile (`@appstrate/module-ee`).** It snapshotted the in-flight
+  sweep and reconcile once, at entry, but the tick starts the reconcile from
+  inside the very promise that snapshot awaits — so a shutdown entered mid-sweep
+  returned the moment the sweep ended and `closeEeDb()` ran underneath a
+  reconcile that had begun in between. It now re-reads both handles after every
+  wait, and its timeout is a constant rather than a parameter no caller passed.
+
+- **Billing: upgrading a paying organization no longer creates a second
+  subscription (`@appstrate/module-ee`).** The plan picker always opened Stripe
+  Checkout, and Checkout only ever CREATES — so an org that already subscribed
+  came out of an upgrade with two live subscriptions and two charges.
+  `POST /api/billing/checkout` now refuses an account whose subscription is
+  active, trialing or past due (`409 subscription_exists`), and the new
+  `POST /api/billing/plan` (`billing:manage`, 5/min) moves the existing
+  subscription's price item onto the chosen plan with proration. The dashboard
+  routes a plan click to whichever of the two applies. Downgrading to free is
+  unchanged — it is a cancellation, taken through the Customer Portal.
+
+- **Billing: an old subscription's events no longer destroy the active one
+  (`@appstrate/module-ee`).** Every subscription-scoped Stripe webhook matched on
+  `metadata.orgId` alone, which says which org OWNS a subscription and not that
+  the org is still on it — so a `customer.subscription.deleted` for a replaced
+  `sub_old` downgraded the live `sub_new` account to free with zero credits while
+  Stripe kept charging it. Reversed order and late delivery did the same through
+  `customer.subscription.updated` and `invoice.paid`, and a superseded
+  subscription's dunning notice reached the customer as if their current plan
+  were failing. Each handler now writes only to the account carrying that exact
+  subscription id (the two that ATTACH one also accept an account with none), and
+  an event about any other subscription is logged and ignored.
+
+- **Billing: the usage the cutover excluded is no longer billed on the second
+  sweep (`@appstrate/module-ee`).** The cursor was seeded at the platform's
+  settled frontier and the first pass billed nothing — as documented — but every
+  later pass reads `EE_RECONCILIATION_REPLAY_WINDOW` ids BELOW the watermark to
+  catch rows that commit late, and that read walked straight back under the seed
+  and debited the whole history. `ee_billing_cursor.floor_id` records the seeded
+  frontier once and never moves, and both the sweep and the org-deletion drain
+  now select from `max(floor_id, watermark − replay window)` through one shared
+  rule. `floor_id` defaults to `0` for a cursor that predates it: its original
+  frontier was never recorded, and 0 is exactly the behaviour those deployments
+  already had.
+
+- **Billing: a ledger row the platform could not price is no longer settled as
+  free (`@appstrate/module-ee`).** The sweep summed `cost_usd` blind, so a row
+  whose `pricing_status` is `unpriced` (cost 0 because no rates were available —
+  not because the call was free) was claimed as zero spend and could never be
+  recovered. Rows are now claimed with their status stamped on
+  `ee_billed_llm_usage.pricing_status`: `priced` is billed, `partial` is billed
+  on its floor and counted, and `unpriced` or an absent status is claimed for 0
+  credits so it is never double-billed and stays auditable. Each sweep pass and
+  each org drain emits one `error` line with the counts and the affected orgs,
+  and the counts ride the per-tick heartbeat.
+
+- **Billing: the final drain on org deletion no longer misses a late-committed
+  row (`@appstrate/module-ee`).** It started strictly above the global watermark,
+  so a row of the org that took a low serial id and committed after the watermark
+  passed it was debited 0 — and unlike the periodic sweep, the drain has no
+  second chance: the org's ledger rows cascade away moments later. It now uses
+  the same selection rule as the sweep.
+
 - **Unit tests green again after the 2026-09-07 LiteLLM catalog refresh
   (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
   `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor

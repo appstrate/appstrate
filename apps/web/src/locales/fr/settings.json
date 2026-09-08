@@ -670,6 +670,7 @@
   "billing.creditsCount": "{{used}} / {{quota}} crédits",
   "billing.storageUsage": "Stockage",
   "billing.month": "mois",
+  "billing.planChangeRequested": "Le changement de plan a été transmis à Stripe. Il s'applique dès la confirmation du paiement.",
   "billing.upgradePlans": "Plans disponibles",
   "billing.noAccount": "Aucun compte de facturation",
   "billing.statusActive": "Abonnement actif",

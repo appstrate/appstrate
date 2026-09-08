@@ -497,6 +497,187 @@ describe("handleWebhook", () => {
     });
   });
 
+  describe("subscription identity — an event may only act on the current subscription", () => {
+    // Stripe orders nothing. An org that replaced `sub_old` with `sub_new` still
+    // receives `sub_old`'s tail, and `metadata.orgId` is identical on both — it
+    // says which ORG owns the subscription, never that the org is still on it.
+    // Event-id dedupe cannot help: these events are new, real, and about a
+    // subscription that no longer matters.
+
+    async function account() {
+      const db = getEeDb();
+      const [row] = await db.select().from(billingAccounts).where(eq(billingAccounts.orgId, orgId));
+      return row!;
+    }
+
+    async function seedReplacedSubscription() {
+      await seedBillingAccount({
+        orgId,
+        planId: "pro",
+        stripeCustomerId: "cus_identity",
+        stripeSubscriptionId: "sub_new",
+        subscriptionStatus: "active",
+        creditsUsed: 1000,
+        creditQuota: 80000,
+      });
+    }
+
+    it("REGRESSION: deleting the OLD subscription leaves the active replacement alone", async () => {
+      await seedReplacedSubscription();
+
+      const { body, signature } = signedEvent({
+        id: "evt_identity_delete_old",
+        type: "customer.subscription.deleted",
+        data: {
+          object: {
+            id: "sub_old",
+            customer: "cus_identity",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const row = await account();
+      expect(row.stripeSubscriptionId).toBe("sub_new");
+      expect(row.planId).toBe("pro");
+      expect(row.creditQuota).toBe(80000);
+      expect(row.subscriptionStatus).toBe("active");
+    });
+
+    it("still downgrades when the CURRENT subscription is the one deleted", async () => {
+      // The guard refuses stale events, not real ones.
+      await seedReplacedSubscription();
+
+      const { body, signature } = signedEvent({
+        id: "evt_identity_delete_current",
+        type: "customer.subscription.deleted",
+        data: {
+          object: { id: "sub_new", customer: "cus_identity", metadata: { orgId, planId: "pro" } },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const row = await account();
+      expect(row.stripeSubscriptionId).toBeNull();
+      expect(row.planId).toBe("free");
+      expect(row.creditQuota).toBe(0);
+    });
+
+    it("ignores an `updated` for the old subscription delivered after the new one attached", async () => {
+      // Reversed order: `sub_old` was canceled first, but its update lands last.
+      await seedReplacedSubscription();
+
+      const { body, signature } = signedEvent({
+        id: "evt_identity_update_old",
+        type: "customer.subscription.updated",
+        data: {
+          object: {
+            id: "sub_old",
+            status: "canceled",
+            cancel_at_period_end: true,
+            metadata: { orgId, planId: "starter" },
+            items: {
+              data: [{ id: "si_old", price: { id: "price_starter_test" } }],
+            },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const row = await account();
+      expect(row.planId).toBe("pro");
+      expect(row.subscriptionStatus).toBe("active");
+      expect(row.cancelAtPeriodEnd).toBe(false);
+    });
+
+    it("ignores a late invoice.paid for the superseded subscription", async () => {
+      // A renewal invoice for `sub_old` would otherwise re-attach the dead
+      // subscription AND reset the live plan's quota and credit usage.
+      await seedReplacedSubscription();
+      setSubscriptionResponse({
+        id: "sub_old",
+        object: "subscription",
+        status: "active",
+        metadata: { orgId, planId: "starter" },
+        items: {
+          object: "list",
+          data: [{ id: "si_old", price: { id: "price_starter_test" } }],
+        },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_identity_invoice_old",
+        type: "invoice.paid",
+        data: {
+          object: {
+            id: "in_identity_old",
+            customer: "cus_identity",
+            billing_reason: "subscription_cycle",
+            parent: { subscription_details: { subscription: "sub_old" } },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const row = await account();
+      expect(row.stripeSubscriptionId).toBe("sub_new");
+      expect(row.planId).toBe("pro");
+      expect(row.creditQuota).toBe(80000);
+      expect(row.creditsUsed).toBe(1000); // not reset by a foreign renewal
+    });
+
+    it("ignores a stale checkout completion for a different subscription", async () => {
+      await seedReplacedSubscription();
+
+      const { body, signature } = signedEvent({
+        id: "evt_identity_checkout_old",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            customer: "cus_identity",
+            subscription: "sub_abandoned",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const row = await account();
+      expect(row.stripeSubscriptionId).toBe("sub_new");
+      expect(row.planId).toBe("pro");
+      expect(row.creditQuota).toBe(80000);
+    });
+
+    it("ignores a `created` for a second subscription on an already-linked account", async () => {
+      await seedReplacedSubscription();
+
+      const { body, signature } = signedEvent({
+        id: "evt_identity_created_second",
+        type: "customer.subscription.created",
+        data: {
+          object: {
+            id: "sub_second",
+            customer: "cus_identity",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { orgId, planId: "starter" },
+            items: { data: [{ id: "si_second", price: { id: "price_starter_test" } }] },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      expect((await account()).stripeSubscriptionId).toBe("sub_new");
+    });
+  });
+
   describe("idempotency", () => {
     it("skips duplicate events (same eventId already processed)", async () => {
       await seedBillingAccount({ orgId });

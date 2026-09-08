@@ -43,6 +43,13 @@
       "when": 1788860547583,
       "tag": "0005_rename_ee_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788887495383,
+      "tag": "0006_cutover_floor_and_pricing_status",
+      "breakpoints": true
     }
   ]
 }

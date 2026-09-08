@@ -53,6 +53,38 @@ export function rateLimited(retryAfterSeconds: number): ApiError {
   });
 }
 
+/**
+ * 409 — the org already has a subscription Stripe is holding, so Checkout is the
+ * wrong door: completing it would create a SECOND subscription beside the first
+ * and bill the organization twice. `POST /api/billing/plan` modifies the one
+ * that exists.
+ *
+ * Enforced on the server, not in the dashboard's buttons: the failure is a
+ * duplicate charge, and a client is not what stands between a customer and that.
+ */
+export function subscriptionExists(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "subscription_exists",
+    title: "Conflict",
+    detail:
+      "This organization already has an active subscription. Change its plan instead of starting a new checkout.",
+  });
+}
+
+/**
+ * 409 — a plan change was asked for on an account with no subscription to
+ * change. The way in is Checkout.
+ */
+export function noActiveSubscription(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "no_active_subscription",
+    title: "Conflict",
+    detail: "This organization has no active subscription to change. Start a checkout instead.",
+  });
+}
+
 export function paymentServiceUnavailable(): ApiError {
   return new ApiError({
     status: 503,

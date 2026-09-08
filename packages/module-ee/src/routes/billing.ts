@@ -7,6 +7,7 @@ import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { createCheckoutSession } from "../stripe/checkout.ts";
+import { changeSubscriptionPlan } from "../stripe/plan.ts";
 import { createPortalSession } from "../stripe/portal.ts";
 import { handleWebhook } from "../stripe/webhooks.ts";
 import { CHECKOUT_PLAN_IDS, getPlans, WARNING_STATUSES, type PlanDefinition } from "../config.ts";
@@ -30,7 +31,7 @@ import {
   rateLimited,
   paymentServiceUnavailable,
 } from "../http-errors.ts";
-import { invalidRequest } from "@appstrate/core/api-errors";
+import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
 import type { OrgRole } from "../types.ts";
 
 // Minimal env type — set by the platform's auth + RBAC middleware. `user` is
@@ -122,6 +123,9 @@ export const checkoutBodySchema = z.object({
   return_url: z.string().startsWith("/").optional(),
 });
 
+/** `POST /api/billing/plan` — the same plan ids, no redirect to come back from. */
+export const planBodySchema = z.object({ plan_id: z.enum(CHECKOUT_PLAN_IDS) }).strict();
+
 export const managersBodySchema = z.object({ user_ids: z.array(z.string().min(1)) });
 
 /** Org roles that already hold `billing:*` — see the PUT handler's refusal. */
@@ -152,59 +156,90 @@ async function parseJsonBody<T>(
   return parsed.success ? { ok: true, data: parsed.data } : { ok: false, malformed: false };
 }
 
+/**
+ * The wire projection of one org's billing account — plan, usage, status and the
+ * upgrades it may take.
+ *
+ * Shared by `GET /api/billing` and the answer to a plan change, so the dashboard
+ * refreshes from the same shape it renders. `null` when the org has no billing
+ * account.
+ */
+async function billingSnapshot(orgId: string) {
+  const [account] = await getEeDb()
+    .select({
+      planId: billingAccounts.planId,
+      creditsUsed: billingAccounts.creditsUsed,
+      creditQuota: billingAccounts.creditQuota,
+      periodEnd: billingAccounts.periodEnd,
+      stripeSubscriptionId: billingAccounts.stripeSubscriptionId,
+      subscriptionStatus: billingAccounts.subscriptionStatus,
+      cancelAtPeriodEnd: billingAccounts.cancelAtPeriodEnd,
+    })
+    .from(billingAccounts)
+    .where(eq(billingAccounts.orgId, orgId));
+
+  if (!account) return null;
+
+  const usagePercent =
+    account.creditQuota > 0
+      ? Math.min(100, Math.round((account.creditsUsed / account.creditQuota) * 100))
+      : 0;
+
+  const plans = getPlans();
+  const allPlans = [plans.free, plans.starter, plans.pro];
+  const currentPlan = allPlans.find((p) => p.id === account.planId);
+
+  return {
+    plan: {
+      id: account.planId,
+      name: currentPlan?.name ?? account.planId,
+    },
+    plans: allPlans.map(planDetail),
+    usage_percent: usagePercent,
+    credits_used: account.creditsUsed,
+    credit_quota: account.creditQuota,
+    period_end: account.periodEnd?.toISOString() ?? null,
+    status: getBillingStatus(account),
+    upgrades: upgradeOptions(allPlans, currentPlan?.tier ?? 0),
+  };
+}
+
+/**
+ * Render the failure of a Stripe-facing billing call.
+ *
+ * `ApiError` first: the refusals this module raises itself (a second concurrent
+ * subscription, a plan change with nothing to change) are decisions, and burying
+ * them under a generic 503 would tell the caller to retry something that can
+ * never succeed.
+ */
+function stripeCallFailure(
+  c: Context<EeEnv>,
+  err: unknown,
+  context: Record<string, unknown>,
+): Response {
+  if (err instanceof ApiError) return problemJson(c, err);
+  if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+    logger.error("Invalid Stripe request", { ...context, error: err.message });
+    return problemJson(c, invalidRequest("Invalid plan configuration", "plan_id"));
+  }
+  if (err instanceof Stripe.errors.StripeRateLimitError) {
+    return problemJson(c, rateLimited(1));
+  }
+  logger.error("Stripe call failed", {
+    ...context,
+    error: err instanceof Error ? err.message : String(err),
+  });
+  return problemJson(c, paymentServiceUnavailable());
+}
+
 export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   const router = new Hono<EeEnv>();
 
   // GET /api/billing — current plan, usage percentage
   router.get("/api/billing", eeRequirePermission("billing:read"), async (c) => {
-    const orgId = c.get("orgId");
-    const db = getEeDb();
-
-    const [account] = await db
-      .select({
-        planId: billingAccounts.planId,
-        creditsUsed: billingAccounts.creditsUsed,
-        creditQuota: billingAccounts.creditQuota,
-        periodEnd: billingAccounts.periodEnd,
-        stripeSubscriptionId: billingAccounts.stripeSubscriptionId,
-        subscriptionStatus: billingAccounts.subscriptionStatus,
-        cancelAtPeriodEnd: billingAccounts.cancelAtPeriodEnd,
-      })
-      .from(billingAccounts)
-      .where(eq(billingAccounts.orgId, orgId));
-
-    if (!account) {
-      return problemJson(c, noBillingAccount());
-    }
-
-    const usagePercent =
-      account.creditQuota > 0
-        ? Math.min(100, Math.round((account.creditsUsed / account.creditQuota) * 100))
-        : 0;
-
-    const status = getBillingStatus(account);
-
-    // Build upgrade options from plan definitions
-    const plans = getPlans();
-    const allPlans = [plans.free, plans.starter, plans.pro];
-    const currentPlan = allPlans.find((p) => p.id === account.planId);
-    const currentTier = currentPlan?.tier ?? 0;
-
-    const upgrades = upgradeOptions(allPlans, currentTier);
-
-    return c.json({
-      plan: {
-        id: account.planId,
-        name: currentPlan?.name ?? account.planId,
-      },
-      plans: allPlans.map(planDetail),
-      usage_percent: usagePercent,
-      credits_used: account.creditsUsed,
-      credit_quota: account.creditQuota,
-      period_end: account.periodEnd?.toISOString() ?? null,
-      status,
-      upgrades,
-    });
+    const snapshot = await billingSnapshot(c.get("orgId"));
+    if (!snapshot) return problemJson(c, noBillingAccount());
+    return c.json(snapshot);
   });
 
   // POST /api/billing/checkout — create Stripe Checkout session (admin only, 5/min)
@@ -233,23 +268,47 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
         );
         return c.json({ url });
       } catch (err) {
-        if (err instanceof Stripe.errors.StripeInvalidRequestError) {
-          logger.error("Invalid Stripe checkout request", {
-            planId: body.data.plan_id,
-            orgId,
-            error: err.message,
-          });
-          return problemJson(c, invalidRequest("Invalid plan configuration", "plan_id"));
-        }
-        if (err instanceof Stripe.errors.StripeRateLimitError) {
-          return problemJson(c, rateLimited(1));
-        }
-        logger.error("Stripe checkout session creation failed", {
+        return stripeCallFailure(c, err, {
+          route: "checkout",
           orgId,
-          error: err instanceof Error ? err.message : String(err),
+          planId: body.data.plan_id,
         });
-        return problemJson(c, paymentServiceUnavailable());
       }
+    },
+  );
+
+  // POST /api/billing/plan — move an EXISTING subscription onto another plan
+  // (admin only, 5/min). Checkout is for an org that has no subscription; this
+  // is the only door for one that does, and the server enforces the split.
+  router.post(
+    "/api/billing/plan",
+    eeRequireAdmin(),
+    eeRateLimit(5, (c) => `plan:${c.get("orgId")}`),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const body = await parseJsonBody(c, planBodySchema);
+      if (!body.ok) {
+        return problemJson(
+          c,
+          body.malformed
+            ? invalidRequest("Request body must be valid JSON")
+            : invalidRequest("plan_id is required", "plan_id"),
+        );
+      }
+
+      try {
+        await changeSubscriptionPlan(orgId, body.data.plan_id);
+      } catch (err) {
+        return stripeCallFailure(c, err, { route: "plan", orgId, planId: body.data.plan_id });
+      }
+
+      // The account itself is written by the `customer.subscription.updated`
+      // webhook Stripe sends back, so this snapshot may still name the previous
+      // plan. It is returned anyway because everything else in it — status,
+      // period end, credits — is current, and the dashboard refetches.
+      const snapshot = await billingSnapshot(orgId);
+      if (!snapshot) return problemJson(c, noBillingAccount());
+      return c.json(snapshot);
     },
   );
 

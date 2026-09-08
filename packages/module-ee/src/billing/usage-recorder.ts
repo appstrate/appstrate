@@ -97,6 +97,13 @@ export interface SweepResult {
    * see {@link OrphanedOrgDebt}.
    */
   orphanedOrgs: number;
+  /**
+   * Rows this pass claimed that the platform could not price in full — billed on
+   * a floor (`partial`) or not charged at all (`unpriced` / `unknown`). Any
+   * non-zero value is money the deployment did not collect; see
+   * {@link PricingFaults}.
+   */
+  pricing: PricingFaults;
   /** Watermark value the pass started from. */
   cursorFrom: number;
   /**
@@ -130,6 +137,37 @@ export interface CursorSeedResult {
   seeded: boolean;
   /** The cursor's current watermark after the call. */
   lastLlmUsageId: number;
+  /**
+   * The cutover exclusion bound — the settled frontier the cursor was seeded at,
+   * written once and never moved. No ledger read ever goes below it.
+   */
+  floorId: number;
+}
+
+/**
+ * First id a ledger read may start from (exclusive `afterId`), for BOTH the
+ * periodic sweep and the org-deletion drain.
+ *
+ * ONE rule, one place. Two bounds meet here and they pull in opposite
+ * directions:
+ *
+ *   - the REPLAY WINDOW pulls the read BELOW the watermark, because a serial id
+ *     is taken at INSERT and published at COMMIT: a row can commit under an
+ *     already-advanced watermark and would otherwise be unreachable forever;
+ *   - the FLOOR stops it, because everything at or below the seeded frontier is
+ *     historical usage the cutover deliberately excluded. Without the floor the
+ *     first pass bills nothing and the SECOND one walks back under the seed and
+ *     bills the whole history — the exact failure the README's cutover paragraph
+ *     promises cannot happen.
+ *
+ * The drain shares it for the same reason it exists: a row of the deleted org
+ * that committed late, below the watermark, is one the sweep would have replayed
+ * — but the org and its ledger rows are about to cascade away, so the drain is
+ * the last reader that will ever see it.
+ */
+export function ledgerScanStart(cursor: { lastLlmUsageId: number; floorId: number }): number {
+  const replayWindow = getEeEnv().EE_RECONCILIATION_REPLAY_WINDOW;
+  return Math.max(cursor.floorId, cursor.lastLlmUsageId - replayWindow);
 }
 
 /**
@@ -162,26 +200,30 @@ export async function ensureCursorSeeded(
   services: PlatformServices,
   db: EeDb,
 ): Promise<CursorSeedResult> {
-  const [existing] = await db
-    .select({ lastLlmUsageId: billingCursor.lastLlmUsageId })
-    .from(billingCursor)
-    .where(eq(billingCursor.id, true));
-  if (existing) return { seeded: false, lastLlmUsageId: existing.lastLlmUsageId };
+  const columns = {
+    lastLlmUsageId: billingCursor.lastLlmUsageId,
+    floorId: billingCursor.floorId,
+  };
+  const [existing] = await db.select(columns).from(billingCursor).where(eq(billingCursor.id, true));
+  if (existing) return { seeded: false, ...existing };
 
   const frontierId = await services.usage.settledFrontier();
   await db
     .insert(billingCursor)
-    .values({ id: true, lastLlmUsageId: frontierId })
+    // `floorId` is the same frontier as the watermark and NEVER moves again: it
+    // is what keeps every later read — the replay window included — out of the
+    // usage this cutover excluded.
+    .values({ id: true, lastLlmUsageId: frontierId, floorId: frontierId })
     .onConflictDoNothing({ target: billingCursor.id });
-  logger.info("billing cursor initialized at cutover", { lastLlmUsageId: frontierId });
+  logger.info("billing cursor initialized at cutover", {
+    lastLlmUsageId: frontierId,
+    floorId: frontierId,
+  });
 
   // Re-read the authoritative watermark: under a concurrent seed race, a losing
   // `ON CONFLICT DO NOTHING` keeps the winner's value, which may differ.
-  const [row] = await db
-    .select({ lastLlmUsageId: billingCursor.lastLlmUsageId })
-    .from(billingCursor)
-    .where(eq(billingCursor.id, true));
-  return { seeded: true, lastLlmUsageId: row!.lastLlmUsageId };
+  const [row] = await db.select(columns).from(billingCursor).where(eq(billingCursor.id, true));
+  return { seeded: true, ...row! };
 }
 
 /** Per-account post-commit state, used to fire the quota-warning email. */
@@ -191,6 +233,88 @@ export interface AccountDebit {
   creditsUsed: number;
   creditQuota: number;
   planId: string;
+}
+
+/** The stamp written on a claim — see `ee_billed_llm_usage.pricing_status`. */
+export type ClaimPricingStatus = "priced" | "partial" | "unpriced" | "unknown";
+
+/**
+ * How much of a ledger row's `costUsd` the platform could actually price.
+ *
+ * `null`/absent means the row predates the field and MUST NOT be read as
+ * `priced` (core's `LlmUsageLedgerRow.pricingStatus` says so in as many words),
+ * so it maps to its own `unknown` stamp rather than being folded into either
+ * side.
+ */
+export function claimPricingStatus(row: LlmUsageLedgerRow): ClaimPricingStatus {
+  return row.pricingStatus ?? "unknown";
+}
+
+/**
+ * The non-`priced` rows a call claimed — a REVENUE FAULT, not a statistic.
+ *
+ *   - `partial`: billed, but `costUsd` is a floor (cached input carried no
+ *     rate), so the org was under-charged by an amount nobody can compute here;
+ *   - `unpriced`: the platform could not price the call at all. A `costUsd` of 0
+ *     alongside it means "unpriceable", NOT "free", so it is claimed for 0
+ *     credits — never settled as zero spend — and stamped so the claim table
+ *     still carries the fact;
+ *   - `unknown`: same treatment, different cause (the row predates the field).
+ *
+ * Reported once per pass by {@link reportPricingFaults}.
+ */
+export interface PricingFaults {
+  partial: number;
+  unpriced: number;
+  unknown: number;
+  /** Orgs the above rows belong to — who to reconcile with. */
+  orgIds: string[];
+}
+
+/** A fault tally with nothing in it. */
+export function noPricingFaults(): PricingFaults {
+  return { partial: 0, unpriced: 0, unknown: 0, orgIds: [] };
+}
+
+/** Tally the non-`priced` rows of one claimed slice. */
+function pricingFaultsOf(rows: LlmUsageLedgerRow[]): PricingFaults {
+  const faults = noPricingFaults();
+  const orgIds = new Set<string>();
+  for (const row of rows) {
+    const status = claimPricingStatus(row);
+    if (status === "priced") continue;
+    faults[status]++;
+    orgIds.add(row.orgId);
+  }
+  faults.orgIds = [...orgIds];
+  return faults;
+}
+
+/** Accumulate `from` into `to` — used by the multi-batch drain and sweep tick. */
+export function addPricingFaults(to: PricingFaults, from: PricingFaults): PricingFaults {
+  return {
+    partial: to.partial + from.partial,
+    unpriced: to.unpriced + from.unpriced,
+    unknown: to.unknown + from.unknown,
+    orgIds: [...new Set([...to.orgIds, ...from.orgIds])],
+  };
+}
+
+/**
+ * ONE `error` line per pass for every row that could not be billed at its true
+ * price. `error`, like {@link reportOrphanedOrg}: money is missing and only an
+ * operator can decide what an unpriceable call is worth. Silent otherwise, so
+ * the line means something when it appears.
+ */
+export function reportPricingFaults(faults: PricingFaults, source: string): void {
+  if (faults.partial === 0 && faults.unpriced === 0 && faults.unknown === 0) return;
+  logger.error("billed ledger rows the platform could not price in full — revenue under-charged", {
+    source,
+    partial: faults.partial,
+    unpriced: faults.unpriced,
+    unknown: faults.unknown,
+    orgIds: faults.orgIds,
+  });
 }
 
 /**
@@ -232,6 +356,8 @@ export interface BillOutcome {
   debits: AccountDebit[];
   /** Orgs with billable usage and no billing account — recorded, not debited. */
   orphans: OrphanedOrgDebt[];
+  /** Non-`priced` rows among the ones THIS call claimed. */
+  pricing: PricingFaults;
 }
 
 /**
@@ -243,7 +369,9 @@ export interface BillOutcome {
  * they select and whether they move the global watermark.
  *
  * Only SETTLED, platform-provided (`credentialSource === "system"`) rows are
- * billable — callers pass an already-filtered set.
+ * billable — callers pass an already-filtered set. Every one of them is CLAIMED;
+ * what its `pricingStatus` decides is whether it is also CHARGED (see
+ * {@link PricingFaults}).
  *
  * Rounding contract: credits are money, so nothing is dropped. For each
  * (org, context) bucket the call adds its won dollars to the context's
@@ -262,14 +390,23 @@ export async function billLedgerRows(
   billableRows: LlmUsageLedgerRow[],
 ): Promise<BillOutcome> {
   if (billableRows.length === 0) {
-    return { billed: 0, billedIds: [], alreadyBilled: 0, debits: [], orphans: [] };
+    return {
+      billed: 0,
+      billedIds: [],
+      alreadyBilled: 0,
+      debits: [],
+      orphans: [],
+      pricing: noPricingFaults(),
+    };
   }
 
   // Claim the billable rows. `ON CONFLICT (llm_usage_id) DO NOTHING` skips rows
   // an earlier pass already claimed; `RETURNING` yields exactly this call's slice.
+  // Each claim carries the row's pricing status, so the claim table records what
+  // the row was WORTH and not merely that it was seen.
   const won = await tx
     .insert(eeBilledLlmUsage)
-    .values(billableRows.map((r) => ({ llmUsageId: r.id })))
+    .values(billableRows.map((r) => ({ llmUsageId: r.id, pricingStatus: claimPricingStatus(r) })))
     .onConflictDoNothing()
     .returning({ llmUsageId: eeBilledLlmUsage.llmUsageId });
 
@@ -280,7 +417,22 @@ export async function billLedgerRows(
   const wonIds = new Set(billedIds);
   const wonRows = billableRows.filter((r) => wonIds.has(r.id));
 
-  // Aggregate the won slice's DOLLARS per bucket. A row with a usage context
+  // Faults are counted on the WON slice only: a row an earlier pass claimed was
+  // already reported then, and re-reporting it every replay tick would turn the
+  // signal into noise.
+  const pricing = pricingFaultsOf(wonRows);
+
+  // Rows whose dollars may be turned into credits. `unpriced` and `unknown` rows
+  // are claimed above (so they are never billed twice) but contribute NOTHING:
+  // their `costUsd` of 0 means "could not price", and settling that as zero spend
+  // is the one thing the ledger contract forbids. `partial` IS billed — its
+  // amount is a real floor, and under-charging beats not charging — and counted.
+  const pricedRows = wonRows.filter((r) => {
+    const status = claimPricingStatus(r);
+    return status === "priced" || status === "partial";
+  });
+
+  // Aggregate the priced slice's DOLLARS per bucket. A row with a usage context
   // (run / chat) joins its context bucket. A null-context row joins one durable
   // per-org `unattributed` bucket instead of being converted directly per pass:
   // this carries sub-credit fractions across sweeps.
@@ -288,7 +440,7 @@ export async function billLedgerRows(
     string,
     { orgId: string; contextType: string; contextId: string; dollars: number }
   >();
-  for (const r of wonRows) {
+  for (const r of pricedRows) {
     const contextType =
       r.contextType !== null && r.contextId !== null ? r.contextType : "unattributed";
     const contextId = r.contextType !== null && r.contextId !== null ? r.contextId : r.orgId;
@@ -396,7 +548,7 @@ export async function billLedgerRows(
     debits.push({ orgId, deltaCredits, ...account });
   }
 
-  return { billed, billedIds, alreadyBilled, debits, orphans };
+  return { billed, billedIds, alreadyBilled, debits, orphans, pricing };
 }
 
 /**
@@ -417,6 +569,7 @@ function noProgress(args: {
     replayed: args.replayed ?? 0,
     replayBilled: 0,
     orphanedOrgs: 0,
+    pricing: noPricingFaults(),
     cursorFrom: args.cursorFrom,
     cursorTo: args.cursorTo,
     stalledOnId: args.stalledOnId ?? null,
@@ -467,13 +620,16 @@ function noProgress(args: {
  * still absent it seeds it here (safety net) and bills nothing. Seeding at a
  * plain `MAX(id)` would strand any in-flight runner row that already holds a low
  * id; the settled frontier stops before the first unsettled row so none is lost.
+ * The same frontier is written to `floor_id`, which is what makes "never
+ * revisited" hold on the SECOND pass: the replay window reads below the
+ * watermark, and without a floor it walks straight back under the seed.
  *
  * Rows already claimed (billed by the previous model) are never re-billed — the
  * claim table dedupes. The first sweep starts at the settled frontier, so
  * settled-but-unclaimed rows ABOVE it (the recent window since the oldest
  * in-flight run began) ARE billed on the first pass — deliberate, so an
- * in-flight run's revenue is not stranded; rows below the frontier are never
- * revisited.
+ * in-flight run's revenue is not stranded; rows at or below the floor are never
+ * revisited by any pass.
  */
 export async function sweepLedgerBatch(
   batchSize: number,
@@ -491,7 +647,8 @@ export async function sweepLedgerBatch(
     // Cutover: the watermark was just placed at the settled frontier and this
     // pass bills nothing. No replay either — everything below a freshly seeded
     // frontier is deliberately out of scope (see the cutover note above), and
-    // reading it would only re-confirm that.
+    // `floor_id` was written at the same value, so no LATER pass can reach it
+    // through the replay window either.
     return noProgress({ cursorFrom: 0, cursorTo: seed.lastLlmUsageId });
   }
 
@@ -514,9 +671,13 @@ export async function sweepLedgerBatch(
   //    The window is a READ offset ONLY. `scanFromId` never becomes the
   //    watermark; the committed advance stays `GREATEST`-guarded below, so the
   //    watermark is still strictly monotonic.
-  const replayWindow = getEeEnv().EE_RECONCILIATION_REPLAY_WINDOW;
-  const scanFromId = Math.max(0, fromId - replayWindow); // clamped: a fresh cursor cannot underflow
-  const replaySpan = fromId - scanFromId; // == min(replayWindow, fromId)
+  //    The window is bounded BELOW by the cutover floor, through the one rule the
+  //    drain shares ({@link ledgerScanStart}): everything at or under the seeded
+  //    frontier is historical usage this deployment deliberately never bills, and
+  //    a plain `fromId − replayWindow` walks straight back into it on the second
+  //    pass.
+  const scanFromId = ledgerScanStart(seed);
+  const replaySpan = fromId - scanFromId;
 
   //    Read the replay span ON TOP of the batch, never out of it: at most
   //    `replaySpan` returned rows can have `id <= fromId`, so the FORWARD slice
@@ -625,6 +786,7 @@ export async function sweepLedgerBatch(
   // and the loud report for orgs that could not be debited.
   for (const debit of outcome.debits) emitQuotaSignals(debit);
   for (const orphan of outcome.orphans) reportOrphanedOrg(orphan);
+  reportPricingFaults(outcome.pricing, "billing sweep");
 
   // Split the claim outcome around the watermark. Both halves come from the ONE
   // claim statement above, so the two counters can never disagree with what was
@@ -646,6 +808,7 @@ export async function sweepLedgerBatch(
     replayed,
     replayBilled: outcome.billed - wonAbove,
     orphanedOrgs: outcome.orphans.length,
+    pricing: outcome.pricing,
     cursorFrom: fromId,
     // The watermark is monotonic, so report what was actually committed, not the
     // frontier end — they differ when the frontier stopped inside the replay

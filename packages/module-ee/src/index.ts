@@ -18,7 +18,12 @@ import {
 import { ensureCursorSeeded } from "./billing/usage-recorder.ts";
 import { getEeDb } from "./db.ts";
 import { onOrgCreate, onOrgDelete } from "./onboarding/post-signup.ts";
-import { checkoutBodySchema, createBillingRoutes, managersBodySchema } from "./routes/billing.ts";
+import {
+  checkoutBodySchema,
+  createBillingRoutes,
+  managersBodySchema,
+  planBodySchema,
+} from "./routes/billing.ts";
 import { openApiPaths, openApiTags, openApiComponentSchemas } from "./openapi.ts";
 import { renderEeVerificationEmail } from "./emails/templates/verification.ts";
 import { renderEeInvitationEmail } from "./emails/templates/invitation.ts";
@@ -171,6 +176,12 @@ const eeModule: AppstrateModule = {
         path: "/api/billing/checkout",
         jsonSchema: z.toJSONSchema(checkoutBodySchema) as Record<string, unknown>,
         description: "Create a Stripe Checkout session",
+      },
+      {
+        method: "POST",
+        path: "/api/billing/plan",
+        jsonSchema: z.toJSONSchema(planBodySchema) as Record<string, unknown>,
+        description: "Change the plan of the existing subscription",
       },
       {
         method: "PUT",

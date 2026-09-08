@@ -25,6 +25,12 @@
  *     and finds them already claimed (`ee_billed_llm_usage` is the arbiter),
  *     so it is a no-op for them. Nothing is rewound, and the drain can bill an
  *     org sitting behind another tenant's head-of-line stall.
+ *   - It starts where the SWEEP starts, from the one shared `ledgerScanStart`:
+ *     below the watermark by the replay window, never below the cutover floor.
+ *     Starting strictly at the watermark loses exactly the rows the replay window
+ *     exists for — a row of this org that committed late under an advanced
+ *     watermark — and here that loss is final, because the org's ledger rows
+ *     cascade away moments later and no sweep will ever replay them.
  *   - Bounded: at most {@link MAX_DRAIN_BATCHES} reads of the configured batch
  *     size, and the scan is narrowed server-side to `credentialSource: "system"`
  *     (the only billable rows). A truncated drain is reported at `warn`.
@@ -34,7 +40,16 @@ import { getEeDb } from "../db.ts";
 import { getPlatformServices } from "../platform.ts";
 import { getEeEnv } from "../env.ts";
 import { logger } from "../logger.ts";
-import { billLedgerRows, ensureCursorSeeded, reportOrphanedOrg } from "./usage-recorder.ts";
+import {
+  addPricingFaults,
+  billLedgerRows,
+  ensureCursorSeeded,
+  ledgerScanStart,
+  noPricingFaults,
+  reportOrphanedOrg,
+  reportPricingFaults,
+  type PricingFaults,
+} from "./usage-recorder.ts";
 
 /**
  * Max ledger reads per drain. With the default batch size (100) that scans
@@ -60,6 +75,8 @@ export interface OrgDrainResult {
   unsettled: number;
   /** True when the drain hit {@link MAX_DRAIN_BATCHES} and stopped early. */
   truncated: boolean;
+  /** Rows the drain claimed that the platform could not price in full. */
+  pricing: PricingFaults;
 }
 
 /**
@@ -71,9 +88,10 @@ export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
   const db = getEeDb();
   const batchSize = getEeEnv().EE_RECONCILIATION_BATCH_SIZE;
 
-  // Start at the global watermark: everything below it has already been through
-  // a sweep pass (claimed if billable, deliberately skipped otherwise).
-  const { lastLlmUsageId } = await ensureCursorSeeded(services, db);
+  // Same selection policy as the sweep — replay window below the watermark,
+  // clamped at the cutover floor. Re-read rows an earlier pass already claimed
+  // cost nothing: the claim table, not the cursor, arbitrates what was billed.
+  const cursor = await ensureCursorSeeded(services, db);
 
   const result: OrgDrainResult = {
     scanned: 0,
@@ -82,9 +100,10 @@ export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
     credits: 0,
     unsettled: 0,
     truncated: false,
+    pricing: noPricingFaults(),
   };
 
-  let afterId = lastLlmUsageId;
+  let afterId = ledgerScanStart(cursor);
   for (let batch = 0; ; batch++) {
     if (batch >= MAX_DRAIN_BATCHES) {
       result.truncated = true;
@@ -109,12 +128,16 @@ export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
       const outcome = await db.transaction((tx) => billLedgerRows(tx, billable));
       result.billed += outcome.billed;
       result.alreadyBilled += outcome.alreadyBilled;
+      result.pricing = addPricingFaults(result.pricing, outcome.pricing);
       for (const debit of outcome.debits) result.credits += debit.deltaCredits;
       for (const orphan of outcome.orphans) reportOrphanedOrg(orphan);
     }
 
     if (rows.length < batchSize) break;
   }
+
+  // One line for the whole drain, not one per batch.
+  reportPricingFaults(result.pricing, `org drain ${orgId}`);
 
   return result;
 }

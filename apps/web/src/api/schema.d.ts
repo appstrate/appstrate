@@ -535,7 +535,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke (soft-delete) an API key. The key will immediately stop working.
+         * @description Revoke (soft-delete) an API key. The key will immediately stop working. `api-keys:revoke` is required in the KEY's own space, not in the space the request carries; a key whose space the caller cannot reach answers 404.
          */
         delete: operations["revokeApiKey"];
         options?: never;
@@ -959,6 +959,26 @@ export interface paths {
          */
         put: operations["replaceEeBillingManagers"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the plan of the existing subscription
+         * @description Moves the organization's EXISTING Stripe subscription onto another plan, in place, with proration — the door for an org that already subscribes, where `POST /api/billing/checkout` would create a second subscription and bill it twice. Admin-only (`billing:manage`). Rate-limited to 5/min per org. Returns the billing snapshot; the new plan itself is applied when Stripe's `customer.subscription.updated` arrives, so the returned `plan` may still name the previous one.
+         */
+        post: operations["changeEeBillingPlan"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1573,7 +1593,7 @@ export interface paths {
         get?: never;
         /**
          * Set the default OAuth client for an integration auth
-         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Admin only.
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["setDefaultIntegrationClient"];
         post?: never;
@@ -1594,7 +1614,7 @@ export interface paths {
         put?: never;
         /**
          * Register a custom OAuth client for an integration auth
-         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Admin only.
+         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.
          */
         post: operations["createIntegrationOAuthClient"];
         delete?: never;
@@ -1712,13 +1732,13 @@ export interface paths {
         get?: never;
         /**
          * Rotate a custom OAuth client's credentials
-         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Admin only.
+         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["rotateIntegrationOAuthClient"];
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Admin only.
+         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
@@ -8840,6 +8860,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description The organization already has a subscription (`subscription_exists`) — change its plan with `POST /api/billing/plan` instead of starting a second one. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
             429: {
                 headers: {
@@ -9030,6 +9059,89 @@ export interface operations {
             };
             /** @description Caller lacks `billing:manage` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    changeEeBillingPlan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                };
+            };
+        };
+        responses: {
+            /** @description Billing snapshot after the change was sent to Stripe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingAccount"];
+                };
+            };
+            /** @description Validation error or invalid Stripe plan configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The organization has no subscription to change (`no_active_subscription`) — start a checkout instead. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

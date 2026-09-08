@@ -4,9 +4,20 @@ import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { and, eq, isNull } from "drizzle-orm";
-import { getPlans, isPlanId } from "../config.ts";
+import { getPlans, isPlanId, LIVE_SUBSCRIPTION_STATUSES } from "../config.ts";
 import { resolvePrimaryBillingEmail } from "../billing/contact.ts";
+import { subscriptionExists } from "../http-errors.ts";
 
+/**
+ * Start a Stripe Checkout for an org that has NO subscription.
+ *
+ * Refuses an org that already has one. Checkout only ever CREATES: it never
+ * reads `stripe_subscription_id`, so an upgrade taken through this door left the
+ * first subscription running and charged the customer for both. The refusal is
+ * here rather than in the dashboard because the dashboard's buttons are not what
+ * protects a customer from a double charge — changing an existing subscription
+ * is `changeSubscriptionPlan`.
+ */
 export async function createCheckoutSession(
   orgId: string,
   planId: string,
@@ -21,12 +32,22 @@ export async function createCheckoutSession(
   const [account] = await db
     .select({
       stripeCustomerId: billingAccounts.stripeCustomerId,
+      stripeSubscriptionId: billingAccounts.stripeSubscriptionId,
+      subscriptionStatus: billingAccounts.subscriptionStatus,
       billingEmail: billingAccounts.billingEmail,
     })
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
 
   if (!account) throw new Error(`No billing account for org: ${orgId}`);
+
+  if (
+    account.stripeSubscriptionId !== null &&
+    account.subscriptionStatus !== null &&
+    LIVE_SUBSCRIPTION_STATUSES.has(account.subscriptionStatus)
+  ) {
+    throw subscriptionExists();
+  }
 
   // Get or create Stripe customer (conditional update prevents race condition)
   let customerId = account.stripeCustomerId;
