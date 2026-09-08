@@ -698,8 +698,9 @@ export default tseslint.config(
   {
     // Type-aware guard (web only): flag `x as T` assertions that don't change
     // the type — these are pure noise that also hide where a value's real type
-    // silently drifted from what the cast claims. Scoped to the SPA so the
-    // type-checked program stays cheap. Only this one type-aware rule is on.
+    // silently drifted from what the cast claims. This rule is web-only because
+    // it is a cast-hygiene rule and the SPA is where the casts are; the backend
+    // gets a different set of type-aware rules in the block below.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {
@@ -709,6 +710,96 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/no-unnecessary-type-assertion": "error",
+    },
+  },
+  {
+    // Type-aware async correctness (backend). Three rules, and each one names a
+    // failure this codebase can actually have:
+    //
+    //  - `no-floating-promises`  an un-awaited promise in a run orchestrator is
+    //    a run reported finished before its work is done, and a rejection that
+    //    reaches the process as an unhandled rejection rather than a log line.
+    //  - `no-misused-promises`   an `async` function handed to something that
+    //    expects a void return (Hono middleware, a Redis/BullMQ listener, an
+    //    event handler) has its rejection dropped on the floor by the caller.
+    //  - `await-thenable`        an `await` on a non-promise is almost always a
+    //    missing call or a type that changed under the caller.
+    //
+    // Nothing else in the repo covers this: `bun test` executes tests without
+    // typechecking them, and `tsc` does not model promise handling. The first
+    // run found 18 violations in product code — 14 under `apps/api/src`, 4
+    // under `packages/*/src` — and four were defects rather than style:
+    // `findAvailablePort` returned a port whose probe server was still bound
+    // (the EADDRINUSE-at-sidecar-boot it exists to prevent); `writer.write()`
+    // was un-awaited in core's streaming upload, dropping both backpressure and
+    // the rollback path; core's MCP bun-probe guarded an async pipe write with
+    // a sync `try`; and the local queue's own catch block could take the
+    // process down with an unhandled rejection.
+    //
+    // ─── Scope, and what it costs ────────────────────────────────────────
+    //
+    // `bun scripts/lint.ts`, wall clock, this machine, 2026-09-08. The three
+    // scopes first, cold (`.eslintcache` deleted before every run), 3 runs each:
+    //
+    //                                       cold                    warm
+    //   no type-aware backend rules   23.5 / 23.5 / 24.2 s         ~2.1 s
+    //   + apps/api/src                35.2 / 38.5 / 41.1 s         ~2.1 s
+    //   + packages/*/src (this block) 51.9 / 54.5 / 54.8 s         ~2.1 s
+    //
+    // then re-measured PAIRED — one baseline-config run and one this-config run
+    // back to back, both cold. That is the only comparison that survives a
+    // machine whose background load moved between the table above and these:
+    //
+    //   pair 1   28.7 s  ->  69.2 s
+    //   pair 2   25.4 s  ->  59.0 s
+    //
+    // So: a cold lint costs about 2.3x, +30 to +40 s, and a warm one is
+    // unchanged — `--cache --cache-strategy content` rebuilds the type program
+    // only for the files that actually changed. Cold is CI and a fresh clone;
+    // the pre-push path is warm, and CI's `check` job budget is
+    // `timeout-minutes: 10`.
+    //
+    // `packages/*/src` is in scope rather than `apps/api/src` alone because the
+    // second half of that cost bought four more findings, two of them
+    // unhandled-rejection paths in `@appstrate/core` — which is PUBLISHED, so a
+    // dropped rejection there ships to every consumer. `packages/*/src` is a
+    // discovered superset (a new package is covered the day it lands), not a
+    // roster of the packages that happened to look async today.
+    //
+    // ─── Why test code is excluded ───────────────────────────────────────
+    //
+    // Not a cost decision — `await-thenable` is UNSOUND over `bun:test`.
+    // `bun-types/test.d.ts` declares `rejects: Matchers<unknown>` (line 929)
+    // whose matchers return `void` (`toThrow(expected?: unknown): void`, line
+    // 1415), while at runtime `expect(p).rejects.toThrow()` returns a promise
+    // that MUST be awaited or the assertion floats and the test passes
+    // regardless. Measured 2026-09-08 with the test trees in scope: 77
+    // `await-thenable` hits, 75 of them exactly that shape — every one a
+    // correct `await` the rule would have had us delete.
+    //
+    // The other two rules could run over tests, and were left off: the whole
+    // population there was six `server.stop(true)` / cache-invalidation calls
+    // in `afterAll` teardown, which is not worth a second block whose only
+    // difference is which of the three rules it carries.
+    //
+    // `**/test/**` is the repo's test glob (see the two blocks above);
+    // `**/*.test.ts` catches the one test file that does not live under one —
+    // `packages/core/src/model-generation.test.ts`.
+    //
+    // If this ever needs to get cheaper, narrow `files` before dropping a rule:
+    // the cost is the type program, not the rule count.
+    files: ["apps/api/src/**/*.ts", "packages/*/src/**/*.ts"],
+    ignores: ["**/test/**", "**/*.test.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/await-thenable": "error",
     },
   },
   eslintConfigPrettier,

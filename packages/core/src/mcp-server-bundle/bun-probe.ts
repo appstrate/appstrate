@@ -147,8 +147,13 @@ async function runProbe(
 
   const writeLine = (obj: unknown): void => {
     try {
-      proc.stdin.write(JSON.stringify(obj) + "\n");
-      proc.stdin.flush();
+      // `FileSink.write`/`flush` return `number | Promise<number>`: a write the
+      // pipe cannot take yet settles LATER, so a broken pipe reported that way
+      // never reaches the sync `catch` below — it would surface as an unhandled
+      // rejection instead of the ignored failure this block intends. Handle
+      // both paths identically; the stdout-scan/exit path is what reports it.
+      void Promise.resolve(proc.stdin.write(JSON.stringify(obj) + "\n")).catch(() => {});
+      void Promise.resolve(proc.stdin.flush()).catch(() => {});
     } catch {
       // Broken pipe — the stdout-scan/exit path surfaces the failure.
     }

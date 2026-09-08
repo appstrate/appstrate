@@ -148,7 +148,7 @@ async function getLimiter(category: string, points: number): Promise<RateLimiter
   let limiter = limiterCache.get(cacheKey);
   if (!limiter) {
     const factory = await getRateLimiterFactory();
-    limiter = await factory.create(points, 60, `rl:oidc:${category}:`);
+    limiter = factory.create(points, 60, `rl:oidc:${category}:`);
     limiterCache.set(cacheKey, limiter);
   }
   return limiter;
@@ -158,7 +158,7 @@ let loginEmailLimiter: RateLimiterAbstract | null = null;
 async function getLoginEmailLimiter(): Promise<RateLimiterAbstract> {
   if (!loginEmailLimiter) {
     const factory = await getRateLimiterFactory();
-    loginEmailLimiter = await factory.create(
+    loginEmailLimiter = factory.create(
       LOGIN_EMAIL_POINTS,
       LOGIN_EMAIL_DURATION_SEC,
       "rl:oidc:login-email:",

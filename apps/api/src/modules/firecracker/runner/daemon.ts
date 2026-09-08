@@ -228,7 +228,13 @@ async function shutdown(signal: string): Promise<void> {
   logger.info("appstrate-runner shutting down", { signal });
   // Stop accepting new requests first, then tear down VMs — the reverse
   // order would let the platform start a run into a dying daemon.
-  server.stop();
+  //
+  // `void`, not `await`: `stop()` closes the listener synchronously (which is
+  // the ordering this comment is about) and its promise only settles once
+  // in-flight connections drain. This daemon serves with `idleTimeout: 0`, so
+  // awaiting it would let one open connection hold shutdown open forever and
+  // never reach the `process.exit(0)` below.
+  void server.stop();
   // Best-effort socket cleanup — a leftover node would force the NEXT
   // boot through the stale-socket removal path anyway, but tidying here
   // keeps `ls` honest. Type-guarded + never throws (shutdown must reach

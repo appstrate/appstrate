@@ -434,7 +434,7 @@ try {
   await dumpConsole(boundary.id, "vm1 exception");
   throw err;
 } finally {
-  platformStub.stop(true);
+  await platformStub.stop(true);
   await orch.removeIsolationBoundary(boundary).catch(() => {});
   await orch.shutdown().catch(() => {});
 }
