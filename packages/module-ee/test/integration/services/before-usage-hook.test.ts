@@ -19,7 +19,6 @@ import { getEeDb, truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
 import eeModule from "../../../src/index.ts";
-import { ApiError } from "@appstrate/core/api-errors";
 import {
   ESTIMATED_MODEL_CREDITS_PER_RUN,
   ESTIMATED_MODEL_CREDITS_PER_CHAT_TURN,
@@ -403,91 +402,6 @@ describe("beforeUsage hook", () => {
       expect(result).not.toBeNull();
       expect(result!.code).toBe("subscription_blocked");
       expect(result!.status).toBe(402);
-    });
-  });
-
-  describe("execution-fact refusal — a platform below the declared @appstrate/core floor", () => {
-    /**
-     * The wire shape such a platform produces: the facts absent entirely. Cast
-     * because they are declared required, and pinning a REFUSAL is the one thing
-     * that cast is still for — nothing in this module adapts the shape any more.
-     */
-    function unrecognized(overrides: Record<string, unknown> = {}) {
-      return {
-        orgId,
-        context: "run",
-        packageId: "@x/agent",
-        runningCount: 1,
-        ...overrides,
-      } as unknown as Parameters<typeof beforeUsage>[0];
-    }
-
-    /** Await `promise`, returning its rejection. Fails if it resolved. */
-    async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
-      try {
-        await promise;
-      } catch (err) {
-        return err;
-      }
-      throw new Error("expected a refusal, got a resolution");
-    }
-
-    it("throws instead of admitting, even for an org with credits to spare", async () => {
-      // The case that matters. This org clears every gate, so a hook that quoted
-      // substituted facts returns null here and meters nothing — and a hook that
-      // quoted the worst case returns null here too, while billing every other
-      // org at worst-case rates. Only a throw makes the mismatch visible.
-      await seedBillingAccount({
-        orgId,
-        subscriptionStatus: "active",
-        creditsUsed: 0,
-        creditQuota: 5000,
-      });
-      const err = await rejectionOf(beforeUsage(unrecognized()));
-      expect(err).toBeInstanceOf(ApiError);
-      expect((err as ApiError).code).toBe("platform_version_unsupported");
-    });
-
-    it("throws an ApiError, which is what makes the refusal visible on every seam", async () => {
-      // A bare `Error` is caught by all three seams and degraded: the scheduler
-      // logs one line and lets the BullMQ job COMPLETE (no failed run row, no
-      // `onRunStatusChange`, `nextRunAt` re-armed — a schedule that looks healthy
-      // while doing nothing), and `/api/llm-proxy` renders it as a retryable 500
-      // the Pi SDK storms. The status therefore has to be a terminal 4xx.
-      const err = (await rejectionOf(beforeUsage(unrecognized()))) as ApiError;
-      expect(err.status).toBe(409);
-      expect(err.status).not.toBe(429);
-      expect(err.status).toBeLessThan(500);
-    });
-
-    it("throws on values outside the documented unions, not only on missing ones", async () => {
-      const err = await rejectionOf(
-        beforeUsage(unrecognized({ credentialSource: "bogus", executionPlane: "bogus" })),
-      );
-      expect((err as ApiError).code).toBe("platform_version_unsupported");
-    });
-
-    it("refuses a chat turn the same way", async () => {
-      const err = await rejectionOf(
-        beforeUsage({
-          orgId,
-          context: "chat",
-          sessionId: "sess-skew",
-        } as unknown as Parameters<typeof beforeUsage>[0]),
-      );
-      expect(err).toBeInstanceOf(ApiError);
-      expect((err as ApiError).code).toBe("platform_version_unsupported");
-    });
-
-    it("refuses a skewed admission that the self-funded short-circuit would otherwise wave through", async () => {
-      // Why the guard sits ABOVE the short-circuit and cannot move below it:
-      // `undefined !== "system" && undefined !== "platform"` is true, so the
-      // short-circuit itself reads the facts under suspicion and would return
-      // `null` — admitting a possibly platform-funded operation, unmetered,
-      // before any assertion placed after it could run.
-      await expect(
-        beforeUsage(unrecognized({ packageId: "@x/agent", runningCount: 4 })),
-      ).rejects.toBeInstanceOf(ApiError);
     });
   });
 

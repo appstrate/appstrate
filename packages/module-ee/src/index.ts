@@ -7,7 +7,7 @@ import { describeEnvIssues, getEeEnv } from "./env.ts";
 import { getAppUrl, setAppUrl, setPlatformServices } from "./platform.ts";
 import { setOrgQueries, type EeInitContext } from "./platform-org-queries.ts";
 import { checkQuota, QuotaExceededError } from "./billing/quota-check.ts";
-import { quoteUsage, assertExecutionFacts } from "./billing/usage-quote.ts";
+import { quoteUsage } from "./billing/usage-quote.ts";
 import { logger } from "./logger.ts";
 import { DEFAULT_QUOTE_RATES } from "./config.ts";
 import {
@@ -34,7 +34,6 @@ import { resolveBillingRecipients } from "./emails/recipients.ts";
 import { BILLING_MANAGER_PERMISSIONS, isBillingManager } from "./billing/managers.ts";
 import { billingContactPatchSchema } from "./billing/contact.ts";
 import { z } from "zod";
-import { sql } from "drizzle-orm";
 
 // Register `billing` as a module-owned RBAC resource. The declaration
 // merging on `ModuleResources` feeds the typed `Resource` union consumed
@@ -112,18 +111,6 @@ const eeModule: AppstrateModule = {
     // ROWS are still read through `ctx.services`, not through this pool.
     initEeDb(databaseUrl);
     await migrateEeDb(databaseUrl);
-
-    // An empty accounts table is the one signal that separates a fresh install
-    // from a deployment whose billing rows were left behind in the database the
-    // module used to run on. Reads only this module's own table.
-    const [row] = await getEeDb().execute<{ accounts: number }>(
-      sql`SELECT count(*)::int AS accounts FROM ee_billing_accounts`,
-    );
-    if (row?.accounts === 0) {
-      logger.warn(
-        "no billing account exists — a fresh install, or an existing deployment whose billing tables were not copied (scripts/migration/0010)",
-      );
-    }
 
     if (ctx.redisUrl) {
       initEeRedis(ctx.redisUrl);
@@ -253,35 +240,6 @@ const eeModule: AppstrateModule = {
     // hard-coded "BYOK ⇒ free", which stops being true the moment platform
     // compute is billed.
     beforeUsage: async (params: BeforeUsageParams): Promise<UsageRejection | null> => {
-      // VERSION-SKEW GUARD — must precede the short-circuit.
-      //
-      // The execution facts are typed as required, but they are filled at
-      // runtime by a SEPARATELY DEPLOYED platform, and every layer below fails
-      // OPEN without them: `undefined !== "system" && undefined !== "platform"`
-      // satisfies the short-circuit, and even past it the quote would score both
-      // components 0 and the balance check would admit. So the shape is checked
-      // rather than trusted — and an unrecognized one is REFUSED, never adapted
-      // to (`assertExecutionFacts` throws an `ApiError`; `src/http-errors.ts`
-      // argues which one and what each admission seam does with it).
-      //
-      // "Below the short-circuit" is not an available position, and that is
-      // worth stating because the ordering reads like an over-reach: it looks as
-      // though a fully self-funded remote BYOK run — one this module lets
-      // through without touching the billing DB — is refused on facts it does
-      // not need in order to be billed. It is not. The short-circuit is ITSELF a
-      // read of the two facts under suspicion, so a skewed admission satisfies
-      // it and returns `null` before any assertion placed after it could run.
-      // Moving the guard down would not narrow it to platform-funded
-      // operations — it would disable it for all of them. Nor can the refusal
-      // fire on a genuinely self-funded operation: recognizing one AS
-      // self-funded takes facts this module knows, and facts it knows pass.
-      //
-      // Deliberately OUTSIDE the try below: that catch reports an unexpected
-      // failure as a 500 "temporarily unavailable", which is true of a DB blip
-      // and false of a version mismatch. A permanent misconfiguration reported
-      // as transient is the silent degrade this guard exists to remove.
-      assertExecutionFacts(params);
-
       // Self-funded short-circuit: the org supplies both the credential and the
       // host (a remote BYOK run), so the platform funds nothing and there is
       // nothing to gate. Returning here BEFORE the quote keeps the billing DB

@@ -178,9 +178,11 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   `CLOUD_RECONCILIATION_*` keys `EE_RECONCILIATION_*` or they silently revert to
   the defaults (`300`, `200`, `100`); the four `STRIPE_*` keys are unchanged.
   `EE_DATABASE_URL` never existed in a release — do not set it, nothing reads
-  it. Deploy, then check the boot log for `Module loaded` with `"id":"ee"`,
-  `billing sweeper started` and NO `no billing account exists` warning, and
-  `select count(*) from drizzle.ee_migrations` on the platform database. Keep
+  it. The cutover is verified by the script's own per-table count table, which
+  must read source = target on every row. Deploy, then check the boot log for
+  `Module loaded` with `"id":"ee"` and `billing sweeper started`, and that
+  `select count(*) from drizzle.ee_migrations` on the platform database counts
+  every file in `packages/module-ee/drizzle/migrations` (7 today). Keep
   the old database read-only (`REVOKE`) for a week, then `DROP DATABASE`; until
   that drop the rollback is the previous image with `CLOUD_DATABASE_URL`
   restored, losing only writes made on the platform copy after the cutover.

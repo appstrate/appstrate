@@ -166,22 +166,6 @@ _appstrate_bootstrap() {
     return 1
   }
 
-  # ─── Retired env vars ───────────────────────────────────────────────────────
-  #
-  # APPSTRATE_AUTO_INSTALL=1 selected unattended mode; `--yes` says the same
-  # thing. Ignoring it silently would flip an Ansible / cloud-init run that
-  # still sets it into the two-step path — binary dropped, nothing installed,
-  # exit 0. Fail here instead, before the first download. An explicitly
-  # blanked value carries no intent, so it is a no-op (same rule as
-  # `RETIRED_ENV_RENAMES` in `@appstrate/env`).
-  if [ -n "${APPSTRATE_AUTO_INSTALL:-}" ]; then
-    err "APPSTRATE_AUTO_INSTALL is retired and is no longer read."
-    err "  Pass --yes instead:"
-    err "    curl -fsSL https://get.appstrate.dev | bash -s -- --yes"
-    err "  CI=true|1|yes and a non-TTY stdout also select unattended mode."
-    exit 1
-  fi
-
   have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
   have_shasum() { command -v shasum >/dev/null 2>&1; }
   have_minisign() { command -v minisign >/dev/null 2>&1; }

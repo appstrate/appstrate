@@ -279,9 +279,6 @@ beforeUsage(params)                              // returns rejection or null
           timeoutSeconds: number|null }          // effective, post-ceiling
   chat: { orgId, context:"chat", sessionId, credentialSource, executionPlane:"platform" }
 
-  → VERSION-SKEW GUARD (first, before everything): facts absent or out-of-union
-      → log at error level and rewrite to the WORST case (system credential +
-        platform compute). Never short-circuit and never quote on unusable facts
   → SELF-FUNDED SHORT-CIRCUIT: credentialSource !== "system" && executionPlane
       !== "platform" (a remote BYOK run) → return null BEFORE any billing DB
       read — such an org may legitimately have no billing account at all
