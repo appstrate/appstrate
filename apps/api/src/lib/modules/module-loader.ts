@@ -594,23 +594,22 @@ function validateContribution(
  * Presets are nested (`viewer ⊂ operator ⊂ builder ⊂ admin`), so `presets` must
  * be upward-closed: `builder` without `admin` would give a space admin LESS than
  * a builder. Boot error, not a warning: the wrong answer is a 403 nobody looks for.
+ *
+ * The nesting order is `SPACE_ROLE_PRESETS` itself, read strongest-first — core
+ * says so at the declaration and `test/unit/lib/space-preset-nesting.test.ts`
+ * checks it against the preset → permission matrix. A local copy of the tuple
+ * was the same four strings with the ordering implicit in both places, so a
+ * reorder in core changed which contributions boot and nothing said a word.
  */
-const PRESETS_STRONGEST_FIRST: readonly SpaceRolePreset[] = [
-  "admin",
-  "builder",
-  "operator",
-  "viewer",
-];
-
 function assertPresetsUpwardClosed(
   presets: readonly SpaceRolePreset[],
   moduleId: string,
   resource: string,
 ): void {
   const declared = new Set<SpaceRolePreset>(presets);
-  const weakest = PRESETS_STRONGEST_FIRST.findLast((preset) => declared.has(preset));
+  const weakest = SPACE_ROLE_PRESETS.findLast((preset) => declared.has(preset));
   if (weakest === undefined) return;
-  const missing = PRESETS_STRONGEST_FIRST.slice(0, PRESETS_STRONGEST_FIRST.indexOf(weakest)).filter(
+  const missing = SPACE_ROLE_PRESETS.slice(0, SPACE_ROLE_PRESETS.indexOf(weakest)).filter(
     (preset) => !declared.has(preset),
   );
   if (missing.length === 0) return;

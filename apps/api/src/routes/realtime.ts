@@ -13,14 +13,15 @@ import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { effectivePermissions } from "../lib/permissions.ts";
-import {
-  loadSpaceMember,
-  resolveSpaceRole,
-  spacePermissions,
-  type SpaceMemberRow,
-} from "../lib/space-role.ts";
+import { loadSpaceMember, resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
 import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
-import { orgHalfFor, personaFor, personaSpaceMember, validateViewAs } from "../lib/view-as.ts";
+import {
+  effectiveInSpace,
+  orgHalfFor,
+  personaFor,
+  personaSpaceMember,
+  validateViewAs,
+} from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
 import {
   reportPermissionDenial,
@@ -120,10 +121,11 @@ async function resolveSpaceGrants(
 ): Promise<ReadonlySet<string> | null> {
   const ref = resolveSpaceRole(personaFor(c, orgId)?.orgRole ?? realRole, space, memberRow);
   if (!ref) return null;
-  return new Set<string>([
-    ...orgHalfFor(c, orgId, realRole, await principalGrants(c, orgId)).orgPermissions,
-    ...spacePermissions(ref),
-  ]);
+  return effectiveInSpace(
+    c,
+    ref,
+    orgHalfFor(c, orgId, realRole, await principalGrants(c, orgId)).orgPermissions,
+  );
 }
 
 /**

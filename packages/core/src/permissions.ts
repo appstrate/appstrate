@@ -288,6 +288,13 @@ export type OrgRole = (typeof ORG_ROLES)[number];
  * Space-role presets (RBAC spec §3.3). Constants, not rows. In core so modules can name
  * them in `ModulePermissionContribution.presets`; the preset → permission mapping is
  * policy and stays in `apps/api/src/lib/permissions.ts`.
+ *
+ * **Ordered strongest first**, and that order is load-bearing, not cosmetic: the presets
+ * are nested (`viewer ⊂ operator ⊂ builder ⊂ admin`), and the platform reads this tuple
+ * in order to decide whether a module's `presets` list is upward-closed
+ * (`assertPresetsUpwardClosed`, `apps/api/src/lib/modules/module-loader.ts`). Reordering
+ * it silently changes which contributions boot. `apps/api/test/unit/lib/space-preset-nesting.test.ts`
+ * holds the order against the real preset → permission matrix.
  */
 export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as const;
 

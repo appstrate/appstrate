@@ -33,7 +33,7 @@ import {
 import type { OrgRole, SpaceRolePreset, ViewAsOrgRole } from "@appstrate/core/permissions";
 import { ApiError } from "./errors.ts";
 import { isSpaceRoleId, SPACE_ID_RE } from "./ids.ts";
-import { effectivePermissions, orgPermissions } from "./permissions.ts";
+import { effectivePermissions, orgPermissions, type Permission } from "./permissions.ts";
 import {
   loadSpaceMember,
   loadSpaceMemberships,
@@ -383,6 +383,31 @@ export function orgHalfFor(
     orgPermissions: org,
     effective: effectivePermissions({ orgPermissions: org, scopeCeiling: c.get("scopeCeiling") }),
   };
+}
+
+/**
+ * The caller's effective set IN one space: their org half ∪ the space half of
+ * `ref`, under the credential ceiling. The counterpart of {@link orgHalfFor},
+ * and the expression four sites rebuilt identically — the space-context
+ * middleware, the space listing behind package access, `GET /api/spaces`, and
+ * the SSE auth path. One helper, so a ceiling applied on three of them and
+ * forgotten on the fourth is not a thing that can happen.
+ *
+ * `orgHalf` defaults to the half the auth pipeline already wrote for this
+ * request. The SSE routes run outside that pipeline and pass their own
+ * (`orgHalfFor(...).orgPermissions`); they also carry no `scopeCeiling`, and
+ * intersect the key's scopes themselves once the set is built.
+ */
+export function effectiveInSpace(
+  c: Context<AppEnv>,
+  ref: SpaceRoleRef | null,
+  orgHalf: ReadonlySet<string> = c.get("orgPermissions") ?? new Set<string>(),
+): Set<Permission> {
+  return effectivePermissions({
+    orgPermissions: orgHalf,
+    spacePermissions: spacePermissions(ref),
+    scopeCeiling: c.get("scopeCeiling"),
+  });
 }
 
 export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRole {

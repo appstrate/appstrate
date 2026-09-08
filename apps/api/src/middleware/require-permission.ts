@@ -36,6 +36,26 @@ export function requirePermission<R extends Resource>(resource: R, action: Actio
 }
 
 /**
+ * Assert a permission from inside a handler — same audit hook and same 403 as
+ * {@link requirePermission}, without a `next` to hand control to.
+ *
+ * A handler that can only decide once it has loaded a row (an API key living in
+ * a different space from the one the request entered) needs the CHECK, not the
+ * middleware: invoking a guard with a no-op `next` reads as pipeline wiring
+ * where the code is really asking a question.
+ */
+export function assertPermission<R extends Resource>(
+  c: Context<AppEnv>,
+  resource: R,
+  action: Action<R>,
+): void {
+  const required = `${resource as string}:${action as string}`;
+  if (c.get("permissions")?.has(required)) return;
+  reportPermissionDenial(c, required);
+  throw forbidden(`Insufficient permissions: ${required} required`);
+}
+
+/**
  * Middleware factory: require ANY ONE of several permissions.
  *
  * A single `makePermissionGuard` cannot express a disjunction, so the denial

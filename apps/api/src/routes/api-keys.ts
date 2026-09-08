@@ -8,7 +8,7 @@ import { logger } from "../lib/logger.ts";
 import { ApiError, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { validateScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
 import {
   generateApiKey,
@@ -143,7 +143,7 @@ export function createApiKeysRouter() {
         throw notFound("API key not found or already revoked");
       }
       await applySpacePermissions(c, keySpace);
-      await requirePermission("api-keys", "revoke")(c, async () => {});
+      assertPermission(c, "api-keys", "revoke");
     }
 
     try {
