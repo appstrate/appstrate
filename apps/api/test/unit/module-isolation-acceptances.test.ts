@@ -23,6 +23,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   importSpecifiers,
+  isScannedSource,
   reviewCrossModuleImports,
   reviewPlatformModuleImports,
   type AcceptedCrossModuleImport,
@@ -207,5 +208,38 @@ describe("importSpecifiers", () => {
     // import behind it disappears from the scan.
     const source = ["const RE = /[\"']/g;", 'import "@appstrate/module-ee";'].join("\n");
     expect(importSpecifiers(source)).toEqual(["@appstrate/module-ee"]);
+  });
+});
+
+/**
+ * Which files each half of the scan reads.
+ *
+ * Both blind spots this pins were real. `packages/module-ee/drizzle/schema.ts`
+ * and `drizzle.config.ts` sat in NO scan root while the module walk was anchored
+ * at each module's `src` directory and the platform walk skipped the module
+ * packages entirely — module-ee is the first module with production code
+ * outside `src`. And `scripts/test` is
+ * Apache-2.0 platform code that CI runs, so the platform→module import ban
+ * applies to it exactly as it does to `scripts/verify-*.ts`.
+ */
+describe("isScannedSource", () => {
+  it("reads a module's production code outside src/", () => {
+    expect(isScannedSource("drizzle/schema.ts", false)).toBe(true);
+    expect(isScannedSource("drizzle/drizzle.config.ts", false)).toBe(true);
+    expect(isScannedSource("src/index.ts", false)).toBe(true);
+  });
+
+  it("skips tests unless the root asks for them — the scripts/ root does", () => {
+    for (const rel of ["test/tables.ts", "src/x/test/helper.ts", "src/a.test.ts"]) {
+      expect(isScannedSource(rel, false)).toBe(false);
+      expect(isScannedSource(rel, true)).toBe(true);
+    }
+  });
+
+  it("never reads an installed dependency, tests included", () => {
+    // A workspace root's `node_modules` holds every module's own source; reading
+    // it would report the platform as importing all of them.
+    expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", false)).toBe(false);
+    expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", true)).toBe(false);
   });
 });

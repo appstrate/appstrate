@@ -38,12 +38,14 @@ import { PGlite } from "@electric-sql/pglite";
 import { applyCorePGliteMigrations } from "../../src/lib/pglite-migrate.ts";
 import {
   PUBLIC_INDEXES_QUERY,
-  latestSnapshotName,
   declaredIndexes,
   diffIndexes,
+} from "../../../../scripts/check-index-drift.ts";
+import {
+  latestSnapshotName,
   type DrizzleJournal,
   type DrizzleSnapshot,
-} from "../../../../scripts/check-index-drift.ts";
+} from "../../../../scripts/lib/drizzle-snapshots.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 const META_DIR = `${MIGRATIONS_DIR}/meta`;

@@ -19,7 +19,12 @@
  *   differently-licensed tree into the Apache-2.0 one. The loader's computed
  *   `import(specifier)` is invisible to a specifier scan; a literal one is not.
  * `apps/web` is out of scope of that rule (the SPA imports a module's UI on
- * purpose); test files are, in both.
+ * purpose). Test files are exempt module→module — a module's own tests may
+ * reach for a sibling's fixtures — but NOT platform→module under `scripts/`:
+ * `scripts/test/**` is Apache-2.0 code in the platform tree, and a static
+ * import there drags a differently-licensed package into it exactly as a
+ * non-test one would (`scripts/migration/0010-…` already reaches its module
+ * through a computed `import()` for that reason).
  *
  * Override via env: `MODULE_ISOLATION_POLICY=warn|fail|off`.
  */
@@ -236,17 +241,30 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
   return problems;
 }
 
-/** Every non-test source file under `root` — one definition of "source", not two. */
-async function sourceFilesUnder(root: string): Promise<string[]> {
+/**
+ * Is `rel` (a path relative to a scan root) source this gate reads?
+ *
+ * Pure and exported so both halves of the test exemption are pinned by a test
+ * rather than by reading the walk: the module→module scan skips tests, the
+ * `scripts/` platform scan does not, and a walk that silently stopped reading
+ * either population would report the same clean tick.
+ */
+export function isScannedSource(rel: string, includeTests: boolean): boolean {
+  // `apps/api/src` and `packages/*/src` hold none, but `runtime-pi`, `e2e`,
+  // `apps/cli` and every `packages/module-*` are workspace roots — scanning
+  // their dependency tree would read every module's published source as
+  // platform source.
+  if (rel.includes("node_modules/")) return false;
+  if (includeTests) return true;
+  return !(rel.includes("/test/") || rel.startsWith("test/") || /\.test\.tsx?$/.test(rel));
+}
+
+/** Every source file under `root` — one definition of "source", not two. */
+async function sourceFilesUnder(root: string, includeTests = false): Promise<string[]> {
   const files: string[] = [];
   const glob = new Glob("**/*.{ts,tsx}");
   for await (const rel of glob.scan({ cwd: root })) {
-    if (rel.includes("/test/") || rel.startsWith("test/") || /\.test\.tsx?$/.test(rel)) continue;
-    // `apps/api/src` and `packages/*/src` hold none, but `runtime-pi`, `e2e`
-    // and `apps/cli` are workspace roots — scanning their dependency tree
-    // would read every module's published source as platform source.
-    if (rel.includes("node_modules/")) continue;
-    files.push(rel);
+    if (isScannedSource(rel, includeTests)) files.push(rel);
   }
   return files;
 }
@@ -278,11 +296,20 @@ if (import.meta.main) {
       process.exit(1);
     }
   }
-  // Workspace npm modules (packages/module-*/src).
+  // Workspace npm modules. The root is the PACKAGE directory, not its `src/`:
+  // `packages/module-ee` is the first module with production code outside
+  // `src/` (`drizzle/schema.ts` declares its tables, `drizzle/drizzle.config.ts`
+  // wires its migrator), and with the root pinned at `src` neither file was in
+  // ANY scan root — the module walk could not see them and the platform walk
+  // skips `module-*` — so an import from either one into another module was
+  // invisible. `sourceFilesUnder` already drops `test/` and `node_modules/`,
+  // which is the whole of what `src/` was buying.
   {
-    const glob = new Glob("module-*/src");
-    for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
-      const id = rel.split("/")[0]!.replace(/^module-/, "");
+    const glob = new Glob("module-*/package.json");
+    for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages") })) {
+      if (rel.includes("node_modules/")) continue;
+      const dir = rel.slice(0, rel.indexOf("/"));
+      const id = dir.replace(/^module-/, "");
       // Refuse a collision rather than overwrite. This loop runs SECOND and wrote
       // into the same map as the built-in discovery above, so extracting a
       // built-in to `packages/module-<same-id>` would silently drop the built-in's
@@ -292,12 +319,12 @@ if (import.meta.main) {
       if (MODULE_ROOTS[id]) {
         console.error(
           `❌ module id \`${id}\` is claimed twice: ${MODULE_ROOTS[id]} and ` +
-            `${resolve(ROOT, "packages", rel)}. One would shadow the other and ` +
+            `${resolve(ROOT, "packages", dir)}. One would shadow the other and ` +
             `un-scan it in silence — rename one.`,
         );
         process.exit(1);
       }
-      MODULE_ROOTS[id] = resolve(ROOT, "packages", rel);
+      MODULE_ROOTS[id] = resolve(ROOT, "packages", dir);
     }
   }
 
@@ -348,25 +375,32 @@ if (import.meta.main) {
   // platform import. `scripts/` stays in scope: `scripts/lib/module-openapi.ts`
   // loads modules by a computed `import(entry)`, the form this gate deliberately
   // cannot see, and nothing there names a module in a literal specifier.
-  const platformRoots: string[] = [
-    resolve(ROOT, "apps/api/src"),
-    resolve(ROOT, "apps/cli/src"),
-    resolve(ROOT, "runtime-pi"),
-    resolve(ROOT, "scripts"),
-    resolve(ROOT, "e2e"),
+  //
+  // `includeTests` is set for `scripts` alone, and it is the one root where a
+  // test file is platform code in the same sense a non-test file is: the gates
+  // and operator scripts it exercises are Apache-2.0, they run in CI on the
+  // platform's behalf, and `scripts/test/migration-0010-…` needed a computed
+  // `import()` for precisely this reason. The other roots keep the exemption:
+  // `apps/api/test` and `e2e` legitimately drive a module end to end.
+  const platformRoots: { dir: string; includeTests: boolean }[] = [
+    { dir: resolve(ROOT, "apps/api/src"), includeTests: false },
+    { dir: resolve(ROOT, "apps/cli/src"), includeTests: false },
+    { dir: resolve(ROOT, "runtime-pi"), includeTests: false },
+    { dir: resolve(ROOT, "scripts"), includeTests: true },
+    { dir: resolve(ROOT, "e2e"), includeTests: false },
   ];
   {
     const glob = new Glob("*/src");
     for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
       if (rel.startsWith("module-")) continue;
-      platformRoots.push(resolve(ROOT, "packages", rel));
+      platformRoots.push({ dir: resolve(ROOT, "packages", rel), includeTests: false });
     }
   }
 
   const platformImports: PlatformImport[] = [];
   let platformFilesScanned = 0;
-  for (const root of platformRoots) {
-    for (const rel of await sourceFilesUnder(root)) {
+  for (const { dir: root, includeTests } of platformRoots) {
+    for (const rel of await sourceFilesUnder(root, includeTests)) {
       const filePath = resolve(root, rel);
       if (ownerOf(filePath)) continue;
       const source = await Bun.file(filePath).text();

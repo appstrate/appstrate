@@ -501,6 +501,15 @@
     "//#verify:module-isolation": {
       "cache": false
     },
+    // `cache: false` for the reason every `verify:*` sibling carries it, plus
+    // one of its own: this gate reads a module's newest drizzle SNAPSHOT to
+    // learn which tables that module owns, and the snapshot it picks is chosen
+    // at runtime from the journal. No `inputs` list names that file, so a
+    // cached replay would check the module's SQL against a table set from
+    // before its last migration.
+    "//#verify:module-sql-boundary": {
+      "cache": false
+    },
     // `cache: false` like its `verify:*` siblings, and for the reason
     // `//#verify:release-version` spells out: this gate's file set is the git
     // INDEX, so `git add`ing a file changes the verdict. Nothing in an `inputs`
