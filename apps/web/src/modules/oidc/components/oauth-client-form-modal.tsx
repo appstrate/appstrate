@@ -189,7 +189,7 @@ function OAuthClientFormBody({
 
   function onSubmit(data: FormData) {
     const signupSpaceAssignments = assignmentsFor(signupRole, toSpaceAssignments(assignments));
-    if (isOrgLevel && allowSignup && signupRole !== "admin" && assignments.length) {
+    if (isOrgLevel && signupRole !== "admin" && assignments.length) {
       if (
         catalogLoading ||
         catalogError ||
@@ -205,7 +205,7 @@ function OAuthClientFormBody({
         return;
       }
     }
-    if (isOrgLevel && allowSignup) {
+    if (isOrgLevel) {
       const validation = validateSpaceAssignments(
         signupRole,
         signupSpaceAssignments,
@@ -450,10 +450,11 @@ function OAuthClientFormBody({
  * The signup half of the client policy: the opt-in, and — on an org-level
  * client — the role and space grants a self-registered user lands with.
  *
- * Everything below the checkbox hangs off it. `allowSignup` off means the
- * server stores no signup policy at all, so a role picker that still answers
- * and a space list that still collects rows describe a state that cannot
- * exist. The role select is disabled and the space grants are not rendered.
+ * The policy is what a signup WOULD receive, so it is edited and validated on
+ * every org-level client whether or not signups are currently allowed — the
+ * server stores and checks it the same way, and a `guest` policy still needs
+ * at least one space grant with the opt-in off. The checkbox decides only
+ * whether a signup can happen at all.
  *
  * Split out of the modal body because a Radix dialog renders nothing without a
  * DOM, and the web runner has none.
@@ -513,7 +514,7 @@ export function SignupPolicyFields({
             id="oauth-client-signup-role"
             value={signupRole}
             onChange={(e) => onSignupRoleChange(e.target.value as AssignableOrgRole)}
-            disabled={!allowSignup || isPending}
+            disabled={isPending}
             className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           >
             {ASSIGNABLE_ORG_ROLES.map((role) => (
@@ -529,7 +530,7 @@ export function SignupPolicyFields({
           </p>
         </div>
       )}
-      {isOrgLevel && allowSignup && (
+      {isOrgLevel && (
         <SpaceAssignmentsField
           spaces={spaces}
           roleOptions={roleOptions}

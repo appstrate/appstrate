@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The signup policy of an OAuth client: what the operator may answer once the
- * opt-in is off.
+ * The signup policy of an OAuth client: what the operator may answer, and when.
  *
- * `allowSignup` off means the server stores no signup policy, so a role picker
- * that still answers and a space-grant list that still collects rows describe a
- * client state that cannot exist — and the grants would be sent on save.
+ * The policy is what a signup WOULD receive, so an org-level client edits it
+ * whether or not signups are currently allowed — the server stores and
+ * validates it the same way either side of the opt-in.
  *
  * `SignupPolicyFields` is rendered rather than the modal, whose Radix dialog
  * chrome renders nothing without a DOM (the web runner has none).
@@ -16,6 +15,7 @@ import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../../../i18n.ts";
 import { render } from "../../../../test/render.tsx";
 import { SignupPolicyFields } from "../oauth-client-form-modal.tsx";
+import { validateSpaceAssignments } from "../../../../lib/space-assignments.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -50,19 +50,18 @@ function signupRoleSelect(html: string): string {
 }
 
 describe("org-level signup policy", () => {
-  it("locks the role and hides the space grants while signup is off", () => {
+  it("edits the role and the space grants while signup is off", () => {
     const html = renderFields({ allowSignup: false });
     expect(html).toContain("Rôle attribué à l'auto-inscription");
-    expect(signupRoleSelect(html)).toContain('disabled=""');
-    expect(html).not.toContain("<legend");
-    expect(html).not.toContain("Production");
-  });
-
-  it("opens both once signup is allowed", () => {
-    const html = renderFields({ allowSignup: true });
     expect(signupRoleSelect(html)).not.toContain('disabled=""');
     expect(html).toContain("<legend");
     expect(html).toContain("Espaces");
+  });
+
+  it("still requires a space for a guest policy while signup is off", () => {
+    expect(validateSpaceAssignments("guest", [], "pick at least one space")).toBe(
+      "pick at least one space",
+    );
   });
 });
 

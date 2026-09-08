@@ -588,11 +588,6 @@ progress` and emits nothing. Once a handler has run the organization is
   `model-provider-credentials:read`; they are now fetched only when the caller
   holds it, instead of collecting two guaranteed 403s per visit.
 
-- **An OAuth client's signup role and space grants are locked while signup is
-  off.** The role select is disabled and the space grants are neither rendered
-  nor validated unless the client allows signup — the policy the server stores
-  is nothing at all while the flag is off.
-
 - **A role can be repaired after a module is unloaded.** The role editor
   rendered only the permissions it could name, kept the rest selected
   invisibly, and resent them on every save, which the server refused with a 400
