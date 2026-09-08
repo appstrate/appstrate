@@ -143,6 +143,70 @@ git config commit.gpgsign true
 5. Wait for CI checks and code review
 6. Squash and merge after approval
 
+Step 5 is currently advice rather than a rule. The `Protect main` ruleset
+(`gh api repos/appstrate/appstrate/rulesets/14614228`) carries only `pull_request` and
+`non_fast_forward`; it declares **no** `required_status_checks`, and
+`repos/appstrate/appstrate/branches/main/protection` returns 404. So every gate in this repository —
+`check`, the test suites, CodeQL, secret scanning — is mergeable red today.
+
+### Required Checks (maintainers)
+
+The set that should gate a merge. Names are the GitHub check-run names, verbatim
+(`gh api repos/appstrate/appstrate/commits/main/check-runs --jq '.check_runs[].name'`):
+
+| Check                                                   | Workflow       |
+| ------------------------------------------------------- | -------------- |
+| `check`                                                 | `check.yml`    |
+| `Package resolves for consumers (packages/core)`        | `check.yml`    |
+| `Package resolves for consumers (packages/afps-shared)` | `check.yml`    |
+| `Unit tests`                                            | `test.yml`     |
+| `Platform container health e2e`                         | `test.yml`     |
+| `Secret Scanning`                                       | `security.yml` |
+| `Analyze`                                               | `codeql.yml`   |
+
+Deliberately **not** required, because a required check that does not report blocks the PR forever:
+`Integration tests`, `Runtime container e2e` and `E2E tests` are label-gated
+(`if: contains(github.event.pull_request.labels.*.name, …) || github.ref == 'refs/heads/main'`), so
+they are absent from an unlabelled PR, and `Scorecard Analysis` has no `pull_request` trigger at all.
+The same rule applies to any check added later: require it only once it is observed reporting on an
+ordinary PR.
+
+Applying it — a ruleset `PUT` **replaces** the whole ruleset, so read the live one and merge into it
+rather than writing a body from scratch:
+
+```sh
+gh api repos/appstrate/appstrate/rulesets/14614228 > /tmp/main-ruleset.json
+
+jq '.rules += [{
+      type: "required_status_checks",
+      parameters: {
+        strict_required_status_checks_policy: false,
+        do_not_enforce_on_create: false,
+        required_status_checks: [
+          { context: "check" },
+          { context: "Package resolves for consumers (packages/core)" },
+          { context: "Package resolves for consumers (packages/afps-shared)" },
+          { context: "Unit tests" },
+          { context: "Platform container health e2e" },
+          { context: "Secret Scanning" },
+          { context: "Analyze" }
+        ]
+      }
+    }]
+  | del(.id, .source_type, .source, .node_id, .created_at, .updated_at, ._links,
+        .current_user_can_bypass)' \
+  /tmp/main-ruleset.json > /tmp/main-ruleset-update.json
+
+gh api --method PUT repos/appstrate/appstrate/rulesets/14614228 --input /tmp/main-ruleset-update.json
+```
+
+`del(...)` rather than a `{name, target, …}` whitelist: the whitelist form emits `bypass_actors: null`
+when the live ruleset has none, and picking the fields to keep is the version of this edit that
+silently drops whatever GitHub adds to the payload next.
+`strict_required_status_checks_policy: false` means a PR does not have to be rebased onto the newest
+`main` before merging; set it to `true` only if stale-base merges become a real problem, since it
+makes every merge to `main` invalidate every open PR's status.
+
 ### Review Criteria
 
 - Quality gate passes (`bun run check` + `bun test`)
