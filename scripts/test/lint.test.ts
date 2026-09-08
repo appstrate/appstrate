@@ -250,8 +250,11 @@ describe("scripts/lint.ts as a process", () => {
     expect(output).toMatch(/no longer errors|too many warnings/);
     // Cold cache, whole repo — and a timeout here does not just fail THIS
     // test: `runGateWith`'s restore never runs, so the next case finds a
-    // config whose anchor this mutation already consumed.
-  }, 120_000);
+    // config whose anchor this mutation already consumed. Which is why this
+    // ceiling moves with the one below even though this case has not tripped
+    // it: they pay the same cold whole-repo lint, and this one failing leaves
+    // a MUTATED config behind.
+  }, 300_000);
 
   it("fails on a warning that fires, however few", () => {
     // The narrowest case for `--max-warnings 0`: the config keeps its full
@@ -277,5 +280,23 @@ describe("scripts/lint.ts as a process", () => {
     expect(output).toMatch(/warning|max-warnings/i);
     // Measured 2026-08-26: 20.8 s, against bunfig's 15 s default. The other
     // subprocess cases here fail before eslint is spawned and take ~1 s.
-  }, 120_000);
+    //
+    // Re-measured 2026-09-08, after backend type-aware rules and jsx-a11y
+    // landed. What this case costs depends entirely on whether `.eslintcache`
+    // is warm, and the two environments differ:
+    //
+    //   locally, warm cache      2.8 s
+    //   cold whole-repo lint      56 s
+    //   CI (`Unit tests`)      >120 s  → timed out, run 34213836495
+    //
+    // The mutation appends a block scoped to `files: ["scripts/lint.ts"]`, so
+    // every OTHER file's EFFECTIVE config is unchanged and stays a cache hit —
+    // which is why a developer sees seconds and never reproduces the CI
+    // failure. `.github/workflows/test.yml` restores no eslint cache (only
+    // `check.yml` does), so CI pays the cold number every time.
+    //
+    // 300 s rather than "a bit more": this ceiling exists to catch a HANG, not
+    // to bound a known cost, and the cost is inherent — `--max-warnings 0`
+    // cannot trip until every file has been linted.
+  }, 300_000);
 });

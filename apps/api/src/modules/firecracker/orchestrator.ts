@@ -1540,7 +1540,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         void this.killVm(vm, 0).catch(() => {});
       }, maxLifetimeSeconds * 1000);
     }
-    proc.exited.then((code) => {
+    // Fire-and-forget: `Bun.Subprocess.exited` never rejects and the observer
+    // only stamps the record and logs, so there is nothing to await here —
+    // `waitForExit` is the path that actually consumes the exit code.
+    void proc.exited.then((code) => {
       if (vm.consoleWatch) clearInterval(vm.consoleWatch);
       // Reaper anchor (ROB-1): the exit reaper destroys records whose
       // stamp lingers past EXIT_REAP_AFTER_MS — i.e. exits no platform
@@ -1630,7 +1633,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     if (!vm) return;
 
     let exited = vm.proc === null;
-    vm.proc?.exited.then(() => {
+    // Fire-and-forget flag flip read by the tail loop below; `exited` never
+    // rejects and the handler cannot throw.
+    void vm.proc?.exited.then(() => {
       exited = true;
     });
     yield* tailFileLines(vm.consolePath, () => exited, signal);

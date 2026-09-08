@@ -205,7 +205,9 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
     const event: RunEvent = { ...(parsed as RunEvent), runId: opts.runId };
     const promise: Promise<void> = sink.handle(event).catch(() => {});
     pendingDispatches.add(promise);
-    promise.finally(() => pendingDispatches.delete(promise));
+    // `void`: the promise already carries its own `.catch` above, so this
+    // chain exists only to un-register the dispatch once it settles.
+    void promise.finally(() => pendingDispatches.delete(promise));
     return true;
   }
 
