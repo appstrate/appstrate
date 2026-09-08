@@ -703,25 +703,28 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
 let realtimeRetryArmed = false;
 
 /**
- * Bounded retry (1 s / 5 s / 25 s) of the realtime LISTEN install, armed once per
- * process. Fire-and-forget: readiness never waits on it, and `/health` reports
- * `checks.realtime: degraded` until an attempt lands.
+ * Retry the realtime LISTEN install until it lands, armed once per process.
+ * Exponential backoff capped at 60 s: giving up would leave a process whose
+ * every dashboard SSE is silent for its whole life, with `/health` reporting
+ * `checks.realtime: degraded` and nothing acting on it. Fire-and-forget:
+ * readiness never waits on it.
  */
 function retryRealtimeInBackground(): void {
   if (realtimeRetryArmed) return;
   realtimeRetryArmed = true;
   void (async () => {
-    for (const delayMs of [1_000, 5_000, 25_000]) {
+    for (let delayMs = 1_000; ; delayMs = Math.min(delayMs * 2, 60_000)) {
       // Unref'd: a pending retry must never hold the process (or a test run) open.
       await new Promise<void>((resolve) => {
         setTimeout(resolve, delayMs).unref?.();
       });
       try {
         await initRealtime();
+        logger.info("Realtime LISTEN channels initialized after retry");
         return;
       } catch (err) {
         logger.error("Realtime LISTEN retry failed", {
-          delayMs,
+          nextDelayMs: Math.min(delayMs * 2, 60_000),
           error: getErrorMessage(err),
         });
       }
