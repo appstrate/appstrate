@@ -23,6 +23,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "../../src/middleware/request-id.ts";
+import { clientIp } from "../../src/middleware/client-ip.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "../../src/middleware/space-context.ts";
@@ -182,6 +183,13 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
 
   // Request-Id
   app.use("*", requestId());
+
+  // Client IP — same position as production (`apps/api/src/index.ts`): it
+  // resolves the address under `TRUST_PROXY` and stamps it on the inbound
+  // Request, so Better Auth reads the platform's answer here too. Under
+  // `app.request()` there is no socket, `getConnInfo` throws and the
+  // middleware absorbs it.
+  app.use("*", clientIp());
 
   // CORS
   app.use("*", cors({ origin: "*", credentials: true }));

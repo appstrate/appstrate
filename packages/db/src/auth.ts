@@ -875,6 +875,10 @@ function buildAuth(options: CreateAuthOptions) {
         // Naming it alone keeps Better Auth from parsing `x-forwarded-for`
         // on its own, so its rate limiter and its session records key on the
         // same address every other platform limiter does.
+        // One writer: the edge middleware `apps/api/src/middleware/client-ip.ts`
+        // overwrites the header on the inbound request, so the handler mount
+        // and every `auth.api.*` call passed `c.req.raw.headers` read the
+        // platform's answer and never a caller-supplied one.
         ipAddressHeaders: [options.clientIpHeader],
       },
       // Explicit per-cookie defaults — Better Auth applies these to the

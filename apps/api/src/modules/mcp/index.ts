@@ -24,7 +24,7 @@
  */
 
 import type { AppstrateModule } from "@appstrate/core/module";
-import { and, eq, like, notInArray } from "drizzle-orm";
+import { and, eq, like, notExists, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizations, oauthResource } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -67,26 +67,37 @@ function mcpOrgResourceRow(orgId: string) {
  * `organizations` roster: the durable, cross-replica MINT rows and this
  * process's VERIFIER set. Symmetric — one statement per direction, so a lost
  * `onOrgCreate` and a lost `onOrgDelete` both converge here. Idempotent.
+ *
+ * The delete names no roster: its `NOT EXISTS` is evaluated by Postgres against
+ * the live `organizations` table, so "is this row's org gone?" is answered at
+ * the instant of the delete rather than by a list read earlier. An org that
+ * commits while this function runs is therefore never swept — and since
+ * `onOrgCreate` writes its `oauth_resources` row only after the org row is
+ * committed, any row this statement can see belongs to an org it can see too.
+ * The roster read below feeds the verifier set and the insert, which are
+ * additive: seeing a stale roster costs one tick of convergence, never a
+ * deletion.
  */
 async function reconcileMcpOrgAudiences(): Promise<void> {
   const rows = await db.select({ id: organizations.id }).from(organizations);
   setMcpOrgVerifyAudiences(rows.map((r) => r.id));
-  const liveUris = rows.map((r) => getMcpOrgResourceUri(r.id));
   // Only per-org URIs are ours to drop: the two static platform identifiers the
   // AS seeds sit outside this prefix. `_` and `%` are LIKE wildcards, so an
   // APP_URL carrying either would over-match — escape them (Postgres' default
   // LIKE escape is the backslash).
-  const prefixPattern = `${getMcpOrgResourceUri("").replace(/([\\%_])/g, "\\$1")}%`;
-  await db
-    .delete(oauthResource)
-    .where(
-      liveUris.length === 0
-        ? like(oauthResource.identifier, prefixPattern)
-        : and(
-            like(oauthResource.identifier, prefixPattern),
-            notInArray(oauthResource.identifier, liveUris),
-          ),
-    );
+  const prefix = getMcpOrgResourceUri("");
+  const prefixPattern = `${prefix.replace(/([\\%_])/g, "\\$1")}%`;
+  await db.delete(oauthResource).where(
+    and(
+      like(oauthResource.identifier, prefixPattern),
+      notExists(
+        db
+          .select({ live: sql`1` })
+          .from(organizations)
+          .where(eq(oauthResource.identifier, sql`${prefix} || ${organizations.id}`)),
+      ),
+    ),
+  );
   if (rows.length === 0) return;
   await db
     .insert(oauthResource)

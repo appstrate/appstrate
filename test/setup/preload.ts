@@ -373,6 +373,7 @@ const { setModulePermissionsProvider, setPermissionDenialHandler } =
 const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
 const { betterAuthRateLimitStorage } =
   await import("../../apps/api/src/infra/rate-limit/better-auth-storage.ts");
+const { resetBetterAuthRateLimitBuckets } = await import("../../apps/api/test/helpers/redis.ts");
 const { CLIENT_IP_HEADER } = await import("../../apps/api/src/lib/client-ip.ts");
 
 // Register module RBAC contributions BEFORE the plugins are built — mirrors
@@ -447,18 +448,23 @@ setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
   }
 });
 
-// ─── Global auto-reset for RBAC audit handler ─────────────────
-// `setPermissionDenialHandler` writes a module-level singleton inside
-// `@appstrate/core/permissions`. A test that installs a custom handler
-// and forgets to clean up would leak it into every subsequent test file
-// in the same process — `bun test` runs the full suite as a single
-// process (see the "Testing" header in CLAUDE.md). Reset after every
-// test so no test needs to remember an `afterEach` of its own.
+// ─── Global auto-reset for process-wide singletons ────────────
+// Both resets below cover state that is process-wide, and `bun test` runs the
+// whole suite as a single process (see the "Testing" header in CLAUDE.md), so
+// leaving either to individual files means every file has to remember it.
 //
-// The handler comes from the single dynamic `@appstrate/core/permissions`
-// import above, which keeps this preload uncoupled from the core types at
-// top level.
+// `setPermissionDenialHandler` writes a module-level singleton inside
+// `@appstrate/core/permissions`. A test that installs a custom handler and
+// forgets to clean up would leak it into every subsequent test file. The
+// handler comes from the single dynamic `@appstrate/core/permissions` import
+// above, which keeps this preload uncoupled from the core types at top level.
+//
+// Better Auth's limiter is armed for the whole suite (`rateLimitEnabled` above)
+// and its built-in rule caps `/sign-in*` and `/sign-up*` at 3 per 10 s per
+// address — one address, shared by every test. Dropping the buckets after each
+// test is what lets a file sign a user in without budgeting for its neighbours.
 const { afterEach } = await import("bun:test");
-afterEach(() => {
+afterEach(async () => {
   setPermissionDenialHandler(null);
+  await resetBetterAuthRateLimitBuckets();
 });

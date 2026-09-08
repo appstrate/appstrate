@@ -28,7 +28,6 @@ import { _rebuildAuthForTesting, getAuth } from "@appstrate/db/auth";
 import { session as sessionTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { flushRedis } from "../../helpers/redis.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 
 const app = getTestApp();
@@ -97,10 +96,6 @@ afterAll(() => {
 describe("session cookie cache — the flag itself", () => {
   beforeEach(async () => {
     await truncateAll();
-    // Better Auth caps `/sign-in*` at 3 per 10s per IP and every request
-    // here arrives from the same (absent) address — reset the budget so a
-    // test is never throttled by the one before it.
-    await flushRedis();
   });
 
   it("issues NO session_data cookie when disabled (the repo default)", async () => {
@@ -128,10 +123,6 @@ describe("session cookie cache — the flag itself", () => {
 describe("session cookie cache — normal session lifecycle", () => {
   beforeEach(async () => {
     await truncateAll();
-    // Better Auth caps `/sign-in*` at 3 per 10s per IP and every request
-    // here arrives from the same (absent) address — reset the budget so a
-    // test is never throttled by the one before it.
-    await flushRedis();
   });
 
   it("authenticates a request from the cached session", async () => {
@@ -179,10 +170,6 @@ describe("session cookie cache — normal session lifecycle", () => {
 describe("session cookie cache — revocation", () => {
   beforeEach(async () => {
     await truncateAll();
-    // Better Auth caps `/sign-in*` at 3 per 10s per IP and every request
-    // here arrives from the same (absent) address — reset the budget so a
-    // test is never throttled by the one before it.
-    await flushRedis();
   });
 
   /**
@@ -270,10 +257,6 @@ describe("session cookie cache — revocation", () => {
 describe("session cookie cache — freshness gate", () => {
   beforeEach(async () => {
     await truncateAll();
-    // Better Auth caps `/sign-in*` at 3 per 10s per IP and every request
-    // here arrives from the same (absent) address — reset the budget so a
-    // test is never throttled by the one before it.
-    await flushRedis();
   });
 
   /**

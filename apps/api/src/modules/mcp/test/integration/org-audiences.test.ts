@@ -84,4 +84,41 @@ describe("per-org MCP audience rows", () => {
     );
     expect(await identifiers([orphanUri])).toEqual([]);
   });
+
+  /**
+   * The sweep asks one question per row — "does an org still exist for this
+   * identifier?" — and Postgres answers it against the live `organizations`
+   * table inside the DELETE itself; no roster list is passed in. That is what
+   * makes a concurrently created org safe: there is no window between reading
+   * the roster and deleting against it.
+   *
+   * The interleaving itself cannot be staged in one process — it would need the
+   * reconcile to pause between its two halves, and no seam here offers that. So
+   * what is asserted is the per-row invariant the interleaving relies on, with
+   * the live row's `id` carried through untouched: a row that was deleted and
+   * re-inserted would come back under a fresh `crypto.randomUUID()`.
+   */
+  it("leaves a live org's existing row untouched while sweeping a dead org's", async () => {
+    const ctx = await createTestContext({ orgSlug: "mcpaud3" });
+    const liveUri = getMcpOrgResourceUri(ctx.orgId);
+    const orphanUri = getMcpOrgResourceUri(ORPHAN_ORG_ID);
+    ownedIdentifiers.push(liveUri);
+
+    const liveRowId = crypto.randomUUID();
+    await db.insert(oauthResource).values([
+      { id: liveRowId, identifier: liveUri, name: "live org endpoint" },
+      { id: crypto.randomUUID(), identifier: orphanUri, name: "orphaned org endpoint" },
+      { id: crypto.randomUUID(), identifier: UNRELATED_IDENTIFIER, name: "not ours" },
+    ]);
+
+    await (mcpModule.init as () => Promise<void>)();
+
+    const [live] = await db
+      .select({ id: oauthResource.id })
+      .from(oauthResource)
+      .where(eq(oauthResource.identifier, liveUri));
+    expect(live?.id).toBe(liveRowId);
+    expect(await identifiers([orphanUri])).toEqual([]);
+    expect(await identifiers([UNRELATED_IDENTIFIER])).toEqual([UNRELATED_IDENTIFIER]);
+  });
 });

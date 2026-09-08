@@ -33,7 +33,7 @@ import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
 import { principalGrants } from "./principal-permissions.ts";
-import { getClientIp, propagateRequestClientIp, stampClientIpHeader } from "./client-ip.ts";
+import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
@@ -109,10 +109,11 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // endpoints (issue #165). Tracked in
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
+    // `CLIENT_IP_HEADER` is already on `c.req.raw` (the edge `clientIp()`
+    // middleware), and both rewrites below copy the inbound headers, so the
+    // address Better Auth reads survives them.
     const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
-    // Stamp the resolved client IP last, so the header Better Auth reads
-    // survives both rewrites above (`stampClientIpHeader`).
-    return getAuth().handler(stampClientIpHeader(c, req));
+    return getAuth().handler(req);
   });
 
   // Auth middleware: module strategies → Bearer API key → session cookie.

@@ -39,7 +39,9 @@ function getRedis(): Redis {
  *
  * Better Auth's own limiter rides the same factory under the `rl:better-auth:`
  * prefix, so FLUSHALL already covers it; tier0 needs its limiter cache dropped
- * alongside the middleware's.
+ * alongside the middleware's. The Better Auth budget alone is reset after every
+ * test by the global `afterEach` in `test/setup/preload.ts` — a file calls this
+ * for the rest of the state.
  *
  * Call in beforeEach() when testing rate-limit / idempotency / cache features.
  */
@@ -55,6 +57,38 @@ export async function flushRedis(): Promise<void> {
   resetRateLimiters();
   resetBetterAuthRateLimitStorage();
   await shutdownInfra();
+}
+
+/**
+ * Drop every Better Auth rate-limit bucket. The suite runs in one process
+ * behind one address and the built-in `/sign-in*` rule is 3 per 10 s per
+ * address, so `test/setup/preload.ts` calls this after every test.
+ *
+ * tier0: the buckets live inside the cached limiter objects — dropping them is
+ *        the whole reset.
+ * tier3: the keys outlive those objects; they are swept by prefix through the
+ *        platform's own shared client (no second connection to keep the process
+ *        alive), and only when something was consumed since the last reset.
+ */
+export async function resetBetterAuthRateLimitBuckets(): Promise<void> {
+  const { resetBetterAuthRateLimitStorage, BETTER_AUTH_RATE_LIMIT_KEY_PREFIX } =
+    await import("../../src/infra/rate-limit/better-auth-storage.ts");
+  const consumed = resetBetterAuthRateLimitStorage();
+  if (!consumed || !hasRedis()) return;
+  const { getRedisConnection } = await import("../../src/lib/redis.ts");
+  const redis = getRedisConnection();
+  let cursor = "0";
+  do {
+    const [next, keys] = await redis.scan(
+      cursor,
+      "MATCH",
+      `${BETTER_AUTH_RATE_LIMIT_KEY_PREFIX}*`,
+      "COUNT",
+      1000,
+    );
+    if (keys.length > 0) await redis.unlink(...keys);
+    cursor = next;
+  } while (cursor !== "0");
 }
 
 /** Close Redis connection. Call in afterAll() of test suites that use Redis. No-op in tier0. */

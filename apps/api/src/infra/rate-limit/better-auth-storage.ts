@@ -16,12 +16,8 @@ import type { BetterAuthRateLimitStorage } from "@appstrate/db/auth";
 import { getRateLimiterFactory } from "../index.ts";
 import type { RateLimiterFactory } from "./interface.ts";
 
-/**
- * Key prefix for every Better Auth bucket. `flushRedis()` clears the whole
- * database in tier3; in tier0 the buckets live in the cached limiters, which
- * {@link resetBetterAuthRateLimitStorage} drops.
- */
-const KEY_PREFIX = "rl:better-auth:";
+/** Key prefix for every Better Auth bucket; the test harness deletes by it. */
+export const BETTER_AUTH_RATE_LIMIT_KEY_PREFIX = "rl:better-auth:";
 
 /** One limiter per `(window, max)` pair — same shape as the OIDC guards' cache. */
 const limiters = new Map<string, RateLimiterAbstract>();
@@ -35,15 +31,23 @@ async function limiterFor(
   let limiter = limiters.get(cacheKey);
   if (!limiter) {
     const factory = await getFactory();
-    limiter = factory.create(max, window, `${KEY_PREFIX}w${window}m${max}:`);
+    limiter = factory.create(max, window, `${BETTER_AUTH_RATE_LIMIT_KEY_PREFIX}w${window}m${max}:`);
     limiters.set(cacheKey, limiter);
   }
   return limiter;
 }
 
-/** Test helper — drops cached limiters so the next call rebuilds them. */
-export function resetBetterAuthRateLimitStorage(): void {
+/**
+ * Test helper — drop the cached limiters so the next call rebuilds them. The
+ * in-memory buckets live inside those objects, so for that backend this is the
+ * whole reset. Returns whether anything had been consumed since the last reset:
+ * `limiterFor` is the only writer, so an empty map means no bucket exists in
+ * Redis either, and the harness skips its key sweep.
+ */
+export function resetBetterAuthRateLimitStorage(): boolean {
+  const consumed = limiters.size > 0;
   limiters.clear();
+  return consumed;
 }
 
 export function betterAuthRateLimitStorage(
