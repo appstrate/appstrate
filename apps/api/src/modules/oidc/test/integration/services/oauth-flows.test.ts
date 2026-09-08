@@ -52,6 +52,7 @@ import {
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
+import { encodeBasicCredentials } from "@better-auth/core/oauth2";
 import { decodeJwt } from "jose";
 
 // The protected-resource registry is a process-wide singleton shared with the
@@ -189,6 +190,27 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // fetches the ES256 keys the jwt plugin just installed.
     overrideJwksResolver(null);
   });
+
+  /**
+   * Headers for the client-authenticated OAuth endpoints (`/oauth2/token`,
+   * `/oauth2/introspect`, `/oauth2/revoke`).
+   *
+   * `createClient` registers every admin-provisioned client as
+   * `client_secret_basic`, and the oauth-provider holds a client to the method
+   * it registered ("client registered for client_secret_basic cannot use
+   * client_secret_post"), so the secret travels in the Authorization header —
+   * encoded by upstream's own RFC 6749 §2.3.1 encoder rather than a hand-rolled
+   * base64. Repeating it in the body would be rejected as two authentication
+   * methods on one request. `client_id` stays in the body: that is
+   * identification, not authentication, and the token guard's per-client rate
+   * limiter reads it from there.
+   */
+  function clientAuthHeaders(): Record<string, string> {
+    return {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: encodeBasicCredentials(clientId, clientSecret),
+    };
+  }
 
   beforeEach(async () => {
     await truncateAll();
@@ -347,13 +369,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       code: code!,
       redirect_uri: "https://satellite.example.com/callback",
       client_id: clientId,
-      client_secret: clientSecret,
       code_verifier: verifier,
       resource: "http://localhost:3000",
     });
     const tokenRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: tokenBody.toString(),
     });
     expect(tokenRes.status).toBe(200);
@@ -483,13 +504,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // so the rejection here is guaranteed to come from PKCE verification.
     const tokenRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code: code!,
         redirect_uri: "https://satellite.example.com/callback",
         client_id: clientId,
-        client_secret: clientSecret,
         code_verifier: randomVerifier(), // wrong verifier
         resource: "http://localhost:3000",
       }).toString(),
@@ -573,13 +593,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   }> {
     const res = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
         redirect_uri: "https://satellite.example.com/callback",
         client_id: clientId,
-        client_secret: clientSecret,
         code_verifier: verifier,
         resource: "http://localhost:3000",
         ...extras,
@@ -597,13 +616,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // first (it would otherwise be consumed by oauth-provider).
     const res = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code: "fake-code",
         redirect_uri: "https://satellite.example.com/callback",
         client_id: clientId,
-        client_secret: clientSecret,
         code_verifier: "fake-verifier",
         // NO resource
       }).toString(),
@@ -662,7 +680,6 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       code: "fake",
       redirect_uri: "https://satellite.example.com/callback",
       client_id: clientId,
-      client_secret: clientSecret,
       code_verifier: "fake",
       resource: "http://localhost:3000",
     }).toString();
@@ -671,7 +688,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     for (let i = 0; i < 35; i++) {
       const res = await app.request("/api/auth/oauth2/token", {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: clientAuthHeaders(),
         body,
       });
       if (res.status === 429) rateLimited++;
@@ -692,12 +709,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
     const refreshRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: tokens.refresh_token!,
         client_id: clientId,
-        client_secret: clientSecret,
         resource: "http://localhost:3000",
       }).toString(),
     });
@@ -722,12 +738,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   it("refresh_token grant also requires resource parameter", async () => {
     const res = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: "whatever",
         client_id: clientId,
-        client_secret: clientSecret,
         // NO resource
       }).toString(),
     });
@@ -747,11 +762,10 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
     const liveRes = await app.request("/api/auth/oauth2/introspect", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         token: tokens.access_token,
         client_id: clientId,
-        client_secret: clientSecret,
       }).toString(),
     });
     expect(liveRes.status).toBe(200);
@@ -764,11 +778,10 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // before consulting the token store — either shape is spec-compliant.
     const garbageRes = await app.request("/api/auth/oauth2/introspect", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         token: "not-a-real-token",
         client_id: clientId,
-        client_secret: clientSecret,
       }).toString(),
     });
     expect([200, 400, 401]).toContain(garbageRes.status);
@@ -795,12 +808,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
     const revokeRes = await app.request("/api/auth/oauth2/revoke", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         token: tokens.refresh_token!,
         token_type_hint: "refresh_token",
         client_id: clientId,
-        client_secret: clientSecret,
       }).toString(),
     });
     expect(revokeRes.status).toBe(200);
@@ -808,12 +820,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // A subsequent refresh attempt with the revoked token must fail.
     const refreshAttempt = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: tokens.refresh_token!,
         client_id: clientId,
-        client_secret: clientSecret,
         resource: "http://localhost:3000",
       }).toString(),
     });

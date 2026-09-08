@@ -82,8 +82,15 @@ describe("CIMD first authorization", () => {
   // A public IP keeps the real client_id URL check (upstream refuses private
   // and reserved addresses) but avoids external DNS. The transport below serves
   // the document in-process; no request reaches this address.
-  const clientId = "https://93.184.216.34/client.json";
-  const redirectUri = "https://93.184.216.34/callback";
+  //
+  // One address PER TEST, not one for the suite: the resolver keeps an
+  // in-process document cache keyed on client_id (60m default revalidation)
+  // and the plugin is built once at boot, so a shared URL would serve a later
+  // test the document an earlier one registered — the DB truncation does not
+  // reach that cache, and the test would silently stop discriminating.
+  let addressOctet = 0;
+  let clientId: string;
+  let redirectUri: string;
   let documentScope: string | undefined;
   let fetchDocument: ReturnType<typeof spyOn<typeof cimdTransport, "fetchClientMetadataResource">>;
 
@@ -91,6 +98,9 @@ describe("CIMD first authorization", () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
+    addressOctet += 1;
+    clientId = `https://93.184.216.${addressOctet}/client.json`;
+    redirectUri = `https://93.184.216.${addressOctet}/callback`;
     documentScope = undefined;
     // The metadata document is fetched through `@better-auth/cimd/node` — the
     // resolve-once, address-pinning, redirect-refusing transport the plugin
@@ -135,7 +145,7 @@ describe("CIMD first authorization", () => {
     return stored;
   }
 
-  it("accepts identity scopes on the first request for a document without scope", async () => {
+  it("registers a document without scope at the self-service ceiling and stamps it", async () => {
     expect(await db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId))).toEqual(
       [],
     );
@@ -151,7 +161,14 @@ describe("CIMD first authorization", () => {
     }
     expect(fetchDocument).toHaveBeenCalledTimes(1);
     const stored = await storedClient();
-    expect(stored.scopes).toEqual(["openid", "profile", "email", "offline_access"]);
+    // Same literals as the DCR sibling below: `mcp` is the only module
+    // contributing end-user scopes today and `getTestApp({ modules: [oidcModule] })`
+    // narrows the live provider. A superset assertion, so a second module
+    // opting in stays green — but `agents:run` must stay out.
+    expect(stored.scopes).toEqual(
+      expect.arrayContaining([...OIDC_IDENTITY_SCOPES, "mcp:read", "mcp:invoke"]),
+    );
+    expect(stored.scopes).not.toContain("agents:run");
     expect(stored.level).toBe("instance");
     expect(JSON.parse(stored.metadata!)).toMatchObject({
       level: "instance",
@@ -160,20 +177,29 @@ describe("CIMD first authorization", () => {
     });
   });
 
-  it("preserves explicitly narrow scopes on first authorization and retry", async () => {
+  it("grants the ceiling to a document that declares a narrower scope", async () => {
+    // A registration `scope` is VALIDATED against the self-service ceiling and
+    // then replaced by it — the declared value is never what gets persisted
+    // (`persistOAuthClientRegistration`). A document narrowing itself to
+    // `openid` therefore still ends up able to request the whole self-service
+    // set. That is not a widening of the trust boundary: our
+    // `clientRegistrationDefaultScopes` and `clientRegistrationAllowedScopes`
+    // are the SAME set, so a document declaring no scope at all already
+    // reached it. The real gate stays the ceiling (asserted below and in the
+    // DCR suite), the consent screen, and the caller's own permissions.
     documentScope = "openid";
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const rejected = await authorize("openid offline_access");
-      expect(new URL(rejected.headers.get("location")!).searchParams.get("error")).toBe(
-        "invalid_scope",
-      );
-    }
-    expect((await storedClient()).scopes).toEqual(["openid"]);
-    const allowed = await authorize("openid");
-    expect(new URL(allowed.headers.get("location")!, "http://localhost").pathname).toBe(
+    const authorized = await authorize("openid offline_access");
+    expect(new URL(authorized.headers.get("location")!, "http://localhost").pathname).toBe(
       "/api/oauth/login",
     );
+    const stored = await storedClient();
+    expect(stored.scopes).toEqual(
+      expect.arrayContaining([...OIDC_IDENTITY_SCOPES, "mcp:read", "mcp:invoke"]),
+    );
+    expect(stored.scopes).not.toContain("agents:run");
+    // Second pass reads the cached/persisted client — no second document fetch.
+    await authorize("openid");
     expect(fetchDocument).toHaveBeenCalledTimes(1);
   });
 
@@ -225,22 +251,36 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
     return app.request(`/api/auth/oauth2/authorize?${query}`);
   }
 
-  it("honours an explicit identity-only scope", async () => {
-    // Asks for the identity scopes and gets exactly those — the self-service
-    // ceiling never widens an explicit request.
-    const { status, json } = await register({
-      client_name: "Claude Code (test)",
-      redirect_uris: ["http://localhost:9911/callback"],
+  it("defaults to a native client so loopback redirects register, but honours a declared web", async () => {
+    // `claude mcp add` and `npx @appstrate/connect-helper` listen on an
+    // ephemeral loopback port and declare no `application_type`. The
+    // oauth-provider validates redirect URIs against that type and assumes
+    // `web` — https on a non-loopback host only — for a DCR body that declares
+    // nothing, which refuses every one of those callbacks. The register
+    // before-hook fills the ABSENT field with `native`, the same default the
+    // CIMD path already gets (RFC 8252 §7.3).
+    const loopback = await register({
+      client_name: "Loopback MCP client",
+      redirect_uris: ["http://127.0.0.1:9917/callback"],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
-      scope: "openid profile email offline_access",
     });
-    expect([200, 201]).toContain(status);
-    expect(typeof json.client_id).toBe("string");
-    expect(String(json.scope).split(" ").sort()).toEqual([...OIDC_IDENTITY_SCOPES].sort());
-    // Public client (PKCE) — registered with no client authentication method.
-    expect(json.token_endpoint_auth_method ?? "none").toBe("none");
+    expect([200, 201]).toContain(loopback.status);
+    expect(loopback.json.application_type).toBe("native");
+
+    // A declared value is never overwritten: a client that says it is a web
+    // client is still held to https on a non-loopback host.
+    const declaredWeb = await register({
+      client_name: "Web client on loopback",
+      redirect_uris: ["http://127.0.0.1:9918/callback"],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      application_type: "web",
+    });
+    expect(declaredWeb.status).toBe(400);
+    expect(String(declaredWeb.json.error)).toBe("invalid_redirect_uri");
   });
 
   it("defaults a scope-less registration to the self-service set and authorizes it", async () => {
@@ -273,7 +313,16 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
     );
   });
 
-  it("keeps an explicitly narrow registration narrow", async () => {
+  it("grants the ceiling to a registration that declares a narrower scope", async () => {
+    // RFC 7591 §3.2.1 lets the AS answer with a scope different from the one
+    // requested. The oauth-provider validates the declared `scope` against the
+    // self-service ceiling and then persists the ceiling itself, so a narrow
+    // declaration is not retained. Harmless here because
+    // `clientRegistrationDefaultScopes` and `clientRegistrationAllowedScopes`
+    // are the SAME set — a body with no `scope` at all (the test above)
+    // already reached the ceiling, so nothing an attacker would have declared
+    // changes what they get. The gates that hold are the ceiling itself (test
+    // below), the consent screen, and the caller's permissions.
     const redirectUri = "http://localhost:9916/callback";
     const { status, json } = await register({
       client_name: "Narrow client",
@@ -284,13 +333,20 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
       scope: "openid",
     });
     expect([200, 201]).toContain(status);
-    expect(String(json.scope)).toBe("openid");
+    expect(typeof json.client_id).toBe("string");
+    // Public client (PKCE) — registered with no client authentication method.
+    expect(json.token_endpoint_auth_method ?? "none").toBe("none");
+    const scopes = String(json.scope).split(" ");
+    expect(scopes).toEqual(
+      expect.arrayContaining([...OIDC_IDENTITY_SCOPES, "mcp:read", "mcp:invoke"]),
+    );
+    expect(scopes).not.toContain("agents:run");
 
-    const rejected = await authorizeClient(String(json.client_id), redirectUri, "mcp:read");
-    expect(rejected.status).toBe(302);
-    expect(
-      new URL(rejected.headers.get("location")!, "http://localhost").searchParams.get("error"),
-    ).toBe("invalid_scope");
+    const authorized = await authorizeClient(String(json.client_id), redirectUri, "mcp:read");
+    expect(authorized.status).toBe(302);
+    expect(new URL(authorized.headers.get("location")!, "http://localhost").pathname).toBe(
+      "/api/oauth/login",
+    );
   });
 
   it("rejects a registration requesting a core action scope outside the self-service set", async () => {
@@ -375,10 +431,6 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
       response_types: ["code"],
       token_endpoint_auth_method: "none",
       scope: "openid profile email offline_access",
-      // A loopback http callback is only registrable by a NATIVE client (OIDC
-      // Dynamic Registration §2) — which is what an MCP client on a loopback
-      // port is. A `web` client would be refused `invalid_redirect_uri`.
-      application_type: "native",
     });
     expect([200, 201]).toContain(status);
     return String(json.client_id);

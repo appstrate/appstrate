@@ -45,7 +45,7 @@ import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
-import { getAppstrateScopeSet, getSelfServiceScopes } from "../auth/scopes.ts";
+import { getAppstrateScopeSet } from "../auth/scopes.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import { assertSpaceAssignmentsValid } from "../../../services/space-assignments.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
@@ -442,11 +442,9 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
  * is safely re-stamped. Best-effort cache invalidation so the next mint reads
  * the stamped row.
  */
-export async function markClientSelfService(
-  clientId: string,
-): Promise<{ scopes: string[]; metadata: string } | undefined> {
+export async function markClientSelfService(clientId: string): Promise<string | undefined> {
   const [row] = await db
-    .select({ metadata: oauthClient.metadata, scopes: oauthClient.scopes })
+    .select({ metadata: oauthClient.metadata })
     .from(oauthClient)
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
@@ -466,22 +464,11 @@ export async function markClientSelfService(
   metadata.clientId = clientId;
   metadata.selfService = true;
 
-  // Backfill the self-service scope ceiling when the client registered with
-  // none. A CIMD client whose metadata document declares no `scope` (e.g.
-  // Claude Code) is written with `scopes: []` — and `[]` is not nullish, so
-  // the authorize-time check `client.scopes ?? opts.scopes` keeps the empty
-  // set and rejects EVERY requested scope (`invalid_scope`). The DCR register
-  // path dodges this via `clientRegistrationDefaultScopes`, but the CIMD path
-  // bypasses it. Stamp the same ceiling a self-service DCR client gets
-  // (identity + module end-user-grantable scopes, e.g. mcp:read/mcp:invoke) so
-  // the client may request them. Only fill when empty — never widen a client
-  // that deliberately declared a narrower scope set.
-  const scopes = row.scopes?.length ? row.scopes : getSelfServiceScopes();
-  const stamped = { scopes, metadata: JSON.stringify(metadata) };
+  const stamped = JSON.stringify(metadata);
 
   await db
     .update(oauthClient)
-    .set({ ...stamped, level: "instance", updatedAt: new Date() })
+    .set({ metadata: stamped, level: "instance", updatedAt: new Date() })
     .where(eq(oauthClient.clientId, clientId));
   cacheInvalidate(clientId);
   return stamped;

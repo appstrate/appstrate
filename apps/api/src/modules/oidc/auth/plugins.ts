@@ -373,12 +373,10 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // for. Without this the entire CIMD onboarding path mints nothing.
       onClientCreated: async ({ client }) => {
         const stamped = await markClientSelfService(client.clientId);
-        // CIMD returns this same object to the first authorize request after
-        // the hook. Persisting alone leaves its scopes empty until the retry.
-        if (stamped) {
-          client.scopes = stamped.scopes;
-          client.metadata = stamped.metadata;
-        }
+        // CIMD hands this same object to the authorize request that triggered
+        // the registration. Persisting alone would leave that first request
+        // reading the unstamped metadata.
+        if (stamped) client.metadata = stamped;
       },
     }),
   ];

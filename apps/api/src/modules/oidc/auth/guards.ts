@@ -32,6 +32,11 @@
  *    the same `rate-limiter-flexible` Redis backend the rest of the API
  *    uses so limits are distributed across instances.
  *
+ * 3. **Registration defaults** — `/oauth2/register` bodies get the
+ *    `application_type` the oauth-provider exposes no option to default,
+ *    so RFC 7591 registrants reach the same redirect-URI rules as CIMD ones
+ *    (see `defaultRegistrationToNativeClient`).
+ *
  * Error shape: rejections throw `better-call`'s `APIError` which Better
  * Auth surfaces as the appropriate HTTP status with an OAuth2-style body.
  */
@@ -705,6 +710,40 @@ async function isSelfServiceClient(clientId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Default an unspecified `application_type` on the DCR path to `native`.
+ *
+ * The oauth-provider validates every registered redirect URI against the
+ * client's application type: a `web` client may only use https on a
+ * non-loopback host, a `native` one may use `http://localhost`,
+ * `http://127.0.0.1` or `http://[::1]` (RFC 8252 §7.3 / OIDC Dynamic
+ * Registration §2). Upstream assumes `web` when a DCR body declares nothing,
+ * and `native` for a client-metadata document. Appstrate's DCR endpoint exists
+ * for exactly the MCP clients that cannot host a CIMD document — `claude mcp
+ * add`, `npx @appstrate/connect-helper` — which listen on an ephemeral loopback
+ * port and declare no `application_type`. Assuming `web` for them refuses every
+ * registration with `invalid_redirect_uri`.
+ *
+ * So the DCR default is aligned on the CIMD one. `native` is strictly more
+ * permissive than `web` on exactly one axis (http loopback) and stricter on
+ * another (https loopback is refused), and the redirect URI is still matched
+ * exactly at authorization time. Only the ABSENT case is filled: a body that
+ * declares `application_type` keeps the value it declared, so a client that
+ * says `web` is still held to https non-loopback.
+ *
+ * Placed here rather than upstream because the plugin exposes no option for a
+ * registration-time application-type default.
+ */
+async function defaultRegistrationToNativeClient(ctx: {
+  body?: unknown;
+}): Promise<{ context: { body: Record<string, unknown> } } | undefined> {
+  const body = ctx.body;
+  if (!body || typeof body !== "object" || "application_type" in body) return;
+  return {
+    context: { body: { ...(body as Record<string, unknown>), application_type: "native" } },
+  };
+}
+
 export function oidcGuardsPlugin() {
   return {
     id: "oidc-guards",
@@ -868,6 +907,10 @@ export function oidcGuardsPlugin() {
           handler: createAuthMiddleware(async (ctx) => {
             await enforceRateLimit("oauth-register", REGISTER_RL_POINTS, ctx.request);
           }),
+        },
+        {
+          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/register",
+          handler: createAuthMiddleware(defaultRegistrationToNativeClient),
         },
       ],
       after: [

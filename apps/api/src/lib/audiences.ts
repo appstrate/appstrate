@@ -137,9 +137,3 @@ export function getEndUserVerifyAudiences(): string[] {
   }
   return verifyAudiencesCache.audiences;
 }
-
-/** Test-only — drop org audiences between fixtures. */
-export function _resetMcpOrgVerifyAudiencesForTesting(): void {
-  orgIds.clear();
-  verifyAudiencesCache = null;
-}

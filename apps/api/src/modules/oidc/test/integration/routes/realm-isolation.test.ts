@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { encodeBasicCredentials } from "@better-auth/core/oauth2";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable, session as sessionTable } from "@appstrate/db/schema";
@@ -294,13 +295,19 @@ async function exchangeCode(
 ): Promise<Response> {
   return app.request("/api/auth/oauth2/token", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      // `createClient` registers admin-provisioned clients as
+      // `client_secret_basic`, and the oauth-provider holds a client to the
+      // method it registered — a secret in the body would be answered
+      // `invalid_client` before the realm guard this file asserts ever runs.
+      Authorization: encodeBasicCredentials(opts.clientId, opts.clientSecret),
+    },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
       redirect_uri: opts.redirectUri,
       client_id: opts.clientId,
-      client_secret: opts.clientSecret,
       code_verifier: verifier,
       resource: "http://localhost:3000",
     }).toString(),
