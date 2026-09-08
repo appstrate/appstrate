@@ -1,10 +1,10 @@
 -- 0009 — one pending invitation per (organization, email).
 --
 -- Run BEFORE the drizzle batch that carries
--- `packages/db/drizzle/0057_org_invitations_pending_unique.sql`, when — and only
--- when — the rollout pre-flight in `README.md` counts a duplicate pending pair.
--- Not afterwards: the batch is one transaction, so letting `0057`'s
--- `CREATE UNIQUE INDEX` raise 23505 rolls `0056` back with it. A duplicate pair
+-- `packages/db/drizzle/0056_space_roles.sql`, when — and only when — the
+-- rollout pre-flight in `README.md` counts a duplicate pending pair. Not
+-- afterwards: letting `0056`'s `CREATE UNIQUE INDEX` raise 23505 rolls the
+-- whole migration back. A duplicate pair
 -- needs two `createInvitation` calls that raced, so most deployments count zero
 -- and never run this.
 --
@@ -15,7 +15,7 @@
 -- sibling — so a second run matches zero rows. One transaction, fenced.
 --
 -- Rows: UNMEASURED — the script prints the pair count before and after; the
--- "after" count must be 0 for `0057` to succeed.
+-- "after" count must be 0 for `0056` to succeed.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';

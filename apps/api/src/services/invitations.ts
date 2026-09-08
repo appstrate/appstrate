@@ -39,7 +39,7 @@ export class InvitationAlreadyPendingError extends Error {
  * follow an expired one without waiting for `expireOldInvitations()`.
  *
  * Two creates racing past the pre-check both reach the INSERT; the partial
- * unique index `uq_org_invitations_pending` (0057) lets exactly one through and
+ * unique index `uq_org_invitations_pending` (0056) lets exactly one through and
  * the loser's 23505 is mapped to the same error, so callers see one contract.
  */
 export async function createInvitation({

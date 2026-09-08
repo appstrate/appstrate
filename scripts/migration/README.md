@@ -48,12 +48,12 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
   -f - < scripts/migration/<NNNN>-<slug>.sql
 ```
 
-## RBAC rollout (drizzle `0056` + `0057`, scripts `0008` + `0009`)
+## RBAC rollout (drizzle `0056`, scripts `0008` + `0009`)
 
 Apply all of it during the same maintenance window with application traffic stopped:
 
 1. Restore a production dump into a throwaway database and rehearse every step. Record the before/after counts; production volume remains unmeasured until this is done. Verify every org with chat sessions has a default space before `0056` promotes `chat_sessions.space_id` to NOT NULL.
-2. **Pre-flight, before any drizzle migration.** Drizzle applies the pending batch in one transaction, so `0057`'s `CREATE UNIQUE INDEX` raising 23505 on a pre-existing duplicate rolls `0056` back with it and boot fails. Count the pairs first:
+2. **Pre-flight, before any drizzle migration.** `0056` creates `uq_org_invitations_pending`; a pre-existing duplicate pending pair makes that `CREATE UNIQUE INDEX` raise 23505, which rolls the whole migration back and fails boot. Count the pairs first:
 
    ```sql
    SELECT count(*) FROM (
@@ -64,7 +64,7 @@ Apply all of it during the same maintenance window with application traffic stop
 
    Non-zero → run `0009-org-invitations-dedupe-pending.sql` and re-run the query until it prints 0.
 
-3. Apply pending Drizzle migrations, including `0056_space_roles.sql` and `0057_org_invitations_pending_unique.sql`.
+3. Apply pending Drizzle migrations, including `0056_space_roles.sql`.
 4. Run `0008-org-viewer-to-guest.sql` before starting the new application. It snapshots memberships, pending viewer invitations and legacy OAuth viewer signup clients into explicit viewer grants, preserving any existing explicit role choices. Reruns do not add later spaces.
 5. Check zero remaining org-member viewers, zero pending viewer invitations and zero OAuth `signup_role = 'viewer'`. `0008` additionally aborts if any captured membership, invitation or OAuth signup space is missing. Inspect the legacy OAuth snapshots against the rehearsal's pre-migration client/space inventory.
 6. Start the new application. Rolling back only the application is unsupported: the older build omits the now-required chat-session space. Roll forward or restore the coordinated backup.
@@ -82,4 +82,4 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
 | 0005 | 2026-08-28  | AFPS `delivery.http.prefix`: bare auth scheme → separator-carrying (`"Bearer"` → `"Bearer "`), both manifest stores — **one deploy with the `integrationManifestSchema` (1d) gate**; run it FIRST, both spellings render alike under the old code                                                | 126 `package_versions` / 77 `packages.draft_manifest`                                                                                  |
 | 0007 | not applied | skills: quote the `description:` lines `yaml` cannot parse, so their drafts are savable again under the SKILL.md frontmatter gate — **run after deploying the gate**; `.ts`, dry-run by default, `--apply` to write                                                                              | 17 of 66 skills fixable, 3 need a manual edit (2 `name`, 1 over-long description) — counted on production, NOT rehearsed               |
 | 0008 | not applied | org role `viewer` → `guest` + an explicit `viewer` `space_members` row in every space that exists; pending invitations and legacy OAuth signup clients carry the same current-space snapshot — **run between drizzle `0056` and bringing the new version up**; viewers are locked out in between | unmeasured — the script prints before/after counts and aborts if any survives                                                          |
-| 0009 | not applied | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0057` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                       | unmeasured — prints the duplicate-pair count before/after, after must be 0                                                             |
+| 0009 | not applied | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0056` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                       | unmeasured — prints the duplicate-pair count before/after, after must be 0                                                             |

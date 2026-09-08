@@ -195,5 +195,13 @@ ALTER TABLE "oauth_clients" ADD COLUMN IF NOT EXISTS "signup_space_assignments" 
 UPDATE oauth_clients SET signup_role = 'guest' WHERE signup_role = 'viewer';--> statement-breakpoint
 ALTER TABLE "oauth_clients" DROP CONSTRAINT IF EXISTS "oauth_clients_signup_role_check";--> statement-breakpoint
 ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_signup_role_check" CHECK (signup_role IN ('admin', 'member', 'guest'));--> statement-breakpoint
+-- H. One pending invitation per (organization, email). `createInvitation`
+-- refuses a second pending row (409 `invitation_already_pending`); the index
+-- makes two concurrent creates safe (one INSERT lands, the other raises 23505,
+-- mapped to the same 409). `email` is stored lower-cased and trimmed. A
+-- duplicate pair left by a race under earlier code fails this statement and
+-- rolls the whole batch back: `scripts/migration/README.md` counts such pairs
+-- first and repairs them with its `0009`.
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_org_invitations_pending" ON "org_invitations" USING btree ("org_id","email") WHERE "org_invitations"."status" = 'pending';--> statement-breakpoint
 SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
 SET LOCAL lock_timeout = DEFAULT;

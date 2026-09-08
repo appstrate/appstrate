@@ -548,12 +548,10 @@ skills sync is running` and kept the stale plugin. The lock is now
   aborts unless every pre-flip (user, space) pair carries a `space_members` row
   and every pending invitation carries its space snapshot.
 
-  **A third file can be needed first.**
-  `packages/db/drizzle/0057_org_invitations_pending_unique.sql` adds the partial
-  unique index behind "one pending invitation per (organization, email)". Drizzle
-  applies the pending batch in a single transaction, so a duplicate pair left by
-  a race under earlier code fails `0057` and rolls `0056` back with it. Count the
-  pairs before the deploy and run
+  **A third file can be needed first.** `0056` also creates the partial unique
+  index behind "one pending invitation per (organization, email)", and a
+  duplicate pair left by a race under earlier code fails that statement and
+  rolls the whole migration back. Count the pairs before the deploy and run
   `scripts/migration/0009-org-invitations-dedupe-pending.sql` if there are any.
   **The runbook, including that query, is `scripts/migration/README.md` → RBAC
   rollout**; rehearse the whole sequence against a restored `pg_dump` copy first,

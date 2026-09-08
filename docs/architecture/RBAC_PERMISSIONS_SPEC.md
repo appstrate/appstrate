@@ -498,7 +498,7 @@ Doctrine: `NO_TRANSITIONAL_CODE.md`. Catalog changes are drizzle migrations; row
 
 **Schema — `packages/db/drizzle/0056_space_roles.sql`:** `ALTER TYPE org_role ADD VALUE 'guest'`; `space_roles`, `space_members`; `spaces.visibility`/`default_role` + checks; `org_invitations.space_assignments`; `chat_sessions.space_id`; `oauth_clients.signup_space_assignments`. Two writes ride along, each licensed by a constraint the same file promotes on the same table (§2 of the doctrine): `chat_sessions.space_id` is backfilled to the org's default space, then `SET NOT NULL`; and OAuth clients whose `signup_role` reads `viewer` become `guest`, which is what lets `oauth_clients_signup_role_check` be re-added narrowed to `admin | member | guest`. The space grants those clients lose in that flip are rows, so they are captured by `scripts/migration/0008`, not here.
 
-**Schema — `packages/db/drizzle/0057_org_invitations_pending_unique.sql`:** the partial unique index `uq_org_invitations_pending` on `(org_id, email) WHERE status = 'pending'`, which is what makes two concurrent invitation creates safe (§6.1). It can only fail on a pair of duplicates left by a race under earlier code; `scripts/migration/0009` is the conditional pre-flight that clears them.
+**Schema — `packages/db/drizzle/0056_space_roles.sql`, section H:** the partial unique index `uq_org_invitations_pending` on `(org_id, email) WHERE status = 'pending'`, which is what makes two concurrent invitation creates safe (§6.1). It can only fail on a pair of duplicates left by a race under earlier code; `scripts/migration/0009` is the conditional pre-flight that clears them.
 
 **Rows — `scripts/migration/0008-org-viewer-to-guest.sql`**, one transaction:
 
