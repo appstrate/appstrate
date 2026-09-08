@@ -19,7 +19,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   were invited for; an email may hold at most one pending invitation per
   organization, and a second is refused rather than silently replacing the
   first. Every permission is org-level or space-level, so a space-level grant
-  can never be satisfied outside a space.
+  can never be satisfied outside a space. Grants hold when they change, not only
+  when they are read: a scheduled run rechecks its actor's `agents:run` in the
+  space at every fire and disables itself once it is gone, an invitation is
+  consumed with the role and assignments current at its atomic claim, and a
+  space grant serializes with the removal or promotion of the same member.
 
 - **Role preview — see the product as a role before you assign it.** An owner or
   administrator can have every request answered as a lesser persona (an org role,
@@ -455,11 +459,6 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
 
 ### Fixed
-
-- Scheduled runs recheck their actor's current space permissions and disable
-  themselves when `agents:run` is revoked. Invitation acceptance consumes the
-  role and space assignments current at its atomic claim; concurrent space
-  grants serialize with organization membership removal and promotion.
 
 - **Unit tests green again after the 2026-09-07 LiteLLM catalog refresh
   (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
