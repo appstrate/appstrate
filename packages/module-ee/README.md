@@ -234,6 +234,12 @@ Plans define quotas in **integer credits** (not floats, not dollars). All DB col
 
 Each plan has a `tier` (0/1/2) for upgrade ordering and a `name` for display.
 
+### Subscription identity
+
+Every subscription-scoped webhook writes only to the account that **currently carries that subscription id**. Stripe orders nothing, so an org that replaced `sub_old` with `sub_new` still receives `sub_old`'s tail of events, and `metadata.orgId` is identical on both — it says which org OWNS a subscription, never that the org is still on it. Matching on `orgId` alone let a `customer.subscription.deleted` for the dead subscription downgrade the live one to free with zero credits on an account Stripe was still charging; reversed order and late delivery are the same fault. The `ee_stripe_events` id dedupe does not help: each of those events is new and genuinely from Stripe.
+
+The two handlers whose job includes ATTACHING a subscription — `checkout.session.completed` and `invoice.paid`, which must not depend on winning the race against it — also accept an account with **no** subscription; an account already on a different one is still excluded. `customer.subscription.created` attaches only to an unattached account, and the condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — that is the expected tail of a replacement, not a fault.
+
 ### Subscription status sync
 
 The `subscriptionStatus` field caches Stripe's status while a subscription is attached; `customer.subscription.deleted` normalizes it to `null`, the canonical free/no-subscription state, without re-granting credits. Admission distinguishes hard service blocks (`unpaid`, `paused`) from ended paid entitlements (`canceled`, `incomplete_expired`). Hard blocks reject every quote. Ended entitlements still admit an exact-zero quote (for example platform BYOK while compute is unbilled) but reject any positive quote with `subscription_blocked`. `past_due` remains allowed as a grace period during Stripe dunning retries. These sets are centralized in `config.ts` (`HARD_BLOCKED_STATUSES`, `ENDED_SUBSCRIPTION_STATUSES`, `WARNING_STATUSES`).

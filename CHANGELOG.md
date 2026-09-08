@@ -526,6 +526,18 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Billing: an old subscription's events no longer destroy the active one
+  (`@appstrate/module-ee`).** Every subscription-scoped Stripe webhook matched on
+  `metadata.orgId` alone, which says which org OWNS a subscription and not that
+  the org is still on it — so a `customer.subscription.deleted` for a replaced
+  `sub_old` downgraded the live `sub_new` account to free with zero credits while
+  Stripe kept charging it. Reversed order and late delivery did the same through
+  `customer.subscription.updated` and `invoice.paid`, and a superseded
+  subscription's dunning notice reached the customer as if their current plan
+  were failing. Each handler now writes only to the account carrying that exact
+  subscription id (the two that ATTACH one also accept an account with none), and
+  an event about any other subscription is logged and ignored.
+
 - **Billing: the usage the cutover excluded is no longer billed on the second
   sweep (`@appstrate/module-ee`).** The cursor was seeded at the platform's
   settled frontier and the first pass billed nothing — as documented — but every

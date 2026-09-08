@@ -236,6 +236,40 @@ describe("webhook billing emails", () => {
     });
   });
 
+  describe("invoice.payment_failed for a superseded subscription", () => {
+    it("sends no dunning notice about a subscription the org has replaced", async () => {
+      // Telling a customer their plan is failing to charge, when the failing
+      // subscription is one they already left, is a false alarm.
+      await seedBillingAccount({
+        orgId,
+        planId: "pro",
+        stripeCustomerId: "cus_email_fail_002",
+        stripeSubscriptionId: "sub_email_new",
+        subscriptionStatus: "active",
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_email_fail_002",
+        type: "invoice.payment_failed",
+        data: {
+          object: {
+            id: "in_email_fail_002",
+            customer: "cus_email_fail_002",
+            billing_reason: "subscription_cycle",
+            amount_due: 2900,
+            attempt_count: 2,
+            parent: { subscription_details: { subscription: "sub_email_old" } },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(sentEmails).toHaveLength(0);
+    });
+  });
+
   describe("no email on events without account", () => {
     it("does not send email when invoice.paid has unknown customer", async () => {
       const { body, signature } = signedEvent({

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or, type SQL } from "drizzle-orm";
 import { logger } from "../logger.ts";
 import { getPlans, isPlanId, type Plans, type PlanDefinition } from "../config.ts";
 import { getEeEnv } from "../env.ts";
@@ -62,6 +62,68 @@ function planForSubscription(
 function subscriptionPeriodEnd(subscription: Stripe.Subscription): Date | null {
   const ts = subscription.items?.data?.[0]?.current_period_end;
   return ts ? new Date(ts * 1000) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Subscription identity — which account a subscription-scoped event may write.
+//
+// Stripe guarantees NOTHING about delivery order, and `metadata.orgId` only says
+// WHICH ORG a subscription belongs to, never that it is the one the org is
+// paying on today. An org that replaced `sub_old` with `sub_new` still receives
+// `sub_old`'s tail of events; matching on `orgId` alone let a
+// `customer.subscription.deleted` for the DEAD subscription wipe the live one —
+// plan back to free, quota to zero, subscription id to null — on an account
+// Stripe is still billing. Reversed order and late delivery are the same fault
+// wearing different hats.
+//
+// So every subscription-scoped write is pinned to the account that currently
+// carries THAT subscription id. An event about any other subscription matches no
+// row, changes nothing, and is logged. Event-id dedupe (`ee_stripe_events`) does
+// not help here: each of these events is genuinely new and genuinely from
+// Stripe — it is simply about a subscription the org has moved on from.
+// ---------------------------------------------------------------------------
+
+/** The org's account, but only while it still carries THIS subscription. */
+function currentSubscription(orgId: string, subscriptionId: string): SQL {
+  return and(
+    eq(billingAccounts.orgId, orgId),
+    eq(billingAccounts.stripeSubscriptionId, subscriptionId),
+  )!;
+}
+
+/**
+ * Same, widened to an account with NO subscription attached yet — for the two
+ * handlers whose job includes ATTACHING one (checkout completion, and the first
+ * paid invoice, which must not depend on winning the ordering race against it).
+ * An account already carrying a DIFFERENT subscription is still excluded, which
+ * is the whole point.
+ */
+function currentOrUnattachedSubscription(orgId: string, subscriptionId: string): SQL {
+  return and(
+    eq(billingAccounts.orgId, orgId),
+    or(
+      isNull(billingAccounts.stripeSubscriptionId),
+      eq(billingAccounts.stripeSubscriptionId, subscriptionId),
+    ),
+  )!;
+}
+
+/**
+ * One line for an event that described a subscription this org is not on. `info`,
+ * not `warn`: it is the expected tail of a replaced subscription, and the
+ * alternative — acting on it — is what corrupts the account.
+ */
+function logSupersededSubscription(
+  event: Stripe.Event,
+  orgId: string,
+  subscriptionId: string,
+): void {
+  logger.info("Stripe event skipped — subscription is not the org's current one", {
+    eventId: event.id,
+    type: event.type,
+    orgId,
+    subscriptionId,
+  });
 }
 
 export async function handleWebhook(body: string, signature: string): Promise<void> {
@@ -177,7 +239,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
 
-      await db
+      const [linked] = await db
         .update(billingAccounts)
         .set({
           planId,
@@ -187,7 +249,16 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           subscriptionStatus: "active",
           updatedAt: new Date(),
         })
-        .where(eq(billingAccounts.orgId, orgId));
+        // This is the handler that ATTACHES a subscription, so an unattached
+        // account qualifies — but an account already on a different subscription
+        // does not: a stale checkout must not switch a paying org's plan.
+        .where(currentOrUnattachedSubscription(orgId, subscriptionId))
+        .returning({ orgId: billingAccounts.orgId });
+
+      if (!linked) {
+        logSupersededSubscription(event, orgId, subscriptionId);
+        break;
+      }
 
       logger.info("Checkout completed — org linked + quota allocated", {
         orgId,
@@ -239,36 +310,38 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const plan = planForSubscription(subscription, plans);
       const planId = plan?.id ?? subMetadata.planId;
 
-      const [existing] = await db
-        .select({ stripeSubscriptionId: billingAccounts.stripeSubscriptionId })
-        .from(billingAccounts)
-        .where(eq(billingAccounts.orgId, orgId));
-
-      if (existing && !existing.stripeSubscriptionId) {
-        await db
-          .update(billingAccounts)
-          .set({
-            planId,
-            // Allocate quota here too (trial / non-checkout path), so a
-            // subscription that never goes through checkout.session.completed
-            // still gets its plan budget before the first invoice.paid.
-            ...(plan ? { creditQuota: plan.creditQuota } : {}),
-            stripeCustomerId: subCustomerId,
-            stripeSubscriptionId: subscription.id,
-            subscriptionStatus: subscription.status,
-            cancelAtPeriodEnd: subscription.cancel_at_period_end,
-            updatedAt: new Date(),
-          })
-          .where(eq(billingAccounts.orgId, orgId));
-
-        logger.info("Subscription created (non-Checkout path) — org linked to Stripe", {
-          orgId,
+      // Attach ONLY to an account that has no subscription. Read-then-write let
+      // a concurrent handler attach between the two; the condition belongs in
+      // the UPDATE, where the row lock decides it.
+      const [linked] = await db
+        .update(billingAccounts)
+        .set({
           planId,
-          status: subscription.status,
-        });
+          // Allocate quota here too (trial / non-checkout path), so a
+          // subscription that never goes through checkout.session.completed
+          // still gets its plan budget before the first invoice.paid.
+          ...(plan ? { creditQuota: plan.creditQuota } : {}),
+          stripeCustomerId: subCustomerId,
+          stripeSubscriptionId: subscription.id,
+          subscriptionStatus: subscription.status,
+          cancelAtPeriodEnd: subscription.cancel_at_period_end,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(billingAccounts.orgId, orgId), isNull(billingAccounts.stripeSubscriptionId)))
+        .returning({ orgId: billingAccounts.orgId });
 
-        await syncOrgStorageEntitlement(orgId);
+      if (!linked) {
+        logSupersededSubscription(event, orgId, subscription.id);
+        break;
       }
+
+      logger.info("Subscription created (non-Checkout path) — org linked to Stripe", {
+        orgId,
+        planId,
+        status: subscription.status,
+      });
+
+      await syncOrgStorageEntitlement(orgId);
       break;
     }
 
@@ -329,15 +402,6 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
 
-      const [account] = await db
-        .select({ orgId: billingAccounts.orgId })
-        .from(billingAccounts)
-        .where(eq(billingAccounts.orgId, orgId));
-      if (!account) {
-        logger.warn("No billing account for org, skipping budget allocation", { orgId });
-        break;
-      }
-
       const invoiceCustomerId = refId(invoice.customer);
 
       // Renewal (subscription_cycle): reset creditsUsed to 0. Otherwise OMIT the
@@ -346,8 +410,11 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const resetCredits = invoice.billing_reason === "subscription_cycle";
 
       // Also (re)establish the Stripe linkage here so allocation no longer
-      // depends on checkout.session.completed winning the ordering race.
-      await db
+      // depends on checkout.session.completed winning the ordering race — hence
+      // the widened condition. An account on a DIFFERENT subscription is still
+      // excluded: a late invoice for a replaced subscription would otherwise
+      // re-attach the dead one and reset the live plan's quota.
+      const [allocated] = await db
         .update(billingAccounts)
         .set({
           planId: plan.id,
@@ -360,7 +427,13 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           ...(invoiceCustomerId ? { stripeCustomerId: invoiceCustomerId } : {}),
           updatedAt: new Date(),
         })
-        .where(eq(billingAccounts.orgId, orgId));
+        .where(currentOrUnattachedSubscription(orgId, subscription.id))
+        .returning({ orgId: billingAccounts.orgId });
+
+      if (!allocated) {
+        logSupersededSubscription(event, orgId, subscription.id);
+        break;
+      }
 
       logger.info("Credits allocated via invoice.paid", {
         orgId,
@@ -411,13 +484,22 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       if (itemPeriodEnd) updates.periodEnd = itemPeriodEnd;
       if (newPlan) updates.planId = newPlan.id;
 
-      // Resolve org from metadata (ordering-independent) and update by orgId —
-      // no post-update re-select needed. `returning` confirms the row existed.
+      // Resolve org from metadata (ordering-independent), then write only if the
+      // org is still ON this subscription. Nothing here attaches one: checkout
+      // completion, subscription creation and the first paid invoice do that, so
+      // an `updated` for a subscription the account does not carry is either a
+      // replaced subscription's tail or an event that arrived ahead of the
+      // attachment — and in both cases the attaching handler carries the truth.
       const [updated] = await db
         .update(billingAccounts)
         .set(updates)
-        .where(eq(billingAccounts.orgId, orgId))
+        .where(currentSubscription(orgId, subscription.id))
         .returning({ orgId: billingAccounts.orgId });
+
+      if (!updated) {
+        logSupersededSubscription(event, orgId, subscription.id);
+        break;
+      }
 
       logger.info("Subscription updated", {
         subscriptionId: subscription.id,
@@ -425,8 +507,6 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         cancelAtPeriodEnd: subscription.cancel_at_period_end,
         planId: newPlan?.id,
       });
-
-      if (!updated) break;
 
       // Plan may have changed (Customer Portal switch) — re-project storage.
       await syncOrgStorageEntitlement(orgId);
@@ -501,8 +581,16 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           creditQuota: 0,
           updatedAt: new Date(),
         })
-        .where(eq(billingAccounts.orgId, orgId))
+        // ONLY if this is still the org's subscription. Without it, the tail of
+        // a replaced subscription tore down the live one: plan to free, quota to
+        // zero, id to null — on an account Stripe was still charging.
+        .where(currentSubscription(orgId, subscription.id))
         .returning({ orgId: billingAccounts.orgId });
+
+      if (!deleted) {
+        logSupersededSubscription(event, orgId, subscription.id);
+        break;
+      }
 
       logger.info("Subscription deleted — downgraded to free with 0 credits", {
         subscriptionId: subscription.id,
@@ -512,15 +600,13 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // Storage follows the plan, not the credit anti-abuse rule: the org
       // drops to the free-plan ceiling (existing documents are never evicted;
       // the platform only blocks new writes above the limit).
-      if (deleted) await syncOrgStorageEntitlement(orgId);
+      await syncOrgStorageEntitlement(orgId);
 
       // Email: subscription expired
-      if (deleted) {
-        sendBillingEmail(orgId, "subscription-expired", {
-          resubscribeUrl: billingSettingsUrl(getAppUrl()),
-          locale: "fr",
-        });
-      }
+      sendBillingEmail(orgId, "subscription-expired", {
+        resubscribeUrl: billingSettingsUrl(getAppUrl()),
+        locale: "fr",
+      });
       break;
     }
 
@@ -540,9 +626,25 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // Email: payment failed with dunning escalation
       if (failedCustomerId) {
         const [failedAccount] = await db
-          .select({ orgId: billingAccounts.orgId, planId: billingAccounts.planId })
+          .select({
+            orgId: billingAccounts.orgId,
+            planId: billingAccounts.planId,
+            stripeSubscriptionId: billingAccounts.stripeSubscriptionId,
+          })
           .from(billingAccounts)
           .where(eq(billingAccounts.stripeCustomerId, failedCustomerId));
+
+        // A dunning notice for a subscription the org has replaced tells the
+        // customer their live plan is failing to charge, which is false.
+        const failedSubscriptionId = refId(invoice.parent?.subscription_details?.subscription);
+        if (
+          failedAccount &&
+          failedSubscriptionId !== null &&
+          failedAccount.stripeSubscriptionId !== failedSubscriptionId
+        ) {
+          logSupersededSubscription(event, failedAccount.orgId, failedSubscriptionId);
+          break;
+        }
 
         if (failedAccount) {
           const plan = isPlanId(failedAccount.planId) ? plans[failedAccount.planId] : undefined;
