@@ -71,7 +71,7 @@ async function cursorValue(): Promise<number> {
 describe("billing sweep — cursor consumer", () => {
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     _resetEeEnvForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });
@@ -709,7 +709,7 @@ describe("billing sweep — cursor consumer", () => {
 describe("billing cursor — init-time seed (cutover loss window)", () => {
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
@@ -760,7 +760,7 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
 describe("billing sweep — backlog drain within one tick", () => {
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "4";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "4";
     _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
@@ -813,7 +813,7 @@ describe("billing sweep — backlog drain within one tick", () => {
 
   it("bounds a tick at the drain cap and rides the remainder onto the next tick", async () => {
     // batch 1, cap 50 → a tick drains at most 50 rows. Seed 60 settled rows.
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "1";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "1";
     _resetEeEnvForTests();
     await seedBillingCursor(0);
     for (let i = 0; i < 60; i++) seedLlmUsage({ orgId, costUsd: 0.01 });
@@ -825,7 +825,7 @@ describe("billing sweep — backlog drain within one tick", () => {
     expect(await cursorValue()).toBe(60);
     expect(await creditsUsed()).toBe(600); // all 60 eventually billed
 
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     _resetEeEnvForTests();
   });
 });
@@ -836,7 +836,7 @@ describe("billing sweep — quota warning email", () => {
 
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     sentEmails.length = 0;
     initBillingEmail({
       sendMail: (to, subject) => {
@@ -895,7 +895,7 @@ describe("billing sweep — quota warning email", () => {
 describe("billing sweep — real concurrent passes", () => {
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
@@ -976,8 +976,8 @@ describe("billing sweep — real concurrent passes", () => {
 describe("billing sweep — serial-visibility replay window", () => {
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-    process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = "200";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
     _resetEeEnvForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
   });
@@ -1020,7 +1020,7 @@ describe("billing sweep — serial-visibility replay window", () => {
     // window existed, and what `REPLAY_WINDOW=0` still opts back into. It pins
     // WHY the window is not redundant work: delete the replay and this is the
     // behaviour you get back, silently.
-    process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = "0";
+    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "0";
     _resetEeEnvForTests();
 
     await seedBillingCursor(0);
@@ -1226,7 +1226,7 @@ describe("billing sweep — serial-visibility replay window", () => {
     // The window is read IN ADDITION to the batch, never out of it — otherwise
     // every pass would lose `REPLAY_WINDOW` rows of forward throughput, and a
     // window at or above the batch size would stall the sweeper outright.
-    process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = "10";
+    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "10";
     _resetEeEnvForTests();
     await seedBillingCursor(0);
     for (let i = 0; i < 9; i++) seedLlmUsage({ orgId, costUsd: 0.01, contextId: `run-${i}` });

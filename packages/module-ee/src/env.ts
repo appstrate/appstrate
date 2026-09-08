@@ -19,15 +19,15 @@ const eeEnvSchema = z.object({
   // ledger, claims platform-provided rows into `ee_billed_llm_usage`, and
   // debits credits. A failed pass advances nothing; the next tick retries.
   //
-  // Var names kept stable (deployed): INTERVAL is the sweep cadence, BATCH_SIZE
-  // the max rows per tick. Defaults tuned for a small deployment: 5-min cadence, 100
-  // rows per tick. Set INTERVAL=0 to disable.
-  CLOUD_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
+  // INTERVAL is the sweep cadence, BATCH_SIZE the max rows per tick. Defaults
+  // tuned for a small deployment: 5-min cadence, 100 rows per tick. Set
+  // INTERVAL=0 to disable.
+  EE_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
   // Max 1000 is the platform's `usage.list` hard ceiling (LLM_USAGE_LIST_MAX_LIMIT):
   // the cursor read is capped there server-side, so a larger batch would silently
   // cap AND make the sweeper's "consumer is behind" backlog warning
   // (`processed >= batchSize`) dead code (processed can never reach batchSize).
-  CLOUD_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
+  EE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
 
   // How far BELOW the watermark every sweep pass re-reads the ledger.
   //
@@ -74,7 +74,7 @@ const eeEnvSchema = z.object({
   //
   // 0 disables replay, restoring the pre-fix cursor AND its silent-loss window.
   // That is an emergency escape hatch, not a tuning knob.
-  CLOUD_RECONCILIATION_REPLAY_WINDOW: z.coerce.number().int().min(0).max(500).default(200),
+  EE_RECONCILIATION_REPLAY_WINDOW: z.coerce.number().int().min(0).max(500).default(200),
 });
 
 export type EeEnv = z.infer<typeof eeEnvSchema>;

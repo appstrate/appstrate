@@ -68,7 +68,7 @@ construction plus two explicit repairs":
   can commit after the one holding id 101: a pass sees 101, bills it, advances
   past 100, and `WHERE id > watermark` can never return row 100 again — unbilled
   and unlogged. Every pass therefore re-reads a bounded window BELOW the
-  watermark (`CLOUD_RECONCILIATION_REPLAY_WINDOW`, default 200) rather than
+  watermark (`EE_RECONCILIATION_REPLAY_WINDOW`, default 200) rather than
   starting at it. The window is a READ offset only: the committed watermark
   stays `GREATEST`-monotonic, and a re-read row that was already claimed debits
   nothing. `replayBilled > 0` in the tick heartbeat warns — it is the proof the
@@ -267,7 +267,7 @@ billing sweeper (periodic, cursor over llm_usage.id):
       watermark and would otherwise be unreachable forever. READ offset only — the
       watermark itself never rewinds. The replay span is read ON TOP of the batch
       (limit = span + batch, ≤ 1000, the platform's usage.list hard cap), so the
-      forward slice keeps its full CLOUD_RECONCILIATION_BATCH_SIZE
+      forward slice keeps its full EE_RECONCILIATION_BATCH_SIZE
   → frontier = leading rows the watermark may pass: settled rows always; an
       UNSETTLED row stalls ONLY if credentialSource === "system" (billed once it
       settles). Unsettled NON-system rows (BYOK/null) are advanced PAST (never
@@ -438,7 +438,7 @@ The root preload (`test/setup/preload.ts`) discovers this package like any other
   (`bun run test:tier0`) the module is not imported, not initialized, and its
   test files are not collected. It needs `CREATE DATABASE` and `postgres.js`,
   neither of which the tier-0 PGlite adapter offers. The runner prints the skip.
-- the same file sets `CLOUD_RECONCILIATION_INTERVAL_SECONDS=0` so `init()` arms
+- the same file sets `EE_RECONCILIATION_INTERVAL_SECONDS=0` so `init()` arms
   no periodic sweep — a timer firing mid-suite would bill rows a test seeded.
   The sweep functions are driven directly by
   `test/integration/services/billing-sweeper.test.ts`.

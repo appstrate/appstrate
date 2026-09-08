@@ -38,7 +38,7 @@ async function account() {
 describe("repairBillingAccount", () => {
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     _resetEeEnvForTests();
     _resetBillingSweeperForTests();
   });

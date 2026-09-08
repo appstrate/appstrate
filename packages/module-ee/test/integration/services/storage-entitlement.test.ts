@@ -297,7 +297,7 @@ describe("storage entitlement", () => {
 
   describe("throttled reconcile on the billing tick", () => {
     beforeEach(() => {
-      process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+      process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
       _resetEeEnvForTests();
       _resetBillingSweeperForTests();
     });

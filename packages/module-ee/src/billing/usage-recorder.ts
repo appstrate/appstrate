@@ -443,7 +443,7 @@ function noProgress(args: {
  *     An unsettled NON-system row (BYOK / null) is never billed and its
  *     `credentialSource` is fixed at first insert, so the watermark advances
  *     PAST it, and a long BYOK run can no longer block billing for every org.
- *   - Scan from `watermark − CLOUD_RECONCILIATION_REPLAY_WINDOW`, not from the
+ *   - Scan from `watermark − EE_RECONCILIATION_REPLAY_WINDOW`, not from the
  *     watermark. A serial `id` is taken at INSERT but published at COMMIT, so a
  *     row can appear BELOW an already-advanced watermark and would otherwise be
  *     unreachable — and therefore unbilled and unlogged — forever. The window is
@@ -513,7 +513,7 @@ export async function sweepLedgerBatch(
   //    The window is a READ offset ONLY. `scanFromId` never becomes the
   //    watermark; the committed advance stays `GREATEST`-guarded below, so the
   //    watermark is still strictly monotonic.
-  const replayWindow = getEeEnv().CLOUD_RECONCILIATION_REPLAY_WINDOW;
+  const replayWindow = getEeEnv().EE_RECONCILIATION_REPLAY_WINDOW;
   const scanFromId = Math.max(0, fromId - replayWindow); // clamped: a fresh cursor cannot underflow
   const replaySpan = fromId - scanFromId; // == min(replayWindow, fromId)
 

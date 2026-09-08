@@ -128,7 +128,7 @@ const eeModule: AppstrateModule = {
     // platform-provided rows into `ee_billed_llm_usage`, and debits credits.
     // A failed pass advances nothing and the next tick retries. Its tick also
     // starts (without awaiting) the throttled storage-entitlement reconcile.
-    // Disabled when `CLOUD_RECONCILIATION_INTERVAL_SECONDS=0`.
+    // Disabled when `EE_RECONCILIATION_INTERVAL_SECONDS=0`.
     startBillingSweeper();
   },
 

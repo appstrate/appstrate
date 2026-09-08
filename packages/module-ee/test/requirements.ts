@@ -35,6 +35,6 @@ export default {
     // module, and a timer firing mid-suite would bill rows a test seeded into
     // the mock ledger. The sweep functions are still driven directly by
     // `test/integration/services/billing-sweeper.test.ts`.
-    CLOUD_RECONCILIATION_INTERVAL_SECONDS: "0",
+    EE_RECONCILIATION_INTERVAL_SECONDS: "0",
   },
 } as const;

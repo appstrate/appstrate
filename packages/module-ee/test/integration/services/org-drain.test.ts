@@ -57,7 +57,7 @@ async function claimedIds(ids: number[]): Promise<number[]> {
 describe("final usage drain on org deletion", () => {
   beforeEach(async () => {
     await truncateEeTables();
-    process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });

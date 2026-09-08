@@ -43,17 +43,17 @@ describe("env", () => {
           "STRIPE_WEBHOOK_SECRET",
           "STRIPE_PRICE_ID_STARTER",
           "STRIPE_PRICE_ID_PRO",
-          "CLOUD_RECONCILIATION_INTERVAL_SECONDS",
-          "CLOUD_RECONCILIATION_BATCH_SIZE",
-          "CLOUD_RECONCILIATION_REPLAY_WINDOW",
+          "EE_RECONCILIATION_INTERVAL_SECONDS",
+          "EE_RECONCILIATION_BATCH_SIZE",
+          "EE_RECONCILIATION_REPLAY_WINDOW",
         ]),
       );
     });
 
     it("applies sensible defaults to reconciliation env vars when unset", () => {
       const env = getEeEnv();
-      expect(env.CLOUD_RECONCILIATION_INTERVAL_SECONDS).toBeGreaterThanOrEqual(0);
-      expect(env.CLOUD_RECONCILIATION_BATCH_SIZE).toBeGreaterThan(0);
+      expect(env.EE_RECONCILIATION_INTERVAL_SECONDS).toBeGreaterThanOrEqual(0);
+      expect(env.EE_RECONCILIATION_BATCH_SIZE).toBeGreaterThan(0);
     });
 
     it("defaults the replay window to a non-zero value on an unconfigured deployment", () => {
@@ -61,7 +61,7 @@ describe("env", () => {
       // an operator who never heard of the var still gets the fix. Preload sets
       // no value for it, so this reads the schema default.
       const env = getEeEnv();
-      expect(env.CLOUD_RECONCILIATION_REPLAY_WINDOW).toBe(200);
+      expect(env.EE_RECONCILIATION_REPLAY_WINDOW).toBe(200);
     });
 
     it("bounds the replay window so it can never starve the forward batch", () => {
@@ -70,7 +70,7 @@ describe("env", () => {
       // forward capacity than replay. Capping at 500 keeps forward progress
       // structural rather than dependent on operator discipline.
       const parse = (value: string): boolean => {
-        process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = value;
+        process.env.EE_RECONCILIATION_REPLAY_WINDOW = value;
         _resetEeEnvForTests();
         try {
           getEeEnv();
@@ -86,7 +86,7 @@ describe("env", () => {
         // 0 stays legal: the escape hatch back to the plain cursor.
         expect(parse("0")).toBe(true);
       } finally {
-        delete process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW;
+        delete process.env.EE_RECONCILIATION_REPLAY_WINDOW;
         _resetEeEnvForTests();
       }
     });

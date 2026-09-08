@@ -18,7 +18,7 @@ import { sweepLedgerBatch, type SweepResult } from "./usage-recorder.ts";
  *
  * Scope:
  *   - Each `sweepLedgerBatch` pass processes at most one batch
- *     (`CLOUD_RECONCILIATION_BATCH_SIZE`). A tick DRAINS consecutive full
+ *     (`EE_RECONCILIATION_BATCH_SIZE`). A tick DRAINS consecutive full
  *     batches (up to `MAX_DRAIN_ITERATIONS`) so a backlog is worked down within
  *     the tick instead of trickling one batch per interval; the remainder rides
  *     the next tick.
@@ -52,7 +52,7 @@ import { sweepLedgerBatch, type SweepResult } from "./usage-recorder.ts";
  * contract carries one, structured
  * pino logs are the honest transport.
  *
- * Disable: set `CLOUD_RECONCILIATION_INTERVAL_SECONDS=0`.
+ * Disable: set `EE_RECONCILIATION_INTERVAL_SECONDS=0`.
  */
 
 let sweeperTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,7 +81,7 @@ const ALERT_AFTER_FAILED_TICKS = 3;
 
 /**
  * Max `sweepLedgerBatch` calls per tick when draining a backlog. Bounds a tick
- * to a finite amount of work (`MAX_DRAIN_ITERATIONS × CLOUD_RECONCILIATION_BATCH_SIZE`
+ * to a finite amount of work (`MAX_DRAIN_ITERATIONS × EE_RECONCILIATION_BATCH_SIZE`
  * rows, e.g. 50 × 100 = 5000) so a huge backlog can't turn one tick into an
  * unbounded loop; the remainder rides the next tick.
  */
@@ -94,7 +94,7 @@ let inFlightResync: Promise<unknown> | null = null;
 
 /**
  * Start the periodic billing sweep. No-op if
- * `CLOUD_RECONCILIATION_INTERVAL_SECONDS` is `0` (disabled). Safe to
+ * `EE_RECONCILIATION_INTERVAL_SECONDS` is `0` (disabled). Safe to
  * call once at module init — re-entry is guarded.
  */
 export function startBillingSweeper(): void {
@@ -103,15 +103,15 @@ export function startBillingSweeper(): void {
     return;
   }
   const env = getEeEnv();
-  const intervalSec = env.CLOUD_RECONCILIATION_INTERVAL_SECONDS;
+  const intervalSec = env.EE_RECONCILIATION_INTERVAL_SECONDS;
   if (intervalSec === 0) {
-    logger.info("billing sweeper disabled (CLOUD_RECONCILIATION_INTERVAL_SECONDS=0)");
+    logger.info("billing sweeper disabled (EE_RECONCILIATION_INTERVAL_SECONDS=0)");
     return;
   }
   stopped = false;
   logger.info("billing sweeper started", {
     intervalSeconds: intervalSec,
-    batchSize: env.CLOUD_RECONCILIATION_BATCH_SIZE,
+    batchSize: env.EE_RECONCILIATION_BATCH_SIZE,
   });
   scheduleNext(intervalSec);
 }
@@ -252,7 +252,7 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
  * ({@link runBillingSweepTick}) owns the retry/alert accounting.
  *
  * Drains a backlog WITHIN the tick: `sweepLedgerBatch` processes at most one
- * batch (`CLOUD_RECONCILIATION_BATCH_SIZE`) per call, so a single pass per tick
+ * batch (`EE_RECONCILIATION_BATCH_SIZE`) per call, so a single pass per tick
  * caps throughput at `batchSize / interval` rows (e.g. 100 / 300 s = 1200 rows/h)
  * and lets a backlog grow unboundedly. Instead we keep sweeping while the last
  * pass filled its batch AND made cursor progress, bounded by
@@ -263,7 +263,7 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
  */
 export async function runBillingSweep(): Promise<SweepResult> {
   const env = getEeEnv();
-  const batchSize = env.CLOUD_RECONCILIATION_BATCH_SIZE;
+  const batchSize = env.EE_RECONCILIATION_BATCH_SIZE;
 
   let result = await sweepLedgerBatch(batchSize);
   let iterations = 1;
@@ -351,7 +351,7 @@ export async function runBillingSweep(): Promise<SweepResult> {
     logger.warn("billing sweep billed a ledger row from BELOW the watermark (replay window)", {
       replayBilled: totalReplayBilled,
       replayed: totalReplayed,
-      replayWindow: env.CLOUD_RECONCILIATION_REPLAY_WINDOW,
+      replayWindow: env.EE_RECONCILIATION_REPLAY_WINDOW,
       cursorTo: result.cursorTo,
     });
   }

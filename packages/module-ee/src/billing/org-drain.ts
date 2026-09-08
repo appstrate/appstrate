@@ -5,7 +5,7 @@
  *
  * WHY THIS EXISTS
  *
- * The periodic cursor sweep runs every `CLOUD_RECONCILIATION_INTERVAL_SECONDS`
+ * The periodic cursor sweep runs every `EE_RECONCILIATION_INTERVAL_SECONDS`
  * (300 s by default). An org that spends and then deletes itself inside that
  * window was never debited: `onOrgDelete` dropped its `ee_billing_accounts`
  * row, and the platform's org cascade then removed its `llm_usage` rows — so
@@ -69,7 +69,7 @@ export interface OrgDrainResult {
 export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
   const services = getPlatformServices();
   const db = getEeDb();
-  const batchSize = getEeEnv().CLOUD_RECONCILIATION_BATCH_SIZE;
+  const batchSize = getEeEnv().EE_RECONCILIATION_BATCH_SIZE;
 
   // Start at the global watermark: everything below it has already been through
   // a sweep pass (claimed if billable, deliberately skipped otherwise).
