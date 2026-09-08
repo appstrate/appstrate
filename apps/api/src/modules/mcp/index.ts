@@ -119,24 +119,28 @@ const mcpModule: AppstrateModule = {
 
   features: { mcp: true },
 
-  // RBAC contribution. `mcp:read` (search/describe + reach the endpoint) is
-  // broad — every role including viewer; `mcp:invoke` (execute an operation)
-  // excludes viewer. Both are API-key- and end-user-grantable: headless agents
-  // and embedding apps are first-class consumers. Defence in depth — the
-  // dispatched operation still enforces its own permission, so `mcp:invoke`
-  // can never exceed the caller's other grants.
+  // RBAC contribution. The endpoint dispatches space-scoped platform
+  // operations, so `mcp` is a space-level resource. `mcp:read`
+  // (search/describe + reach the endpoint) is broad — every preset including
+  // viewer; `mcp:invoke` (execute an operation) excludes viewer. Both are
+  // API-key- and end-user-grantable: headless agents and embedding apps are
+  // first-class consumers. Defence in depth — the dispatched operation still
+  // enforces its own permission, so `mcp:invoke` can never exceed the
+  // caller's other grants.
   permissionsContribution: () => [
     {
       resource: "mcp",
       actions: ["read"],
-      grantTo: ["owner", "admin", "member", "viewer"],
+      level: "space",
+      presets: ["admin", "builder", "operator", "viewer"],
       apiKeyGrantable: true,
       endUserGrantable: true,
     },
     {
       resource: "mcp",
       actions: ["invoke"],
-      grantTo: ["owner", "admin", "member"],
+      level: "space",
+      presets: ["admin", "builder", "operator"],
       apiKeyGrantable: true,
       endUserGrantable: true,
     },

@@ -53,6 +53,7 @@ import {
   loadClientSignupPolicy,
   resolveOrCreateOrgMembership,
   OrgSignupClosedError,
+  OrgSignupConfigurationError,
 } from "../services/orgmember-mapping.ts";
 import { resolvePendingClientBinding } from "../services/oauth-transaction-binding.ts";
 
@@ -195,7 +196,11 @@ export async function oidcAfterSignupHandler(input: {
     await resolveOrCreateOrgMembership(
       { id: input.user.id, email: input.user.email },
       policy.orgId,
-      { allowSignup: policy.allowSignup, signupRole: policy.signupRole },
+      {
+        allowSignup: policy.allowSignup,
+        signupRole: policy.signupRole,
+        signupSpaceAssignments: policy.signupSpaceAssignments,
+      },
     );
     logger.info("oidc: auto-joined new signup to organization", {
       module: "oidc",
@@ -206,6 +211,12 @@ export async function oidcAfterSignupHandler(input: {
       role: policy.signupRole,
     });
   } catch (err) {
+    if (err instanceof OrgSignupConfigurationError) {
+      throw new APIError("FORBIDDEN", {
+        code: "signup_configuration_invalid",
+        message: err.message,
+      });
+    }
     if (err instanceof OrgSignupClosedError) {
       // Cannot happen after the `before` guard, but log for visibility.
       logger.warn("oidc: afterSignup reached closed-policy branch", {

@@ -4,7 +4,12 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { zipSync } from "fflate";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  addOrgMember,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedAgent,
   seedPackage,
@@ -911,7 +916,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 403 when trying to update package from another org", async () => {
+    it("returns 404 when trying to update package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "foreignorg" });
       await seedAgent({
         id: "@foreignorg/their-agent",
@@ -936,7 +941,7 @@ describe("Packages API", () => {
         }),
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
 
     it("updates a package the org owns even when its scope differs from the org slug", async () => {
@@ -1990,7 +1995,7 @@ describe("Packages API", () => {
       expect(auditRows[0]!.after).toMatchObject({ type: "agent" });
     });
 
-    it("returns 403 when trying to delete package from another org", async () => {
+    it("returns 404 when trying to delete package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherdelorg" });
       await seedAgent({
         id: "@otherdelorg/their-agent",
@@ -2003,7 +2008,7 @@ describe("Packages API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
 
     it("returns 401 without authentication", async () => {
@@ -2028,7 +2033,7 @@ describe("Packages API", () => {
       await assertDbMissing(packages, eq(packages.id, "@foreignscope/imported-agent"));
     });
 
-    it("returns 403 when trying to delete a package owned by another org (DB check)", async () => {
+    it("returns 404 when trying to delete a package owned by another org (DB check)", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherdelorg2" });
       await seedAgent({
         id: "@foreignscope/other-org-agent",
@@ -2041,7 +2046,7 @@ describe("Packages API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
   });
 
@@ -2817,6 +2822,7 @@ describe("Packages API", () => {
       // Fork requires a source in ANOTHER org with a published version whose
       // ZIP exists in storage — go through the API end to end.
       const srcCtx = await createTestContext({ orgSlug: "forksrc" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const create = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
@@ -2857,6 +2863,7 @@ describe("Packages API", () => {
 
     it("POST fork returns the bare forked SKILL detail DTO (oneOf non-agent arm)", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forksrc2" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const create = await app.request("/api/packages/skills", {
         method: "POST",
         headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
@@ -2980,6 +2987,7 @@ describe("Packages API", () => {
 
     it("drops a retired runtime tool from all three fork sinks", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkret" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkret/legacy-agent";
       await seedPublishedSource(sourceId, srcCtx.orgId, {
         name: sourceId,
@@ -3014,6 +3022,7 @@ describe("Packages API", () => {
 
     it("removes the runtime_tools key entirely when every tool was retired", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkret2" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkret2/all-retired";
       await seedPublishedSource(sourceId, srcCtx.orgId, {
         name: sourceId,
@@ -3047,6 +3056,7 @@ describe("Packages API", () => {
 
     it("forks a clean manifest unchanged — nothing reordered, nothing defaulted", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkclean" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkclean/clean-agent";
       await seedPublishedSource(sourceId, srcCtx.orgId, {
         name: sourceId,
@@ -3087,6 +3097,7 @@ describe("Packages API", () => {
       // `runtime_tools` is agent vocabulary, so the normalisation must be
       // invisible to the other three package types.
       const srcCtx = await createTestContext({ orgSlug: "forkskill" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkskill/plain-skill";
       await seedPublishedSource(
         sourceId,
@@ -3129,6 +3140,7 @@ describe("Packages API", () => {
     // into a 500.
     it("forks a published manifest whose type drifted from its row (#481 legacy)", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkdrift" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkdrift/legacy-provider";
       await seedPublishedSource(
         sourceId,
@@ -3276,6 +3288,7 @@ describe("Packages API", () => {
 
     it("carries a forked integration's INTEGRATION.md through to the explorer", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkdoc" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkdoc/documented";
       await publishIntegration(sourceId, srcCtx.orgId, {
         "INTEGRATION.md": new TextEncoder().encode(INTEGRATION_DOC),
@@ -3299,6 +3312,7 @@ describe("Packages API", () => {
 
     it('stores the manifest text — not `""` — when the source ships no doc', async () => {
       const srcCtx = await createTestContext({ orgSlug: "forknodoc" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forknodoc/bare";
       await publishIntegration(sourceId, srcCtx.orgId, {});
 
@@ -3323,6 +3337,7 @@ describe("Packages API", () => {
 
     it("still reads an agent's prompt.md — the required entries are unchanged", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkprompt" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkprompt/agent";
       const manifest = {
         name: sourceId,
@@ -3376,6 +3391,7 @@ describe("Packages API", () => {
   describe("POST fork — source artifact decompression ceiling", () => {
     it("422s on a source that expands past the ceiling, and mints nothing", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkbomb" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkbomb/high-ratio-agent";
       const manifest = {
         name: sourceId,

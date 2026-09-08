@@ -16,7 +16,7 @@
  * injected `extraModules` list). Callers collect them and pass them in.
  */
 
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
 import { eq } from "drizzle-orm";
@@ -31,11 +31,12 @@ import { ApiError, unauthorized } from "./errors.ts";
 import { clearStaleAuthCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
-import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
+import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
+import { principalGrants } from "./principal-permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
-import type { AppEnv } from "../types/index.ts";
+import type { AppEnv, OrgRole } from "../types/index.ts";
 
 interface AuthPipelineOptions {
   /**
@@ -136,9 +137,27 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
         if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
         if (resolution.orgRole !== undefined) c.set("orgRole", resolution.orgRole);
-        if (resolution.permissions.length > 0) {
-          c.set("permissions", new Set(resolution.permissions));
+        // Before the permission write: `applyOrgPermissions` reads the persona.
+        adoptViewAs(c, resolution.orgId, resolution.extra);
+        // The strategy's list is the CEILING (a token's scope claim), not the
+        // grant: with an org role the grant is the role's org set narrowed by
+        // it, plus the space slice once `requireSpaceContext` runs. Written for
+        // an EMPTY list too — an undefined `scopeCeiling` would later hand an
+        // identity-only OIDC token the space preset's full set (RBAC spec §7.2).
+        if (resolution.orgRole !== undefined) {
+          const ceiling = new Set<string>(resolution.permissions);
+          c.set("scopeCeiling", ceiling);
+          c.set("permissions", applyOrgPermissions(c, resolution.orgRole));
+        } else if (!resolution.deferOrgResolution) {
+          // No org role and not deferring: the strategy's list IS the whole
+          // answer (an OIDC end-user token's fixed allowlist), empty included.
+          const ceiling = new Set<string>(resolution.permissions);
+          c.set("scopeCeiling", ceiling);
+          c.set("permissions", new Set(ceiling));
         }
+        // No org role + `deferOrgResolution` writes NO ceiling: the OIDC
+        // instance token (CLI as the full user) picks its org via `X-Org-Id`
+        // like a cookie session. A strategy meaning "nothing" must not defer.
         c.set("authMethod", resolution.authMethod);
         if (resolution.spaceId !== undefined) {
           c.set("spaceId", resolution.spaceId);
@@ -176,7 +195,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       c.set("orgId", keyInfo.orgId);
       c.set("orgSlug", keyInfo.orgSlug);
       c.set("orgRole", keyInfo.creatorRole);
-      c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
+      // The key's scopes are the ceiling; the grant is the creator's live
+      // authority narrowed by them. The space half arrives in
+      // `requireSpaceContext` from the CREATOR's membership (RBAC spec §7.1).
+      const keyCeiling = new Set<string>(keyInfo.scopes);
+      c.set("scopeCeiling", keyCeiling);
+      c.set("permissions", applyOrgPermissions(c, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
       c.set("apiKeyId", keyInfo.keyId);
       c.set("spaceId", keyInfo.spaceId);
@@ -300,6 +324,15 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     return next();
   });
 
+  // Role-preview eligibility + the `X-View-As-Active` marker: a header the
+  // transport cannot honour is refused before any org is resolved.
+  const viewAsGuard = viewAsTransportGuard();
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path, publicPaths(), c.req.raw.headers)) return next();
+    if (!c.get("user")) return next();
+    return viewAsGuard(c, next);
+  });
+
   // Realm guard: reject BA cookie sessions belonging to a non-platform
   // audience (OIDC end-users) from hitting platform routes. Runs after
   // the auth middleware has resolved the session and set `sessionRealm`,
@@ -350,10 +383,31 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (authMethod !== "session" && !c.get("deferOrgResolution")) return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
-      c.set("permissions", resolvePermissions(orgRole));
+      // Preview eligibility is judged against the REAL org role, before the write.
+      await resolveViewAs(c, c.get("orgId"), orgRole);
+      // Session + `deferOrgResolution` is exactly the population eligible for
+      // per-principal grants (`lib/principal-permissions.ts`).
+      const granted = await principalGrants(c, c.get("orgId"));
+      c.set("permissions", applyOrgPermissions(c, orgRole, granted));
     }
     return next();
   });
+}
+
+/**
+ * Write `orgPermissions` and return the org-level effective set (persona and
+ * ceiling applied, via `orgHalfFor`). Principal grants go into `orgPermissions`
+ * rather than the returned set: `requireSpaceContext` re-derives `permissions`
+ * from that key.
+ */
+function applyOrgPermissions(
+  c: Context<AppEnv>,
+  role: OrgRole,
+  principal?: ReadonlySet<string>,
+): Set<string> {
+  const { orgPermissions, effective } = orgHalfFor(c, c.get("orgId"), role, principal);
+  c.set("orgPermissions", orgPermissions);
+  return effective;
 }
 
 /**

@@ -24,6 +24,7 @@ export const mePaths = {
         "every org the user is a member of. API keys see only their bound org. OIDC end-user " +
         "JWTs see the single org owning their space. " +
         "**Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
+      parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
         "200": {
           description: "Orgs accessible to the caller",
@@ -46,9 +47,15 @@ export const mePaths = {
                         slug: { type: "string" },
                         role: {
                           type: "string",
-                          enum: ["owner", "admin", "member", "viewer", "end_user"],
+                          enum: ["owner", "admin", "member", "guest", "end_user"],
                           description:
                             "Org role for member callers; `end_user` for OIDC end-user JWTs.",
+                        },
+                        permissions: {
+                          type: "array",
+                          items: { type: "string" },
+                          description:
+                            "The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role.",
                         },
                         createdAt: { type: "string", format: "date-time" },
                       },
@@ -66,6 +73,7 @@ export const mePaths = {
                     name: "Acme Corp",
                     slug: "acme",
                     role: "owner",
+                    permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
                   },
                 ],
@@ -73,7 +81,10 @@ export const mePaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -401,7 +412,7 @@ export const mePaths = {
                       id: { type: "string" },
                       role: {
                         type: "string",
-                        enum: ["owner", "admin", "member", "viewer", "end_user"],
+                        enum: ["owner", "admin", "member", "guest", "end_user"],
                       },
                       name: {
                         type: ["string", "null"],

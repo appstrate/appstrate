@@ -23,6 +23,7 @@ import {
 
 describe("resolveOrCreateOrgMembership", () => {
   let orgId: string;
+  let defaultSpaceId: string;
   let ownerUserId: string;
   let newcomerUserId: string;
 
@@ -30,7 +31,9 @@ describe("resolveOrCreateOrgMembership", () => {
     await truncateAll();
     const owner = await createTestUser();
     ownerUserId = owner.id;
-    const { org } = await createTestOrg(owner.id, { slug: "orgsigntest" });
+    const created = await createTestOrg(owner.id, { slug: "orgsigntest" });
+    const { org } = created;
+    defaultSpaceId = created.defaultSpaceId;
     orgId = org.id;
     // A second auth identity that has NO membership in the test org — this
     // simulates a brand-new social sign-in on a closed org-level client.
@@ -105,13 +108,17 @@ describe("resolveOrCreateOrgMembership", () => {
     expect(resolved.role).toBe("admin");
   });
 
-  it("honors signupRole=viewer", async () => {
+  it("honors signupRole=guest", async () => {
     const resolved = await resolveOrCreateOrgMembership(
       { id: newcomerUserId, email: "newcomer@example.com" },
       orgId,
-      { allowSignup: true, signupRole: "viewer" },
+      {
+        allowSignup: true,
+        signupRole: "guest",
+        signupSpaceAssignments: [{ space_id: defaultSpaceId, preset_role: "viewer" }],
+      },
     );
-    expect(resolved.role).toBe("viewer");
+    expect(resolved.role).toBe("guest");
   });
 
   it("is idempotent on double-call (no extra row, no role change)", async () => {

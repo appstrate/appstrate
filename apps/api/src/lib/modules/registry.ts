@@ -13,7 +13,7 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
-import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
+import type { ModuleInitContext, ModuleOrgMember, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
@@ -161,7 +161,8 @@ export function buildModuleInitContext(): ModuleInitContext {
       // eslint-disable-next-line @typescript-eslint/no-misused-promises -- `ModuleInitContext.getSendMail` (packages/core/src/module.ts) declares the mailer as `(to, subject, html) => void`; the platform's `sendMail` returns `Promise<void>`, so no module can await delivery. Reconciling the two is a published-core contract change (a module supplying its own mailer would break), so it is not made here.
       return sendMail;
     },
-    getOrgAdminEmails,
+    getOrgOwnerEmails,
+    getOrgMembers,
     getOrgName,
     services: buildPlatformServices(),
   };
@@ -169,22 +170,52 @@ export function buildModuleInitContext(): ModuleInitContext {
 }
 
 // ---------------------------------------------------------------------------
-// DI: org admin emails query
+// DI: org membership queries
 // ---------------------------------------------------------------------------
 
-async function getOrgAdminEmails(orgId: string): Promise<string[]> {
-  const admins = await db
+/**
+ * Emails of the org's owners.
+ *
+ * Owner only, not owner-or-admin: this is the fallback recipient for billing
+ * mail, and an admin is an operational role. A module that wants a wider
+ * audience names the users itself and resolves them through
+ * {@link getOrgMembers}.
+ */
+async function getOrgOwnerEmails(orgId: string): Promise<string[]> {
+  const owners = await db
     .select({ email: user.email })
     .from(organizationMembers)
     .innerJoin(user, eq(organizationMembers.userId, user.id))
-    .where(
-      and(
-        eq(organizationMembers.orgId, orgId),
-        inArray(organizationMembers.role, ["admin", "owner"]),
-      ),
-    );
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.role, "owner")));
 
-  return admins.map((a) => a.email);
+  return owners.map((row) => row.email);
+}
+
+/**
+ * Resolve `userIds` to members of `orgId`. An id that is not a member is
+ * absent from the result — the caller asked which of its stored ids still hold
+ * membership, and "no longer a member" is an answer, not an error.
+ */
+async function getOrgMembers(
+  orgId: string,
+  userIds: readonly string[],
+): Promise<ModuleOrgMember[]> {
+  if (userIds.length === 0) return [];
+  const rows = await db
+    .select({
+      userId: organizationMembers.userId,
+      email: user.email,
+      role: organizationMembers.role,
+    })
+    .from(organizationMembers)
+    .innerJoin(user, eq(organizationMembers.userId, user.id))
+    .where(and(eq(organizationMembers.orgId, orgId), inArray(user.id, [...userIds])));
+
+  return rows.map((row) => ({
+    userId: row.userId,
+    email: row.email,
+    role: row.role,
+  }));
 }
 
 // ---------------------------------------------------------------------------

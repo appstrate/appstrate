@@ -24,7 +24,7 @@ import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
-import { listModels, pickModel, resolveDefaultSpaceId } from "./llm.ts";
+import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -215,7 +215,13 @@ export async function handleChatStream(
 ): Promise<Response> {
   const orgId = c.get("orgId");
   const user = c.get("user");
-  const orgRole = c.get("orgRole") ?? "member";
+  // The space the router entered — the session's space, and the scope of every
+  // space-scoped read this turn makes.
+  const spaceId = c.get("space").id;
+  // While a preview is on, the turn is answered as the persona; the real role
+  // stays on the context for identity and audit.
+  const persona = c.get("viewAs");
+  const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
@@ -249,7 +255,9 @@ export async function handleChatStream(
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
   const sessionReady: Promise<void> =
-    sessionId && lastMessage?.id ? ensureSession(sessionId, orgId, user.id) : Promise.resolve();
+    sessionId && lastMessage?.id
+      ? ensureSession(sessionId, orgId, user.id, spaceId)
+      : Promise.resolve();
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
@@ -289,18 +297,14 @@ export async function handleChatStream(
     "X-Org-Id": orgId,
   };
 
-  // ── Preamble phase A (parallel) ──────────────────────────────────────────
-  // The model list and the default space id are independent reads, so
-  // fire them together rather than back-to-back. `listModels` resolves the row
-  // the turn binds to; the space id scopes the MCP + integration reads that
-  // follow. Pin from the header when the caller already supplied one (no lookup
-  // needed).
+  // ── Preamble phase A ─────────────────────────────────────────────────────
+  // `listModels` resolves the row the turn binds to. The space is NOT looked
+  // up: the router entered it before this handler ran (`enterSpaceContext`),
+  // so `c.get("space")` is the one the caller's `chat:write` was checked
+  // against — reading it again from `/api/spaces` would be a second, divergent
+  // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
-  const pinnedSpaceId = c.req.header("x-space-id");
   const phaseAStart = Date.now();
-  const spaceIdPromise: Promise<string | undefined> = pinnedSpaceId
-    ? Promise.resolve(pinnedSpaceId)
-    : resolveDefaultSpaceId(origin, headers, orgId, platformFetch);
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
   // Only the caller-context block. It depends on the space id and the caller's
@@ -324,32 +328,29 @@ export async function handleChatStream(
   // between here and the point the block is consumed (invalid generation
   // settings, a gate rejection) would otherwise leave a rejection with no
   // handler. The error is rethrown where the block is consumed.
+  const phaseBStart = Date.now();
   let phaseBMs = 0;
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
-    spaceIdPromise
-      .then((resolvedSpaceId) => {
-        const phaseBStart = Date.now();
-        return buildCallerContextBlock(c, {
-          origin,
-          headers,
-          spaceId: resolvedSpaceId,
-          user,
-          deps,
-          // UI language forwarded by the client; validated/defaulted in the builder.
-          locale: c.req.header("X-Chat-Locale"),
-        }).finally(() => {
-          // Wall time of the block itself, from the space id being known.
-          phaseBMs = Date.now() - phaseBStart;
-        });
+    buildCallerContextBlock(c, {
+      origin,
+      headers,
+      spaceId,
+      user,
+      deps,
+      // UI language forwarded by the client; validated/defaulted in the builder.
+      locale: c.req.header("X-Chat-Locale"),
+    })
+      .finally(() => {
+        // Wall time of the block itself.
+        phaseBMs = Date.now() - phaseBStart;
       })
       .then(
         (block) => ({ ok: true as const, block }),
         (error: unknown) => ({ ok: false as const, error }),
       );
 
-  const [models, spaceId] = await Promise.all([
+  const [models] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    spaceIdPromise,
     sessionReady,
   ]);
   const chosen = pickModel(models, modelId);
@@ -379,7 +380,7 @@ export async function handleChatStream(
   // nothing has been opened yet, so a quota/cap rejection surfaces as a clean
   // error with no MCP/stop-controller to leak. Only the last message can carry
   // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
-  if (sessionId && lastMessage && spaceId) {
+  if (sessionId && lastMessage) {
     lastMessage = await materializeUserAttachments(lastMessage, (uri) =>
       deps.resolveChatAttachment({
         orgId,
@@ -570,6 +571,9 @@ export async function handleChatStream(
       orgId,
       orgRole,
       permissions: [...(c.get("permissions") ?? [])],
+      // The re-entered request carries no header, so without this the hop would
+      // answer with the caller's real authority while a preview is on screen.
+      viewAs: persona,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
@@ -577,7 +581,7 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  if (spaceId) mcpHeaders["x-space-id"] = spaceId;
+  mcpHeaders["x-space-id"] = spaceId;
   try {
     const response = await finalize(
       runEngine({

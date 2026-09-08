@@ -21,8 +21,12 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { createOrgModel } from "../../../src/services/org-models.ts";
 import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
+
+// `resolveChatModel` reads the system model registry; the HTTP harness initializes it at boot.
+initSystemModelProviderKeys();
 
 describe("resolveChatModel", () => {
   let ctx: TestContext;
@@ -125,7 +129,9 @@ describe("recordChatUsage — pricing provenance", () => {
   });
 
   async function seedSession(id: string): Promise<string> {
-    await db.insert(chatSessions).values({ id, orgId: ctx.orgId, userId: ctx.user.id });
+    await db
+      .insert(chatSessions)
+      .values({ id, orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, userId: ctx.user.id });
     return id;
   }
 

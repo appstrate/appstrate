@@ -25,6 +25,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
+import { PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
 import { usePermissions } from "../../hooks/use-permissions";
 
 interface PackageActionsDropdownProps {
@@ -99,10 +100,20 @@ export function PackageActionsDropdown({
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
-  const { isAdmin, isMember } = usePermissions();
+  const { can } = usePermissions();
 
   const isAgent = type === "agent";
-  const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
+  // Each package family is its own permission resource, so every gate below
+  // asks for the string the matching route checks.
+  const resource = PACKAGE_PERMISSIONS[type].resource;
+  const canWrite = can(`${resource}:write`);
+  const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
+  const canDelete = can(`${resource}:delete`);
+  // Deactivating / uninstalling an integration is the same route pair as
+  // `integrations:uninstall`; the props say whether the action EXISTS here.
+  const showDeactivate = !!canDeactivate && can("integrations:uninstall") && !!onDeactivate;
+  const showUninstall = !!canUninstall && can("integrations:uninstall") && !!onUninstall;
+  const showDelete = !isBuiltIn && isOwned && canDelete;
 
   // The manifest is no longer reachable from here, and does not need to be:
   // every page that mounts this dropdown carries both tabs — À propos renders
@@ -120,7 +131,7 @@ export function PackageActionsDropdown({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {/* ── Run with options (advanced launcher — per-run overrides) ── */}
-        {isAgent && isMember && onRunWithOptions && (
+        {isAgent && can("agents:run") && onRunWithOptions && (
           <>
             <DropdownMenuItem onSelect={onRunWithOptions}>
               <SlidersHorizontal size={14} />
@@ -170,7 +181,7 @@ export function PackageActionsDropdown({
         )}
 
         {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
-        {isMember && !isOwned && onFork && (
+        {canWrite && !isOwned && onFork && (
           <DropdownMenuItem onSelect={onFork}>
             <GitFork size={14} />
             {t("fork.button")}
@@ -181,13 +192,13 @@ export function PackageActionsDropdown({
         {isAgent && (
           <>
             <DropdownMenuSeparator />
-            {isAdmin && !hasFileInput && onAddSchedule && (
+            {can("schedules:write") && !hasFileInput && onAddSchedule && (
               <DropdownMenuItem onSelect={onAddSchedule}>
                 <CalendarPlus size={14} />
                 {t("schedule.titleNew")}
               </DropdownMenuItem>
             )}
-            {isAdmin && hasRuns && onDeleteRuns && (
+            {can("runs:delete") && hasRuns && onDeleteRuns && (
               <DropdownMenuItem
                 onSelect={onDeleteRuns}
                 disabled={runningRuns > 0}
@@ -197,7 +208,7 @@ export function PackageActionsDropdown({
                 {t("detail.clearRuns")}
               </DropdownMenuItem>
             )}
-            {isAdmin && hasMemories && onDeleteMemories && (
+            {can("persistence:delete") && hasMemories && onDeleteMemories && (
               <DropdownMenuItem
                 onSelect={onDeleteMemories}
                 className="text-destructive focus:text-destructive"
@@ -210,16 +221,16 @@ export function PackageActionsDropdown({
         )}
 
         {/* ── Deactivate / Uninstall / Delete ── */}
-        {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
+        {(showDeactivate || showUninstall || showDelete) && (
           <>
             <DropdownMenuSeparator />
-            {canDeactivate && onDeactivate && (
+            {showDeactivate && (
               <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
                 <PowerOff size={14} />
                 {t("integrations.btn.deactivate", { ns: "settings" })}
               </DropdownMenuItem>
             )}
-            {canUninstall && onUninstall && (
+            {showUninstall && (
               <DropdownMenuItem
                 onSelect={onUninstall}
                 className="text-destructive focus:text-destructive"
@@ -228,7 +239,7 @@ export function PackageActionsDropdown({
                 {t("packages.uninstall", { ns: "settings" })}
               </DropdownMenuItem>
             )}
-            {!isBuiltIn && isOwned && isAgent && onDeleteAgent && (
+            {showDelete && isAgent && onDeleteAgent && (
               <DropdownMenuItem
                 onSelect={onDeleteAgent}
                 disabled={runningRuns > 0}
@@ -238,7 +249,7 @@ export function PackageActionsDropdown({
                 {t("btn.delete")}
               </DropdownMenuItem>
             )}
-            {!isBuiltIn && isOwned && !isAgent && canDeletePackage && onDeletePackage && (
+            {showDelete && !isAgent && canDeletePackage && onDeletePackage && (
               <DropdownMenuItem
                 onSelect={onDeletePackage}
                 className="text-destructive focus:text-destructive"

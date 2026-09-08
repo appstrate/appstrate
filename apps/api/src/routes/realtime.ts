@@ -1,21 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
-import { organizationMembers, runs } from "@appstrate/db/schema";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { runs } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/realtime.ts";
 import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
-import { forbidden, unauthorized } from "../lib/errors.ts";
+import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
-import { resolveApiKeyPermissions } from "../lib/permissions.ts";
-import { validateSpaceInOrg } from "../middleware/space-context.ts";
+import { getOrgMember } from "../services/organizations.ts";
+import { effectivePermissions } from "../lib/permissions.ts";
+import {
+  loadSpaceMember,
+  resolveSpaceRole,
+  spacePermissions,
+  type SpaceMemberRow,
+} from "../lib/space-role.ts";
+import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
+import { orgHalfFor, personaFor, personaSpaceMember, validateViewAs } from "../lib/view-as.ts";
+import {
+  reportPermissionDenial,
+  VIEW_AS_ACTIVE_HEADER,
+  VIEW_AS_HEADER,
+  VIEW_AS_QUERY,
+} from "@appstrate/core/permissions";
 import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
-import type { OrgRole } from "../types/index.ts";
+import type { AppEnv, OrgRole } from "../types/index.ts";
 
 /**
  * Hard cap on frames queued for one subscriber before we give up on it.
@@ -74,18 +88,35 @@ function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | 
 interface SSEAuthResult {
   userId: string;
   orgId: string;
-  role: OrgRole;
   /**
-   * Admin level derived from the resolved role (`admin`/`owner`), never
-   * hardcoded. Drives the subscriber filter's `isAdmin` flag — the only
-   * thing it gates is debug-level `run_log` visibility
-   * (services/realtime.ts).
+   * Gates debug-level `run_log` events only (services/realtime.ts). Read from
+   * `runs:delete`: `runs:read` opens the stream for everyone, so it cannot discriminate.
    */
-  isAdmin: boolean;
+  canReadDebugLogs: boolean;
   spaceId: string;
 }
 
-const isAdminRole = (role: OrgRole): boolean => role === "admin" || role === "owner";
+/**
+ * SSE routes skip the auth pipeline (`skipAuth` matches `/api/realtime/`), so
+ * the PRINCIPAL's permission set in the streamed space is resolved here — not
+ * the API key's ceiling, which the caller intersects afterwards. `null` when
+ * the principal has no role in that space. `memberRow` is the persona's overlay
+ * under a role preview, so it is passed in rather than loaded.
+ */
+function resolveSpaceGrants(
+  c: Context<AppEnv>,
+  orgId: string,
+  realRole: OrgRole,
+  space: SpaceContextRow,
+  memberRow: SpaceMemberRow | null,
+): ReadonlySet<string> | null {
+  const ref = resolveSpaceRole(personaFor(c, orgId)?.orgRole ?? realRole, space, memberRow);
+  if (!ref) return null;
+  return new Set<string>([
+    ...orgHalfFor(c, orgId, realRole).orgPermissions,
+    ...spacePermissions(ref),
+  ]);
+}
 
 /**
  * Validate auth for SSE endpoints.
@@ -96,39 +127,73 @@ const isAdminRole = (role: OrgRole): boolean => role === "admin" || role === "ow
  *
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
  *
- * API keys go through the same canonical scope resolution as the HTTP
- * pipeline (`resolveApiKeyPermissions` — key scopes ∩ creator's live role)
- * and must carry `runs:read` to open any run stream; a valid key without
- * that grant is rejected with 403 instead of silently inheriting admin.
+ * Both branches resolve permissions as the HTTP pipeline does (key: scopes ∩
+ * creator's live authority in the key's space; session: org ∪ space) and both
+ * must carry `runs:read`; 403 otherwise, never inherited admin.
+ *
+ * ROLE PREVIEW arrives as `?view_as=` (same grammar and validation as
+ * `X-View-As`): an `EventSource` cannot send a header, and the header guard
+ * never runs for these pipeline-exempt routes.
  */
-async function validateSSEAuth(c: {
-  req: {
-    raw: Request;
-    query: (key: string) => string | undefined;
-  };
-}): Promise<SSEAuthResult | null> {
+async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null> {
+  const viewAsRaw = c.req.query(VIEW_AS_QUERY);
+  if (c.req.header(VIEW_AS_HEADER) !== undefined) {
+    // Refuse, never ignore: a client that believes it is previewing must not get real authority.
+    throw new ApiError({
+      status: 400,
+      code: "invalid_view_as",
+      title: "Invalid View-As Header",
+      detail: `Server-Sent-Events routes take the role preview as the \`${VIEW_AS_QUERY}\` query parameter, not as a header.`,
+      param: VIEW_AS_HEADER,
+    });
+  }
+
   // 1. Try API key auth via ?token= query param
   const token = c.req.query("token");
   if (token?.startsWith("ask_")) {
+    if (viewAsRaw !== undefined) {
+      // Same refusal as the HTTP transport guard: a key has no session to narrow.
+      throw new ApiError({
+        status: 400,
+        code: "view_as_unsupported",
+        title: "View-As Not Supported",
+        detail: `${VIEW_AS_QUERY} is only supported for a user session, not for api_key authentication.`,
+        param: VIEW_AS_QUERY,
+      });
+    }
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
-    const permissions = resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole);
+    // `spaceId` comes straight off the `api_keys` row: shape-check it here. The
+    // space row decides the creator's membership (visibility + default role).
+    assertSpaceId(keyInfo.spaceId);
+    const keySpace = await validateSpaceInOrg(keyInfo.spaceId, keyInfo.orgId);
+    if (!keySpace) return null;
+
+    // Creator's LIVE authority in the key's space (RBAC spec §7.1).
+    const grants = resolveSpaceGrants(
+      c,
+      keyInfo.orgId,
+      keyInfo.creatorRole,
+      keySpace,
+      await loadSpaceMember(keySpace.id, keyInfo.userId),
+    );
+    if (!grants) {
+      throw forbidden("The key's creator is not a member of the key's space");
+    }
+    const permissions = effectivePermissions({
+      orgPermissions: grants,
+      scopeCeiling: new Set(keyInfo.scopes),
+    });
     if (!permissions.has("runs:read")) {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
 
-    // The key's `spaceId` comes straight off the `api_keys` row and never
-    // reaches `validateSpaceInOrg` (the key already proves org+space binding),
-    // so this is the shape check for that path — an un-migrated `api_keys`
-    // table would otherwise open a stream on an `app_` id in silence.
-    assertSpaceId(keyInfo.spaceId);
-
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
-      role: keyInfo.creatorRole,
-      isAdmin: isAdminRole(keyInfo.creatorRole),
+      // From the ceilinged set, not `grants`: the key's scopes bound debug-log visibility.
+      canReadDebugLogs: permissions.has("runs:delete"),
       spaceId: keyInfo.spaceId,
     };
   }
@@ -140,19 +205,8 @@ async function validateSSEAuth(c: {
   const orgId = c.req.query("orgId");
   if (!orgId) return null;
 
-  // Verify org membership
-  const rows = await db
-    .select({ role: organizationMembers.role })
-    .from(organizationMembers)
-    .where(
-      scopedWhere(organizationMembers, {
-        orgId,
-        extra: [eq(organizationMembers.userId, session.user.id)],
-      }),
-    )
-    .limit(1);
-
-  if (!rows[0]) return null;
+  const member = await getOrgMember(orgId, session.user.id);
+  if (!member) return null;
 
   const spaceId = c.req.query("spaceId");
   if (!spaceId) return null;
@@ -161,18 +215,63 @@ async function validateSSEAuth(c: {
   const space = await validateSpaceInOrg(spaceId, orgId);
   if (!space) return null;
 
+  const role = member.role;
+  // Set before the persona is judged: `reportPermissionDenial` names the actor from the context.
+  c.set("user", {
+    id: session.user.id,
+    email: session.user.email ?? "",
+    name: session.user.name ?? "",
+  });
+  c.set("orgId", orgId);
+  c.set("orgRole", role);
+
+  const persona = await validateViewAs({
+    raw: viewAsRaw,
+    orgId,
+    realOrgRole: role,
+    onDenial: (required) => reportPermissionDenial(c, required),
+  });
+  // Set now so a refusal below also carries the marker (`errorHandler` stamps it).
+  if (persona) c.set("viewAs", persona);
+
+  // Same as `applySpacePermissions`: being in the org is not being in the space.
+  const grants = resolveSpaceGrants(
+    c,
+    orgId,
+    role,
+    space,
+    persona
+      ? personaSpaceMember(persona, space.id)
+      : await loadSpaceMember(space.id, session.user.id),
+  );
+  if (!grants) {
+    // Same 403 / 404 split as `applySpacePermissions`, not a 401 for an authenticated session.
+    if (space.visibility === "private") {
+      throw notFound(`Space '${space.id}' not found in this organization`);
+    }
+    throw new ApiError({
+      status: 403,
+      code: "not_a_space_member",
+      title: "Not a Space Member",
+      detail: `You are not a member of space '${space.id}'`,
+    });
+  }
+  // Same floor as the key branch; a session has no ceiling, so its effective set IS `grants`.
+  if (!grants.has("runs:read")) {
+    throw forbidden("Caller does not have the 'runs:read' permission in this space");
+  }
+
   return {
     userId: session.user.id,
     orgId,
-    role: rows[0].role,
-    isAdmin: isAdminRole(rows[0].role),
+    canReadDebugLogs: grants.has("runs:delete"),
     spaceId,
   };
 }
 
 /** Open an SSE stream with a subscriber filter, verbose toggle, and ping keep-alive. */
 function openRealtimeStream(
-  c: Parameters<typeof streamSSE>[0],
+  c: Context<AppEnv>,
   subId: string,
   filter: {
     runId?: string;
@@ -209,6 +308,8 @@ function openRealtimeStream(
   // this surface set nothing, so it was the one SSE endpoint unprotected
   // against a buffering proxy. Costs nothing when no proxy is in front.
   c.header("X-Accel-Buffering", "no");
+  // Same marker the HTTP pipeline stamps; here so all three streams carry it.
+  if (c.get("viewAs")) c.header(VIEW_AS_ACTIVE_HEADER, "1");
   return streamSSE(c, async (stream) => {
     // Queue + signal so events written by PG NOTIFY callbacks are flushed
     // immediately via the stream's own async context (avoids Bun buffering).
@@ -431,7 +532,7 @@ async function sendInitialRunSnapshot(
 }
 
 export function createRealtimeRouter() {
-  const router = new Hono();
+  const router = new Hono<AppEnv>();
 
   // GET /api/realtime/runs/:id — stream run status + log changes
   router.get("/runs/:id", async (c) => {
@@ -449,7 +550,7 @@ export function createRealtimeRouter() {
         runId,
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -475,7 +576,7 @@ export function createRealtimeRouter() {
         packageId,
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -497,7 +598,7 @@ export function createRealtimeRouter() {
       {
         orgId: validated.orgId,
         spaceId: validated.spaceId,
-        isAdmin: validated.isAdmin,
+        isAdmin: validated.canReadDebugLogs,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },

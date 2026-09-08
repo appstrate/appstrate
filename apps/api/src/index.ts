@@ -27,6 +27,7 @@ import { createModelProviderCredentialsRouter } from "./routes/model-provider-cr
 import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createSpacesRouter } from "./routes/spaces.ts";
+import { createRolesRouter } from "./routes/roles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -43,6 +44,7 @@ import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
 import orgsRouter from "./routes/organizations.ts";
+import { ORG_PATH_MIDDLEWARE } from "./middleware/org-path-context.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -328,6 +330,12 @@ const agentsRouter = createAgentsRouter();
 const runsRouter = createRunsRouter();
 const schedulesRouter = createSchedulesRouter();
 
+// Org context for the `/api/orgs/:orgId*` family, where the org comes from the
+// PATH. Mounted here — before the orgs router AND before every module router
+// below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
+// `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
+
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
 
@@ -362,6 +370,7 @@ app.route("/api/models", createModelsRouter());
 app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
 app.route("/api/spaces", createSpacesRouter());
+app.route("/api/roles", createRolesRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());

@@ -11,6 +11,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
+import { usePermissions } from "../hooks/use-permissions";
 import { formatDateField } from "../lib/format-date";
 
 interface Props {
@@ -117,6 +118,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string | null |
 
 export function EndUserDetailModal({ open, onClose, endUser }: Props) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const deleteMutation = useDeleteEndUser();
   const updateMutation = useUpdateEndUser();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -295,13 +297,17 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
         title={endUser.name || endUser.email || t("spaces.endUserDetail")}
         actions={
           <>
-            <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
-              {t("common:btn.delete")}
-            </Button>
+            {can("end-users:delete") && (
+              <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
+                {t("common:btn.delete")}
+              </Button>
+            )}
             <div className="flex-1" />
-            <Button variant="outline" onClick={startEditing}>
-              {t("common:btn.edit")}
-            </Button>
+            {can("end-users:write") && (
+              <Button variant="outline" onClick={startEditing}>
+                {t("common:btn.edit")}
+              </Button>
+            )}
             <Button variant="outline" onClick={handleClose}>
               {t("common:btn.close")}
             </Button>

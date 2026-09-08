@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { makePermissionGuard } from "@appstrate/core/permissions";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
@@ -60,8 +61,18 @@ import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.
 import { readJsonBody } from "../lib/request-body.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import {
+  assertCatalogPackageAccess,
+  assertPackageDependenciesAccessible,
+  assertForkSourceAccess,
+  authorizeBundlePackages,
+  assertExistingPackageInstallAccess,
+  PACKAGE_WRITE_PERMISSIONS,
+  assertPackageMutationAccess,
+  packagePermission,
+} from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -163,9 +174,9 @@ async function assertAgentIntegrationScopesValid(
 async function validateManifestForRoute(
   manifest: unknown,
   expectedType: PackageType,
-  orgId: string,
+  c: Context<AppEnv>,
   direction: "author" | "stored",
-  opts: { requireCallableTools?: boolean } = {},
+  opts: { requireCallableTools?: boolean; previous?: Record<string, unknown> } = {},
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
@@ -191,7 +202,9 @@ async function validateManifestForRoute(
     ]);
   }
 
-  await assertAgentIntegrationScopesValid(validated, orgId, opts.requireCallableTools);
+  if (direction === "author")
+    await assertPackageDependenciesAccessible(c, validated, opts.previous);
+  await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
   return validated;
 }
 
@@ -666,7 +679,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       const validatedManifest = await validateManifestForRoute(
         manifest,
         rcfg.cfg.type,
-        orgId,
+        c,
         "author",
       );
 
@@ -773,7 +786,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, orgId, "author");
+    await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, c, "author");
 
     // Run the canonical AFPS archive parser before the first write. It shares
     // companion-file enforcement with the runtime bundle loader, so a missing
@@ -1004,8 +1017,9 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const validatedManifest = await validateManifestForRoute(
       manifest,
       rcfg.cfg.type,
-      orgId,
+      c,
       authoredManifest ? "author" : "stored",
+      { previous: asRecord(existing.manifest) },
     );
     const manifestText = JSON.stringify(validatedManifest, null, 2);
 
@@ -1165,6 +1179,7 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
     await loadOrgItemOr404(rcfg, orgId, itemId);
+    await assertCatalogPackageAccess(c, itemId);
     const versions = await listPackageVersions(itemId);
     return c.json({ versions });
   };
@@ -1216,6 +1231,7 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
     const versionSpec = c.req.param("version")!;
 
     await loadOrgItemOr404(rcfg, orgId, itemId);
+    await assertCatalogPackageAccess(c, itemId);
 
     const dto = await buildVersionDetailDto(rcfg, itemId, versionSpec);
     if (!dto) {
@@ -1231,6 +1247,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
     await loadOrgItemOr404(rcfg, orgId, itemId);
+    await assertCatalogPackageAccess(c, itemId);
     const info = await getVersionInfo(itemId, orgId);
     return c.json(info);
   };
@@ -1266,7 +1283,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // `requireCallableTools` is ON here and NOT on the draft writes: this is
     // where the artifact stops being editable, and freezing an empty tool
     // selection produces a version that can only fail at boot.
-    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored", {
+    await validateManifestForRoute(item.manifest, rcfg.cfg.type, c, "stored", {
       requireCallableTools: true,
     });
 
@@ -1376,6 +1393,11 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     // violation writes nothing.
     if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
+    await assertPackageDependenciesAccessible(
+      c,
+      asRecord(detail.manifest),
+      asRecord(existing.manifest),
+    );
     const updated = await updateOrgItem(
       orgId,
       itemId,
@@ -1641,6 +1663,9 @@ async function requirePackageReadPermission(c: Context<AppEnv>, type: string): P
   await guard(c, async () => {});
 }
 
+/** Reject non-authors before parsing uploads or fetching a GitHub archive. */
+const requireAnyPackageWrite = requireAnyPermission(PACKAGE_WRITE_PERMISSIONS);
+
 // ═══════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════
@@ -1691,7 +1716,7 @@ export function createPackagesRouter() {
     );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
-      requirePackageInOrg(),
+      requirePackageInOrg("delete"),
       deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
@@ -1714,7 +1739,7 @@ export function createPackagesRouter() {
     );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
-      requirePackageInOrg(),
+      requirePackageInOrg("delete"),
       deleteGuard,
       makeDeleteHandler(rcfg),
     );
@@ -1738,7 +1763,7 @@ export function createPackagesRouter() {
   }
 
   // --- Fork route ---
-  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requirePermission("agents", "write"), async (c) => {
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requireAnyPackageWrite, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
@@ -1749,6 +1774,8 @@ export function createPackagesRouter() {
     // while still 400ing on malformed JSON or a bad-shape `name`.
     const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
     const customName = parsed.name;
+    const source = await assertForkSourceAccess(c, packageId);
+    await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
 
     const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
 
@@ -1918,6 +1945,7 @@ export function createPackagesRouter() {
     const user = c.get("user");
     const orgId = c.get("orgId");
     const { manifest, content, files, type: packageType, packageId } = parsed;
+    await makePermissionGuard(packagePermission(packageType, "write"))(c, async () => {});
 
     // System packages are immutable
     if (isSystemPackage(packageId)) {
@@ -1936,11 +1964,20 @@ export function createPackagesRouter() {
     // An import is a FINAL artifact, not an editing step — `postInstallPackage`
     // below cuts a version from it — so the declared-but-empty gate applies
     // here too.
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
 
+    if (existing?.orgId === orgId) {
+      await assertPackageMutationAccess(c, packageId, "write");
+      await assertExistingPackageInstallAccess(c, packageId, existing.type);
+    }
+    await assertPackageDependenciesAccessible(
+      c,
+      asRecord(manifest),
+      asRecord(existing?.draftManifest),
+    );
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
     if (existing) {
       if (existing.orgId !== orgId) {
         throw new ApiError({
@@ -2121,7 +2158,7 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-bundle — import a multi-package .afps-bundle
   // (or a raw .afps, promoted to a bundle-of-one via the catalog).
-  router.post("/import-bundle", rateLimit(10), requirePermission("agents", "write"), async (c) => {
+  router.post("/import-bundle", rateLimit(10), requireAnyPackageWrite, async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
@@ -2144,7 +2181,9 @@ export function createPackagesRouter() {
 
     let result: Awaited<ReturnType<typeof handleImportBundle>>;
     try {
-      result = await handleImportBundle(bytes, { orgId, spaceId }, userId);
+      result = await handleImportBundle(bytes, { orgId, spaceId }, userId, (bundle) =>
+        authorizeBundlePackages(c, bundle),
+      );
     } catch (err) {
       // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
       // A raw post-install/version-creation failure becomes the same clean 4xx
@@ -2173,7 +2212,7 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), requirePermission("agents", "write"), async (c) => {
+  router.post("/import", rateLimit(10), requireAnyPackageWrite, async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
@@ -2196,7 +2235,7 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
-  router.post("/import-github", rateLimit(10), requirePermission("agents", "write"), async (c) => {
+  router.post("/import-github", rateLimit(10), requireAnyPackageWrite, async (c) => {
     const data = await readJsonBody(c, githubImportSchema, { param: "url" });
 
     let zipBytes: Uint8Array;

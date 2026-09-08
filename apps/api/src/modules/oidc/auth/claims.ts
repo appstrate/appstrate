@@ -16,7 +16,7 @@
  */
 
 import { getModuleEndUserAllowedScopes, type OrgRole } from "@appstrate/core/permissions";
-import { resolvePermissions } from "../../../lib/permissions.ts";
+import { knownSpaceLevelPermissions, orgPermissions } from "../../../lib/permissions.ts";
 import { logger } from "../../../lib/logger.ts";
 import { OIDC_ALLOWED_SCOPES, OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
 
@@ -59,12 +59,21 @@ export function scopesToPermissions(
   // X-Org-Id middleware resolves org context. Return empty set here.
   if (actorType === "user") return granted;
 
-  // Dashboard users: the role's permission set is the ceiling. A scope is
-  // granted iff the role allows it. This prevents token privilege
-  // escalation after a role downgrade and matches the way API keys derive
-  // their effective permissions (see `resolveApiKeyPermissions`).
+  // Dashboard users: the subject's authority is the ceiling. A scope is
+  // granted iff the subject could hold it, which prevents token privilege
+  // escalation after a role downgrade.
+  //
+  // The org half is the role's set; the SPACE half cannot be narrowed here,
+  // because the space is only known per request — `requireSpaceContext`
+  // resolves the subject's membership in the pinned space and intersects this
+  // claim with it (RBAC spec §7.2). Filtering the space vocabulary out at mint
+  // instead would make the token useless in every space the subject is a
+  // builder of, and admitting it grants nothing: the per-request set is
+  // `claim ∩ (org ∪ space)`.
   const ceiling: ReadonlySet<string> | undefined =
-    actorType === "dashboard_user" && orgRole ? resolvePermissions(orgRole) : undefined;
+    actorType === "dashboard_user" && orgRole
+      ? new Set<string>([...orgPermissions(orgRole), ...knownSpaceLevelPermissions()])
+      : undefined;
 
   // Safety alarm: a dashboard token without an `orgRole` gets zero scopes
   // below (ceiling is `undefined`, every scope falls through to the

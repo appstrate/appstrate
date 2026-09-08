@@ -244,6 +244,66 @@ export const responses = {
       },
     },
   },
+  ViewAsRefused: {
+    description:
+      "The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse " +
+      "(bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential " +
+      "cannot carry a persona: only a cookie session and the CLI/instance token authenticate the " +
+      "user themselves; every other credential carries a ceiling of its own and no session to " +
+      "narrow. The other refusals reuse the " +
+      "statuses already documented on this operation: `403 view_as_forbidden` when the real org " +
+      "role is not owner/admin, the role is not grantable by the caller in that space, or a " +
+      "custom role is previewed where the `custom_roles` feature is off, and " +
+      "`404 view_as_not_found` when the space is not in the organization, the custom role does " +
+      "not exist, or the organization named alongside the persona is not the caller's. Those four " +
+      'codes are the complete set that means "drop the preview" — a plain `not_found` under an ' +
+      "active persona is the previewed role's own wall, not a refusal of the persona. A refused " +
+      "preview is never answered with the caller's real permissions.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        examples: {
+          invalid: {
+            summary: "Header does not parse",
+            value: {
+              type: "https://docs.appstrate.dev/errors/invalid-view-as",
+              title: "Invalid View-As Header",
+              status: 400,
+              detail: "X-View-As could not be parsed: space and role must be provided together",
+              code: "invalid_view_as",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+          notFound: {
+            summary: "The persona names something that is gone",
+            value: {
+              type: "https://docs.appstrate.dev/errors/view-as-not-found",
+              title: "View-As Target Not Found",
+              status: 404,
+              detail: "Space 'spc_…' not found in this organization",
+              code: "view_as_not_found",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+          unsupported: {
+            summary: "Credential cannot carry a persona",
+            value: {
+              type: "https://docs.appstrate.dev/errors/view-as-unsupported",
+              title: "View-As Not Supported",
+              status: 400,
+              detail:
+                "X-View-As is only supported for a user session or the CLI/instance token, not for api_key authentication.",
+              code: "view_as_unsupported",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+        },
+      },
+    },
+  },
   IdempotencyConflict: {
     description: "Same Idempotency-Key used with a different request body",
     headers: REQUEST_ID_ONLY_HEADERS,

@@ -44,6 +44,8 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
+import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
+import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
@@ -137,16 +139,28 @@ router.get("/orgs", async (c) => {
   // Same rule as `GET /api/orgs` keeps the two paths in lockstep.
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
+  // Once for the listing: the persona names one org, and one this listing
+  // cannot place is refused rather than ignored.
+  await resolveListingViewAs(c, orgs);
 
   return c.json(
     listResponse(
-      orgs.map((o) => ({
-        id: o.id,
-        name: o.name,
-        slug: o.slug,
-        role: o.role,
-        createdAt: o.createdAt,
-      })),
+      await Promise.all(
+        orgs.map(async (o) => {
+          // Role and org-level effective set in THAT org, ceiling-applied — same
+          // fields and same helper as `GET /api/orgs` (RBAC spec §6.5). Absent
+          // from the end-user branch above: an end-user holds no org role.
+          const identity = await listedOrgIdentityForCaller(c, o.id, o.role);
+          return {
+            id: o.id,
+            name: o.name,
+            slug: o.slug,
+            role: identity.role,
+            permissions: identity.permissions,
+            createdAt: o.createdAt,
+          };
+        }),
+      ),
     ),
   );
 });
@@ -376,7 +390,9 @@ router.get("/context", requireSpaceContext(), async (c) => {
     identity = { id: user.id, name: user.name ?? null, email: user.email ?? null };
   }
 
-  const role = (c.get("orgRole") as string | undefined) ?? "end_user";
+  // The persona's while previewing: this payload tells the model what the caller
+  // may do, and every operation it names is checked against the persona.
+  const role = (callerOrgRole(c) as string | undefined) ?? "end_user";
 
   // Agents are a runnable-hint: only surface them when the caller actually holds
   // `agents:run` (otherwise the model would propose agents that 403 at invoke).

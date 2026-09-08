@@ -3,8 +3,11 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../types/index.ts";
-import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
+import type { AppEnv, OrgRole } from "../types/index.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
+import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
+import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
+import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -34,10 +37,13 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,
+  InvitationAlreadyPendingError,
   getOrgInvitations,
+  getPendingInvitation,
   cancelInvitation,
-  updateInvitationRole,
+  updateInvitation,
 } from "../services/invitations.ts";
+import { assertSpaceAssignmentsValid } from "../services/space-assignments.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
@@ -70,6 +76,7 @@ export const addMemberSchema = z
   .object({
     email: z.email("Email is required"),
     role: z.enum(ASSIGNABLE_ORG_ROLES).default("member"),
+    space_assignments: z.array(spaceAssignmentSchema).default([]),
   })
   .strict();
 
@@ -80,33 +87,29 @@ export const updateRoleSchema = z
   .strict();
 
 /**
- * Gate an org-administration route on the caller's org role.
- *
- * API keys are rejected outright: none of the operations gated here
- * (org update/delete, member removal, role changes, settings writes) map
- * to an API-key-grantable scope — `org:*` / `members:*` are deliberately
- * absent from `API_KEY_ALLOWED_SCOPES` (lib/permissions.ts). Checking the
- * creator's LIVE membership row for a key would therefore let ANY key,
- * whatever its scopes (e.g. `runs:read`), inherit its creator's full
- * org-admin rights — a privilege escalation past the scope intersection
- * computed by the auth pipeline. Cookie sessions (and any other
- * human-session auth method) keep the plain membership-role check.
+ * Omitting `space_assignments` keeps the stored ones; the role rules are
+ * re-checked against them, so `guest` on a space-less invitation is refused.
  */
-async function requireOrgRole(c: Context<AppEnv>, orgId: string, roles: string[], message: string) {
-  if (c.get("authMethod") === "api_key") {
-    throw forbidden("API keys cannot perform organization administration");
-  }
-  const member = await getOrgMember(orgId, c.get("user").id);
-  if (!member || !roles.includes(member.role)) {
-    throw forbidden(message);
-  }
-  return member;
+export const updateInvitationSchema = z
+  .object({
+    role: z.enum(ASSIGNABLE_ORG_ROLES),
+    space_assignments: z.array(spaceAssignmentSchema).optional(),
+  })
+  .strict();
+
+/**
+ * Org role the who-manages-whom policies judge against: the persona's under a
+ * role preview. The route guard already proved membership; the throw is a backstop.
+ */
+function actingOrgRole(c: Context<AppEnv>): OrgRole {
+  const role = callerOrgRole(c, c.req.param("orgId"));
+  if (!role) throw forbidden("Not a member of this organization");
+  return role;
 }
 
 const router = new Hono<AppEnv>();
 
-router.use("/:orgId", apiKeyOrgScopeGuard);
-router.use("/:orgId/*", apiKeyOrgScopeGuard);
+// Org-path context + API-key org pin come from `orgPathContext`, mounted once at the app root.
 
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
@@ -116,16 +119,25 @@ router.get("/", async (c) => {
   // creator belongs to.
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
+  // A persona naming an org this listing cannot place is refused, not ignored.
+  await resolveListingViewAs(c, orgs);
 
   return c.json(
     listResponse(
-      orgs.map((o) => ({
-        id: o.id,
-        name: o.name,
-        slug: o.slug,
-        role: o.role,
-        createdAt: o.createdAt,
-      })),
+      await Promise.all(
+        orgs.map(async (o) => {
+          // Ceiling-applied, per org, the persona's under a preview (RBAC spec §6.5).
+          const identity = await listedOrgIdentityForCaller(c, o.id, o.role);
+          return {
+            id: o.id,
+            name: o.name,
+            slug: o.slug,
+            role: identity.role,
+            permissions: identity.permissions,
+            createdAt: o.createdAt,
+          };
+        }),
+      ),
     ),
   );
 });
@@ -202,11 +214,12 @@ router.post("/", async (c) => {
 
 // OrgDetail serializer — shared by GET /:orgId and PUT /:orgId so the update
 // response is the exact same resource shape as the detail read.
-async function buildOrgDetail(orgId: string) {
+async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
+  const permissions = c.get("permissions");
   const [org, members, invitations] = await Promise.all([
     getOrgById(orgId),
-    getOrgMembers(orgId),
-    getOrgInvitations(orgId),
+    permissions?.has("members:read") ? getOrgMembers(orgId) : Promise.resolve([]),
+    permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -243,6 +256,7 @@ async function buildOrgDetail(orgId: string) {
       id: inv.id,
       email: inv.email,
       role: inv.role,
+      space_assignments: inv.spaceAssignments,
       token: inv.token,
       expiresAt: inv.expiresAt?.toISOString(),
       createdAt: inv.createdAt?.toISOString(),
@@ -252,23 +266,19 @@ async function buildOrgDetail(orgId: string) {
 
 // GET /api/orgs/:orgId — org details + members
 router.get("/:orgId", async (c) => {
-  const user = c.get("user");
-  const orgId = c.req.param("orgId");
+  const orgId = c.req.param("orgId")!;
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member) {
-    throw forbidden("Not a member of this organization");
-  }
+  // Membership, not RBAC: every org role reads its own org, and API keys must
+  // keep working. `orgRole` is the row `orgPathContext` (session) or the auth
+  // pipeline (key) already loaded — set only when it exists.
+  if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
-  return c.json(await buildOrgDetail(orgId));
+  return c.json(await buildOrgDetail(c, orgId));
 });
 
 // PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
-router.put("/:orgId", async (c) => {
-  const orgId = c.req.param("orgId");
-
-  await requireOrgRole(c, orgId, ["owner"], "Only the owner can modify the organization");
-
+router.put("/:orgId", requirePermission("org", "update"), async (c) => {
+  const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
   if (data.slug) {
@@ -296,14 +306,12 @@ router.put("/:orgId", async (c) => {
   });
 
   // Bare updated resource — same OrgDetail serializer as GET /:orgId.
-  return c.json(await buildOrgDetail(orgId));
+  return c.json(await buildOrgDetail(c, orgId));
 });
 
 // DELETE /api/orgs/:orgId — delete organization and all related data (owner only)
-router.delete("/:orgId", async (c) => {
-  const orgId = c.req.param("orgId");
-
-  await requireOrgRole(c, orgId, ["owner"], "Only the owner can delete the organization");
+router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
+  const orgId = c.req.param("orgId")!;
 
   try {
     // Refuse FIRST, notify SECOND, delete THIRD — the order is load-bearing,
@@ -362,14 +370,17 @@ router.delete("/:orgId", async (c) => {
 // consent-explicit join path: no silent direct-add of existing users, no
 // magic-link side channel. When SMTP is configured the invitation email is
 // sent; otherwise the admin shares the returned token/link out of band.
-router.post("/:orgId/members", async (c) => {
+//
+// One pending invitation per (org, email): a duplicate is a 409
+// `invitation_already_pending` carrying `invitation_id`; the caller edits that
+// one (PUT /invitations/:id) instead — the space Members page relies on this.
+router.post("/:orgId/members", requirePermission("members", "invite"), async (c) => {
   const user = c.get("user");
-  const orgId = c.req.param("orgId");
-
-  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to invite members");
-
+  const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, addMemberSchema);
   const role = data.role;
+  // Before the try: the catch below turns anything it wraps into a 500.
+  await assertSpaceAssignmentsValid({ orgId, role, assignments: data.space_assignments });
 
   try {
     const invitation = await createInvitation({
@@ -377,13 +388,14 @@ router.post("/:orgId/members", async (c) => {
       orgId,
       role,
       invitedBy: user.id,
+      spaceAssignments: data.space_assignments,
     });
 
     await recordAuditFromContext(c, {
       action: "org.invitation_created",
       resourceType: "invitation",
       resourceId: invitation.id,
-      after: { email: invitation.email, role },
+      after: { email: invitation.email, role, space_assignments: invitation.spaceAssignments },
       orgIdOverride: orgId,
     });
 
@@ -395,6 +407,7 @@ router.post("/:orgId/members", async (c) => {
         id: invitation.id,
         email: invitation.email,
         role: invitation.role,
+        space_assignments: invitation.spaceAssignments,
         token: invitation.token,
         expiresAt: invitation.expiresAt?.toISOString(),
         createdAt: invitation.createdAt?.toISOString(),
@@ -402,6 +415,16 @@ router.post("/:orgId/members", async (c) => {
       201,
     );
   } catch (err) {
+    if (err instanceof InvitationAlreadyPendingError) {
+      throw new ApiError({
+        status: 409,
+        code: "invitation_already_pending",
+        title: "Conflict",
+        detail:
+          "A pending invitation already exists for this email. Edit that invitation to change its role or add a space.",
+        extensions: { invitation_id: err.invitationId },
+      });
+    }
     throw new ApiError({
       status: 500,
       code: "invitation_failed",
@@ -412,75 +435,86 @@ router.post("/:orgId/members", async (c) => {
 });
 
 // DELETE /api/orgs/:orgId/invitations/:invitationId — cancel an invitation (admin+)
-router.delete("/:orgId/invitations/:invitationId", async (c) => {
-  const orgId = c.req.param("orgId");
-  const invitationId = c.req.param("invitationId");
+router.delete(
+  "/:orgId/invitations/:invitationId",
+  requirePermission("members", "invite"),
+  async (c) => {
+    const orgId = c.req.param("orgId")!;
+    const invitationId = c.req.param("invitationId")!;
 
-  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required");
-  await cancelInvitation(invitationId, orgId);
-  await recordAuditFromContext(c, {
-    action: "org.invitation_cancelled",
-    resourceType: "invitation",
-    resourceId: invitationId,
-    orgIdOverride: orgId,
-  });
-  return c.body(null, 204);
-});
+    await cancelInvitation(invitationId, orgId);
+    await recordAuditFromContext(c, {
+      action: "org.invitation_cancelled",
+      resourceType: "invitation",
+      resourceId: invitationId,
+      orgIdOverride: orgId,
+    });
+    return c.body(null, 204);
+  },
+);
 
 // PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (admin+)
-router.put("/:orgId/invitations/:invitationId", async (c) => {
-  const orgId = c.req.param("orgId");
-  const invitationId = c.req.param("invitationId");
+router.put(
+  "/:orgId/invitations/:invitationId",
+  requirePermission("members", "change-role"),
+  async (c) => {
+    const orgId = c.req.param("orgId")!;
+    const invitationId = c.req.param("invitationId")!;
 
-  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to change roles");
+    const data = await readJsonBody(c, updateInvitationSchema);
 
-  const data = await readJsonBody(c, updateRoleSchema);
+    const existing = await getPendingInvitation(invitationId, orgId);
+    if (!existing) {
+      throw notFound("Invitation not found or already accepted");
+    }
+    const spaceAssignments = data.space_assignments ?? existing.spaceAssignments;
+    await assertSpaceAssignmentsValid({ orgId, role: data.role, assignments: spaceAssignments });
 
-  const updated = await updateInvitationRole(invitationId, orgId, data.role);
-  if (!updated) {
-    throw notFound("Invitation not found or already accepted");
-  }
+    const updated = await updateInvitation(invitationId, orgId, {
+      role: data.role,
+      spaceAssignments,
+    });
+    if (!updated) {
+      throw notFound("Invitation not found or already accepted");
+    }
 
-  await recordAuditFromContext(c, {
-    action: "org.invitation_role_updated",
-    resourceType: "invitation",
-    resourceId: invitationId,
-    after: { role: data.role },
-    orgIdOverride: orgId,
-  });
+    await recordAuditFromContext(c, {
+      action: "org.invitation_role_updated",
+      resourceType: "invitation",
+      resourceId: invitationId,
+      after: { role: data.role, space_assignments: spaceAssignments },
+      orgIdOverride: orgId,
+    });
 
-  // Bare updated resource — same serializer as the invitations list in
-  // GET /orgs/:orgId (issue #657).
-  return c.json({
-    id: updated.id,
-    email: updated.email,
-    role: updated.role,
-    token: updated.token,
-    expiresAt: updated.expiresAt?.toISOString(),
-    createdAt: updated.createdAt?.toISOString(),
-  });
-});
+    // Bare updated resource — same serializer as the invitations list in
+    // GET /orgs/:orgId (issue #657).
+    return c.json({
+      id: updated.id,
+      email: updated.email,
+      role: updated.role,
+      space_assignments: updated.spaceAssignments,
+      token: updated.token,
+      expiresAt: updated.expiresAt?.toISOString(),
+      createdAt: updated.createdAt?.toISOString(),
+    });
+  },
+);
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
-router.delete("/:orgId/members/:userId", async (c) => {
+router.delete("/:orgId/members/:userId", requirePermission("members", "remove"), async (c) => {
   const user = c.get("user");
-  const orgId = c.req.param("orgId");
-  const targetUserId = c.req.param("userId");
+  const orgId = c.req.param("orgId")!;
+  const targetUserId = c.req.param("userId")!;
 
-  const actor = await requireOrgRole(
-    c,
-    orgId,
-    ["owner", "admin"],
-    "Admin access required to remove members",
-  );
-
+  // The guard answered "may remove members at all"; the policy answers "THIS one".
+  const actorRole = actingOrgRole(c);
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
     throw notFound("Member not found");
   }
   if (
     !canRemoveMember({
-      actorRole: actor.role,
+      actorRole,
       targetRole: target.role,
       isSelf: targetUserId === user.id,
     })
@@ -499,18 +533,12 @@ router.delete("/:orgId/members/:userId", async (c) => {
 });
 
 // PUT /api/orgs/:orgId/members/:userId — change role (owner/admin hierarchy)
-router.put("/:orgId/members/:userId", async (c) => {
+router.put("/:orgId/members/:userId", requirePermission("members", "change-role"), async (c) => {
   const user = c.get("user");
-  const orgId = c.req.param("orgId");
-  const targetUserId = c.req.param("userId");
+  const orgId = c.req.param("orgId")!;
+  const targetUserId = c.req.param("userId")!;
 
-  const actor = await requireOrgRole(
-    c,
-    orgId,
-    ["owner", "admin"],
-    "Admin access required to change roles",
-  );
-
+  const actorRole = actingOrgRole(c);
   const data = await readJsonBody(c, updateRoleSchema);
 
   const target = await getOrgMember(orgId, targetUserId);
@@ -519,7 +547,7 @@ router.put("/:orgId/members/:userId", async (c) => {
   }
 
   const assignableRoles = assignableRolesForMember({
-    actorRole: actor.role,
+    actorRole,
     targetRole: target.role,
     isSelf: targetUserId === user.id,
   });
@@ -527,11 +555,21 @@ router.put("/:orgId/members/:userId", async (c) => {
     throw forbidden("You cannot assign this role to this member");
   }
 
-  await updateMemberRole(orgId, targetUserId, data.role);
+  // Promoting to owner/admin drops the member's explicit space grants; the audit
+  // is the only record of what a later demotion will NOT restore.
+  const revoked = await updateMemberRole(orgId, targetUserId, data.role);
   await recordAuditFromContext(c, {
     action: "org.member_role_updated",
     resourceType: "member",
     resourceId: targetUserId,
+    before: {
+      role: target.role,
+      revoked_space_assignments: revoked.map((row) => ({
+        space_id: row.spaceId,
+        preset_role: row.presetRole,
+        custom_role_id: row.customRoleId,
+      })),
+    },
     after: { role: data.role },
     orgIdOverride: orgId,
   });
@@ -553,25 +591,19 @@ router.put("/:orgId/members/:userId", async (c) => {
 
 // GET /api/orgs/:orgId/settings — get org settings (any member)
 router.get("/:orgId/settings", async (c) => {
-  const user = c.get("user");
-  const orgId = c.req.param("orgId");
+  const orgId = c.req.param("orgId")!;
 
-  // Membership gate — without it any cookie-session user could read an
-  // arbitrary org's settings by passing its id (apiKeyOrgScopeGuard only
-  // pins API keys, not sessions). Mirrors the PUT handler below.
-  const member = await getOrgMember(orgId, user.id);
-  if (!member) throw forbidden("Not a member of this organization");
+  // Membership gate (`orgPathContext` only pins API keys, not sessions); same
+  // already-loaded row as GET /:orgId.
+  if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   const settings = await getOrgSettings(orgId);
   return c.json(settings);
 });
 
 // PUT /api/orgs/:orgId/settings — update org settings (owner/admin)
-router.put("/:orgId/settings", async (c) => {
-  const orgId = c.req.param("orgId");
-
-  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to update settings");
-
+router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
+  const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, orgSettingsPatchSchema);
 
   // Write-side counterpart of the read-side check in `middleware/api-version.ts`.

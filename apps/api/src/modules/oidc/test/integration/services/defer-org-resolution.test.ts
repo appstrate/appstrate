@@ -177,6 +177,36 @@ describe("deferOrgResolution in auth pipeline", () => {
     expect(res.status).toBe(200);
   });
 
+  it("holds the user's FULL authority — `permissions: []` is a defer, not a ceiling", async () => {
+    // The decision this pins (§4.2, `lib/auth-pipeline.ts`): an instance token
+    // resolves no org role and an empty permission list, and the pipeline
+    // writes NO `scopeCeiling` for that shape. It is the CLI acting as the
+    // user, so it must reach what the user reaches in whichever org they
+    // select. Reading the empty list as a ceiling instead would leave this
+    // caller with zero permissions everywhere.
+    const token = await mintInstanceToken(authUserId, instanceClientId);
+
+    // A SPACE-level write, which arrives only after `requireSpaceContext`
+    // unions the space slice — precisely the step a stray empty ceiling would
+    // clamp back to nothing.
+    const spaceLevel = await app.request("/api/agents/@deferorg%2Fnope/proxy", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Org-Id": orgId,
+        "X-Space-Id": defaultSpaceId,
+      },
+    });
+    // 404, not 403: the guard passed and the agent simply does not exist.
+    expect(spaceLevel.status).toBe(404);
+
+    // And an ORG-level one on the path-org family, which `orgPathContext`
+    // resolves — same rule, second code path.
+    const orgLevel = await app.request(`/api/orgs/${orgId}/settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(orgLevel.status).toBe(200);
+  });
+
   it("resolveInstanceUser returns deferOrgResolution: true", async () => {
     // Directly test the strategy function's return shape
     const { oidcAuthStrategy } = await import("../../../auth/strategy.ts");

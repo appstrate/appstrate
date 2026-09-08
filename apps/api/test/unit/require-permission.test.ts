@@ -18,7 +18,10 @@
 
 import { describe, it, expect } from "bun:test";
 import type { Context, Next } from "hono";
-import { requirePermission } from "../../src/middleware/require-permission.ts";
+import {
+  requireAnyPermission,
+  requirePermission,
+} from "../../src/middleware/require-permission.ts";
 import type { AppEnv } from "../../src/types/index.ts";
 
 /** Minimal Hono-context stand-in — the guard only reads `c.get("permissions")`. */
@@ -68,6 +71,44 @@ describe("requirePermission", () => {
     let called = false;
     try {
       await middleware(ctx(new Set()), async () => {
+        called = true;
+      });
+    } catch {
+      // expected
+    }
+    expect(called).toBe(false);
+  });
+});
+
+describe("requireAnyPermission", () => {
+  const perms = ["agents:write", "skills:write", "integrations:write"];
+
+  it("calls next() when any one of the alternatives is held", async () => {
+    for (const held of perms) {
+      let called = false;
+      await requireAnyPermission(perms)(ctx(new Set([held])), async () => {
+        called = true;
+      });
+      expect(called).toBe(true);
+    }
+  });
+
+  it("names the whole disjunction on denial, not one arbitrary member", async () => {
+    await expect(requireAnyPermission(perms)(ctx(new Set(["agents:read"])), noop)).rejects.toThrow(
+      "Insufficient permissions: agents:write|skills:write|integrations:write required",
+    );
+  });
+
+  it("fails closed when the permissions Set is absent", async () => {
+    await expect(requireAnyPermission(perms)(ctx(undefined), noop)).rejects.toThrow(
+      /agents:write\|skills:write\|integrations:write required/,
+    );
+  });
+
+  it("does not call next() on denial", async () => {
+    let called = false;
+    try {
+      await requireAnyPermission(perms)(ctx(new Set()), async () => {
         called = true;
       });
     } catch {

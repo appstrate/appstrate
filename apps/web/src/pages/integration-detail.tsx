@@ -602,14 +602,14 @@ function AuthHeader({ status }: { status: IntegrationAuthStatus }) {
 function ConnectAuthBlock({
   packageId,
   status,
-  isAdmin,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
-  isAdmin: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const canConfigure = can("integrations:configure");
   const isOAuth = status.type === "oauth2";
   // Connectable when a client is usable: org-registered, shared system client,
   // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
@@ -635,9 +635,11 @@ function ConnectAuthBlock({
             className="text-muted-foreground text-xs"
             data-testid={`no-oauth-client-hint-${status.auth_key}`}
           >
-            {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
+            {canConfigure
+              ? t("integration.auth.noClientHintAdmin")
+              : t("integration.auth.noClientHint")}
           </p>
-        ) : isAdmin ? (
+        ) : can("integrations:connect") ? (
           <InlineConnectButton
             packageId={packageId}
             authKey={status.auth_key}
@@ -1200,7 +1202,7 @@ function ConnectionTableRow({
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const { user } = useAuth();
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1217,7 +1219,7 @@ function ConnectionTableRow({
   //               (`routes/integrations.ts`, `shared_with_org` branch);
   //   - rename  → owner OR org admin (same route, label branch).
   const isOwn = isConnectionOwnedBy(connection, user?.id);
-  const canRename = isOwn || isAdmin;
+  const canRename = isOwn || can("integrations:configure");
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
     setEditing(true);
@@ -1473,7 +1475,9 @@ export function IntegrationDetailPage() {
   const deactivate = useDeactivateIntegration();
   const deletePkg = useDeletePackage("integration");
   const downloadPackage = usePackageDownload(scope, name);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
+  const canConfigure = can("integrations:configure");
+  const canActivate = can("integrations:install");
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
@@ -1522,7 +1526,7 @@ export function IntegrationDetailPage() {
         }
         actionsRight={
           <>
-            {!active && (
+            {!active && canActivate && (
               <Button
                 size="sm"
                 onClick={onActivate}
@@ -1561,7 +1565,7 @@ export function IntegrationDetailPage() {
             <TabsTrigger value="connections" data-testid="tab-connections">
               {t("integration.tabs.connections")}
             </TabsTrigger>
-            {isAdmin && (
+            {canConfigure && (
               <TabsTrigger value="configuration" data-testid="tab-configuration">
                 {t("integration.tabs.configuration")}
               </TabsTrigger>
@@ -1612,7 +1616,6 @@ export function IntegrationDetailPage() {
                 key={authStatus.auth_key}
                 packageId={packageId}
                 status={authStatus}
-                isAdmin={isAdmin}
               />
             ))
           )}
@@ -1622,7 +1625,7 @@ export function IntegrationDetailPage() {
             rules, publisher setup guide). Separated from the runtime
             Connexions view so client setup and connected accounts no longer
             share one crowded card. ─── */}
-        {isAdmin && (
+        {canConfigure && (
           <TabsContent value="configuration" className="mt-4 space-y-4">
             {!active ? (
               <ActivationHint onActivate={onActivate} pending={activate.isPending} />

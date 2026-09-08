@@ -456,18 +456,23 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       SELECT 'audit_events.space_id',
              (SELECT count(*)::int FROM audit_events WHERE space_id LIKE 'app\\_%')
     `);
-    expect(survivors.length).toBe(18);
+    // 19 FK columns + the constraint-less `audit_events.space_id`. Two of the
+    // 19 arrived with `0056_space_roles` (`space_members.space_id`,
+    // `chat_sessions.space_id`); 0003 derives the columns it rewrites FROM the
+    // FK set, so it covers them without an edit — which is exactly the property
+    // this count guards.
+    expect(survivors.length).toBe(20);
     expect(survivors.filter((r) => r.n !== 0)).toEqual([]);
   });
 
-  it("restores all seventeen foreign keys with their ON DELETE behaviour intact", async () => {
+  it("restores every foreign key into `spaces` with its ON DELETE behaviour intact", async () => {
     const before = await rows<{ child: string; conname: string; d: string }>(`
       SELECT conrelid::regclass::text AS child, conname, confdeltype AS d
         FROM pg_constraint
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(17);
+    expect(before.length).toBe(19);
 
     await replayScript();
 
@@ -478,7 +483,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        ORDER BY 1, 2
     `);
     // Byte-for-byte the same set, same names, same delete actions — all
-    // seventeen `c` (cascade). `audit_events` used to be an eighteenth entry at
+    // nineteen `c` (cascade). `audit_events` used to be one more entry at
     // `n` (set null); `0055_schema_integrity_repairs` dropped that FK, because
     // the SET NULL was doing exactly what the old comment here warned a wrong
     // action would do — erasing the space attribution of every historical audit

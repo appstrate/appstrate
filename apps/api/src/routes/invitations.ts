@@ -13,9 +13,11 @@ import {
   getOrgName,
 } from "../services/invitations.ts";
 import { addMember, getOrgById } from "../services/organizations.ts";
+import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
+import { listedOrgPermissions } from "../lib/permissions.ts";
 
 const router = new Hono();
 
@@ -61,6 +63,7 @@ router.get("/:token/info", async (c) => {
     email: invitation.email,
     org_name: orgName,
     role: invitation.role,
+    space_assignments: invitation.spaceAssignments,
     inviter_name: inviterName,
     expiresAt: invitation.expiresAt.toISOString(),
     is_new_user: !existingUser,
@@ -127,10 +130,19 @@ router.post("/:token/accept", async (c) => {
   // is reported as already-accepted. `addMember` is idempotent (it swallows the
   // unique violation), so an existing membership keeps the claim valid.
   const claimed = await db.transaction(async (tx) => {
-    const won = await markInvitationAccepted(invitation.id, tx);
-    if (!won) return false;
-    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
-    return true;
+    const current = await markInvitationAccepted(invitation.id, tx);
+    if (!current) return null;
+    // The claim locks and returns the current grant, including edits committed
+    // since the initial token lookup. Never apply that earlier snapshot.
+    await addMember(current.orgId, session.user.id, current.role as AssignableOrgRole, tx);
+    const assignments = await applySpaceAssignments(tx, {
+      orgId: current.orgId,
+      userId: session.user.id,
+      addedBy: current.invitedBy,
+      assignments: current.spaceAssignments,
+      onMissing: "skip",
+    });
+    return { invitation: current, assignments };
   });
 
   if (!claimed) {
@@ -163,7 +175,11 @@ router.post("/:token/accept", async (c) => {
     action: "org.invitation_accepted",
     resourceType: "invitation",
     resourceId: invitation.id,
-    after: { email: invitation.email, role: invitation.role },
+    after: {
+      email: invitation.email,
+      role: claimed.invitation.role,
+      space_assignments: claimed.assignments,
+    },
     ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,
   });
@@ -174,7 +190,8 @@ router.post("/:token/accept", async (c) => {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    role: invitation.role,
+    role: claimed.invitation.role,
+    permissions: listedOrgPermissions(claimed.invitation.role),
     createdAt: org.createdAt,
   });
 });

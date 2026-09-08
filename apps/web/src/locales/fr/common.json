@@ -103,5 +103,16 @@
   "claim.passwordHelp": "Minimum {{min}} caractères.",
   "claim.submit": "Réclamer l'instance",
   "claim.submitting": "Création du compte…",
-  "claim.docs": "Documentation : examples/self-hosting/AUTH_MODES.md"
+  "claim.docs": "Documentation : examples/self-hosting/AUTH_MODES.md",
+  "access.denied": "Vous n'avez pas accès à cette page.",
+  "access.deniedHint": "Demandez à un administrateur de l'organisation de vous accorder les droits nécessaires.",
+  "viewAs.banner": "Vous voyez l'organisation en tant que <b>{{role}}</b>",
+  "viewAs.bannerSpace": "Vous voyez l'organisation en tant que <b>{{role}}</b>, <b>{{spaceRole}}</b> dans <b>{{space}}</b>",
+  "viewAs.bannerHere": "· dans <b>{{space}}</b> : <b>{{role}}</b> (espace ouvert)",
+  "viewAs.exit": "Quitter",
+  "viewAs.stopped.invalid_view_as": "Prévisualisation arrêtée : la prévisualisation enregistrée n'est plus lisible.",
+  "viewAs.stopped.view_as_unsupported": "Prévisualisation arrêtée : cette session ne peut pas prévisualiser de rôle.",
+  "viewAs.stopped.view_as_forbidden": "Prévisualisation arrêtée : vous n'avez plus le droit de prévisualiser ce rôle.",
+  "viewAs.stopped.view_as_not_found": "Prévisualisation arrêtée : l'espace ou le rôle prévisualisé n'existe plus.",
+  "viewAs.stopped.generic": "Prévisualisation arrêtée."
 }

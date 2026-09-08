@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
-import { Users } from "lucide-react";
+import { UserPlus, Users } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Input } from "@appstrate/ui/components/input";
 import {
   Select,
   SelectContent,
@@ -20,34 +18,32 @@ import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
+import { OrgInvitationForm } from "../../components/org-invitation-form";
+import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { CopyLinkButton } from "../../components/copy-link-button";
+import { OrgInvitationsList } from "../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
 import { toast } from "sonner";
 import {
-  ASSIGNABLE_ORG_ROLES,
   assignableRolesForMember,
   canRemoveMember,
   type AssignableOrgRole,
 } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
-
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
   const { user } = useAuth();
-  const { role, isAdmin } = usePermissions();
+  const { can, orgRole } = usePermissions();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
-  const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
+  const canInvite = can("members:invite");
+  const canChangeRole = can("members:change-role");
 
-  const inviteForm = useForm<{ email: string; role: AssignableOrgRole }>({
-    defaultValues: { email: "", role: "member" },
-  });
-  const inviteRole = useWatch({ control: inviteForm.control, name: "role" });
+  const [invitingOrgId, setInvitingOrgId] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
   const {
     data: orgData,
@@ -62,40 +58,9 @@ export function OrgSettingsMembersPage() {
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
-
   const invalidateOrg = () => {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
   };
-
-  // Polymorphic bare resource: the created member (has `userId`) or the
-  // created invitation (has `id` + `token`).
-  const addMemberMutation = $api.useMutation("post", "/api/orgs/{orgId}/members", {
-    onSuccess: () => {
-      invalidateOrg();
-      inviteForm.reset();
-    },
-    onError: (err) => {
-      inviteForm.setError("root", { message: getErrorMessage(err) });
-    },
-  });
-
-  const cancelInvitationMutation = $api.useMutation(
-    "delete",
-    "/api/orgs/{orgId}/invitations/{invitationId}",
-    {
-      onSuccess: invalidateOrg,
-      onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
-    },
-  );
-
-  const changeInvitationRoleMutation = $api.useMutation(
-    "put",
-    "/api/orgs/{orgId}/invitations/{invitationId}",
-    {
-      onSuccess: invalidateOrg,
-      onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
-    },
-  );
 
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
@@ -109,15 +74,6 @@ export function OrgSettingsMembersPage() {
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
-
-  const handleInvite = (data: { email: string; role: AssignableOrgRole }) => {
-    const trimmed = data.email.trim();
-    if (!trimmed || !orgId) return;
-    addMemberMutation.mutate({
-      params: { path: { orgId } },
-      body: { email: trimmed, role: data.role },
-    });
-  };
 
   const handleRemove = (member: OrgMember) => {
     const label = member.displayName || member.email || member.userId;
@@ -134,44 +90,14 @@ export function OrgSettingsMembersPage() {
 
   return (
     <>
-      {isAdmin && (
-        <form
-          onSubmit={inviteForm.handleSubmit(handleInvite)}
-          className="mb-4 flex items-start gap-2"
-        >
-          <div className="flex-1">
-            <div className="flex gap-2">
-              <Input
-                type="email"
-                {...inviteForm.register("email", { required: true })}
-                placeholder="email@example.com"
-              />
-              <Select
-                value={inviteRole}
-                onValueChange={(v) => inviteForm.setValue("role", v as AssignableOrgRole)}
-              >
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ASSIGNABLE_ORG_ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {t(roleI18nKey(r))}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {inviteForm.formState.errors.root && (
-              <p className="text-destructive mt-1 text-sm">
-                {inviteForm.formState.errors.root.message}
-              </p>
-            )}
-          </div>
-          <Button type="submit" disabled={addMemberMutation.isPending}>
-            {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
+      <p className="text-muted-foreground mb-4 text-sm">{t("orgSettings.usersDescription")}</p>
+      {canInvite && orgId && (
+        <div className="mb-4 flex justify-end">
+          <Button data-testid="invite-org-user-button" onClick={() => setInvitingOrgId(orgId)}>
+            <UserPlus />
+            {t("orgSettings.inviteUser")}
           </Button>
-        </form>
+        </div>
       )}
 
       <div className="flex flex-col gap-3">
@@ -179,38 +105,48 @@ export function OrgSettingsMembersPage() {
           const label = member.displayName || member.email || member.userId;
           const isMemberOwner = member.role === "owner";
           const isSelf = member.userId === user?.id;
-          const assignableRoles = role
-            ? assignableRolesForMember({ actorRole: role, targetRole: member.role, isSelf })
-            : [];
-          const canRemove = role
-            ? canRemoveMember({ actorRole: role, targetRole: member.role, isSelf })
-            : false;
+          const assignableRoles =
+            orgRole && canChangeRole
+              ? assignableRolesForMember({ actorRole: orgRole, targetRole: member.role, isSelf })
+              : [];
+          const canRemove =
+            orgRole && can("members:remove")
+              ? canRemoveMember({ actorRole: orgRole, targetRole: member.role, isSelf })
+              : false;
           return (
-            <div key={member.userId} className="border-border bg-card rounded-lg border p-5">
-              <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold">{label}</h3>
-                  {member.email && (
+            <div
+              key={member.userId}
+              className="border-border bg-card flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center"
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold break-words">{label}</h3>
+                  {member.email && member.email !== label && (
                     <span className="text-muted-foreground text-sm">{member.email}</span>
                   )}
                 </div>
-                <Badge
-                  variant={
-                    isMemberOwner ? "running" : member.role === "admin" ? "success" : "pending"
-                  }
-                >
-                  {t(roleI18nKey(member.role))}
-                </Badge>
+                {assignableRoles.length === 0 && (
+                  <Badge
+                    variant={
+                      isMemberOwner ? "running" : member.role === "admin" ? "success" : "pending"
+                    }
+                  >
+                    {t(roleI18nKey(member.role))}
+                  </Badge>
+                )}
               </div>
               {(assignableRoles.length > 0 || canRemove) && (
-                <div className="border-border mt-3 flex gap-2 border-t pt-3">
+                <div className="flex flex-wrap items-center gap-2">
                   {assignableRoles.length > 0 && (
                     <Select
                       value={member.role}
                       onValueChange={(v) => handleRoleChange(member.userId, v as AssignableOrgRole)}
                       disabled={changeRoleMutation.isPending}
                     >
-                      <SelectTrigger className="w-[140px]">
+                      <SelectTrigger
+                        className="w-full sm:w-[200px]"
+                        aria-label={t("orgSettings.inviteRoleAriaLabel")}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -240,69 +176,7 @@ export function OrgSettingsMembersPage() {
         })}
       </div>
 
-      {invitations.length > 0 && (
-        <>
-          <div className="text-muted-foreground mt-6 mb-4 text-sm font-medium">
-            {t("orgSettings.pendingInvitations")}
-          </div>
-          <div className="flex flex-col gap-3">
-            {invitations.map((inv) => (
-              <div key={inv.id} className="border-border bg-card rounded-lg border p-5">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <h3 className="text-sm font-semibold">{inv.email}</h3>
-                    <span className="text-muted-foreground text-sm">
-                      {t(roleI18nKey(inv.role))}
-                    </span>
-                  </div>
-                  <Badge variant="pending">{t("orgSettings.invited")}</Badge>
-                </div>
-                <div className="border-border mt-3 flex gap-2 border-t pt-3">
-                  {isAdmin && (
-                    <Select
-                      value={inv.role}
-                      onValueChange={(v) =>
-                        changeInvitationRoleMutation.mutate({
-                          params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
-                          body: { role: v as AssignableOrgRole },
-                        })
-                      }
-                      disabled={changeInvitationRoleMutation.isPending}
-                    >
-                      <SelectTrigger className="w-[140px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ASSIGNABLE_ORG_ROLES.map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {t(roleI18nKey(r))}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <CopyLinkButton token={inv.token} />
-                  {isAdmin && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="ml-auto"
-                      onClick={() =>
-                        cancelInvitationMutation.mutate({
-                          params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
-                        })
-                      }
-                      disabled={cancelInvitationMutation.isPending}
-                    >
-                      {t("btn.cancel")}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+      {orgId && <OrgInvitationsList key={orgId} orgId={orgId} invitations={invitations} />}
 
       {members.length === 0 && invitations.length === 0 && (
         <EmptyState
@@ -311,6 +185,23 @@ export function OrgSettingsMembersPage() {
           icon={Users}
           compact
         />
+      )}
+
+      {canInvite && orgId && invitingOrgId === orgId && (
+        <Modal
+          open
+          onClose={() => setInvitingOrgId(null)}
+          title={t("orgSettings.inviteUser")}
+          className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
+        >
+          <OrgInvitationForm
+            key={orgId}
+            orgId={orgId}
+            allowGuest
+            onSuccess={() => setInvitingOrgId(null)}
+            onCancel={() => setInvitingOrgId(null)}
+          />
+        </Modal>
       )}
 
       <ConfirmModal

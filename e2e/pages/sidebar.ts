@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
  * Page Object for the sidebar navigation — org/space switcher and nav links.
@@ -37,12 +37,27 @@ export class Sidebar {
 
   /** Open the space submenu and click a space by name. */
   async switchSpace(spaceName: string) {
+    // The item's accessible name appends the role label, so match the name on
+    // its own element, exactly: "Default" must not pick "Default 2" or "My Default".
+    await this.clickSpaceItem(
+      this.page
+        .getByRole("menuitem")
+        .filter({ has: this.page.getByText(spaceName, { exact: true }) }),
+    );
+  }
+
+  /** Open the space submenu and click a space by id. */
+  async switchSpaceById(spaceId: string) {
+    await this.clickSpaceItem(this.page.getByTestId(`space-item-${spaceId}`));
+  }
+
+  private async clickSpaceItem(item: Locator) {
     await this.openSwitcher();
-    // Hover the space submenu trigger to open the sub-content
-    await this.spaceSubmenuTrigger.hover();
-    await expect(this.page.getByText(spaceName)).toBeVisible();
-    await this.page.getByText(spaceName).click();
-    // Wait for the space switch to take effect
-    await this.page.waitForLoadState("domcontentloaded");
+    // Click, not hover: a pointer already resting on the trigger when the menu
+    // opens fires no `pointerenter`, and the sub-content never appears.
+    await this.spaceSubmenuTrigger.click();
+    await expect(item).toBeVisible();
+    await item.click();
+    await expect(this.dropdownMenu).toHaveCount(0);
   }
 }

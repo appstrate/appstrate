@@ -19,6 +19,10 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg, addOrgMember } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedEndUser } from "../../helpers/seed.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
+import {
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
+} from "../../../src/services/integration-client-registry.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import {
@@ -43,6 +47,7 @@ describeRequiresRedis("scheduler service", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
+    initSystemIntegrations([]);
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
     const { org, defaultSpaceId: spaceId } = await createTestOrg(userId, { slug: "testorg" });
@@ -67,6 +72,7 @@ describeRequiresRedis("scheduler service", () => {
   });
 
   afterAll(async () => {
+    __resetSystemIntegrationsForTest();
     await closeRedis();
   });
 

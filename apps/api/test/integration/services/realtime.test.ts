@@ -631,6 +631,50 @@ describe("realtime service (integration)", () => {
   // ── initRealtime idempotency ────────────────────────────────
 
   describe("initRealtime idempotency", () => {
+    /** A fresh installation state, so an injected failure never touches the real fan-out. */
+    function freshState() {
+      return { promise: null, installed: new Set<string>() };
+    }
+
+    it("retries only the channels whose listen failed", async () => {
+      const seen: string[] = [];
+      const state = freshState();
+      const failOnMetric = async (channel: string) => {
+        seen.push(channel);
+        if (channel === "run_metric") throw new Error("listen refused");
+      };
+
+      await expect(initRealtime(failOnMetric, state)).rejects.toThrow("listen refused");
+      expect(seen).toEqual(["run_update", "run_log_insert", "run_metric"]);
+
+      seen.length = 0;
+      await initRealtime(async (channel: string) => {
+        seen.push(channel);
+      }, state);
+      // The two channels that resolved are NOT listened to again — a second
+      // handler on the same channel would double every frame.
+      expect(seen).toEqual(["run_metric", "connection_update", "chat_session_update"]);
+    });
+
+    it("listens on each channel exactly once under concurrent callers", async () => {
+      const seen: string[] = [];
+      const state = freshState();
+      const slowListen = async (channel: string) => {
+        seen.push(channel);
+        await Bun.sleep(5);
+      };
+
+      await Promise.all([initRealtime(slowListen, state), initRealtime(slowListen, state)]);
+
+      expect(seen).toEqual([
+        "run_update",
+        "run_log_insert",
+        "run_metric",
+        "connection_update",
+        "chat_session_update",
+      ]);
+    });
+
     it("calling initRealtime multiple times does not duplicate listeners", async () => {
       // initRealtime was already called in beforeAll. Call it again.
       await initRealtime();

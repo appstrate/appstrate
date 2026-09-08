@@ -81,6 +81,20 @@ export const parameters = {
       "Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key).",
     schema: { type: "string" },
   },
+  SseViewAs: {
+    name: "view_as",
+    in: "query" as const,
+    required: false,
+    description:
+      "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` " +
+      "header (see that parameter). It is a query parameter here because `EventSource` cannot " +
+      "send headers — presenting it as the `X-View-As` header on these routes is " +
+      "`400 invalid_view_as`. Sessions only: with `?token=ask_…` it is " +
+      "`400 view_as_unsupported`. A stream opened under a persona sees what that role would see " +
+      "and stops where that role would stop (`403 not_a_space_member`, or `404` for a private " +
+      "space), and carries `X-View-As-Active: 1`.",
+    schema: { type: "string", example: "org_role=member; space=spc_…; role=preset:viewer" },
+  },
   SseToken: {
     name: "token",
     in: "query" as const,
@@ -88,6 +102,45 @@ export const parameters = {
     description:
       "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
     schema: { type: "string" },
+  },
+  XViewAs: {
+    name: "X-View-As",
+    in: "header" as const,
+    required: false,
+    description:
+      'Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; ' +
+      "whitespace around the separators is tolerated and nothing else is:\n\n" +
+      "- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n" +
+      "- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n" +
+      "- `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. " +
+      "Must be paired with `space`.\n\n" +
+      "Example: `org_role=member; space=spc_…; role=preset:viewer`.\n\n" +
+      "The persona is enforced server-side: `permissions`, the space role and every listing are " +
+      "the persona's, and a write the persona cannot make is refused exactly as it would be for a " +
+      "real holder of that role. The authenticated identity and the audit actor stay the real " +
+      "caller; audit rows carry the persona under `after.view_as`.\n\n" +
+      "Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` " +
+      "(header does not parse), `400 view_as_unsupported` (the credential is not one that can " +
+      "carry a persona — only a cookie session and the CLI/instance token, which authenticate the " +
+      "user themselves, can), `403 view_as_forbidden` " +
+      "(the real org role is not owner/admin, or the role is not one the caller could grant in " +
+      "that space, or previewing a custom role where the `custom_roles` feature is off), " +
+      "`404 view_as_not_found` (the space is not in the org, the custom role does not exist, or " +
+      "the organization named alongside the persona is not one the caller belongs to). A 404 " +
+      "carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain " +
+      "`404 not_found` under an active persona is the previewed role's own wall and leaves the " +
+      "preview standing.\n\n" +
+      "On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the " +
+      "`X-Org-Id` header names the organization the persona applies to; every other row in those " +
+      "listings stays the caller's real role. Sending the persona without it is `400 " +
+      "invalid_view_as`, and naming an organization the caller is not a member of is " +
+      "`404 view_as_not_found`: a " +
+      "listing that answered with real permissions while the client believed it was previewing " +
+      "would be the failure this feature exists to prevent.\n\n" +
+      "The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` " +
+      "QUERY parameter instead: `EventSource` cannot send headers.\n\n" +
+      "Every response produced under a validated persona carries `X-View-As-Active: 1`.",
+    schema: { type: "string", example: "org_role=member; space=spc_…; role=preset:viewer" },
   },
   XSpaceId: {
     name: "X-Space-Id",

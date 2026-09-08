@@ -36,9 +36,13 @@ import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { seedTestModelProviders } from "./model-providers.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
-import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
+import {
+  collectModulePermissions,
+  collectPrincipalPermissions,
+} from "../../src/lib/modules/module-loader.ts";
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
-import { initAppConfig } from "../../src/lib/app-config.ts";
+import { setPrincipalPermissionsProviders } from "@appstrate/core/principal-permissions";
+import { getAppConfig, initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
 import { createResponseValidationMiddleware } from "./response-validation.ts";
@@ -49,6 +53,7 @@ import { createRunsRouter } from "../../src/routes/runs.ts";
 import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
+import { createLibraryRouter } from "../../src/routes/library.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
@@ -57,6 +62,7 @@ import { createModelProvidersOAuthRouter } from "../../src/routes/model-provider
 import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createSpacesRouter } from "../../src/routes/spaces.ts";
+import { createRolesRouter } from "../../src/routes/roles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -70,6 +76,7 @@ import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
+import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
@@ -91,6 +98,27 @@ interface GetTestAppOptions {
 }
 
 let cachedApp: Hono<AppEnv> | null = null;
+
+/**
+ * Turn a module-contributed feature flag on (or off) for the duration of a
+ * test, returning the restore function.
+ *
+ * Production merges these flags into `AppConfig` once, at boot, from the loaded
+ * modules (`applyModuleFeatures`) — and the test harness deliberately never
+ * boots. A test that needs `features.custom_roles` on and off in the SAME file
+ * therefore has nothing to reach for, which is why this seam exists: it writes
+ * the same object the routes read (`getAppConfig().features`), so what is
+ * exercised is the real gate, not a stand-in.
+ */
+export function setFeatureFlag(name: string, value: boolean): () => void {
+  const features = getAppConfig().features as Record<string, boolean | undefined>;
+  const previous = features[name];
+  features[name] = value;
+  return () => {
+    if (previous === undefined) delete features[name];
+    else features[name] = previous;
+  };
+}
 
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
@@ -126,7 +154,8 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Register module RBAC contributions BEFORE returning the app — mirrors
   // production wiring in `initSortedModules()`, which calls
   // `setModulePermissionsProvider` before init() runs so
-  // `resolvePermissions(role)` already sees module grants when modules are
+  // `orgPermissions(role)` / `presetPermissions(preset)` already see module
+  // grants when modules are
   // loaded. Without this, module-owned resources (e.g. `webhooks:*`,
   // `oauth-clients:*` after they were extracted out of the static core
   // catalog) are absent from the session's permission Set and every
@@ -140,6 +169,9 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // contributions array — so re-registering per call is acceptable.
   const rbacSnapshot = collectModulePermissions(extraModules);
   setModulePermissionsProvider(() => rbacSnapshot);
+  // Same order as `initSortedModules()`: `mayGrant` is validated against the
+  // merged vocabulary the line above just registered.
+  setPrincipalPermissionsProviders(collectPrincipalPermissions(extraModules));
 
   if (!explicit && cachedApp) return cachedApp;
 
@@ -238,8 +270,15 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   const runsRouter = createRunsRouter();
   const schedulesRouter = createSchedulesRouter();
 
+  // Org context for the `/api/orgs/:orgId*` family, where the org comes from the
+  // PATH. Mounted here — before the orgs router AND before every module router
+  // below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
+  // `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+  app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
+
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);
+  app.route("/api/library", createLibraryRouter());
   app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
@@ -278,6 +317,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
   app.route("/api/spaces", createSpacesRouter());
+  app.route("/api/roles", createRolesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());

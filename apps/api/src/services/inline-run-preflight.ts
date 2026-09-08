@@ -70,6 +70,8 @@ export async function runInlinePreflight(params: {
   actor: Actor | null;
   body: InlineRunBody;
   mode?: Mode;
+  /** The transport must authorize caller-selected sources before readiness reads their metadata. */
+  authorizeDependencies: (manifest: AgentManifest) => Promise<void>;
 }): Promise<InlineRunPreflightResult> {
   const { orgId, spaceId, actor, body, mode = "fail-fast" } = params;
 
@@ -113,6 +115,7 @@ export async function runInlinePreflight(params: {
   // Later stages that strictly need it (AJV input schema, readiness)
   // are gated on this in accumulate mode; fail-fast has already thrown.
   const manifest = validated.valid ? (validated.manifest as AgentManifest) : undefined;
+  if (manifest) await params.authorizeDependencies(manifest);
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
 
   const modelIdOverride = body.modelId ?? null;

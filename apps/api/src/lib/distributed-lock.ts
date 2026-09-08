@@ -12,8 +12,10 @@
  * lock (plus a re-read of the stored credential after acquisition) collapses
  * those concurrent refreshes to one upstream exchange.
  *
- * On Tier 0/1 (no Redis) the platform is single-instance by definition, so the
- * caller's in-process singleflight is sufficient and the lock is skipped.
+ * On Tier 0/1 (no Redis) the platform is single-instance by definition, and
+ * `dedupedRefresh` already serializes every flight for one credential in
+ * process (per-key chain, not just the singleflight map), so the lock adds
+ * nothing and is skipped.
  */
 
 import { hasRedis } from "../infra/mode.ts";
@@ -46,8 +48,9 @@ interface RedisLockOptions {
  * Run `fn` while holding the Redis lock `key`. When Redis is absent the lock
  * is a no-op and `fn` runs directly. If the lock can't be acquired within
  * `acquireTimeoutMs`, logs a warning and runs `fn` anyway (availability over
- * strict mutual exclusion — the in-process singleflight still bounds the
- * blast radius, and the TTL guarantees the lock can't wedge forever).
+ * strict mutual exclusion — the caller's per-key in-process serialization
+ * still bounds the blast radius, and the TTL guarantees the lock can't wedge
+ * forever).
  */
 export async function withRedisLock<T>(
   key: string,

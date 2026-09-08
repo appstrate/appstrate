@@ -10,9 +10,11 @@
  * silently stalling every run at status="running" in dev mode.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn, beforeEach, afterEach } from "bun:test";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
+import { logger } from "../../../src/lib/logger.ts";
+import { MAX_BUFFER_ENTRIES } from "../../../src/infra/event-buffer/interface.ts";
 import { LocalEventBuffer } from "../../../src/infra/event-buffer/local-event-buffer.ts";
 import { RedisEventBuffer } from "../../../src/infra/event-buffer/redis-event-buffer.ts";
 
@@ -26,6 +28,16 @@ function mkEvent(seq: number): RunEvent {
 }
 
 describe("LocalEventBuffer", () => {
+  let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
+
+  beforeEach(() => {
+    warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
   it("peekLowest returns null on an empty buffer", async () => {
     const buf = new LocalEventBuffer();
     expect(await buf.peekLowest("r1")).toBeNull();
@@ -139,6 +151,67 @@ describe("LocalEventBuffer", () => {
     expect((h2?.event as unknown as { message: string }).message).toBe("event-100");
     await buf.shutdown();
   });
+
+  it("caps the buffer at MAX_BUFFER_ENTRIES, dropping the lowest sequences", async () => {
+    const buf = new LocalEventBuffer();
+    try {
+      for (let seq = 1; seq <= MAX_BUFFER_ENTRIES + 10; seq++) {
+        await buf.put("r1", seq, mkEvent(seq), 60);
+      }
+
+      // The 10 lowest were evicted, so the head is the 11th sequence.
+      expect((await buf.peekLowest("r1"))?.sequence).toBe(11);
+      expect(warnSpy).toHaveBeenCalledWith("event buffer overflowed — dropped oldest entries", {
+        runId: "r1",
+        trimmed: 1,
+        cap: MAX_BUFFER_ENTRIES,
+      });
+    } finally {
+      await buf.shutdown();
+    }
+  });
+
+  it("stays strictly ordered after a trim, whatever the insert order", async () => {
+    const buf = new LocalEventBuffer();
+    try {
+      // Descending inserts: every put lands at the head and every trim evicts
+      // the entry that just arrived, the worst case for the insertion path.
+      for (let seq = MAX_BUFFER_ENTRIES + 10; seq >= 1; seq--) {
+        await buf.put("r1", seq, mkEvent(seq), 60);
+      }
+
+      const drained: number[] = [];
+      for (;;) {
+        const head = await buf.peekLowest("r1");
+        if (!head) break;
+        drained.push(head.sequence);
+        await buf.remove("r1", head.sequence);
+      }
+
+      expect(drained.length).toBe(MAX_BUFFER_ENTRIES);
+      expect(drained[0]).toBe(11);
+      expect(drained.every((seq, i) => i === 0 || seq > drained[i - 1]!)).toBe(true);
+    } finally {
+      await buf.shutdown();
+    }
+  });
+
+  it("logs the entries it drops on expiry", async () => {
+    const buf = new LocalEventBuffer();
+    try {
+      await buf.put("r1", 1, mkEvent(1), 0); // immediately expired
+      await buf.put("r1", 2, mkEvent(2), 0);
+      await new Promise((r) => setTimeout(r, 5));
+
+      expect(await buf.peekLowest("r1")).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith("event buffer dropped expired entries", {
+        runId: "r1",
+        dropped: 2,
+      });
+    } finally {
+      await buf.shutdown();
+    }
+  });
 });
 
 describeRequiresRedis("RedisEventBuffer", () => {
@@ -187,4 +260,31 @@ describeRequiresRedis("RedisEventBuffer", () => {
       await buf.shutdown();
     }
   });
+
+  // The cap (ZREMRANGEBYRANK on every put) had no coverage. Same case as the
+  // local backend's: MAX+10 ascending sequences, lowest ones evicted. The
+  // count is not re-checked by draining — that would cost two extra round
+  // trips per entry, and with distinct ascending sequences a head at 11
+  // already pins it: exactly 10 members were removed from the bottom.
+  it("caps the sorted set at MAX_BUFFER_ENTRIES, dropping the lowest sequences", async () => {
+    const runId = `r_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const buf = new RedisEventBuffer();
+    try {
+      for (let seq = 1; seq <= MAX_BUFFER_ENTRIES + 10; seq++) {
+        await buf.put(runId, seq, mkEvent(seq), 60);
+      }
+
+      const drained: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const head = await buf.peekLowest(runId);
+        if (!head) break;
+        drained.push(head.sequence);
+        await buf.remove(runId, head.sequence);
+      }
+      expect(drained).toEqual([11, 12, 13]);
+    } finally {
+      await buf.clear(runId);
+      await buf.shutdown();
+    }
+  }, 60_000);
 });

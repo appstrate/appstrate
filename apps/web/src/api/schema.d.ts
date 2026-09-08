@@ -1658,10 +1658,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List all packages visible to the org with per-space install state
-         * @description Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of space ids — the spaces belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.
-         *
-         *     The response also includes the org's spaces (id, name, isDefault) so the UI can render a single grid keyed by space without an additional `/api/spaces` call.
+         * List readable packages with accessible-space install state
+         * @description Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -2578,7 +2576,7 @@ export interface paths {
         get?: never;
         /**
          * Change invitation role
-         * @description Change the role assigned to a pending invitation. Admin or owner required.
+         * @description Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.
          */
         put: operations["changeInvitationRole"];
         post?: never;
@@ -2622,7 +2620,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.
+         * @description Change a member's role. Owners can manage any non-owner; admins can manage guests and members.
          */
         put: operations["changeMemberRole"];
         post?: never;
@@ -3331,7 +3329,7 @@ export interface paths {
         put?: never;
         /**
          * Fork a package to your organization
-         * @description Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.
+         * @description Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. Reading a source in another organization requires a session caller with live membership and package read access in that source organization; space-pinned credentials cannot cross organizations. Published versions alone do not grant visibility. The caller also needs the source package type's write permission in the destination space. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.
          */
         post: operations["forkPackage"];
         delete?: never;
@@ -3592,6 +3590,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List space roles
+         * @description Every role assignable in a space of this organization: the four platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization's own bundles (`kind: "custom"`).
+         */
+        get: operations["listRoles"];
+        put?: never;
+        /**
+         * Create a custom space role
+         * @description Define an organization-scoped bundle of space-level permissions. Requires the `custom_roles` feature. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.
+         */
+        post: operations["createRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/roles/vocabulary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the permissions a custom role may hold
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`.
+         */
+        get: operations["listRoleVocabulary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/roles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a custom space role
+         * @description Requires the `custom_roles` feature. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
+         */
+        delete: operations["deleteRole"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a custom space role
+         * @description Rename, re-describe or re-scope a bundle. Requires the `custom_roles` feature. The `srl_` id never changes, so assignments follow the edit.
+         */
+        patch: operations["updateRole"];
+        trace?: never;
+    };
     "/api/runs": {
         parameters: {
             query?: never;
@@ -3623,7 +3689,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an inline agent (no persisted package)
-         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.
+         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["runInline"];
         delete?: never;
@@ -3643,9 +3709,9 @@ export interface paths {
         put?: never;
         /**
          * Validate an inline manifest without firing a run
-         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.
+         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.
          *
-         *     **Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.
+         *     **Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["validateInlineRun"];
         delete?: never;
@@ -3665,7 +3731,7 @@ export interface paths {
         put?: never;
         /**
          * Create a remote-backed run (caller executes the agent)
-         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
+         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["createRemoteRun"];
         delete?: never;
@@ -3997,9 +4063,77 @@ export interface paths {
         head?: never;
         /**
          * Update a space
-         * @description Update space name or settings.
+         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.
          */
         patch: operations["updateSpace"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List space members
+         * @description Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member (`source: "open_space"`).
+         */
+        get: operations["listSpaceMembers"];
+        put?: never;
+        /**
+         * Add a space member
+         * @description Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.
+         */
+        post: operations["addSpaceMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a space member
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.
+         */
+        delete: operations["removeSpaceMember"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a space member's role
+         * @description Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.
+         */
+        patch: operations["updateSpaceMember"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List assignable space roles
+         * @description Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.
+         */
+        get: operations["listAssignableSpaceRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/spaces/{id}/smtp-config": {
@@ -4081,7 +4215,7 @@ export interface paths {
         };
         /**
          * List installed packages
-         * @description List all packages installed in this space, with their model/proxy/version overrides.
+         * @description List packages installed in this space, with their model/proxy/version overrides. Returns only package types the caller has permission to read, within the credential scope ceiling.
          */
         get: operations["listInstalledPackages"];
         put?: never;
@@ -4193,13 +4327,13 @@ export interface paths {
         };
         /**
          * List webhooks
-         * @description List webhooks visible to the current organization. When `spaceId` is passed, returns org-level + space-level webhooks pinned to that space. When `all=true`, returns every webhook in the org regardless of level.
+         * @description List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`.
          */
         get: operations["listWebhooks"];
         put?: never;
         /**
          * Create a webhook
-         * @description Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.
+         * @description Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. The secret is returned once in the response. Max 20 webhooks per org.
          */
         post: operations["createWebhook"];
         delete?: never;
@@ -5036,7 +5170,8 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "viewer";
+            signupRole: "guest" | "member" | "admin";
+            signupSpaceAssignments: components["schemas"]["SpaceAssignment"][];
             createdAt: string | null;
             updatedAt: string | null;
         };
@@ -5055,7 +5190,8 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "viewer";
+            signupRole: "guest" | "member" | "admin";
+            signupSpaceAssignments: components["schemas"]["SpaceAssignment"][];
             createdAt: string | null;
             updatedAt: string | null;
             clientSecret: string;
@@ -5083,14 +5219,18 @@ export interface components {
                 /** @description Effective limit in bytes the write path enforces (override ?? global quota), or null when unlimited. */
                 effective_limit_bytes: number | null;
             };
+            /** @description Empty unless the caller holds members:read. */
             members?: components["schemas"]["OrgMember"][];
+            /** @description Empty unless the caller holds members:invite, including any credential scope ceiling. */
             invitations?: components["schemas"]["OrgInvitationInfo"][];
         };
         OrgInvitationInfo: {
             id: string;
             email: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
+            /** @description Space memberships applied when the invitation is accepted. */
+            space_assignments: components["schemas"]["SpaceAssignment"][];
             token: string;
             /** Format: date-time */
             expiresAt: string;
@@ -5102,7 +5242,7 @@ export interface components {
             displayName?: string;
             email?: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
             /** Format: date-time */
             joinedAt: string;
         };
@@ -5233,7 +5373,9 @@ export interface components {
             name: string;
             slug: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
+            /** @description The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces. */
+            permissions: string[];
             /**
              * Format: date-time
              * @description Creation timestamp
@@ -5327,6 +5469,34 @@ export interface components {
             required_auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
             available_auth_keys?: string[];
+        };
+        /** @description A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle. */
+        RoleObject: {
+            /** @enum {string} */
+            object: "role";
+            /** @enum {string} */
+            kind: "preset" | "custom";
+            /** @description `srl_` id for a custom bundle; null for a preset, which has no row. */
+            id: string | null;
+            key: string;
+            name: string;
+            description: string | null;
+            /** @description Space-level permission strings the role grants, sorted. */
+            permissions: string[];
+            /** Format: date-time */
+            createdAt: string | null;
+            /** Format: date-time */
+            updatedAt: string | null;
+        };
+        /** @description Space-level permissions of one resource, with their delegation facts. */
+        RoleVocabularyGroup: {
+            resource: string;
+            permissions: {
+                permission: string;
+                action: string;
+                /** @description Can also be carried by an API key. */
+                api_key_grantable: boolean;
+            }[];
         };
         Run: {
             id: string;
@@ -5562,6 +5732,53 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        /** @description A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set. */
+        SpaceAssignment: {
+            space_id: string;
+            /** @enum {string} */
+            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            custom_role_id?: string;
+        } & (unknown | unknown);
+        SpaceMemberAssignment: {
+            /** @enum {string} */
+            object: "space_member";
+            userId: string;
+            /** @enum {string} */
+            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            custom_role_id?: string;
+        };
+        SpaceMemberObject: {
+            /** @enum {string} */
+            object: "space_member";
+            userId: string;
+            name: string | null;
+            email: string | null;
+            /** @enum {string} */
+            org_role: "owner" | "admin" | "member" | "guest";
+            /**
+             * @description How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.
+             * @enum {string}
+             */
+            source: "explicit" | "org_role" | "open_space";
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
+            /**
+             * Format: date-time
+             * @description When the explicit row was written; null for an implicit member
+             */
+            createdAt: string | null;
+        };
+        SpaceMemberRemoval: {
+            /**
+             * @description Whether the removed member keeps implicit access (open space) or loses the space entirely.
+             * @enum {string}
+             */
+            access_after: "implicit" | "none";
+        };
         SpaceObject: {
             /** @description Space ID (spc_ prefix) */
             id: string;
@@ -5580,6 +5797,30 @@ export interface components {
                 /** @description Domains allowed for OAuth redirect callbacks */
                 allowedRedirectDomains?: string[];
             };
+            /**
+             * @description Who reaches the space without an explicit membership row: `open` (every org member), `closed` (listed, not enterable), `private` (not listed).
+             * @enum {string}
+             */
+            visibility: "open" | "closed" | "private";
+            /**
+             * @description Preset the implicit members of an `open` space hold
+             * @enum {string}
+             */
+            default_role: "admin" | "builder" | "operator" | "viewer";
+            /**
+             * @description Whether the caller may enter this space
+             * @enum {string}
+             */
+            access: "member" | "none";
+            /** @description The caller's role in this space, or null when they have none */
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
+            /** @description The caller's effective permission set in this space, ceiling applied */
+            permissions: string[];
             /** @description ID of the user who created the space */
             created_by: string | null;
             /** Format: date-time */
@@ -5862,6 +6103,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse (bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential cannot carry a persona: only a cookie session and the CLI/instance token authenticate the user themselves; every other credential carries a ceiling of its own and no session to narrow. The other refusals reuse the statuses already documented on this operation: `403 view_as_forbidden` when the real org role is not owner/admin, the role is not grantable by the caller in that space, or a custom role is previewed where the `custom_roles` feature is off, and `404 view_as_not_found` when the space is not in the organization, the custom role does not exist, or the organization named alongside the persona is not the caller's. Those four codes are the complete set that means "drop the preview" — a plain `not_found` under an active persona is the previewed role's own wall, not a refusal of the persona. A refused preview is never answered with the caller's real permissions. */
+        ViewAsRefused: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Same Idempotency-Key used with a different request body */
         IdempotencyConflict: {
             headers: {
@@ -5902,8 +6152,30 @@ export interface components {
         IdempotencyKey: string;
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
+        /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+        SseViewAs: string;
         /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
         SseToken: string;
+        /**
+         * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+         *
+         *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+         *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+         *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+         *
+         *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+         *
+         *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+         *
+         *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+         *
+         *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+         *
+         *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+         *
+         *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+         */
+        XViewAs: string;
         /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
         XSpaceId: string;
         /** @description Package scope (e.g. @myorg) */
@@ -8373,6 +8645,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -8404,6 +8678,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -8444,6 +8720,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -8475,6 +8753,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -8500,6 +8780,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -8532,6 +8814,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -8564,6 +8848,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -8596,6 +8882,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -11415,7 +11703,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "library";
-                        /** @description Spaces belonging to the caller's organization. The default space (if any) is listed first. */
+                        /** @description Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first. */
                         spaces: {
                             /** @description Space id (`spc_…`). */
                             id: string;
@@ -11884,7 +12172,7 @@ export interface operations {
                         org: {
                             id: string;
                             /** @enum {string} */
-                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            role: "owner" | "admin" | "member" | "guest" | "end_user";
                             /** @description Human-readable organization name. */
                             name?: string | null;
                             /** @description Organization slug. */
@@ -12076,7 +12364,28 @@ export interface operations {
     listMyOrgs: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12100,6 +12409,11 @@ export interface operations {
                      *           "name": "Acme Corp",
                      *           "slug": "acme",
                      *           "role": "owner",
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "org:update",
+                     *             "members:invite"
+                     *           ],
                      *           "createdAt": "2026-01-10T08:00:00Z"
                      *         }
                      *       ]
@@ -12116,7 +12430,9 @@ export interface operations {
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
                              */
-                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            role: "owner" | "admin" | "member" | "guest" | "end_user";
+                            /** @description The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role. */
+                            permissions?: string[];
                             /** Format: date-time */
                             createdAt: string;
                         }[];
@@ -12124,7 +12440,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listModelProviderCredentials: {
@@ -13604,11 +13923,13 @@ export interface operations {
                     isFirstParty?: boolean;
                     /** @description When `true`, users signing in for the first time through this client are auto-joined to `referencedOrgId` with `signupRole`. When `false` (default), non-members are rejected. Only meaningful for org-level clients. */
                     allowSignup?: boolean;
+                    /** @description Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments. */
+                    signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
                     /**
                      * @description Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "viewer";
+                    signupRole?: "guest" | "member" | "admin";
                 } | {
                     /** @enum {string} */
                     level: "space";
@@ -13738,11 +14059,13 @@ export interface operations {
                     isFirstParty?: boolean;
                     /** @description Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Space: brand-new BA users + JIT `end_users` provisioning. */
                     allowSignup?: boolean;
+                    /** @description Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments. */
+                    signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
                     /**
                      * @description Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "viewer";
+                    signupRole?: "guest" | "member" | "admin";
                 };
             };
         };
@@ -13916,7 +14239,28 @@ export interface operations {
     listOrganizations: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -13940,6 +14284,11 @@ export interface operations {
                      *           "name": "Acme Corp",
                      *           "slug": "acme-corp",
                      *           "role": "owner",
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "org:update",
+                     *             "members:invite"
+                     *           ],
                      *           "createdAt": "2026-01-10T08:00:00Z"
                      *         }
                      *       ]
@@ -13953,7 +14302,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createOrganization: {
@@ -14236,7 +14588,9 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "viewer" | "member" | "admin";
+                    role: "guest" | "member" | "admin";
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
         };
@@ -14254,6 +14608,7 @@ export interface operations {
                      *       "id": "inv_abc123",
                      *       "email": "carol@acme.com",
                      *       "role": "admin",
+                     *       "space_assignments": [],
                      *       "token": "tok_xyz789",
                      *       "expiresAt": "2026-02-01T00:00:00Z",
                      *       "createdAt": "2026-01-25T00:00:00Z"
@@ -14312,7 +14667,9 @@ export interface operations {
                      * @default member
                      * @enum {string}
                      */
-                    role?: "viewer" | "member" | "admin";
+                    role?: "guest" | "member" | "admin";
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
         };
@@ -14330,6 +14687,12 @@ export interface operations {
                      *       "id": "inv_abc123",
                      *       "email": "newuser@example.com",
                      *       "role": "member",
+                     *       "space_assignments": [
+                     *         {
+                     *           "space_id": "spc_...",
+                     *           "preset_role": "operator"
+                     *         }
+                     *       ],
                      *       "token": "inv_abc123def456",
                      *       "expiresAt": "2026-02-01T00:00:00Z",
                      *       "createdAt": "2026-01-25T00:00:00Z"
@@ -14341,6 +14704,19 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The pending invitation already held by this email. */
+                        invitation_id: string;
+                    };
+                };
+            };
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -14358,7 +14734,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "viewer" | "member" | "admin";
+                    role: "guest" | "member" | "admin";
                 };
             };
         };
@@ -17257,6 +17633,8 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
@@ -17284,8 +17662,10 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     streamAllRuns: {
@@ -17293,6 +17673,8 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
@@ -17317,8 +17699,10 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     streamRun: {
@@ -17326,6 +17710,8 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
@@ -17352,8 +17738,241 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RoleObject"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Slug, unique per organization. Never one of the preset keys (`admin`, `builder`, `operator`, `viewer`). */
+                    key: string;
+                    name: string;
+                    description?: string | null;
+                    /** @description Space-level permission strings the role grants (at least one). */
+                    permissions: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Role created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description A role with this key already exists (`role_key_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listRoleVocabulary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space-level permission vocabulary */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RoleVocabularyGroup"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    deleteRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Custom role id (`srl_` prefix). Presets are not addressable. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role deleted */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The role is still assigned (`role_in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description Space members still holding this role. */
+                        member_count: number;
+                        /** @description Pending invitations whose `space_assignments` name this role. */
+                        pending_invitation_count: number;
+                    };
+                };
+            };
+        };
+    };
+    updateRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Custom role id (`srl_` prefix). Presets are not addressable. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    key?: string;
+                    name?: string;
+                    description?: string | null;
+                    permissions?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Role updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description A role with this key already exists (`role_key_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listRuns: {
@@ -17574,6 +18193,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyInProgress"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
@@ -17688,6 +18308,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
@@ -17795,6 +18416,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyInProgress"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
@@ -18865,6 +19487,26 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
             };
             path?: never;
             cookie?: never;
@@ -18892,6 +19534,18 @@ export interface operations {
                      *           "settings": {
                      *             "allowedRedirectDomains": []
                      *           },
+                     *           "visibility": "open",
+                     *           "default_role": "operator",
+                     *           "access": "member",
+                     *           "role": {
+                     *             "kind": "preset",
+                     *             "key": "operator",
+                     *             "name": "operator"
+                     *           },
+                     *           "permissions": [
+                     *             "agents:read",
+                     *             "agents:run"
+                     *           ],
                      *           "created_by": null,
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -18907,6 +19561,14 @@ export interface operations {
                      *               "myapp.com"
                      *             ]
                      *           },
+                     *           "visibility": "closed",
+                     *           "default_role": "operator",
+                     *           "access": "none",
+                     *           "role": null,
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "spaces:read"
+                     *           ],
                      *           "created_by": "usr_k7x9m2p4q1",
                      *           "createdAt": "2026-01-15T10:30:00Z",
                      *           "updatedAt": "2026-01-15T10:30:00Z"
@@ -18924,8 +19586,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createSpace: {
@@ -18973,6 +19637,18 @@ export interface operations {
                      *           "staging.myapp.com"
                      *         ]
                      *       },
+                     *       "visibility": "open",
+                     *       "default_role": "operator",
+                     *       "access": "member",
+                     *       "role": {
+                     *         "kind": "preset",
+                     *         "key": "admin",
+                     *         "name": "admin"
+                     *       },
+                     *       "permissions": [
+                     *         "agents:read",
+                     *         "agents:run"
+                     *       ],
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z"
@@ -18992,6 +19668,26 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
             };
             path: {
                 id: string;
@@ -19011,6 +19707,7 @@ export interface operations {
                     "application/json": components["schemas"]["SpaceObject"];
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -19066,6 +19763,16 @@ export interface operations {
                         /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
                         allowedRedirectDomains?: string[];
                     };
+                    /**
+                     * @description Who reaches the space without an explicit membership row. The default space must stay `open`.
+                     * @enum {string}
+                     */
+                    visibility?: "open" | "closed" | "private";
+                    /**
+                     * @description Preset the implicit members of an `open` space hold
+                     * @enum {string}
+                     */
+                    default_role?: "admin" | "builder" | "operator" | "viewer";
                 };
             };
         };
@@ -19082,6 +19789,250 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSpaceMembers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space member list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["SpaceMemberObject"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ViewAsRefused"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    userId?: string;
+                    /** Format: email */
+                    email?: string;
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    custom_role_id?: string;
+                } & ((unknown | unknown) & (unknown | unknown));
+            };
+        };
+        responses: {
+            /** @description Space member added */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberAssignment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    removeSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space member removed */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberRemoval"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    custom_role_id?: string;
+                } & (unknown | unknown);
+            };
+        };
+        responses: {
+            /** @description Space member role changed */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberAssignment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner or admin — an explicit space role would grant nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listAssignableSpaceRoles: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignable space roles */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RoleObject"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -19796,12 +20747,14 @@ export interface operations {
             query?: {
                 /** @description Filter — include webhooks pinned to this space (plus org-level). */
                 spaceId?: string;
-                /** @description When `true`, return all webhooks in the org (org-level + every space-level). Overrides `spaceId`. */
+                /** @description When `true`, span every space in the org (org-level + every space-level). Requires `org-webhooks:read`. Overrides `spaceId`. */
                 all?: "true";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -19850,6 +20803,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -19859,6 +20813,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19940,6 +20896,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyInProgress"];
             422: components["responses"]["IdempotencyConflict"];
             429: components["responses"]["RateLimited"];
@@ -19951,6 +20908,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20000,6 +20959,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20062,6 +21023,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20092,6 +21055,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20160,6 +21125,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20216,6 +21183,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20312,6 +21281,9 @@ export interface operations {
                      *         },
                      *         "agents": {
                      *           "status": "healthy"
+                     *         },
+                     *         "realtime": {
+                     *           "status": "healthy"
                      *         }
                      *       }
                      *     }
@@ -20332,6 +21304,11 @@ export interface operations {
                             };
                             /** @description Agent runtime readiness established during platform boot. */
                             agents?: {
+                                /** @enum {string} */
+                                status?: "healthy" | "degraded";
+                            };
+                            /** @description PG LISTEN fan-out behind the realtime SSE streams. `degraded` when a channel failed to install. Advisory: not part of the top-level `status`. */
+                            realtime?: {
                                 /** @enum {string} */
                                 status?: "healthy" | "degraded";
                             };
@@ -20729,6 +21706,10 @@ export interface operations {
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
                      *       "role": "member",
+                     *       "permissions": [
+                     *         "org:read",
+                     *         "spaces:read"
+                     *       ],
                      *       "createdAt": "2026-01-10T08:00:00Z"
                      *     }
                      */
@@ -20820,6 +21801,12 @@ export interface operations {
                      *       "email": "newuser@example.com",
                      *       "org_name": "Acme Corp",
                      *       "role": "member",
+                     *       "space_assignments": [
+                     *         {
+                     *           "space_id": "spc_...",
+                     *           "preset_role": "operator"
+                     *         }
+                     *       ],
                      *       "inviter_name": "Alice Martin",
                      *       "expiresAt": "2026-02-15T10:30:00Z",
                      *       "is_new_user": true
@@ -20829,7 +21816,9 @@ export interface operations {
                         email: string;
                         org_name: string;
                         /** @enum {string} */
-                        role: "owner" | "admin" | "member" | "viewer";
+                        role: "owner" | "admin" | "member" | "guest";
+                        /** @description Space memberships applied when the invitation is accepted. */
+                        space_assignments: components["schemas"]["SpaceAssignment"][];
                         inviter_name: string;
                         expiresAt: string;
                         is_new_user: boolean;

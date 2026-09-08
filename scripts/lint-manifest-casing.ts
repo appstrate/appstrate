@@ -176,6 +176,11 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["displayName"],
     reason: PROFILE_DISPLAY_NAME,
   },
+  {
+    path: "apps/api/src/services/space-members.ts",
+    keys: ["displayName"],
+    reason: PROFILE_DISPLAY_NAME,
+  },
   { path: "apps/api/src/routes/packages.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
   { path: "apps/api/src/routes/welcome.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
   {

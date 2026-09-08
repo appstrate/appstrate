@@ -3,9 +3,9 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
-import { getPackageById } from "../services/package-items/crud.ts";
+import { assertPackageMutationAccess } from "../lib/package-access.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
-import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
+import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
 
 /** Middleware: load an agent by route param and set it on context, or 404.
  *  Also checks that the current space has access to the package. */
@@ -68,22 +68,11 @@ function extractPackageId(c: Context<AppEnv>): string {
   return packageId;
 }
 
-/** Middleware: reject with 404/403 if the package doesn't belong to the current org in the DB.
- *  Use for any package mutation (edit, publish/delete versions, delete) — gating is on DB
- *  ownership (`orgId`), NOT on the package's scope name. A package whose scope differs from the
- *  org slug (e.g. imported cross-org) is still freely mutable as long as the org owns the row;
- *  registry-side identity/integrity checks happen at publish time, not local modification. */
-export function requirePackageInOrg() {
+/** Package ownership plus mutation authority in every affected installation space. */
+export function requirePackageInOrg(action: "write" | "delete" = "write") {
   return async (c: Context<AppEnv>, next: Next) => {
     const packageId = extractPackageId(c);
-    const orgId = c.get("orgId");
-    const row = await getPackageById(packageId);
-    if (!row) {
-      throw notFound(`Package '${packageId}' not found`);
-    }
-    if (row.orgId !== orgId) {
-      throw forbidden("Cannot modify a package not in your organization.");
-    }
+    await assertPackageMutationAccess(c, packageId, action);
     return next();
   };
 }

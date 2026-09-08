@@ -32,14 +32,24 @@ org (`assertSpaceBelongsToOrg` in `routes.ts`) rather than relying on the
 
 ## Permissions
 
-| Role  | Permissions                                          |
-| ----- | ---------------------------------------------------- |
-| owner | `webhooks:read`, `webhooks:write`, `webhooks:delete` |
-| admin | `webhooks:read`, `webhooks:write`, `webhooks:delete` |
+Two resources, one per scoping level — an org-level webhook fires for every
+space in the org, so it is not the same grant as administering one space's
+subscriptions.
 
-API key scopes: `webhooks:read`, `webhooks:write`, `webhooks:delete`.
+| Resource       | Level | Granted to                 |
+| -------------- | ----- | -------------------------- |
+| `webhooks`     | space | presets `admin`, `builder` |
+| `org-webhooks` | org   | org roles `owner`, `admin` |
 
-Members and viewers have no access — webhooks are considered developer tooling and live under the admin-only surface.
+Both carry `read`, `write`, `delete`, and both are API-key-grantable.
+
+Every route picks its resource from the webhook's own level: the `level` field
+of the create body, the stored row's `level` everywhere else. `GET
+/api/webhooks` spans both levels and drops the rows whose level the caller
+cannot read.
+
+`operator` and `viewer` have no access — webhooks are developer tooling and
+live under the governance surface.
 
 ## Events listened to
 

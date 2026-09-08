@@ -8,6 +8,7 @@ import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
+import { exitViewAs } from "../stores/view-as-store";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -40,6 +41,11 @@ function clearSession() {
   authStore.setState({ user: null, profile: null, loading: false });
   orgStore.getState().setId(null);
   spaceStore.getState().setId(null);
+  // Same reason, one scope deeper: a persona left behind would ride the next
+  // user's requests as `X-View-As`. Here rather than at the sign-out button —
+  // the OIDC branch navigates away before anything after `logout()` runs, and
+  // a session lost mid-flight never passes through a button at all.
+  exitViewAs();
 }
 
 function setAuthenticatedUser(

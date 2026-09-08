@@ -1,20 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
 import { Badge } from "@appstrate/ui/components/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
 import {
   OnboardingLayout,
   useOnboardingGuard,
@@ -23,19 +11,13 @@ import {
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { $api } from "../../api/client";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { Spinner } from "../../components/spinner";
-import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
+import { OrgInvitationForm } from "../../components/org-invitation-form";
 
 export function OnboardingMembersStep() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const orgId = useOnboardingGuard();
   const { nextRoute, prevRoute } = useOnboardingNav("members");
-
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<AssignableOrgRole>("member");
-  const [error, setError] = useState<string | null>(null);
 
   const { data: orgData } = $api.useQuery(
     "get",
@@ -46,30 +28,7 @@ export function OnboardingMembersStep() {
 
   const invitations = orgData?.invitations ?? [];
 
-  const addMemberMutation = $api.useMutation("post", "/api/orgs/{orgId}/members", {
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-      setEmail("");
-      setRole("member");
-      setError(null);
-    },
-    onError: (err) => {
-      setError(getErrorMessage(err));
-    },
-  });
-
   const goNext = () => nextRoute && navigate(nextRoute);
-
-  const handleInvite = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const trimmed = email.trim();
-    if (!trimmed || !orgId) return;
-    addMemberMutation.mutate({
-      params: { path: { orgId } },
-      body: { email: trimmed, role },
-    });
-  };
 
   if (!orgId) return null;
 
@@ -82,39 +41,7 @@ export function OnboardingMembersStep() {
       onBack={prevRoute ? () => navigate(prevRoute) : undefined}
     >
       <div className="flex flex-col gap-4">
-        {/* Invite form — fixed above scroll */}
-        <form onSubmit={handleInvite} className="flex items-start gap-2">
-          <div className="flex-1">
-            <div className="flex gap-2">
-              <Input
-                type="email"
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setError(null);
-                }}
-                placeholder="email@example.com"
-                required
-              />
-              <Select value={role} onValueChange={(v) => setRole(v as AssignableOrgRole)}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ASSIGNABLE_ORG_ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {t(roleI18nKey(r))}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {error && <p className="text-destructive mt-1 text-sm">{error}</p>}
-          </div>
-          <Button type="submit" disabled={addMemberMutation.isPending}>
-            {addMemberMutation.isPending ? <Spinner /> : t("onboarding.invite")}
-          </Button>
-        </form>
+        <OrgInvitationForm key={orgId} orgId={orgId} />
 
         {/* Pending invitations — scrollable */}
         {invitations.length > 0 && (
@@ -124,7 +51,7 @@ export function OnboardingMembersStep() {
             </div>
             {invitations.map((inv) => (
               <div key={inv.id} className="border-border bg-card rounded-lg border p-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{inv.email}</span>
                   </div>

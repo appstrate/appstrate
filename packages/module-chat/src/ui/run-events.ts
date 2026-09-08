@@ -26,6 +26,7 @@ import {
   parseFileUri,
   PUBLISHED_FILE_LOG_EVENT,
 } from "@appstrate/core/file-uri";
+import { VIEW_AS_HEADER, VIEW_AS_QUERY } from "@appstrate/core/permissions";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -239,26 +240,31 @@ export function buildRunSseUrl(args: {
   runId: string;
   orgId: string | undefined;
   spaceId: string | undefined;
+  /** Role preview, if the host is under one. Realtime routes REFUSE the header. */
+  viewAs?: string | undefined;
 }): string | undefined {
-  const { runId, orgId, spaceId } = args;
+  const { runId, orgId, spaceId, viewAs } = args;
   if (!orgId || !spaceId) return undefined;
   const qs = new URLSearchParams({
     orgId,
     spaceId,
     verbose: "true",
   });
+  if (viewAs) qs.set(VIEW_AS_QUERY, viewAs);
   return `/api/realtime/runs/${encodeURIComponent(runId)}?${qs.toString()}`;
 }
 
-/** Read org/space ids out of the chat host's forwarded headers (case-tolerant). */
+/** Read the scoping context out of the chat host's forwarded headers (case-tolerant). */
 export function orgSpaceFromHeaders(headers: Record<string, string> | undefined): {
   orgId: string | undefined;
   spaceId: string | undefined;
+  viewAs: string | undefined;
 } {
   const h = headers ?? {};
   return {
     orgId: h["X-Org-Id"] ?? h["x-org-id"],
     spaceId: h["X-Space-Id"] ?? h["x-space-id"],
+    viewAs: h[VIEW_AS_HEADER] ?? h[VIEW_AS_HEADER.toLowerCase()],
   };
 }
 

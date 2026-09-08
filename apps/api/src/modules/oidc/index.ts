@@ -271,6 +271,7 @@ const oidcModule: AppstrateModule = {
     {
       resource: "oauth-clients",
       actions: ["read", "write", "delete"],
+      level: "org",
       grantTo: ["owner", "admin"],
       apiKeyGrantable: true,
     },
@@ -285,6 +286,7 @@ const oidcModule: AppstrateModule = {
     {
       resource: "cli-sessions",
       actions: ["read", "delete"],
+      level: "org",
       grantTo: ["owner", "admin"],
       apiKeyGrantable: false,
     },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { listenClient } from "@appstrate/db/client";
+import { listenClient, type ListenClient } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
@@ -57,7 +57,6 @@ type Subscriber = {
 };
 
 const subscribers = new Map<string, Subscriber>();
-let initialized = false;
 
 /**
  * Channel gate — the cheapest possible check, so it runs FIRST in every
@@ -99,207 +98,245 @@ function snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
+function handleRunUpdate(payload: string): void {
+  try {
+    if (!anyAccepts("run_update")) return;
+    const raw = JSON.parse(payload) as Record<string, unknown>;
+    const parsed = runUpdateEventSchema.safeParse(snakeToCamel(raw));
+    if (!parsed.success) {
+      logger.error("run_update payload failed schema validation", {
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+    for (const sub of subscribers.values()) {
+      if (!accepts(sub, "run_update")) continue;
+      if (sub.filter.orgId !== raw.org_id) continue;
+      if (sub.filter.spaceId !== raw.space_id) continue;
+      if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
+      if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
+      // Actor gate: an end-user subscription (endUserId set) receives ONLY
+      // its own runs — org+space scope alone would leak every other
+      // end-user's runs on a non-pinned SSE. Dashboard members / API keys
+      // (endUserId undefined) legitimately see every run in the space, so they
+      // keep the org/space gate above. The `run_update` NOTIFY payload carries
+      // `end_user_id` (packages/db/src/notify.ts), so the match is exact.
+      // Mirrors the `connection_update` channel's actor filter below.
+      if (sub.filter.endUserId !== undefined && raw.end_user_id !== sub.filter.endUserId) {
+        continue;
+      }
+      sub.send({ event: "run_update", data: parsed.data });
+    }
+  } catch (err) {
+    logger.error("Failed to parse run_update payload", {
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+function handleRunLogInsert(payload: string): void {
+  try {
+    // The firehose. Every `run_logs` INSERT lands here; when no open stream
+    // declared the `run_log` channel we drop it before paying for the parse.
+    if (!anyAccepts("run_log")) return;
+    const raw = JSON.parse(payload) as Record<string, unknown>;
+    const parsed = runLogEventSchema.safeParse(snakeToCamel(raw));
+    if (!parsed.success) {
+      logger.error("run_log payload failed schema validation", {
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+    for (const sub of subscribers.values()) {
+      if (!accepts(sub, "run_log")) continue;
+      if (sub.filter.orgId !== raw.org_id) continue;
+      if (sub.filter.spaceId !== raw.space_id) continue;
+      if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
+      if (!sub.filter.isAdmin && raw.level === "debug") continue;
+      // Actor gate: the `run_log_insert` NOTIFY payload carries no
+      // `end_user_id` (packages/db/src/notify.ts — notify_run_log_insert()
+      // emits only org/space/run scope), so an end-user subscription cannot be
+      // proven to own this log row. Skip rather than leak another end-user's
+      // logs (same "skip rather than leak" posture as `connection_update`).
+      // Dashboard members / API keys (endUserId undefined) are unaffected.
+      // Per-end-user log streaming would need `end_user_id` added to the
+      // trigger payload (a DB migration — see the report).
+      if (sub.filter.endUserId !== undefined) continue;
+      sub.send({ event: "run_log", data: parsed.data });
+    }
+  } catch (err) {
+    logger.error("Failed to parse run_log_insert payload", {
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+// `run_metric` carries the running cumulative cost + token usage
+// emitted by the event sink after each `appstrate.metric` event,
+// throttled per run by the broadcaster. Routed to the same
+// org/space/run filters as `run_update` and `run_log_insert`
+// — no new isolation rule. The scope filters here are the ONLY
+// tenant gate for this channel; do not relax without updating the
+// broadcaster payload contract.
+function handleRunMetric(payload: string): void {
+  try {
+    if (!anyAccepts("run_metric")) return;
+    const raw = JSON.parse(payload) as Record<string, unknown>;
+    const parsed = runMetricEventSchema.safeParse(snakeToCamel(raw));
+    if (!parsed.success) {
+      logger.error("run_metric payload failed schema validation", {
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+    for (const sub of subscribers.values()) {
+      if (!accepts(sub, "run_metric")) continue;
+      if (sub.filter.orgId !== raw.org_id) continue;
+      if (sub.filter.spaceId !== raw.space_id) continue;
+      if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
+      if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
+      // Actor gate: the `run_metric` NOTIFY payload carries no `end_user_id`
+      // (packages/db/src/notify.ts — RunMetricNotifyPayload has org/space/run/
+      // package scope only), so an end-user subscription cannot be proven to
+      // own this metric row. Skip rather than leak another end-user's cost /
+      // token metrics. Dashboard members / API keys (endUserId undefined) are
+      // unaffected. Per-end-user metric streaming would need `end_user_id`
+      // added to the broadcast payload (a DB migration — see the report).
+      if (sub.filter.endUserId !== undefined) continue;
+      sub.send({ event: "run_metric", data: parsed.data });
+    }
+  } catch (err) {
+    logger.error("Failed to parse run_metric payload", {
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+// `connection_update` carries every INSERT/UPDATE/DELETE on
+// `integration_connections` so the dashboard can patch its caches in
+// real time — the orange "Reconnection required" badge, the agent
+// page's member picker verdict, the integration detail's connection
+// row all read off React Query keys that this event invalidates.
+//
+// Filter is per-space; the subscriber owns its actor identity
+// (set at SSE auth time) so a member only sees their own rows. The
+// payload deliberately omits `org_id` (the table has none) — tenant
+// isolation is bound to the upstream SSE auth gate proving
+// `spaceId ∈ orgId`.
+function handleConnectionUpdate(payload: string): void {
+  try {
+    if (!anyAccepts("connection_update")) return;
+    const raw = JSON.parse(payload) as Record<string, unknown>;
+    const parsed = connectionUpdateEventSchema.safeParse(snakeToCamel(raw));
+    if (!parsed.success) {
+      logger.error("connection_update payload failed schema validation", {
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+    const data = parsed.data;
+    for (const sub of subscribers.values()) {
+      if (!accepts(sub, "connection_update")) continue;
+      if (sub.filter.spaceId !== raw.space_id) continue;
+      // Actor filter: only fan out rows the subscriber owns. Without
+      // this, every member of a space would receive every other
+      // member's connection events (org-wide cache pollution).
+      if (sub.filter.userId !== undefined) {
+        if (raw.user_id !== sub.filter.userId) continue;
+      } else if (sub.filter.endUserId !== undefined) {
+        if (raw.end_user_id !== sub.filter.endUserId) continue;
+      } else {
+        // No actor filter on the subscription — skip rather than leak.
+        continue;
+      }
+      sub.send({ event: "connection_update", data });
+    }
+  } catch (err) {
+    logger.error("Failed to parse connection_update payload", {
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+// `chat_session_update` is a space-emitted change SIGNAL from the
+// chat module (packages/module-chat/src/realtime.ts): the payload carries
+// only the owner identity, and the client refetches the session list.
+// Chat sessions are strictly user-owned (org+user scoped, no space
+// dimension), so fan-out gates on org + exact user match. End-user
+// subscriptions never receive chat frames (chat has no end-user surface);
+// subscriptions without an actor are skipped rather than leaked to.
+function handleChatSessionUpdate(payload: string): void {
+  try {
+    if (!anyAccepts("chat_session_update")) return;
+    const raw = JSON.parse(payload) as Record<string, unknown>;
+    const parsed = chatSessionUpdateEventSchema.safeParse(snakeToCamel(raw));
+    if (!parsed.success) {
+      logger.error("chat_session_update payload failed schema validation", {
+        issues: parsed.error.issues,
+        raw,
+      });
+      return;
+    }
+    for (const sub of subscribers.values()) {
+      if (!accepts(sub, "chat_session_update")) continue;
+      if (sub.filter.orgId !== raw.org_id) continue;
+      if (sub.filter.userId === undefined || sub.filter.userId !== raw.user_id) continue;
+      sub.send({ event: "chat_session_update", data: parsed.data });
+    }
+  } catch (err) {
+    logger.error("Failed to parse chat_session_update payload", {
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+/** Every PG channel the fan-out listens on, with the handler installed for it. */
+const LISTEN_SPECS: Record<string, (payload: string) => void> = {
+  run_update: handleRunUpdate,
+  run_log_insert: handleRunLogInsert,
+  run_metric: handleRunMetric,
+  connection_update: handleConnectionUpdate,
+  chat_session_update: handleChatSessionUpdate,
+};
+
+/** One installation: the in-flight (or settled) init, and the channels `listen` resolved for. */
+type RealtimeInitState = { promise: Promise<void> | null; installed: Set<string> };
+
+const initState: RealtimeInitState = { promise: null, installed: new Set() };
+
+async function installChannels(
+  listen: ListenClient["listen"],
+  installed: Set<string>,
+): Promise<void> {
+  for (const [channel, handler] of Object.entries(LISTEN_SPECS)) {
+    if (installed.has(channel)) continue;
+    // Marked only AFTER the ack: flagging first loses the retry, and
+    // re-listening a resolved channel doubles the fan-out.
+    await listen(channel, handler);
+    installed.add(channel);
+  }
+  logger.info("Realtime LISTEN channels initialized", { channels: installed.size });
+}
+
 /**
- * Initialize PG LISTEN channels for run_update and run_log_insert.
- * Safe to call multiple times — only initializes once.
+ * Install the PG LISTEN channels the realtime fan-out reads. Concurrent callers
+ * share the in-flight promise; a rejection drops it so the next call retries only
+ * the missing channels. `listen` and the state are injected in tests.
  */
-export async function initRealtime(): Promise<void> {
-  if (initialized) return;
-  initialized = true;
-
-  await listenClient.listen("run_update", (payload) => {
-    try {
-      if (!anyAccepts("run_update")) return;
-      const raw = JSON.parse(payload) as Record<string, unknown>;
-      const parsed = runUpdateEventSchema.safeParse(snakeToCamel(raw));
-      if (!parsed.success) {
-        logger.error("run_update payload failed schema validation", {
-          issues: parsed.error.issues,
-        });
-        return;
-      }
-      for (const sub of subscribers.values()) {
-        if (!accepts(sub, "run_update")) continue;
-        if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.spaceId !== raw.space_id) continue;
-        if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
-        if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
-        // Actor gate: an end-user subscription (endUserId set) receives ONLY
-        // its own runs — org+space scope alone would leak every other
-        // end-user's runs on a non-pinned SSE. Dashboard members / API keys
-        // (endUserId undefined) legitimately see every run in the space, so they
-        // keep the org/space gate above. The `run_update` NOTIFY payload carries
-        // `end_user_id` (packages/db/src/notify.ts), so the match is exact.
-        // Mirrors the `connection_update` channel's actor filter below.
-        if (sub.filter.endUserId !== undefined && raw.end_user_id !== sub.filter.endUserId) {
-          continue;
-        }
-        sub.send({ event: "run_update", data: parsed.data });
-      }
-    } catch (err) {
-      logger.error("Failed to parse run_update payload", {
-        error: getErrorMessage(err),
-      });
-    }
+export function initRealtime(
+  listen: ListenClient["listen"] = listenClient.listen,
+  state: RealtimeInitState = initState,
+): Promise<void> {
+  state.promise ??= installChannels(listen, state.installed).catch((err: unknown) => {
+    state.promise = null;
+    throw err;
   });
+  return state.promise;
+}
 
-  await listenClient.listen("run_log_insert", (payload) => {
-    try {
-      // The firehose. Every `run_logs` INSERT lands here; when no open stream
-      // declared the `run_log` channel we drop it before paying for the parse.
-      if (!anyAccepts("run_log")) return;
-      const raw = JSON.parse(payload) as Record<string, unknown>;
-      const parsed = runLogEventSchema.safeParse(snakeToCamel(raw));
-      if (!parsed.success) {
-        logger.error("run_log payload failed schema validation", {
-          issues: parsed.error.issues,
-        });
-        return;
-      }
-      for (const sub of subscribers.values()) {
-        if (!accepts(sub, "run_log")) continue;
-        if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.spaceId !== raw.space_id) continue;
-        if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
-        if (!sub.filter.isAdmin && raw.level === "debug") continue;
-        // Actor gate: the `run_log_insert` NOTIFY payload carries no
-        // `end_user_id` (packages/db/src/notify.ts — notify_run_log_insert()
-        // emits only org/space/run scope), so an end-user subscription cannot be
-        // proven to own this log row. Skip rather than leak another end-user's
-        // logs (same "skip rather than leak" posture as `connection_update`).
-        // Dashboard members / API keys (endUserId undefined) are unaffected.
-        // Per-end-user log streaming would need `end_user_id` added to the
-        // trigger payload (a DB migration — see the report).
-        if (sub.filter.endUserId !== undefined) continue;
-        sub.send({ event: "run_log", data: parsed.data });
-      }
-    } catch (err) {
-      logger.error("Failed to parse run_log_insert payload", {
-        error: getErrorMessage(err),
-      });
-    }
-  });
-
-  // `run_metric` carries the running cumulative cost + token usage
-  // emitted by the event sink after each `appstrate.metric` event,
-  // throttled per run by the broadcaster. Routed to the same
-  // org/space/run filters as `run_update` and `run_log_insert`
-  // — no new isolation rule. The scope filters here are the ONLY
-  // tenant gate for this channel; do not relax without updating the
-  // broadcaster payload contract.
-  await listenClient.listen("run_metric", (payload) => {
-    try {
-      if (!anyAccepts("run_metric")) return;
-      const raw = JSON.parse(payload) as Record<string, unknown>;
-      const parsed = runMetricEventSchema.safeParse(snakeToCamel(raw));
-      if (!parsed.success) {
-        logger.error("run_metric payload failed schema validation", {
-          issues: parsed.error.issues,
-        });
-        return;
-      }
-      for (const sub of subscribers.values()) {
-        if (!accepts(sub, "run_metric")) continue;
-        if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.spaceId !== raw.space_id) continue;
-        if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
-        if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
-        // Actor gate: the `run_metric` NOTIFY payload carries no `end_user_id`
-        // (packages/db/src/notify.ts — RunMetricNotifyPayload has org/space/run/
-        // package scope only), so an end-user subscription cannot be proven to
-        // own this metric row. Skip rather than leak another end-user's cost /
-        // token metrics. Dashboard members / API keys (endUserId undefined) are
-        // unaffected. Per-end-user metric streaming would need `end_user_id`
-        // added to the broadcast payload (a DB migration — see the report).
-        if (sub.filter.endUserId !== undefined) continue;
-        sub.send({ event: "run_metric", data: parsed.data });
-      }
-    } catch (err) {
-      logger.error("Failed to parse run_metric payload", {
-        error: getErrorMessage(err),
-      });
-    }
-  });
-
-  // `connection_update` carries every INSERT/UPDATE/DELETE on
-  // `integration_connections` so the dashboard can patch its caches in
-  // real time — the orange "Reconnection required" badge, the agent
-  // page's member picker verdict, the integration detail's connection
-  // row all read off React Query keys that this event invalidates.
-  //
-  // Filter is per-space; the subscriber owns its actor identity
-  // (set at SSE auth time) so a member only sees their own rows. The
-  // payload deliberately omits `org_id` (the table has none) — tenant
-  // isolation is bound to the upstream SSE auth gate proving
-  // `spaceId ∈ orgId`.
-  await listenClient.listen("connection_update", (payload) => {
-    try {
-      if (!anyAccepts("connection_update")) return;
-      const raw = JSON.parse(payload) as Record<string, unknown>;
-      const parsed = connectionUpdateEventSchema.safeParse(snakeToCamel(raw));
-      if (!parsed.success) {
-        logger.error("connection_update payload failed schema validation", {
-          issues: parsed.error.issues,
-        });
-        return;
-      }
-      const data = parsed.data;
-      for (const sub of subscribers.values()) {
-        if (!accepts(sub, "connection_update")) continue;
-        if (sub.filter.spaceId !== raw.space_id) continue;
-        // Actor filter: only fan out rows the subscriber owns. Without
-        // this, every member of a space would receive every other
-        // member's connection events (org-wide cache pollution).
-        if (sub.filter.userId !== undefined) {
-          if (raw.user_id !== sub.filter.userId) continue;
-        } else if (sub.filter.endUserId !== undefined) {
-          if (raw.end_user_id !== sub.filter.endUserId) continue;
-        } else {
-          // No actor filter on the subscription — skip rather than leak.
-          continue;
-        }
-        sub.send({ event: "connection_update", data });
-      }
-    } catch (err) {
-      logger.error("Failed to parse connection_update payload", {
-        error: getErrorMessage(err),
-      });
-    }
-  });
-
-  // `chat_session_update` is a space-emitted change SIGNAL from the
-  // chat module (packages/module-chat/src/realtime.ts): the payload carries
-  // only the owner identity, and the client refetches the session list.
-  // Chat sessions are strictly user-owned (org+user scoped, no space
-  // dimension), so fan-out gates on org + exact user match. End-user
-  // subscriptions never receive chat frames (chat has no end-user surface);
-  // subscriptions without an actor are skipped rather than leaked to.
-  await listenClient.listen("chat_session_update", (payload) => {
-    try {
-      if (!anyAccepts("chat_session_update")) return;
-      const raw = JSON.parse(payload) as Record<string, unknown>;
-      const parsed = chatSessionUpdateEventSchema.safeParse(snakeToCamel(raw));
-      if (!parsed.success) {
-        logger.error("chat_session_update payload failed schema validation", {
-          issues: parsed.error.issues,
-          raw,
-        });
-        return;
-      }
-      for (const sub of subscribers.values()) {
-        if (!accepts(sub, "chat_session_update")) continue;
-        if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.userId === undefined || sub.filter.userId !== raw.user_id) continue;
-        sub.send({ event: "chat_session_update", data: parsed.data });
-      }
-    } catch (err) {
-      logger.error("Failed to parse chat_session_update payload", {
-        error: getErrorMessage(err),
-      });
-    }
-  });
-
-  logger.info("Realtime LISTEN channels initialized");
+/** Is every LISTEN channel installed? Read by `/health` (`checks.realtime`). */
+export function realtimeReady(): boolean {
+  return initState.installed.size === Object.keys(LISTEN_SPECS).length;
 }
 
 export function addSubscriber(sub: Subscriber): void {

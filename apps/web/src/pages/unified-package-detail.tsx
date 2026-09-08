@@ -145,7 +145,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
@@ -276,7 +276,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     : agentDetail?.input;
   const hasEffectiveInputFields = hasInputFields(effectiveInputWrapper);
   const effectiveShowConfigTab =
-    isAdmin &&
+    can("agents:configure") &&
     type === "agent" &&
     (hasEffectiveInputFields || hasModelsAvailable || hasProxiesAvailable);
 
