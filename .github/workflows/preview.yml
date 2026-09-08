@@ -79,6 +79,25 @@ jobs:
         # block in .github/workflows/release.yml (which additionally bakes the
         # Firecracker pubkey, builds multi-arch, and attests provenance).
         # Adding or renaming an image here means editing release.yml too.
+        #
+        # The MATRIX is the shared part; release.yml's supply-chain steps are
+        # deliberately NOT mirrored here, and the divergence is not an oversight:
+        #
+        #   - Signed provenance (`actions/attest-build-provenance`) would need
+        #     `id-token: write` + `attestations: write` on a `pull_request`-
+        #     triggered workflow that checks out the PR's HEAD. The resulting
+        #     statement names this repository as the builder of code nobody has
+        #     reviewed, and a consumer running the documented
+        #     `gh attestation verify --repo appstrate/appstrate` would accept it
+        #     unless they also pinned `--signer-workflow`. That weakens the
+        #     release attestation instead of adding one.
+        #   - The SBOM attestation and the vulnerability scan exist to gate the
+        #     RELEASE artifacts. A preview image is a reviewer's staging deploy,
+        #     thrown away on merge; scanning it would spend up to ~10 min of a
+        #     30-min budget to gate nothing, and its findings would drown the
+        #     release ones in the Security tab.
+        #
+        # If a preview image ever becomes something users pull, revisit this.
         include:
           - name: appstrate
             context: .

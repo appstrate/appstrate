@@ -25,6 +25,7 @@ duplicating the detail.
 
 - [**OBSERVABILITY.md**](./OBSERVABILITY.md) — OpenTelemetry traces, metrics, and logs.
 - [**SUPPLY_CHAIN.md**](./SUPPLY_CHAIN.md) — Supply-chain posture for the single-vendor Pi SDK dependency.
+- [**RELEASE_ARTIFACT_TRUST.md**](./RELEASE_ARTIFACT_TRUST.md) — What each released artifact carries (signed provenance, SBOM, vulnerability scan) and how a consumer verifies an image or a binary.
 
 ---
 
