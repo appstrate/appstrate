@@ -400,7 +400,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       signupRole,
       signupSpaceAssignments,
       disabled: false,
-      type: "web",
+      applicationType: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -757,7 +757,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
         clientId: oauthClient.clientId,
         redirectUris: oauthClient.redirectUris,
         postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
-        public: oauthClient.public,
         tokenEndpointAuthMethod: oauthClient.tokenEndpointAuthMethod,
         clientSecret: oauthClient.clientSecret,
       })
@@ -770,10 +769,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       const storedPostLogout = existing.postLogoutRedirectUris ?? [];
       const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
       const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
+      // `tokenEndpointAuthMethod === "none"` IS the public-client contract —
+      // it is the value the provider derives "public" from, and the one that
+      // makes it demand PKCE.
       const authMethodDrift =
-        existing.public !== true ||
-        existing.tokenEndpointAuthMethod !== "none" ||
-        existing.clientSecret !== null;
+        existing.tokenEndpointAuthMethod !== "none" || existing.clientSecret !== null;
 
       if (redirectDrift || postLogoutDrift || authMethodDrift) {
         await tx
@@ -783,7 +783,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
             postLogoutRedirectUris: expectedPostLogoutRedirectUris,
             ...(authMethodDrift
               ? {
-                  public: true,
                   tokenEndpointAuthMethod: "none" as const,
                   clientSecret: null,
                 }
@@ -800,8 +799,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
           redirectUrisTo: expectedRedirectUris,
           postLogoutRedirectUrisFrom: storedPostLogout,
           postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
-          publicFrom: existing.public,
-          publicTo: authMethodDrift ? true : existing.public,
           tokenEndpointAuthMethodFrom: existing.tokenEndpointAuthMethod,
           tokenEndpointAuthMethodTo: authMethodDrift ? "none" : existing.tokenEndpointAuthMethod,
           clientSecretCleared: authMethodDrift && existing.clientSecret !== null,
@@ -831,8 +828,7 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       allowSignup: true,
       signupRole: "member",
       disabled: false,
-      type: "web",
-      public: true,
+      applicationType: "web",
       tokenEndpointAuthMethod: "none",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -922,7 +918,7 @@ export async function createInstanceClientFromEnv(
       allowSignup: input.allowSignup,
       signupRole: "member",
       disabled: false,
-      type: "web",
+      applicationType: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],

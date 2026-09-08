@@ -15,7 +15,16 @@
  * The Drizzle export stays named `oauthClient` (singular) so the Better Auth
  * oauth-provider plugin's internal model id (`oauthClient`) resolves via the
  * core schema barrel (`packages/db/src/auth.ts` spreads `import * as schema`).
+ * The same holds for every export below whose name is a plugin model id
+ * (`oauthResource`, `oauthClientResource`, `oauthClientAssertion`, …): the
+ * adapter addresses a table by its EXPORT KEY and a column by its PROPERTY
+ * NAME, never by the SQL name, so renaming either breaks the mapping.
  * `skipConsent` is aliased to the `is_first_party` column.
+ *
+ * From 1.7.3 that mapping is checked: the drizzle adapter introspects this
+ * object at boot and on the first auth request, and a field the provider writes
+ * with no column here raises `SchemaMismatchError` and rejects auth traffic.
+ * Adding a plugin means adding its tables here in the same change.
  *
  * Raw-SQL CHECK constraints from the module's migrations are reproduced here
  * via Drizzle `check()` so regen keeps them. The `oauth_clients_level_immutable`
@@ -32,6 +41,7 @@ import {
   boolean,
   uuid,
   index,
+  uniqueIndex,
   primaryKey,
   foreignKey,
   check,
@@ -50,6 +60,11 @@ export const jwks = pgTable("jwks", {
   privateKey: text("private_key").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  // Signing algorithm and, for EC/OKP keys, the curve. The jwt plugin reads
+  // them to pick a key without parsing `public_key`, so a keyset holding more
+  // than one algorithm resolves by column.
+  alg: text("alg"),
+  crv: text("crv"),
 });
 
 // ─── Better Auth: device-authorization plugin (RFC 8628) ──────────────────────
@@ -78,11 +93,16 @@ export const oauthClient = pgTable(
     id: text("id").primaryKey(),
     clientId: text("client_id").notNull().unique(),
     clientSecret: text("client_secret"),
+    // Identifier of the client-metadata document a CIMD client was registered
+    // from — the discovery URL's stable key, not the `client_id`.
+    clientDiscoveryId: text("client_discovery_id"),
     disabled: boolean("disabled").default(false),
     skipConsent: boolean("is_first_party").default(false),
     enableEndSession: boolean("enable_end_session"),
     subjectType: text("subject_type"),
     scopes: text("scopes").array().default([]),
+    /** Scopes reachable through the `client_credentials` grant only. */
+    clientCredentialsScopes: text("client_credentials_scopes").array().default([]),
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -98,12 +118,29 @@ export const oauthClient = pgTable(
     softwareStatement: text("software_statement"),
     redirectUris: text("redirect_uris").array().notNull(),
     postLogoutRedirectUris: text("post_logout_redirect_uris").array(),
+    // OIDC back-channel logout (RP-initiated logout's server-to-server half).
+    backchannelLogoutUri: text("backchannel_logout_uri"),
+    backchannelLogoutSessionRequired: boolean("backchannel_logout_session_required"),
+    // Also the public/confidential discriminator: `none` IS a public client.
+    // There is no separate boolean — Better Auth requires PKCE off the back of
+    // this value alone.
     tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
+    // `web` | `native` (OIDC Dynamic Registration §2). Gates which redirect
+    // URIs a registration may declare: only `native` accepts loopback and
+    // custom-scheme callbacks.
+    applicationType: text("application_type"),
+    // Client JWK Set, inline or by reference — the keys a `private_key_jwt`
+    // client authenticates with.
+    jwks: text("jwks"),
+    jwksUri: text("jwks_uri"),
     grantTypes: text("grant_types").array(),
     responseTypes: text("response_types").array(),
-    public: boolean("public"),
-    type: text("type"),
     requirePKCE: boolean("require_pkce"),
+    dpopBoundAccessTokens: boolean("dpop_bound_access_tokens").default(false),
+    // Opaque tenant key Better Auth partitions clients by. Unused here — the
+    // platform partitions on `level` + `referenced_*` below — but the provider
+    // writes it, so the column must exist.
+    referenceId: text("reference_id"),
     metadata: text("metadata"),
     // ─── Appstrate polymorphic fields ────────────────────────────────────────
     // Defaults to `instance` so self-registered clients (RFC 7591 DCR /
@@ -147,44 +184,78 @@ export const oauthClient = pgTable(
   ],
 );
 
-export const oauthRefreshToken = pgTable("oauth_refresh_tokens", {
-  id: text("id").primaryKey(),
-  token: text("token").notNull().unique(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => oauthClient.clientId, { onDelete: "cascade" }),
-  sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  referenceId: text("reference_id"),
-  expiresAt: timestamp("expires_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  revoked: timestamp("revoked", { withTimezone: true }),
-  authTime: timestamp("auth_time", { withTimezone: true }),
-  scopes: text("scopes").array().notNull(),
-  // RFC 8707 resource indicators (Better Auth 1.7+): the audiences this token
-  // was issued for. Optional — first-party flows that pass no `resource` leave
-  // it null.
-  resources: text("resources").array(),
-});
+export const oauthRefreshToken = pgTable(
+  "oauth_refresh_tokens",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").notNull().unique(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    referenceId: text("reference_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    revoked: timestamp("revoked", { withTimezone: true }),
+    authTime: timestamp("auth_time", { withTimezone: true }),
+    scopes: text("scopes").array().notNull(),
+    // RFC 8707 resource indicators (Better Auth 1.7+): the audiences this token
+    // was issued for. Optional — first-party flows that pass no `resource` leave
+    // it null.
+    resources: text("resources").array(),
+    // The `claims` request parameter (OIDC Core §5.5) carried forward, so a
+    // refresh mints a userinfo payload with the same claims the user consented to.
+    requestedUserInfoClaims: text("requested_user_info_claims").array(),
+    // The authorization code this token descends from — the join that lets one
+    // revocation reach every token minted from one authorization.
+    authorizationCodeId: text("authorization_code_id"),
+    // RFC 9449 DPoP proof-of-possession confirmation (`cnf`) claim.
+    confirmation: jsonb("confirmation"),
+    // Rotation replay detection (RFC 9700 §4.14.2): once rotated, a replay of the
+    // consumed token within the window replays the encrypted response instead of
+    // minting a second family — a network retry stays idempotent while a stolen
+    // token still fails after the window.
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    rotationReplayResponse: text("rotation_replay_response"),
+    rotationReplayExpiresAt: timestamp("rotation_replay_expires_at", { withTimezone: true }),
+  },
+  (t) => [
+    // Replaying an authorization code deletes every token minted from it, by
+    // this column, on both token tables.
+    index("idx_oauth_refresh_tokens_auth_code").on(t.authorizationCodeId),
+  ],
+);
 
-export const oauthAccessToken = pgTable("oauth_access_tokens", {
-  id: text("id").primaryKey(),
-  token: text("token").unique(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => oauthClient.clientId, { onDelete: "cascade" }),
-  sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
-  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-  referenceId: text("reference_id"),
-  refreshId: text("refresh_id").references(() => oauthRefreshToken.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  scopes: text("scopes").array().notNull(),
-  // RFC 8707 resource indicators (Better Auth 1.7+) — see oauth_refresh_tokens.
-  resources: text("resources").array(),
-});
+export const oauthAccessToken = pgTable(
+  "oauth_access_tokens",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").unique(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    referenceId: text("reference_id"),
+    refreshId: text("refresh_id").references(() => oauthRefreshToken.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    scopes: text("scopes").array().notNull(),
+    // RFC 8707 resource indicators (Better Auth 1.7+) — see oauth_refresh_tokens.
+    resources: text("resources").array(),
+    requestedUserInfoClaims: text("requested_user_info_claims").array(),
+    authorizationCodeId: text("authorization_code_id"),
+    // Revocation instant, not a flag: introspection distinguishes "never issued"
+    // from "revoked at T", and the row is kept until it expires.
+    revoked: timestamp("revoked", { withTimezone: true }),
+    // RFC 9449 DPoP proof-of-possession confirmation (`cnf`) claim.
+    confirmation: jsonb("confirmation"),
+  },
+  (t) => [index("idx_oauth_access_tokens_auth_code").on(t.authorizationCodeId)],
+);
 
 export const oauthConsent = pgTable("oauth_consents", {
   id: text("id").primaryKey(),
@@ -197,8 +268,89 @@ export const oauthConsent = pgTable("oauth_consents", {
   // RFC 8707 resource indicators (Better Auth 1.7+) — the resources the user
   // consented the client to access.
   resources: text("resources").array(),
+  // The userinfo claims (OIDC Core §5.5) this consent covers, alongside the
+  // scopes — a later request for a wider claim set re-prompts.
+  requestedUserInfoClaims: text("requested_user_info_claims").array(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// ─── Better Auth: OAuth protected resources (RFC 8707) ────────────────────────
+//
+// A protected resource the authorization server issues access tokens for.
+// `identifier` is the value clients send as the `resource` parameter, and it —
+// not `id` — is what `oauth_client_resources` references, so a resource can be
+// re-keyed without touching its links.
+//
+// Every policy column is nullable on purpose: null means "inherit the
+// plugin-level default at issuance time", which lets an operator override one
+// resource without re-seeding the rest.
+
+export const oauthResource = pgTable("oauth_resources", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull().unique(),
+  name: text("name").notNull(),
+  accessTokenTtl: integer("access_token_ttl"),
+  refreshTokenTtl: integer("refresh_token_ttl"),
+  signingAlgorithm: text("signing_algorithm"),
+  signingKeyId: text("signing_key_id"),
+  allowedScopes: text("allowed_scopes").array(),
+  // Extra JWT claims minted into tokens for this resource. Reserved claims
+  // (RFC 9068 §2.2) are rejected server-side, not here.
+  customClaims: jsonb("custom_claims"),
+  dpopBoundAccessTokensRequired: boolean("dpop_bound_access_tokens_required").default(false),
+  disabled: boolean("disabled").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  // Bumped whenever the policy above changes, so an already-minted token can be
+  // told apart from one issued under the current policy.
+  policyVersion: integer("policy_version").default(1),
+  metadata: jsonb("metadata"),
+});
+
+// Join table — which clients may request which resources. Authoritative only
+// when the plugin runs with `enforcePerClientResources`; otherwise every client
+// reaches every enabled resource. The unique pair is load-bearing: the linkage
+// check assumes one row per pair, and a concurrent duplicate insert is meant to
+// fail on the constraint so the endpoint can answer "already linked".
+export const oauthClientResource = pgTable(
+  "oauth_client_resources",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    resourceId: text("resource_id").notNull(),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    index("idx_oauth_client_resources_client").on(t.clientId),
+    index("idx_oauth_client_resources_resource").on(t.resourceId),
+    uniqueIndex("uq_oauth_client_resources_pair").on(t.clientId, t.resourceId),
+    // Both FKs are named explicitly: drizzle's derived name for the resource
+    // one is 64 bytes, one past Postgres' 63-byte limit, so it would be
+    // TRUNCATED at creation and every later `DROP CONSTRAINT` by the declared
+    // name would 42704 (the beta.24 failure mode — see migration 0055).
+    foreignKey({
+      columns: [t.clientId],
+      foreignColumns: [oauthClient.clientId],
+      name: "oauth_client_resources_client_id_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.resourceId],
+      foreignColumns: [oauthResource.identifier],
+      name: "oauth_client_resources_resource_id_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
+// Single-use record for `private_key_jwt` client assertion `jti` values. The id
+// is a digest of the assertion identifier, so a replay collides on the primary
+// key and the insert fails atomically — including across replicas. `expires_at`
+// says when the row is safe to sweep, not when it stops blocking; nothing
+// prunes it yet, so rows accumulate like `verification` does.
+export const oauthClientAssertion = pgTable("oauth_client_assertions", {
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
 // ─── CLI refresh tokens (issue #165) ──────────────────────────────────────────

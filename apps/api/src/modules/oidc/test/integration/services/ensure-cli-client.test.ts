@@ -36,8 +36,7 @@ describe("ensureCliClient()", () => {
     expect(row!.clientSecret).toBeNull();
     expect(row!.name).toBe("Appstrate CLI");
     expect(row!.level).toBe("instance");
-    expect(row!.type).toBe("native");
-    expect(row!.public).toBe(true);
+    expect(row!.applicationType).toBe("native");
     expect(row!.tokenEndpointAuthMethod).toBe("none");
     expect(row!.requirePKCE).toBe(true);
     expect(row!.redirectUris).toEqual([]);

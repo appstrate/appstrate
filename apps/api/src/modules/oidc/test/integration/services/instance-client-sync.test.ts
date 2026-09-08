@@ -81,7 +81,7 @@ describe("syncInstanceClientsFromEnv — create", () => {
     expect(row!.postLogoutRedirectUris).toEqual(["https://admin.example.com"]);
     expect(row!.scopes).toEqual(["openid", "profile", "email", "offline_access"]);
     expect(row!.skipConsent).toBe(false);
-    expect(row!.type).toBe("web");
+    expect(row!.applicationType).toBe("web");
     expect(row!.tokenEndpointAuthMethod).toBe("client_secret_basic");
     expect(row!.requirePKCE).toBe(true);
     expect(row!.referencedOrgId).toBeNull();
