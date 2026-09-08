@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, spyOn } from "bun:test";
+import * as cimdTransport from "@better-auth/cimd/node";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { oauthClient } from "@appstrate/db/schema";
@@ -78,32 +79,36 @@ describe("authorization-server discovery — DCR + CIMD", () => {
 });
 
 describe("CIMD first authorization", () => {
-  // A public IP keeps the real SSRF check but avoids external DNS. The fetch
-  // below serves the document in-process; no request reaches this address.
+  // A public IP keeps the real client_id URL check (upstream refuses private
+  // and reserved addresses) but avoids external DNS. The transport below serves
+  // the document in-process; no request reaches this address.
   const clientId = "https://93.184.216.34/client.json";
   const redirectUri = "https://93.184.216.34/callback";
   let documentScope: string | undefined;
-  let fetchDocument: ReturnType<typeof spyOn<typeof globalThis, "fetch">>;
+  let fetchDocument: ReturnType<typeof spyOn<typeof cimdTransport, "fetchClientMetadataResource">>;
 
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
     documentScope = undefined;
-    const fetchMetadata = async (input: string | URL | Request): Promise<Response> => {
-      expect(String(input)).toBe(clientId);
-      return Response.json({
-        client_id: clientId,
-        client_name: "CIMD first authorization",
-        redirect_uris: [redirectUri],
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-        ...(documentScope === undefined ? {} : { scope: documentScope }),
-      });
-    };
-    fetchDocument = spyOn(globalThis, "fetch").mockImplementation(
-      Object.assign(fetchMetadata, { preconnect: globalThis.fetch.preconnect }),
+    // The metadata document is fetched through `@better-auth/cimd/node` — the
+    // resolve-once, address-pinning, redirect-refusing transport the plugin
+    // requires — not through `globalThis.fetch`, so that is what is replaced
+    // here. The platform reads the binding per request (see `plugins.ts`).
+    fetchDocument = spyOn(cimdTransport, "fetchClientMetadataResource").mockImplementation(
+      async (input) => {
+        expect(String(input)).toBe(clientId);
+        return Response.json({
+          client_id: clientId,
+          client_name: "CIMD first authorization",
+          redirect_uris: [redirectUri],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+          ...(documentScope === undefined ? {} : { scope: documentScope }),
+        });
+      },
     );
   });
 

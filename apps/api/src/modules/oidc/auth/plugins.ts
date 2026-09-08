@@ -33,6 +33,7 @@ import { randomInt, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { oauthProvider, type OAuthOptions, type Scope } from "@better-auth/oauth-provider";
 import { cimd } from "@better-auth/cimd";
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { bearer, jwt } from "better-auth/plugins";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { APIError } from "better-auth/api";
@@ -48,6 +49,7 @@ import {
   loadSpaceById,
 } from "../services/enduser-mapping.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import {
   OrgSignupClosedError,
   OrgSignupConfigurationError,
@@ -60,7 +62,6 @@ import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
-import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
 
 interface ClientMetadata {
@@ -136,6 +137,27 @@ interface OidcBetterAuthPluginsOptions {
    * `services/oauth-admin.ts`.
    */
   cachedTrustedClientIds?: readonly string[];
+}
+
+/**
+ * Platform policy gate for a CIMD `client_id` URL, run by the plugin BEFORE the
+ * metadata document is fetched.
+ *
+ * Deliberately the LITERAL denylist (`@appstrate/core/ssrf`): IP literals,
+ * `localhost`, cloud-metadata names and the run network's internal Docker
+ * aliases `sidecar` / `agent`, which upstream's own public-routability check
+ * lets through because they are ordinary names that resolve nowhere outside a
+ * container. Resolving DNS here would re-open the TOCTOU window the pinned
+ * transport closes, which is exactly what upstream warns this hook must not do.
+ *
+ * Fail-closed needs no wrapper: `isBlockedUrl` is total over strings (a
+ * malformed URL or an unparseable host reads as blocked), and a throw out of
+ * this hook is not caught by the plugin — it aborts client resolution.
+ *
+ * Exported for unit testing — not part of the module's public surface.
+ */
+export function isCimdMetadataDocumentUrlAllowed(clientIdUrl: string): boolean {
+  return !isBlockedUrl(clientIdUrl);
 }
 
 export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): unknown[] {
@@ -318,35 +340,31 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // init() appends a clientDiscovery entry to the provider and advertises
     // `client_id_metadata_document_supported` in the well-known metadata.
     //
-    // The plugin already enforces SSRF (private/link-local/cloud-metadata
-    // ranges), a 5s timeout, a 5KB body cap, JSON-only, and no redirects. The
-    // upstream guard and our `isBlockedUrl` are both LITERAL (no DNS), so we
-    // resolve DNS here in `allowFetch` (the documented hostname-defense seam)
-    // and block any URL whose A/AAAA resolves to a private/internal address —
-    // closing the rebind-to-internal vector for the metadata-document fetch.
-    // Also blocks internal Docker hostnames (`sidecar`/`agent`). Origin binding
-    // (redirect/post-logout/client URIs must share the client_id origin) is
-    // left at its secure default.
+    // The plugin enforces a 5s timeout, a 5KB body cap, JSON-only, and a
+    // bounded request-amplification budget. Origin binding (post-logout and
+    // client URIs must share the client_id origin; redirect URIs deliberately
+    // excluded upstream, exact matching at authorization time covering them)
+    // is left at its default.
     cimd({
-      // TOCTOU: `isBlockedUrlWithDns` resolves the hostname and blocks any
-      // A/AAAA in a private/internal range, but the actual metadata-document
-      // fetch is performed by the upstream CIMD plugin against the HOSTNAME —
-      // it re-resolves independently, so a hostile resolver can return a
-      // public IP to this check and an internal one at connect time (classic
-      // DNS-rebind). Fully closing this needs resolve-then-connect-to-pinned-IP,
-      // which the runtime-agnostic plugin does not expose via `allowFetch`
-      // (boolean-only seam). This guard is defence-in-depth over the
-      // literal-only `isBlockedUrl`, not a complete pin. FAIL CLOSED: any
-      // error (incl. resolution failure) blocks the fetch — `isBlockedUrlWithDns`
-      // already returns `true` on every failure path, and the explicit
-      // try/catch guarantees a thrown error can never be read as "allowed".
-      allowFetch: async (url) => {
-        try {
-          return !(await isBlockedUrlWithDns(url));
-        } catch {
-          return false;
-        }
-      },
+      // The metadata-document transport is the AS's SSRF boundary and upstream
+      // makes it the application's responsibility: it must resolve the hostname
+      // EXACTLY ONCE, refuse every non-public-routable answer, connect to that
+      // pinned address (original host kept as HTTP Host, TLS SNI and
+      // certificate identity) and never follow a redirect. Wrapping `fetch`
+      // cannot express that — `fetch` re-resolves after any check, leaving a
+      // DNS-rebind window open however carefully the URL was vetted first.
+      // `@better-auth/cimd/node` is upstream's conforming implementation, so we
+      // use it rather than reimplement it. It reaches for
+      // `node:dns`/`node:https`: the "Bun equivalents, not Node APIs" rule
+      // governs code we write, Bun implements both, and Bun's own APIs expose
+      // no address-pinning seam that would satisfy the contract.
+      //
+      // Called through a lambda rather than passed by reference so the module
+      // binding is read per request: the integration suite replaces the
+      // upstream export to serve a document in-process (plugins are built once,
+      // at boot, long before any test file runs).
+      fetchClientMetadataResource: (input, init) => fetchClientMetadataResource(input, init),
+      isMetadataDocumentUrlAllowed: isCimdMetadataDocumentUrlAllowed,
       // A CIMD client is written straight to the DB by the plugin with no
       // platform `level`, so `buildClaimsForClient` would reject its tokens.
       // Stamp it as a self-service instance client (same model as a DCR
