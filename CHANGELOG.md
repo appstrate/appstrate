@@ -526,6 +526,36 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Billing: the usage the cutover excluded is no longer billed on the second
+  sweep (`@appstrate/module-ee`).** The cursor was seeded at the platform's
+  settled frontier and the first pass billed nothing — as documented — but every
+  later pass reads `EE_RECONCILIATION_REPLAY_WINDOW` ids BELOW the watermark to
+  catch rows that commit late, and that read walked straight back under the seed
+  and debited the whole history. `ee_billing_cursor.floor_id` records the seeded
+  frontier once and never moves, and both the sweep and the org-deletion drain
+  now select from `max(floor_id, watermark − replay window)` through one shared
+  rule. `floor_id` defaults to `0` for a cursor that predates it: its original
+  frontier was never recorded, and 0 is exactly the behaviour those deployments
+  already had.
+
+- **Billing: a ledger row the platform could not price is no longer settled as
+  free (`@appstrate/module-ee`).** The sweep summed `cost_usd` blind, so a row
+  whose `pricing_status` is `unpriced` (cost 0 because no rates were available —
+  not because the call was free) was claimed as zero spend and could never be
+  recovered. Rows are now claimed with their status stamped on
+  `ee_billed_llm_usage.pricing_status`: `priced` is billed, `partial` is billed
+  on its floor and counted, and `unpriced` or an absent status is claimed for 0
+  credits so it is never double-billed and stays auditable. Each sweep pass and
+  each org drain emits one `error` line with the counts and the affected orgs,
+  and the counts ride the per-tick heartbeat.
+
+- **Billing: the final drain on org deletion no longer misses a late-committed
+  row (`@appstrate/module-ee`).** It started strictly above the global watermark,
+  so a row of the org that took a low serial id and committed after the watermark
+  passed it was debited 0 — and unlike the periodic sweep, the drain has no
+  second chance: the org's ledger rows cascade away moments later. It now uses
+  the same selection rule as the sweep.
+
 - **Unit tests green again after the 2026-09-07 LiteLLM catalog refresh
   (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
   `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor

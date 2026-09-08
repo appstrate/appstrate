@@ -284,11 +284,13 @@ billing sweeper (periodic, cursor over llm_usage.id):
       one tick, not one batch per interval) — keep sweeping while the last pass
       filled its batch AND advanced the cursor, bounded by MAX_DRAIN_ITERATIONS
       (50) so the tick stays finite; a short batch or a head-of-line stall stops it
-  → services.usage.list({ afterId: cursor − REPLAY_WINDOW }) — one batch per pass,
-      id ASC. Scans BELOW the watermark (clamped at 0) because a serial id is taken
+  → services.usage.list({ afterId: max(floor_id, cursor − REPLAY_WINDOW) }) — one
+      batch per pass, id ASC. Scans BELOW the watermark because a serial id is taken
       at INSERT and published at COMMIT: a row can commit below an already-advanced
-      watermark and would otherwise be unreachable forever. READ offset only — the
-      watermark itself never rewinds. The replay span is read ON TOP of the batch
+      watermark and would otherwise be unreachable forever. Clamped at floor_id, the
+      frontier the cursor was seeded at, so the window never walks back into the
+      history the cutover excluded. READ offset only — the watermark itself never
+      rewinds. The replay span is read ON TOP of the batch
       (limit = span + batch, ≤ 1000, the platform's usage.list hard cap), so the
       forward slice keeps its full EE_RECONCILIATION_BATCH_SIZE
   → frontier = leading rows the watermark may pass: settled rows always; an
@@ -299,7 +301,13 @@ billing sweeper (periodic, cursor over llm_usage.id):
       recovered): intended — the stall is what keeps it inside the replay window
       until it settles. stalledBelowWatermark tells the two apart.
   → for each SETTLED row with credentialSource === "system":
-      claim into ee_billed_llm_usage (ON CONFLICT DO NOTHING)
+      claim into ee_billed_llm_usage (ON CONFLICT DO NOTHING), stamping the row's
+        pricing_status — priced | partial | unpriced | unknown (a null pricingStatus
+        is NEVER read as priced)
+      CHARGE only priced and partial rows. partial is a floor, so billing it
+        under-charges by an unknown amount; unpriced/unknown are claimed for 0
+        credits — a cost of 0 there means "could not price", not "free" — and one
+        `error` line per pass names the counts and the orgs
       per (context_type, context_id): cost_usd += cost_usd; debit the DELTA
       dollarsToCredits(new cost_usd) − prior cost_credits (remainder carries forward)
       null-context rows join the org's DURABLE (unattributed, orgId) bucket, so
@@ -308,7 +316,8 @@ billing sweeper (periodic, cursor over llm_usage.id):
       with its id, pass commits (see `repair:account`) — never fatal
   → advance ee_billing_cursor in the SAME transaction; on error nothing advances (retry next tick)
   → one structured heartbeat per tick: processed / billed / alreadyBilled /
-      replayed / replayBilled / orphanedOrgs / cursorTo / stalledOnId /
+      replayed / replayBilled / orphanedOrgs / partialPriced / unpriced /
+      unknownPriced / cursorTo / stalledOnId /
       stalledBelowWatermark (a cursorTo that stands still across ticks is the
       "billing is behind" signal;
       replayBilled > 0 warns — revenue recovered from below the watermark;
@@ -318,11 +327,14 @@ billing sweeper (periodic, cursor over llm_usage.id):
 
 org deletion (onOrgDelete, awaited by the platform BEFORE its cascade):
   → bounded final drain of that org's settled system rows, out of band
-      (never moves the global watermark; the sweep later finds them claimed)
+      (never moves the global watermark; the sweep later finds them claimed).
+      Starts at the SAME max(floor_id, cursor − REPLAY_WINDOW) the sweep uses —
+      one shared rule — because a row of this org that committed late below the
+      watermark has no second chance: its ledger row cascades away next
   → then Stripe subscription cancel + delete the org's EE rows
 ```
 
-Only platform-provided models (`credentialSource === "system"`) are billed; org-credential (BYOK) and null-credential rows advance the watermark but are never debited. **Runner rows are cumulative** (one growing row per run) and only settle at a terminal run status — the sweep never advances past an unsettled _system_ row, so a mid-run system row is billed only once it is final. Cutover: the cursor is seeded to the platform's **settled frontier** (`usage.settledFrontier()` — the highest id below which every row is settled, NOT a plain max id, which would strand an in-flight runner row already holding a low id) **synchronously in the module's `init()`, at boot before the server takes traffic** (`ensureCursorSeeded`, shared with an in-sweep safety-net fallback). Seeding at init rather than at the first sweep tick closes the loss window: usage recorded between boot and that first tick (~5 min) is billed by the tick instead of falling below a watermark only set at the tick. Rows already claimed by the previous model are never re-billed — the claim table dedupes. But because the first sweep starts at the settled frontier, settled-but-unclaimed rows ABOVE it (the recent window since the oldest in-flight run began) ARE billed on the first pass — deliberate, so an in-flight run's revenue is not stranded; rows below the frontier are never revisited.
+Only platform-provided models (`credentialSource === "system"`) are billed; org-credential (BYOK) and null-credential rows advance the watermark but are never debited. **Runner rows are cumulative** (one growing row per run) and only settle at a terminal run status — the sweep never advances past an unsettled _system_ row, so a mid-run system row is billed only once it is final. Cutover: the cursor is seeded to the platform's **settled frontier** (`usage.settledFrontier()` — the highest id below which every row is settled, NOT a plain max id, which would strand an in-flight runner row already holding a low id) **synchronously in the module's `init()`, at boot before the server takes traffic** (`ensureCursorSeeded`, shared with an in-sweep safety-net fallback). That same frontier is written to `ee_billing_cursor.floor_id` and never moves again: the watermark drifts forward and every pass reads `REPLAY_WINDOW` ids below it, so without the floor the second pass walks back under the seed and bills the very history the cutover excluded. `floor_id` defaults to `0` for a cursor that predates the column — its original frontier was never recorded, and 0 is exactly the behaviour those deployments already have. Seeding at init rather than at the first sweep tick closes the loss window: usage recorded between boot and that first tick (~5 min) is billed by the tick instead of falling below a watermark only set at the tick. Rows already claimed by the previous model are never re-billed — the claim table dedupes. But because the first sweep starts at the settled frontier, settled-but-unclaimed rows ABOVE it (the recent window since the oldest in-flight run began) ARE billed on the first pass — deliberate, so an in-flight run's revenue is not stranded; rows at or below the floor are never revisited.
 
 #### Known over-quote on the system-proxy seam (accepted)
 

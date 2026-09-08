@@ -74,6 +74,33 @@ describe("final usage drain on org deletion", () => {
     expect(await creditsUsed(orgId)).toBe(120);
   });
 
+  it("REGRESSION: bills a row of the org that committed late BELOW the watermark", async () => {
+    // The row the periodic sweep's replay window exists for — a low serial id
+    // published after the watermark passed it. Starting the drain strictly above
+    // the watermark debited 0 and the org's ledger row then cascaded away, so
+    // the sweep never got its replay: the loss was final.
+    await seedBillingCursor(3);
+    seedLlmUsage({ orgId, id: 2, costUsd: 0.05, contextId: "run-late-commit" });
+
+    const result = await drainOrgUsage(orgId);
+
+    expect(result.credits).toBe(50);
+    expect(await creditsUsed(orgId)).toBe(50);
+    expect(await cursorValue()).toBe(3); // still out of band
+  });
+
+  it("does not reach below the cutover floor", async () => {
+    // Same selection rule as the sweep, floor included: usage the cutover
+    // excluded is not billed by the deletion path either.
+    await seedBillingCursor(3, 3);
+    seedLlmUsage({ orgId, id: 2, costUsd: 0.05, contextId: "run-historical" });
+
+    const result = await drainOrgUsage(orgId);
+
+    expect(result).toMatchObject({ scanned: 0, billed: 0, credits: 0 });
+    expect(await creditsUsed(orgId)).toBe(0);
+  });
+
   it("never moves the global watermark", async () => {
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.05 });

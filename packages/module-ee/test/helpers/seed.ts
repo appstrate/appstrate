@@ -109,6 +109,12 @@ export function seedLlmUsage(overrides: {
   contextId?: string | null;
   credentialSource?: "system" | "org" | null;
   settled?: boolean;
+  /**
+   * How much of `costUsd` the platform could price. Omitted defaults to
+   * `"priced"` (the common case); pass `null` explicitly for a row that predates
+   * the field, which the billing rules must NOT read as priced.
+   */
+  pricingStatus?: "priced" | "partial" | "unpriced" | null;
 }): number {
   const id = overrides.id ?? _llmUsageIdSeq++;
   const contextType = overrides.contextType === undefined ? "run" : overrides.contextType;
@@ -127,6 +133,7 @@ export function seedLlmUsage(overrides: {
     contextId,
     credentialSource:
       overrides.credentialSource === undefined ? "system" : overrides.credentialSource,
+    pricingStatus: overrides.pricingStatus === undefined ? "priced" : overrides.pricingStatus,
     settled: overrides.settled ?? true,
   };
   mockLedger.push(row);
@@ -149,13 +156,17 @@ export async function markLlmUsageBilled(args: {
   });
 }
 
-/** Seed the singleton billing cursor at a given watermark. */
-export async function seedBillingCursor(lastLlmUsageId: number): Promise<void> {
+/**
+ * Seed the singleton billing cursor at a given watermark. `floorId` defaults to
+ * 0 — the column's own default, i.e. a cursor that predates the cutover floor —
+ * so a test that cares about the exclusion bound has to state it.
+ */
+export async function seedBillingCursor(lastLlmUsageId: number, floorId = 0): Promise<void> {
   const db = getEeDb();
   await db
     .insert(billingCursor)
-    .values({ id: true, lastLlmUsageId })
-    .onConflictDoUpdate({ target: billingCursor.id, set: { lastLlmUsageId } });
+    .values({ id: true, lastLlmUsageId, floorId })
+    .onConflictDoUpdate({ target: billingCursor.id, set: { lastLlmUsageId, floorId } });
 }
 
 /** Grant `billing:*` to a user through the EE-owned billing-manager table. */

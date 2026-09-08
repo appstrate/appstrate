@@ -3,7 +3,12 @@
 import { logger } from "../logger.ts";
 import { getEeEnv } from "../env.ts";
 import { resyncAllStorageEntitlements } from "./storage-entitlement.ts";
-import { sweepLedgerBatch, type SweepResult } from "./usage-recorder.ts";
+import {
+  addPricingFaults,
+  noPricingFaults,
+  sweepLedgerBatch,
+  type SweepResult,
+} from "./usage-recorder.ts";
 
 /**
  * Periodic billing sweeper — the EE metering consumer.
@@ -273,6 +278,7 @@ export async function runBillingSweep(): Promise<SweepResult> {
   let totalReplayed = result.replayed;
   let totalReplayBilled = result.replayBilled;
   let totalOrphanedOrgs = result.orphanedOrgs;
+  let totalPricing = addPricingFaults(noPricingFaults(), result.pricing);
 
   while (
     result.processed >= batchSize &&
@@ -293,6 +299,7 @@ export async function runBillingSweep(): Promise<SweepResult> {
     totalReplayed += result.replayed;
     totalReplayBilled += result.replayBilled;
     totalOrphanedOrgs += result.orphanedOrgs;
+    totalPricing = addPricingFaults(totalPricing, result.pricing);
   }
 
   // One structured heartbeat per tick — a tick that logs nothing is
@@ -321,6 +328,12 @@ export async function runBillingSweep(): Promise<SweepResult> {
     replayed: totalReplayed,
     replayBilled: totalReplayBilled,
     orphanedOrgs: totalOrphanedOrgs,
+    // Rows claimed but not charged at their true price. Each pass already logged
+    // its own `error` line naming the orgs; restating the counts here keeps the
+    // one-line-per-tick summary honest about what was NOT collected.
+    partialPriced: totalPricing.partial,
+    unpriced: totalPricing.unpriced,
+    unknownPriced: totalPricing.unknown,
     cursorTo: result.cursorTo,
     stalledOnId: result.stalledOnId,
     stalledBelowWatermark,
