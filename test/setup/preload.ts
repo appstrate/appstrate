@@ -379,8 +379,27 @@ const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/
 const preloadRbacSnapshot = collectModulePermissions(importedModules);
 setModulePermissionsProvider(() => preloadRbacSnapshot);
 
-const contributions = collectModuleContributions(importedModules);
-createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
+// A thunk, not a list — same contract as boot.ts. `_rebuildAuthForTesting()`
+// re-invokes it, so a test that flips an env flag mid-suite gets plugin
+// instances built against the new env, and never re-initializes the ones the
+// previous build already mutated.
+//
+// The snapshot is re-installed INSIDE the thunk because plugin construction
+// reads it (OIDC's self-service scope ceiling is
+// `OIDC_IDENTITY_SCOPES ∪ getModuleEndUserAllowedScopes()`), and the live
+// provider is volatile in tests: `getTestApp({ modules })` re-installs a
+// snapshot narrowed to that file's module list on every call. In production
+// the ceiling is always the FULL loaded module set — `createAuth()` runs
+// after `loadModules()` — so a rebuild must see the full set too, not
+// whichever subset the last-loaded test file happened to leave behind. The
+// harness restores its own view on the next `getTestApp()` call, which is
+// already how it recovers from the resets `module-loader.test.ts` does.
+createAuth(() => {
+  setModulePermissionsProvider(() => preloadRbacSnapshot);
+  return collectModuleContributions(importedModules).betterAuthPlugins as ReturnType<
+    Parameters<typeof createAuth>[0]
+  >;
+});
 
 // Phase 3: run each module's `init(ctx)` — the same topo-sorted pipeline
 // production uses, via the entry point that exists for exactly this

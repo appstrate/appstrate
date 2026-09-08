@@ -374,6 +374,23 @@ export function setAfterSignupHook(
 export type BetterAuthPluginList = NonNullable<Parameters<typeof betterAuth>[0]["plugins"]>;
 
 /**
+ * How module plugin contributions reach {@link createAuth}: as a THUNK, never
+ * as an already-built array.
+ *
+ * A Better Auth plugin object is single-use. Building an auth instance runs
+ * every plugin's `init(ctx)`, and an init may MUTATE a sibling plugin's
+ * options — `@better-auth/cimd` calls `extendOAuthProvider()`, which appends
+ * to `oauth-provider`'s `options.extensions`. Feeding the same objects to a
+ * second `betterAuth()` call appends a second time, and the provider's
+ * disjointness check then rejects the duplicate client-discovery id.
+ *
+ * A thunk makes each build produce fresh instances, so every build starts from
+ * a clean plugin state. It also means a rebuild re-reads the env at plugin
+ * construction time, which is the whole point of {@link _rebuildAuthForTesting}.
+ */
+export type BetterAuthPluginFactory = () => BetterAuthPluginList;
+
+/**
  * BA's OAuth callback endpoint path. Exposed as a constant so the create
  * hook and its unit tests reference the same string (if BA ever renames
  * the route, both sides fail together).
@@ -528,7 +545,7 @@ function buildBasePlugins(
 // needed. All consumers must call `getAuth()` at request time / post-boot
 // — never at module-evaluation time.
 //
-// Test harness: `test/setup/preload.ts` calls `createAuth([])` during
+// Test harness: `test/setup/preload.ts` calls `createAuth()` during
 // preload so module test runs boot cleanly.
 
 function buildAuth(extraPlugins: BetterAuthPluginList = []) {
@@ -1061,7 +1078,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
 type AuthInstance = ReturnType<typeof buildAuth>;
 
 let _auth: AuthInstance | null = null;
-let _lastExtraPlugins: BetterAuthPluginList = [];
+let _extraPlugins: BetterAuthPluginFactory = () => [];
 
 /**
  * Construct the Better Auth singleton. Idempotent — subsequent calls are
@@ -1069,19 +1086,25 @@ let _lastExtraPlugins: BetterAuthPluginList = [];
  * that any plugins contributed via `AppstrateModule.betterAuthPlugins()`
  * are merged with `basePlugins`. Module tables already live in the core
  * schema, so the Drizzle adapter resolves them from the barrel directly.
+ *
+ * Takes a {@link BetterAuthPluginFactory}, not a list: plugin objects are
+ * single-use (see that type's doc), and the factory is what lets
+ * {@link _rebuildAuthForTesting} mint a fresh set.
  */
-export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
+export function createAuth(extraPlugins: BetterAuthPluginFactory = () => []): void {
   if (_auth) return;
-  _lastExtraPlugins = extraPlugins;
-  _auth = buildAuth(extraPlugins);
+  _extraPlugins = extraPlugins;
+  _auth = buildAuth(extraPlugins());
 }
 
 /**
  * Test-only: rebuild the Better Auth singleton with the CURRENT env. Lets
  * tests flip SMTP / social / cookie-domain flags at runtime and verify the
  * resulting behavior (email-verification flow, social auto-verify hook,
- * …). The extra plugins + drizzle schemas passed to the most recent
- * `createAuth()` call are re-used so modules don't need to re-register.
+ * …). The plugin factory passed to `createAuth()` is re-invoked so modules
+ * don't need to re-register — and so the rebuild gets plugin instances of
+ * its own rather than re-initializing the ones the previous build already
+ * mutated.
  *
  * DO NOT call this from production code — it defeats the whole point of
  * the idempotent singleton. It exists solely so the module test preload
@@ -1089,7 +1112,7 @@ export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
  * having to reload the entire process.
  */
 export function _rebuildAuthForTesting(): void {
-  _auth = buildAuth(_lastExtraPlugins);
+  _auth = buildAuth(_extraPlugins());
 }
 
 /** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */

@@ -4,7 +4,7 @@ import { describe, it, expect } from "bun:test";
 import { getAuth, createAuth } from "@appstrate/db/auth";
 
 describe("Better Auth factory", () => {
-  // NOTE: `createAuth([])` is already called by the test preload
+  // NOTE: `createAuth()` is already called by the test preload
   // (`test/setup/preload.ts`), so `getAuth()` is expected to succeed here.
 
   it("getAuth returns the constructed Better Auth instance", () => {
@@ -16,7 +16,7 @@ describe("Better Auth factory", () => {
 
   it("createAuth is idempotent — second call does not rebuild", () => {
     const before = getAuth();
-    createAuth([]); // no-op
+    createAuth(() => []); // no-op
     const after = getAuth();
     expect(after).toBe(before); // reference equality
   });

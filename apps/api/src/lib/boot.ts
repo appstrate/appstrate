@@ -125,12 +125,14 @@ export async function bootCritical(): Promise<void> {
   registerModelProviders(getModuleModelProviders());
 
   // Initialize Better Auth AFTER modules have registered their plugin +
-  // schema contributions. `createAuth()` narrows the `unknown[]` from the
-  // core contract to Better Auth's plugin list type. Module tables (e.g.
-  // OIDC's oauth_clients/jwks) now live in the core schema barrel, so the
-  // Better Auth adapter resolves them directly — no module schema injection.
-  const contributions = getModuleContributions();
-  createAuth(contributions.betterAuthPlugins as BetterAuthPluginList);
+  // schema contributions. Passed as a thunk, which `createAuth()` calls
+  // exactly once here — it re-collects (rather than re-using plugin objects a
+  // previous build already initialized) whenever the instance is rebuilt. The
+  // cast narrows the `unknown[]` from the core contract to Better Auth's
+  // plugin list type. Module tables (e.g. OIDC's oauth_clients/jwks) now live
+  // in the core schema barrel, so the Better Auth adapter resolves them
+  // directly — no module schema injection.
+  createAuth(() => getModuleContributions().betterAuthPlugins as BetterAuthPluginList);
 
   // Wire module contributions that were declared on the module contract
   for (const mod of getModules().values()) {
