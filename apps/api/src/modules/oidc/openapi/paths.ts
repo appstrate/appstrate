@@ -2,6 +2,35 @@
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 
+/**
+ * 429 for the `/api/auth/oauth2/*` endpoints, which Better Auth's own limiter
+ * guards (the budgets are the `rateLimit` block of `oauthProvider()` in
+ * `auth/plugins.ts`). Its refusal is NOT the platform shape: a bare
+ * `{ message }` body under `X-Retry-After`, where
+ * `#/components/responses/RateLimited` is a ProblemDetail under `Retry-After`.
+ * Spelled out here rather than $ref'd so the spec states which one a caller
+ * gets.
+ */
+const providerRateLimited = {
+  description: "Too many requests — Better Auth's per-IP limiter refused the call.",
+  headers: {
+    "X-Retry-After": {
+      description: "Seconds until the current window resets.",
+      schema: { type: "string" },
+    },
+  },
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        required: ["message"],
+        properties: { message: { type: "string" } },
+      },
+      example: { message: "Too many requests. Please try again later." },
+    },
+  },
+};
+
 const clientListResponse = {
   type: "object",
   required: ["object", "data", "hasMore"],
@@ -378,6 +407,11 @@ export const oidcPaths = {
           description:
             "Redirect to `redirect_uri` with `code`+`state`, or to the login/consent pages.",
         },
+        "400": {
+          description:
+            "Answered in place, never redirected: the client cannot be resolved (`invalid_client` — unknown `client_id`, or a CIMD `client_id` URL the server's fetch policy refuses) or its `redirect_uri` does not match.",
+        },
+        "429": providerRateLimited,
       },
     },
   },
@@ -445,7 +479,7 @@ export const oidcPaths = {
         "400": { description: "`invalid_grant`, `invalid_request`, or RFC 8707 mismatch." },
         "401": { description: "Invalid client credentials (unknown client or secret mismatch)." },
         "403": { description: "Access denied — realm guard, signup gate, or resource mismatch." },
-        "429": { description: "Rate limit exceeded." },
+        "429": providerRateLimited,
       },
     },
   },

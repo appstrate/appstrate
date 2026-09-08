@@ -826,11 +826,15 @@ describe("CIMD client_id URL policy gate", () => {
         code_challenge_method: "S256",
       })}`,
     );
-    // Refused, and never sent anywhere near the login page.
+    // Refused, and never sent anywhere near the login page. The gate throws
+    // `invalid_client` during client resolution, so authorize answers in place
+    // (400, no Location) instead of redirecting.
     const location = res.headers.get("location");
-    expect(location === null || new URL(location, "http://localhost").pathname).not.toBe(
-      "/api/oauth/login",
-    );
+    if (location === null) {
+      expect(res.status).toBe(400);
+    } else {
+      expect(new URL(location, "http://localhost").pathname).not.toBe("/api/oauth/login");
+    }
     expect(fetchDocument).not.toHaveBeenCalled();
     expect(await db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId))).toEqual(
       [],

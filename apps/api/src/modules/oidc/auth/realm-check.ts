@@ -5,7 +5,7 @@
  *
  * Extracted out of `plugins.ts` so `guards.ts` can reuse the same check
  * on paths that don't flow through `@better-auth/oauth-provider`'s
- * `customAccessTokenClaims` — notably Better Auth's `deviceAuthorization()`
+ * access-token claim extension — notably Better Auth's `deviceAuthorization()`
  * plugin at `/device/approve`, which mints BA sessions directly via the
  * internal adapter and bypasses oauth-provider entirely.
  *

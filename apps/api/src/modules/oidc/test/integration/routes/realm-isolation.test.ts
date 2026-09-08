@@ -202,7 +202,7 @@ async function sha256Base64Url(input: string): Promise<string> {
 /**
  * Drive the full OAuth 2.1 + PKCE flow for the given session cookie and
  * space-level client, returning the `/oauth2/token` response. The
- * realm enforcement lives in `customAccessTokenClaims` → claim builder
+ * realm enforcement lives in the access-token claim extension → claim builder
  * → `assertUserRealm`, which fires at the token exchange — so the caller
  * asserts on `res.status` here. Happy-path token shape is already covered
  * by `oauth-flows.test.ts`; this helper exists to probe the rejection

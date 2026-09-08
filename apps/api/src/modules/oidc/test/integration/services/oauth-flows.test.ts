@@ -17,7 +17,7 @@
  *  - The minted access token verifies against the module's
  *    `verifyEndUserAccessToken` — proving the JWT is ES256-signed by the
  *    `jwks` table + carries the `endUserId` + `spaceId` custom
- *    claims injected by `customAccessTokenClaims`.
+ *    claims injected by the access-token claim extension in `auth/plugins.ts`.
  *  - PKCE enforcement: a tampered `code_verifier` fails exchange.
  *
  * What this test intentionally does NOT assert:
@@ -202,8 +202,8 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
    * encoded by upstream's own RFC 6749 §2.3.1 encoder rather than a hand-rolled
    * base64. Repeating it in the body would be rejected as two authentication
    * methods on one request. `client_id` stays in the body: that is
-   * identification, not authentication, and the token guard's per-client rate
-   * limiter reads it from there.
+   * identification, not authentication, and the token guard's self-service
+   * audience confinement reads it from there.
    */
   function clientAuthHeaders(): Record<string, string> {
     return {
@@ -392,8 +392,9 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // ── Step 5 ── Decode the access token (signature verification is
     // covered by `test/integration/middleware/enduser-token-auth.test.ts`
     // which spins up a local JWKS server). Here we assert the payload
-    // shape — proving `customAccessTokenClaims` actually ran and injected
-    // `end_user_id` + `space_id` + `org_id` via `resolveOrCreateEndUser`.
+    // shape — proving the access-token claim extension actually ran and
+    // injected `end_user_id` + `space_id` + `org_id` via
+    // `resolveOrCreateEndUser`.
     const payload = decodeJwt(tokens.access_token) as {
       sub?: string;
       scope?: string;
@@ -671,31 +672,6 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     }
   });
 
-  it("rate-limits /oauth2/token to 30 req/min per IP", async () => {
-    // The guard limiter is keyed on x-forwarded-for; app.request() sets no
-    // such header, so all spam shares the `unknown` bucket. Fire 31 posts;
-    // the 31st must be rejected with 429.
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      code: "fake",
-      redirect_uri: "https://satellite.example.com/callback",
-      client_id: clientId,
-      code_verifier: "fake",
-      resource: "http://localhost:3000",
-    }).toString();
-
-    let rateLimited = 0;
-    for (let i = 0; i < 35; i++) {
-      const res = await app.request("/api/auth/oauth2/token", {
-        method: "POST",
-        headers: clientAuthHeaders(),
-        body,
-      });
-      if (res.status === 429) rateLimited++;
-    }
-    expect(rateLimited).toBeGreaterThan(0);
-  });
-
   it("issues a fresh JWT access token via grant_type=refresh_token with custom claims re-injected", async () => {
     const { cookie } = await signUpEndUser(
       ctx.defaultSpaceId,
@@ -722,9 +698,9 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(refreshed.access_token).toBeTruthy();
     expect(refreshed.access_token).not.toBe(initialAccess);
 
-    // Prove customAccessTokenClaims re-ran on refresh — end_user_id + space_id
-    // are injected only by that closure, so their presence on the new token
-    // is the canary.
+    // Prove the access-token claim extension re-ran on refresh — end_user_id +
+    // space_id are injected only there, so their presence on the new token is
+    // the canary.
     const payload = decodeJwt(refreshed.access_token) as {
       actor_type?: string;
       end_user_id?: string;

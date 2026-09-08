@@ -8272,6 +8272,31 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Answered in place, never redirected: the client cannot be resolved (`invalid_client` — unknown `client_id`, or a CIMD `client_id` URL the server's fetch policy refuses) or its `redirect_uri` does not match. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too many requests — Better Auth's per-IP limiter refused the call. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current window resets. */
+                    "X-Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Too many requests. Please try again later."
+                     *     }
+                     */
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
         };
     };
     oauth2Introspect: {
@@ -8407,12 +8432,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Rate limit exceeded. */
+            /** @description Too many requests — Better Auth's per-IP limiter refused the call. */
             429: {
                 headers: {
+                    /** @description Seconds until the current window resets. */
+                    "X-Retry-After"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Too many requests. Please try again later."
+                     *     }
+                     */
+                    "application/json": {
+                        message: string;
+                    };
+                };
             };
         };
     };

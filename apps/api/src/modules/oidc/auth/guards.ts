@@ -201,7 +201,7 @@ async function enforceRateLimit(
         error: "rate_limited",
         error_description: `Too many requests to ${category}. Retry after ${retry}s.`,
       },
-      { "Retry-After": String(retry), "X-RateLimit-Scope": "ip" },
+      { "Retry-After": String(retry) },
     );
   }
 }
@@ -410,9 +410,9 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
  *
  * The `deviceAuthorization()` plugin mints BA sessions directly via its
  * internal adapter path — it does NOT flow through `@better-auth/oauth-provider`,
- * so `customAccessTokenClaims` (where `assertUserRealm` normally fires
- * for `/oauth2/token`) never runs for device-flow approvals. Without this
- * hook, an end-user of space X (realm=`"end_user:<spaceId>"`) could
+ * so the access-token claim extension in `plugins.ts` (where `assertUserRealm`
+ * normally fires for `/oauth2/token`) never runs for device-flow approvals.
+ * Without this hook, an end-user of space X (realm=`"end_user:<spaceId>"`) could
  * approve an `appstrate-cli` (level=`"instance"`) device code and obtain
  * a session attached to their identity. The session would be blocked by
  * `requirePlatformRealm` on every subsequent platform request — but the

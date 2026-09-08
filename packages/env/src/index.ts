@@ -946,23 +946,13 @@ export const envSchema = z
     message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
     path: ["APP_URL"],
   })
-  // A production `APP_URL` that is not plain-http loopback is reached through
-  // a reverse proxy, and behind one `TRUST_PROXY=false` is not the safe
-  // setting its name suggests: `lib/client-ip.ts` then ignores
-  // `X-Forwarded-For` and hands every caller the socket peer — the proxy's own
-  // address. Better Auth's per-IP rules (it reads the platform-resolved
-  // address off `CLIENT_IP_HEADER` and walks no chain of its own), every
-  // platform per-IP limiter and every audit record collapse into one bucket
-  // for the whole instance, so a single client exhausts the sign-in budget for
-  // everyone and no audit row identifies who acted.
-  //
-  // The loopback carve-out is the one `APP_URL` already grants, and it is a
-  // topology the repo ships: the CLI's local Tier 1/2/3 install and
-  // `scripts/health-container-e2e.sh` both run this image — whose Dockerfile
-  // bakes in `NODE_ENV=production` — on `http://127.0.0.1` with nothing in
-  // front. The CLI already writes `TRUST_PROXY=true` for every other
-  // `APP_URL` (`isRemoteAppUrl` in `apps/cli/src/lib/install/secrets.ts`);
-  // this refine is what holds a hand-written `.env` to the same rule.
+  // A production `APP_URL` that is not plain-http loopback is reached through a
+  // reverse proxy, and there `TRUST_PROXY=false` makes `lib/client-ip.ts`
+  // ignore `X-Forwarded-For` and hand every caller the proxy's own address:
+  // per-IP limiters and audit records collapse into one bucket per instance.
+  // The loopback carve-out is a topology the repo ships — the CLI's local tiers
+  // and `scripts/health-container-e2e.sh` both run this image, whose Dockerfile
+  // bakes in `NODE_ENV=production`, on `http://127.0.0.1` with nothing in front.
   .refine(
     (env) =>
       env.NODE_ENV !== "production" ||
