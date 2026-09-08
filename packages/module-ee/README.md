@@ -186,6 +186,7 @@ packages/module-ee/
 │   │   ├── usage-recorder.ts  # Cursor sweep pass: claim + debit + advance watermark (one txn) + billLedgerRows primitive
 │   │   ├── billing-sweeper.ts # Periodic timer driving the cursor sweep + tick observability + throttled entitlement resync
 │   │   ├── org-drain.ts       # Bounded final drain of ONE org's usage on deletion (never moves the watermark)
+│   │   ├── org-cancellation.ts # Durable, retried Stripe cancellation + EE row cleanup on org deletion
 │   │   ├── repair-account.ts  # Re-provision a missing billing account and apply its recorded debt
 │   │   └── storage-entitlement.ts # Plan → platform file-storage limit projection (setFileStorageLimit)
 │   ├── stripe/
@@ -362,7 +363,11 @@ org deletion (onOrgDelete, awaited by the platform BEFORE its cascade):
       Starts at the SAME max(floor_id, cursor − REPLAY_WINDOW) the sweep uses —
       one shared rule — because a row of this org that committed late below the
       watermark has no second chance: its ledger row cascades away next
-  → then Stripe subscription cancel + delete the org's EE rows
+  → stamp cancel_requested_at, THEN ask Stripe to cancel. The rows are deleted
+      only once Stripe confirms (a subscription it no longer has counts as
+      confirmed); an unconfirmed cancellation keeps them, and the sweeper's tick
+      retries every account with cancel_requested_at set until it clears
+  → a second call for the same org is a no-op — the account is already gone
 ```
 
 Only platform-provided models (`credentialSource === "system"`) are billed; org-credential (BYOK) and null-credential rows advance the watermark but are never debited. **Runner rows are cumulative** (one growing row per run) and only settle at a terminal run status — the sweep never advances past an unsettled _system_ row, so a mid-run system row is billed only once it is final. Cutover: the cursor is seeded to the platform's **settled frontier** (`usage.settledFrontier()` — the highest id below which every row is settled, NOT a plain max id, which would strand an in-flight runner row already holding a low id) **synchronously in the module's `init()`, at boot before the server takes traffic** (`ensureCursorSeeded`, shared with an in-sweep safety-net fallback). That same frontier is written to `ee_billing_cursor.floor_id` and never moves again: the watermark drifts forward and every pass reads `REPLAY_WINDOW` ids below it, so without the floor the second pass walks back under the seed and bills the very history the cutover excluded. `floor_id` defaults to `0` for a cursor that predates the column — its original frontier was never recorded, and 0 is exactly the behaviour those deployments already have. Seeding at init rather than at the first sweep tick closes the loss window: usage recorded between boot and that first tick (~5 min) is billed by the tick instead of falling below a watermark only set at the tick. Rows already claimed by the previous model are never re-billed — the claim table dedupes. But because the first sweep starts at the settled frontier, settled-but-unclaimed rows ABOVE it (the recent window since the oldest in-flight run began) ARE billed on the first pass — deliberate, so an in-flight run's revenue is not stranded; rows at or below the floor are never revisited.
@@ -447,6 +452,24 @@ refusal above and the manager address book. `src/platform-org-queries.ts`
 declares them and narrows `init`'s parameter to `EeInitContext`, so the
 requirement sits in the signature rather than in a comment.
 
+### Org deletion and the Stripe cancellation
+
+`onOrgDelete` used to call `subscriptions.cancel`, log a failure, and delete the
+billing account regardless. The subscription id died with the row, so a Stripe
+blip left a subscription charging a customer every month for an organization
+that no longer existed and nothing in the system could name it. A log line is a
+diagnosis, not a recovery.
+
+The intent is written down first — `ee_billing_accounts.cancel_requested_at` —
+and the row survives a failed cancellation, `stripe_subscription_id` included.
+Rows are deleted only after Stripe confirms; a subscription Stripe no longer has
+(`resource_missing`/404, or a 400 refusing to update one already canceled)
+counts as confirmed, because the response to an earlier attempt may simply have
+been lost. Every billing tick calls `retryPendingCancellations`, which re-runs
+the same body for each account still carrying a `cancel_requested_at` and
+removes its rows on success. Steady state is zero rows and zero work, and a
+second `onOrgDelete` for the same org is a no-op — the account is already gone.
+
 ### Storage-entitlement reconcile
 
 `resyncAllStorageEntitlements` blind-rewrites every account's platform storage
@@ -456,7 +479,9 @@ transition syncs that failed. It rides the billing tick on an hourly throttle,
 awaiting a fleet-wide pass here would delay billing. The pass is
 concurrency-bounded internally (8 orgs at a time) and a pass that left orgs
 unrepaired logs at `error`; the next window simply repeats the idempotent
-rewrite. `shutdown()` drains it along with the sweep.
+rewrite. `shutdown()` drains it along with the sweep — re-reading both handles
+after every wait, because the tick starts the reconcile from inside the very
+promise the drain is awaiting, and a single snapshot taken at entry missed it.
 
 ### Operator recovery
 

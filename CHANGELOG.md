@@ -526,6 +526,24 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Billing: a Stripe cancellation that fails on org deletion is now retried
+  instead of forgotten (`@appstrate/module-ee`).** `onOrgDelete` logged the
+  failure and deleted the billing account anyway, so the subscription id died
+  with the row: a Stripe blip left a subscription charging a customer every month
+  for an organization that no longer existed, with nothing able to name it. The
+  intent is now stamped on `ee_billing_accounts.cancel_requested_at` before the
+  call, the rows survive an unconfirmed cancellation, and every billing tick
+  retries them until Stripe confirms — a subscription Stripe no longer has counts
+  as confirmed, and a second `onOrgDelete` for the same org is a no-op.
+
+- **Billing: the shutdown drain no longer closes the database under a running
+  storage reconcile (`@appstrate/module-ee`).** It snapshotted the in-flight
+  sweep and reconcile once, at entry, but the tick starts the reconcile from
+  inside the very promise that snapshot awaits — so a shutdown entered mid-sweep
+  returned the moment the sweep ended and `closeEeDb()` ran underneath a
+  reconcile that had begun in between. It now re-reads both handles after every
+  wait, and its timeout is a constant rather than a parameter no caller passed.
+
 - **Billing: upgrading a paying organization no longer creates a second
   subscription (`@appstrate/module-ee`).** The plan picker always opened Stripe
   Checkout, and Checkout only ever CREATES — so an org that already subscribed

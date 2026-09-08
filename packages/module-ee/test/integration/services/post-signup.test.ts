@@ -9,9 +9,10 @@ import {
   seedFreeTierClaim,
   seedUsageRecord,
 } from "../../helpers/seed.ts";
-import { resetStripeMock, requests } from "../../helpers/stripe.ts";
+import { resetStripeMock, requests, setNextError } from "../../helpers/stripe.ts";
 import { onOrgCreate, onOrgDelete } from "../../../src/onboarding/post-signup.ts";
 import { listBillingManagers } from "../../../src/billing/managers.ts";
+import { retryPendingCancellations } from "../../../src/billing/org-cancellation.ts";
 import { billingAccounts, freeTierClaims, orgUsageRecords } from "../../../drizzle/schema.ts";
 import { useEeTestSeams } from "../../helpers/setup.ts";
 
@@ -252,6 +253,100 @@ describe("post-signup", () => {
       expect(accounts).toHaveLength(0);
       expect(usage).toHaveLength(0);
       expect(managers).toHaveLength(0);
+    });
+  });
+
+  describe("onOrgDelete — a cancellation Stripe did not confirm", () => {
+    const orgId = "00000000-0000-4000-a000-000000000061";
+
+    async function account() {
+      const db = getEeDb();
+      const [row] = await db.select().from(billingAccounts).where(eq(billingAccounts.orgId, orgId));
+      return row ?? null;
+    }
+
+    it("REGRESSION: keeps the subscription reference when Stripe refuses", async () => {
+      // The account used to be deleted regardless, taking the subscription id
+      // with it — so a Stripe blip left a customer being charged for an org that
+      // no longer existed, with nothing in the system able to name it.
+      await seedBillingAccount({
+        orgId,
+        stripeCustomerId: "cus_retry",
+        stripeSubscriptionId: "sub_retry",
+        subscriptionStatus: "active",
+      });
+      setNextError(500, { error: { type: "api_error", message: "simulated Stripe outage" } });
+
+      await onOrgDelete(orgId);
+
+      const row = await account();
+      expect(row?.stripeSubscriptionId).toBe("sub_retry");
+      expect(row?.cancelRequestedAt).toBeInstanceOf(Date);
+    });
+
+    it("the sweeper's retry finishes the job and removes the rows", async () => {
+      await seedBillingAccount({
+        orgId,
+        stripeCustomerId: "cus_retry",
+        stripeSubscriptionId: "sub_retry",
+        subscriptionStatus: "active",
+      });
+      await seedUsageRecord({ orgId, contextId: "run-retry", costCredits: 10 });
+      setNextError(500, { error: { type: "api_error", message: "simulated Stripe outage" } });
+      await onOrgDelete(orgId);
+      expect(await account()).not.toBeNull();
+
+      const result = await retryPendingCancellations();
+
+      expect(result).toEqual({ pending: 1, cleared: 1 });
+      expect(
+        requests.filter((r) => r.method === "DELETE" && r.path === "/v1/subscriptions/sub_retry"),
+      ).toHaveLength(2); // the failed attempt, then the successful retry
+      expect(await account()).toBeNull();
+      const db = getEeDb();
+      expect(await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId))).toHaveLength(0); // prettier-ignore
+    });
+
+    it("treats a subscription Stripe no longer has as cancelled", async () => {
+      // The response to the first attempt may simply have been lost. Retrying
+      // forever on "no such subscription" would keep a dead org's rows alive on
+      // a cancellation that already happened.
+      await seedBillingAccount({
+        orgId,
+        stripeSubscriptionId: "sub_gone",
+        subscriptionStatus: "active",
+      });
+      setNextError(404, {
+        error: { type: "invalid_request_error", code: "resource_missing", message: "No such subscription: sub_gone" }, // prettier-ignore
+      });
+
+      await onOrgDelete(orgId);
+
+      expect(await account()).toBeNull();
+    });
+
+    it("is a no-op when called twice", async () => {
+      // The platform may retry a deletion that failed further along.
+      await seedBillingAccount({
+        orgId,
+        stripeSubscriptionId: "sub_twice",
+        subscriptionStatus: "active",
+      });
+
+      await onOrgDelete(orgId);
+      await onOrgDelete(orgId);
+
+      expect(await account()).toBeNull();
+      expect(
+        requests.filter((r) => r.method === "DELETE" && r.path.startsWith("/v1/subscriptions/")),
+      ).toHaveLength(1);
+    });
+
+    it("does nothing when no cancellation is pending", async () => {
+      await seedBillingAccount({ orgId, stripeSubscriptionId: "sub_live", subscriptionStatus: "active" }); // prettier-ignore
+
+      expect(await retryPendingCancellations()).toEqual({ pending: 0, cleared: 0 });
+      expect(await account()).not.toBeNull();
     });
   });
 });
