@@ -23,7 +23,7 @@ Single root `bunfig.toml` drives core tests; each module has its own pointing at
 
 - `index.ts` → dynamic-imported, registered in `test-modules.ts` for `getTestApp()`
 - `test/tables.ts` → `string[]` registered via `registerTruncationTables()`
-- `test/requirements.ts` → `{ postgres?: boolean; env?: Record<string, string> }`. `env` is applied with `??=` before the module entry is imported; `postgres: true` means the module is not imported, not initialized, and its own test files are not collected under `bun run test:tier0` (`scripts/test-tier0.ts` derives the exclusion from the same file — see `test/setup/modules.ts`)
+- `test/requirements.ts` → `{ postgres?: boolean; env?: Record<string, string> }`. `env` is applied with `Object.assign` before the module entry is imported, so it OVERRIDES the ambient environment on purpose — the suite truncates and drops the tables it is pointed at, and a developer `.env` (Bun auto-loads it) may name a real database; `postgres: true` means the module is not imported, not initialized, and its own test files are not collected under `bun run test:tier0` (`scripts/test-tier0.ts` derives the exclusion from the same file — see `test/setup/modules.ts`)
 
 There is no per-module migration step: **modules own no tables**, so a module's tables are created by the core migration step above. `apps/api/src/modules/README.md` ("Database ownership rules") owns that rule and the reasoning behind it.
 

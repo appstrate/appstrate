@@ -28,7 +28,7 @@ import type { KnipConfig } from "knip";
  *
  * Not covered, deliberately: whether a **published** package's public export
  * still has a reader. `@appstrate/core` and `@appstrate/afps-shared` are on npm
- * and consumed out of tree (`cloud`, `connect-helper`, third-party modules), so
+ * and consumed out of tree (`connect-helper`, third-party modules), so
  * "no in-repo reader" is not evidence of death for them; proving one of those
  * is dead needs the consumers, not this repo.
  *
@@ -40,7 +40,7 @@ import type { KnipConfig } from "knip";
  * with a publish workflow (`publish-core.yml`, `publish-afps-shared.yml`) and a
  * release tag. `@appstrate/afps-runtime` carries `publishConfig` but has no
  * workflow, no `afps-runtime@*` tag, and npm holds one `0.0.0` placeholder from
- * 2026-04-20 against a local 0.2.0; `@appstrate/runner-pi` and all four
+ * 2026-04-20 against a local 0.2.0; `@appstrate/runner-pi` and all five
  * `@appstrate/module-*` packages are absent from npm entirely and are reached
  * in-tree by `workspace:*` or by a `MODULES` specifier the loader resolves by
  * name. `@appstrate/ui` is a third case: `"private": true` here, yet 1.0.1 sits
@@ -55,18 +55,18 @@ import type { KnipConfig } from "knip";
  * before granting the exemption to anything else — `npm view <pkg> versions`
  * and `ls .github/workflows/publish-*`, not the manifest's `publishConfig`.
  *
- * ## What the exemption is currently hiding (measured 2026-08-28)
+ * ## What the exemption is currently hiding (measured 2026-09-08)
  *
  * Recorded so the next audit reads an answer instead of re-deriving one. Turn
  * `includeEntryExports: true` on for `packages/core` and `packages/afps-shared`
- * below and knip reports **27** names with no in-tree reader — 25 in core, 2 in
+ * below and knip reports **26** names with no in-tree reader — 24 in core, 2 in
  * afps-shared. Reproduce it that way, then restore this file; the two flags are
- * off on purpose, and none of the 27 is evidence of death on its own.
+ * off on purpose, and none of the 26 is evidence of death on its own.
  *
  *   afps-shared  CREDENTIAL_REF, defaultHostResolver
  *   core values  AGENT_OUTPUT_FILE_PURPOSE, MCP_SERVER_APPSTRATE_META_KEY,
  *                anthropicReasoningBudgetTokens, modelCapabilitySupportSchema,
- *                SLUG_PATTERN, decodePairingToken, ORG_ROLES,
+ *                SLUG_PATTERN, decodePairingToken,
  *                RUN_AND_WAIT_MAX_MS, RUN_AND_WAIT_BACKOFF_MS,
  *                RUN_AND_WAIT_TERMINAL_STATUSES, isRunAndWaitTerminalStatus,
  *                projectRunAndWaitPayload, mcpServerSchema, RESERVE_FRACTION,
@@ -76,13 +76,13 @@ import type { KnipConfig } from "knip";
  *                IntegrityCheckResult, SidecarConfig, LlmProxyConfig,
  *                BoundedUnzipLimits
  *
- * Both known out-of-tree consumers were checked at `origin/main` (their working
- * trees are unreliable — connect-helper's sits on a stale branch). `cloud`
- * imports none of the 27. `connect-helper` imports exactly one:
- * `decodePairingToken`, in `src/cli.ts` and `test/pairing-token.test.ts` — so
- * that name is proven live and the exemption earned its keep on it alone.
+ * The one out-of-tree consumer was checked at `origin/main` (its working tree
+ * is unreliable — connect-helper's sits on a stale branch). `connect-helper`
+ * imports exactly one: `decodePairingToken`, in `src/cli.ts` and
+ * `test/pairing-token.test.ts` — so that name is proven live and the exemption
+ * earned its keep on it alone.
  *
- * The other 26 are unresolved, NOT dead. Third-party modules are the third
+ * The other 25 are unresolved, NOT dead. Third-party modules are the third
  * consumer class and this repo cannot see them; removing a published name is a
  * major either way (see `packages/core/test/export-surface.test.ts`). Two carry
  * their own recorded disposition at the declaration and should not be re-raised
@@ -533,7 +533,7 @@ const config: KnipConfig = {
 
     "packages/core": {
       // Every target of the `exports` map. Published on npm and consumed out
-      // of tree (cloud, connect-helper, third-party modules), so each subpath
+      // of tree (connect-helper, third-party modules), so each subpath
       // is a public entry whose readers this repo cannot see.
       entry: [...manifestEntries("packages/core")],
       /**

@@ -50,8 +50,8 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
 /**
  * Post-bootstrap side-effect hook (issue #228). Fires once `createBootstrapOrg`
  * has actually inserted the org row — never on the idempotent no-op path.
- * apps/api wires this at boot to (a) emit `onOrgCreate` so cloud free-tier
- * and other module listeners observe the bootstrap org, and (b) provision
+ * apps/api wires this at boot to (a) emit `onOrgCreate` so the ee module's
+ * free-tier gate and other module listeners observe the bootstrap org, and (b) provision
  * the default space + hello-world agent so the post-signup onboarding
  * path lands on a usable space, mirroring `POST /api/orgs`.
  *
@@ -426,7 +426,7 @@ function buildBasePlugins(
             // chain still enforces per-context policy: the OIDC module's
             // `oidcBeforeSignupGuard` blocks creation for org-level clients with
             // `allowSignup: false` (via the signed `oidc_pending_client` cookie),
-            // and cloud's free-tier hook applies its own gate. Outside an OIDC
+            // and the ee module's free-tier hook applies its own gate. Outside an OIDC
             // flow, magic-link signup is as open as email/password signup.
             disableSignUp: false,
             // Short-lived login link. A magic-link is a bearer credential: a
@@ -996,7 +996,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
             const realm = (user as { realm?: string }).realm ?? "platform";
             // Self-hosting bootstrap path (issue #228) — auto-create the
             // root org for AUTH_BOOTSTRAP_OWNER_EMAIL. Idempotent. Runs
-            // BEFORE the module after-hook so cloud's free-tier hook etc.
+            // BEFORE the module after-hook so the ee module's free-tier hook etc.
             // see a coherent state.
             try {
               await maybeBootstrapOrgForOwner(user.id, user.email, realm);

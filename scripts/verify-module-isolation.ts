@@ -94,8 +94,14 @@ function ownerOf(absPath: string): string | null {
 const IMPORT_RE =
   /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*[`"']([^`"'$]+)[`"']|\bimport\s+["']([^"']+)["']/g;
 
-/** Characters after which a `/` opens a regex literal rather than a division. */
-const REGEX_PRECEDERS = new Set("(,=:[!&|?{};+-*%~^<>");
+/**
+ * Characters after which a `/` opens a regex literal rather than a division.
+ * `<` and `>` are left out on purpose: this scan reads `.tsx`, where `</div>`
+ * would otherwise open a phantom regex that blanks the rest of the file and
+ * hides — or falsely reports — whatever follows. The cost is a regex literal
+ * written directly after a comparison operator, which nothing here does.
+ */
+const REGEX_PRECEDERS = new Set("(,=:[!&|?{};+-*%~^");
 
 /**
  * Blank the comments out: a commented-out import is not one. Strings are walked
@@ -236,6 +242,10 @@ async function sourceFilesUnder(root: string): Promise<string[]> {
   const glob = new Glob("**/*.{ts,tsx}");
   for await (const rel of glob.scan({ cwd: root })) {
     if (rel.includes("/test/") || rel.startsWith("test/") || /\.test\.tsx?$/.test(rel)) continue;
+    // `apps/api/src` and `packages/*/src` hold none, but `runtime-pi`, `e2e`
+    // and `apps/cli` are workspace roots — scanning their dependency tree
+    // would read every module's published source as platform source.
+    if (rel.includes("node_modules/")) continue;
     files.push(rel);
   }
   return files;
@@ -332,11 +342,19 @@ if (import.meta.main) {
   problems.push(...reviewCrossModuleImports(crossModuleImports, ACCEPTED_CROSS_MODULE_IMPORTS));
 
   // ─── core → module ──────────────────────────────────────────────────
-  // `apps/api/src` plus every non-module `packages/*/src` (`apps/web` absent on
-  // purpose — see the header). Built-ins live UNDER `apps/api/src`, so a file
-  // that is a module's own is skipped: reaching into itself is not a platform
-  // import, and the pass above owns every other case.
-  const platformRoots: string[] = [resolve(ROOT, "apps/api/src")];
+  // Every non-module tree the platform ships or builds itself with (`apps/web`
+  // absent on purpose — see the header). Built-ins live UNDER `apps/api/src`, so
+  // a file that is a module's own is skipped: reaching into itself is not a
+  // platform import. `scripts/` stays in scope: `scripts/lib/module-openapi.ts`
+  // loads modules by a computed `import(entry)`, the form this gate deliberately
+  // cannot see, and nothing there names a module in a literal specifier.
+  const platformRoots: string[] = [
+    resolve(ROOT, "apps/api/src"),
+    resolve(ROOT, "apps/cli/src"),
+    resolve(ROOT, "runtime-pi"),
+    resolve(ROOT, "scripts"),
+    resolve(ROOT, "e2e"),
+  ];
   {
     const glob = new Glob("*/src");
     for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {

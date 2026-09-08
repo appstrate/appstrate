@@ -176,6 +176,32 @@ describe("importSpecifiers", () => {
     ]);
   });
 
+  it("does not let a JSX closing tag swallow the commented-out import behind it", () => {
+    // The scan reads `.tsx` too. With `<` treated as a regex preceder, the `/`
+    // in `</div>` opened a phantom regex that ran to the next `/` — the `//` of
+    // the comment below — and the commented-out import behind it reached the
+    // scan as a live one: a hard violation on a line that imports nothing.
+    const source = [
+      "export function Panel() {",
+      "  return <div>x</div>;",
+      "}",
+      '// import "@appstrate/module-ee";',
+    ].join("\n");
+    expect(importSpecifiers(source)).toEqual([]);
+  });
+
+  it("still catches a REAL import after JSX", () => {
+    // The other half. A fix that made the scan skip everything behind JSX
+    // would pass the test above and blind the gate.
+    const source = [
+      "export function Panel() {",
+      "  return <div>x</div>;",
+      "}",
+      'import "@appstrate/module-ee";',
+    ].join("\n");
+    expect(importSpecifiers(source)).toEqual(["@appstrate/module-ee"]);
+  });
+
   it("reads past a regex literal holding quote characters", () => {
     // Treated as a string, the `["']` swallows the rest of the file and the
     // import behind it disappears from the scan.

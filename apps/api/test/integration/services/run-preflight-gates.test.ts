@@ -116,7 +116,7 @@ describe("runPreflightGates", () => {
  * (that hard-coded "BYOK ⇒ free", which stops being true the moment platform
  * compute is billed). It now reports neutral facts — `credentialSource`,
  * `executionPlane`, and the EFFECTIVE post-ceiling `timeoutSeconds` — and a
- * metering module (cloud) quotes them.
+ * metering module (the ee module) quotes them.
  *
  * These assertions pin the facts a module quotes against: dropping one, or
  * reporting a pre-ceiling timeout, would silently over- or under-charge rather

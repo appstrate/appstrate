@@ -465,7 +465,7 @@ The SPA's role strings are display only. `packages/shared-types/src/member-role-
 | billing managers, billing contact, `billing:*`                     |                         | `module-ee` (§10)                                                                     |
 | `principalPermissions` hook                                        | contract in core        | any module                                                                            |
 
-Core keeps its zero-billing-vocabulary invariant: no `billing` role, no billing column, no billing route.
+Core keeps its zero-billing-vocabulary invariant: the Apache-2.0 core (`apps/api/src`, `packages/*` except `module-ee`) declares no `billing` role, no billing column, no billing permission, no billing route and no billing env var. The SERVED OpenAPI spec and the generated SPA types (`apps/web/src/api/schema.d.ts`) do carry the ee module's contributions (`/api/billing*`, `Ee*` schemas), the same way they carry every in-tree module's, and the SPA renders them only when the server reports `features.billing`.
 
 ---
 

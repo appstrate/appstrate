@@ -10,7 +10,8 @@
 # in degraded mode and the image healthcheck must mark the container unhealthy.
 #
 # HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
-# enabled and adds the "EE module" phase below (loaded, sweeping, routed). That mode is the
+# enabled and adds the "EE module" phase below (loaded, sweeping). The "Billing
+# route" phase runs in both modes and asserts the opposite status in each. That mode is the
 # `ee-container-e2e` job in .github/workflows/test.yml; it replaces the
 # release-time `verify` the cloud repo used to run against its own second image.
 
@@ -160,19 +161,31 @@ if [ "$E2E_EE" = "1" ]; then
     echo 'EE module loaded but its billing sweeper never started' >&2
     exit 1
   fi
-  # The log lines prove init ran; only a request proves the module's routers are
-  # mounted on the platform app. Unsigned, so Stripe is never reached: the route
-  # rejects a missing `stripe-signature` with 400. Measured on the same image
-  # WITHOUT the module in MODULES: 401, the platform's `/api/*` auth guard
-  # answering for an unrouted path — so any status but 400 is the regression.
-  webhook_status=$(curl -s -o /dev/null -w '%{http_code}' \
-    -X POST "http://127.0.0.1:${E2E_PORT}/api/billing/webhooks")
-  if [ "$webhook_status" != "400" ]; then
-    echo "POST /api/billing/webhooks returned $webhook_status, expected 400 — the EE routers are not mounted" >&2
-    exit 1
-  fi
-  echo "ee_module=loaded ee_routes=mounted"
+  echo "ee_module=loaded"
 fi
+
+# The log lines above prove init ran; only a request proves the module's routers
+# are mounted. This probe runs in BOTH modes off ONE image, which is what makes
+# it a zero-footprint measurement rather than a claim: the module declares
+# `/api/billing/webhooks` a public path, so with EE on the auth pipeline steps
+# aside and the route rejects the missing `stripe-signature` with 400 (unsigned,
+# so Stripe is never reached); with EE off nothing declares it public, the
+# platform's `/api/*` auth guard answers 401 for the unauthenticated request and
+# the route never exists. Either status appearing in the other mode is the
+# regression.
+echo "==> Billing route"
+if [ "$E2E_EE" = "1" ]; then
+  expected_webhook_status=400
+else
+  expected_webhook_status=401
+fi
+webhook_status=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "http://127.0.0.1:${E2E_PORT}/api/billing/webhooks")
+if [ "$webhook_status" != "$expected_webhook_status" ]; then
+  echo "POST /api/billing/webhooks returned $webhook_status, expected $expected_webhook_status (EE=$E2E_EE)" >&2
+  exit 1
+fi
+echo "billing_webhook_status=$webhook_status"
 
 compose down --volumes --remove-orphans >/dev/null
 

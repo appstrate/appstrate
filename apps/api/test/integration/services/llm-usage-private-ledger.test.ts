@@ -2,9 +2,9 @@
 
 /**
  * Phase 5 (model alias) — private usage ledger. `llm_usage.real_model` / `api`
- * retain the REAL backing id for billing + audit, but they are admin/cloud-only
+ * retain the REAL backing id for billing + audit, but they are admin/billing-only
  * and must never reach a user-facing surface. `listLlmUsage` (the module-facing
- * cursor read, consumed by the cloud metering module) never projects the binding
+ * cursor read, consumed by the ee metering module) never projects the binding
  * columns — this locks that projection so a future column add can't silently
  * leak the backing of a model alias.
  */

@@ -7,6 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppConfig } from "../../hooks/use-app-config";
+import type { components } from "../../api/client";
 import { useBilling, useCheckout, usePortal, type CheckoutPlanId } from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor } from "../../lib/usage-severity";
@@ -15,7 +16,10 @@ import { LoadingState, ErrorState, EmptyState } from "../../components/page-stat
 import { formatDateField } from "../../lib/format-date";
 import { toast } from "sonner";
 
-const STATUS_I18N: Record<string, string> = {
+// Keyed on the status enum the spec declares, not on `string`: a status added
+// to `EeBillingAccount.status` without an i18n key fails to compile here
+// instead of rendering the raw key.
+const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], string> = {
   past_due: "billing.statusPastDue",
   unpaid: "billing.statusUnpaid",
   paused: "billing.statusPaused",

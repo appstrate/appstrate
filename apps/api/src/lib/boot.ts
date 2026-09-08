@@ -113,7 +113,7 @@ export async function bootCritical(): Promise<void> {
     });
   });
 
-  // Load modules (cloud, webhooks, etc.)
+  // Load modules (oidc, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
@@ -139,7 +139,7 @@ export async function bootCritical(): Promise<void> {
     }
   }
   // `beforeSignup` / `afterSignup` broadcast to EVERY loaded module (not
-  // first-match-wins like the other hooks) via `callAllHooks`: the cloud
+  // first-match-wins like the other hooks) via `callAllHooks`: the ee module's
   // free-tier gate AND the OIDC per-client signup policy both run on every
   // signup, and a throwing `beforeSignup` aborts user creation. OIDC's
   // `afterSignup` auto-joins the new user to the org pinned by the in-flight
@@ -150,8 +150,8 @@ export async function bootCritical(): Promise<void> {
   // `createBootstrapOrg` actually inserted the org row. Mirrors the post-
   // create sequence in `routes/organizations.ts` so the bootstrap owner
   // lands on a usable workspace (default app + hello-world agent) AND so
-  // module listeners on `onOrgCreate` (cloud free-tier, audit, analytics)
-  // observe the org creation. Each side effect catches its own errors —
+  // module listeners on `onOrgCreate` (the ee module's free-tier gate, audit,
+  // analytics) observe the org creation. Each side effect catches its own errors —
   // signup must never fail on a non-fatal provisioning hiccup.
   setPostBootstrapOrgHook(triggerPostBootstrapOrg);
   if (env.S3_BUCKET) {

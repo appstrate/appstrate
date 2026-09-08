@@ -62,6 +62,11 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       const res = await app.request("/api/webhooks/wh_123", { headers: authHeaders(ctx) });
       expect(res.status).toBe(404);
     });
+
+    it("GET /api/billing → 404", async () => {
+      const res = await app.request("/api/billing", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(404);
+    });
   });
 
   describe("OpenAPI spec", () => {
@@ -83,6 +88,16 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       const webhookTag = spec.tags.find((t) => t.name.toLowerCase().includes("webhook"));
       expect(webhookTag).toBeUndefined();
     });
+
+    it("has no billing paths", () => {
+      const billingPaths = Object.keys(spec.paths).filter((p) => p.startsWith("/api/billing"));
+      expect(billingPaths).toEqual([]);
+    });
+
+    it("has no Ee* component schemas", () => {
+      const schemaNames = Object.keys(spec.components.schemas).filter((n) => n.startsWith("Ee"));
+      expect(schemaNames).toEqual([]);
+    });
   });
 
   describe("app config features", () => {
@@ -92,6 +107,11 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       // module-owned flag.
       const cfg = buildAppConfig();
       expect(cfg.features.webhooks).toBeUndefined();
+    });
+
+    it("base config has no billing flag — only @appstrate/module-ee contributes it", () => {
+      const cfg = buildAppConfig();
+      expect(cfg.features.billing).toBeUndefined();
     });
   });
 
@@ -113,6 +133,8 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       "oauth-clients:read",
       "oauth-clients:write",
       "oauth-clients:delete",
+      "billing:read",
+      "billing:manage",
     ];
 
     it("role and preset permission sets contain no module-owned scopes", () => {

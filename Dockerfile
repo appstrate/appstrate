@@ -153,7 +153,7 @@ COPY --from=build /app/system-packages ./system-packages
 # The image ships two licences: Apache-2.0 for the platform, and the commercial
 # one for packages/module-ee, which is shipped by the `packages/*` globs above.
 COPY --from=build /app/LICENSE /app/NOTICE ./
-COPY --from=build /app/packages/module-ee/LICENSE ./packages/module-ee/LICENSE
+COPY --from=build --chown=bun:bun /app/packages/module-ee/LICENSE ./packages/module-ee/LICENSE
 
 # su-exec for lightweight privilege drop in entrypoint
 RUN apk add --no-cache su-exec

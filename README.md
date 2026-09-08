@@ -199,7 +199,7 @@ appstrate/
 │   ├── runner-pi/            # @appstrate/runner-pi — Pi run driver + container/sidecar env construction
 │   ├── mcp-transport/        # @appstrate/mcp-transport — MCP SDK adapter (sidecar tools surface)
 │   ├── db/                   # @appstrate/db — Drizzle ORM + Better Auth (all tables, incl. module-read ones)
-│   ├── emails/               # @appstrate/emails — email template registry + cloud override
+│   ├── emails/               # @appstrate/emails — email template registry + module overrides
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 │   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, ee are opt-in

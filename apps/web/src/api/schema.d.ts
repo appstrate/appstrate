@@ -7459,7 +7459,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -8804,7 +8804,7 @@ export interface operations {
             content: {
                 "application/json": {
                     plan_id: components["schemas"]["EeCheckoutPlanId"];
-                    /** @description Path-relative redirect target (must start with `/`). Defaults to `/settings/billing`. */
+                    /** @description Path-relative redirect target (must start with `/`). Defaults to `/org-settings/billing`. */
                     return_url?: string;
                 };
             };
@@ -18754,7 +18754,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -18977,7 +18977,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
