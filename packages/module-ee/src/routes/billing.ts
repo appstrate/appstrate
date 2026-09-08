@@ -33,15 +33,16 @@ import {
 import { invalidRequest } from "@appstrate/core/api-errors";
 import type { OrgRole } from "../types.ts";
 
-// Minimal env type — set by the platform's auth + RBAC middleware. `userId` is
-// the session caller: billing-manager grants are attributed to whoever made
-// them, and the platform's own `principalPermissions` surface is session-only,
-// so a request that reaches a `billing:manage` route always has one.
+// Minimal env type — set by the platform's auth + RBAC middleware. `user` is
+// the caller as `apps/api/src/lib/auth-pipeline.ts` writes it (the same shape
+// the platform's own `AppEnv` declares): billing-manager grants are attributed
+// to whoever made them, and the platform's `principalPermissions` surface is
+// session-only, so a request reaching a `billing:manage` route always has one.
 type EeEnv = {
   Variables: {
     orgId: string;
     orgRole: OrgRole;
-    userId: string;
+    user: { id: string; email: string; name: string };
     permissions: ReadonlySet<string>;
   };
 };
@@ -324,7 +325,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
       );
     }
 
-    const managers = await replaceBillingManagers(orgId, wanted, c.get("userId"));
+    const managers = await replaceBillingManagers(orgId, wanted, c.get("user").id);
     return c.json({ managers: managers.map(managerDetail) });
   });
 

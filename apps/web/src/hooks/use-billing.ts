@@ -54,3 +54,57 @@ export function useCheckout() {
 export function usePortal() {
   return $api.useMutation("post", "/api/billing/portal");
 }
+
+/**
+ * The two admin surfaces below are gated on `billing:manage` — the exact
+ * permission `eeRequireAdmin()` checks — so a caller who can only READ billing
+ * never fires a request the server would answer with 403.
+ */
+
+/** The org users granted `billing:*` without being owners or admins. */
+export function useBillingManagers(options?: { enabled?: boolean }) {
+  const { enabled, header } = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/billing/managers",
+    { params: { header } },
+    { enabled: (options?.enabled ?? true) && enabled },
+  );
+}
+
+/**
+ * Exact key of {@link useBillingManagers} — the entry a save writes its own
+ * answer into before invalidating, so the list never blinks back to the stale
+ * value between the response and the refetch.
+ */
+export function useBillingManagersKey() {
+  const { header } = useOrgOnlyScope();
+  return $api.queryOptions("get", "/api/billing/managers", { params: { header } }).queryKey;
+}
+
+/** Replace the whole manager set — the route is a `PUT` of the complete list. */
+export function useReplaceBillingManagers() {
+  return $api.useMutation("put", "/api/billing/managers");
+}
+
+/** Where invoices, receipts and payment alerts go. */
+export function useBillingContact(options?: { enabled?: boolean }) {
+  const { enabled, header } = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/billing/contact",
+    { params: { header } },
+    { enabled: (options?.enabled ?? true) && enabled },
+  );
+}
+
+/** Exact key of {@link useBillingContact}, for the same reason. */
+export function useBillingContactKey() {
+  const { header } = useOrgOnlyScope();
+  return $api.queryOptions("get", "/api/billing/contact", { params: { header } }).queryKey;
+}
+
+/** Merge-patch the contact; `billing_email: null` clears it. */
+export function useUpdateBillingContact() {
+  return $api.useMutation("patch", "/api/billing/contact");
+}

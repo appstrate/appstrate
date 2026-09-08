@@ -7,11 +7,14 @@ import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppConfig } from "../../hooks/use-app-config";
+import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import { useBilling, useCheckout, usePortal, type CheckoutPlanId } from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
+import { BillingManagersSection } from "../../components/billing-managers-section";
+import { BillingContactSection } from "../../components/billing-contact-section";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { formatDateField } from "../../lib/format-date";
 import { toast } from "sonner";
@@ -33,6 +36,7 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
+  const { can } = usePermissions();
   // Gate the fetch on the feature flag (mirrors sidebar-billing) so a build
   // without `@appstrate/module-ee` never fires the `/billing` request (404).
   // The line-below <Navigate> still handles the visible redirect.
@@ -49,6 +53,11 @@ export function OrgSettingsBillingPage() {
     limitBytes: storageLimit,
     percent: storagePercent,
   } = useOrgStorage({ enabled: features.billing });
+
+  // The two admin sections below are MOUNTED on the exact condition
+  // `eeRequireAdmin()` checks (`billing:manage`), not merely hidden by it — so
+  // their queries never fire for a caller the routes would answer with 403.
+  const canManageBilling = !!features.billing && can("billing:manage");
 
   if (!features.billing) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
@@ -221,6 +230,13 @@ export function OrgSettingsBillingPage() {
             onSelect={handleUpgrade}
           />
         </div>
+      )}
+
+      {canManageBilling && (
+        <>
+          <BillingManagersSection />
+          <BillingContactSection />
+        </>
       )}
     </>
   );

@@ -15,7 +15,7 @@ type EeTestEnv = {
   Variables: {
     orgId: string;
     orgRole: OrgRole;
-    userId: string;
+    user: { id: string; email: string; name: string };
     permissions: ReadonlySet<string>;
   };
 };
@@ -36,7 +36,11 @@ export function getTestApp(): Hono<EeTestEnv> {
     if (!orgId) return c.json({ error: "Missing X-Test-Org-Id" }, 401);
     c.set("orgId", orgId);
     c.set("orgRole", orgRole);
-    c.set("userId", c.req.header("X-Test-User-Id") ?? "user-test");
+    // Exactly what `apps/api/src/lib/auth-pipeline.ts` writes — the platform
+    // sets `user`, never a bare `userId`. Any other shape here lets a route
+    // read a variable production never populates.
+    const userId = c.req.header("X-Test-User-Id") ?? "user-test";
+    c.set("user", { id: userId, email: `${userId}@test.local`, name: userId });
     // Mirror the platform RBAC grant matrix (permissionsContribution in
     // src/index.ts): `billing:read` is granted to owner/admin/member;
     // `billing:manage` only to owner/admin. A `guest` gets neither.
