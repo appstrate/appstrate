@@ -19,7 +19,6 @@ import {
   packageKeys,
   agentsKeys,
   scheduleKeys,
-  billingKeys,
 } from "../lib/query-keys";
 import {
   type EnrichedRun,
@@ -297,7 +296,9 @@ function handleSSEMessage(
     // A terminal run has completed its output sweep; refresh every scoped
     // file collection, including conversation-context filters.
     qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
-    qc.invalidateQueries({ queryKey: billingKeys.forOrg(orgId) });
+    // openapi-react-query keys are [method, path, init] — invalidating the
+    // literal spec path reaches the entry whatever org rides in its init.
+    qc.invalidateQueries({ queryKey: ["get", "/api/billing"] });
   }
 }
 

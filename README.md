@@ -202,7 +202,7 @@ appstrate/
 │   ├── emails/               # @appstrate/emails — email template registry + cloud override
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
-│   ├── module-*/             # opt-in workspace modules (chat, claude-code, codex, observability)
+│   ├── module-*/             # opt-in workspace modules (chat, claude-code, codex, observability, ee)
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
 ├── system-packages/           # System package `.afps` archives — integrations + one mcp-server, loaded at boot

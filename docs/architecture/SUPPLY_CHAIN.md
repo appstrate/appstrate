@@ -19,12 +19,12 @@ It is intended to double as the rationale for a future ADR.
 ## 1. Isolation wall — the coupling is shallow
 
 The Pi SDK is **not** a cross-cutting dependency. It is confined to the agent
-runner and its container image. The platform core, the cloud billing module,
+runner and its container image. The platform core, the EE billing module,
 and the published `@appstrate/core` library import it **zero** times.
 
 ```
 apps/api   (Hono backend)      → 0 pi-* imports
-cloud      (billing module)    → 0 pi-* imports
+packages/module-ee (billing)   → 0 pi-* imports
 packages/core (@appstrate/core)→ 0 pi-* imports
 ```
 

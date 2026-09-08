@@ -14,10 +14,15 @@ is the gate, not the publish.
 
 `scripts/check-consumer-versions.ts` holds the authoritative list. It reads each
 `package.json` off the repo's **default branch** through the GitHub contents
-API. Today that is exactly two repos:
+API. Today that is exactly one repo:
 
-- `appstrate/cloud`
 - `appstrate/connect-helper`
+
+`appstrate/cloud` was the second entry until the billing module came in-tree as
+`packages/module-ee`. A `workspace:*` package resolves core from the monorepo
+and is never published, so gating a core publish on it would gate it on a
+version that does not exist on npm yet — the same deadlock `packages/module-*`
+has always been kept out of. Its `CONSUMERS` entry is gone.
 
 Membership is not a release-time decision. The rule for adding and removing
 entries lives in the `CONSUMERS` doc-comment in that script — it addresses
@@ -53,7 +58,7 @@ found **exactly one major behind** is a **warning**, not a failure.
 
 ## 3. Bump the consumers right after
 
-Bump `cloud` and `connect-helper` to `^X.0.0` and push to each default branch.
+Bump `connect-helper` to `^X.0.0` and push to its default branch.
 
 This is not optional politeness. **The carve-out is scoped to `X.0.0` alone** —
 the very next core release (`X.0.1`, `X.1.0`, anything non-major) fails hard on
@@ -93,9 +98,10 @@ bun -e 'const {exportedNames}=await import(process.env.REPO+"/packages/core/test
     JSON.stringify({version:"X.Y.Z",exports:Object.keys(n).sort()},null,2)+"\n")'
 ```
 
-Not from the workspace and not from a git tag: `cloud/node_modules/@appstrate/core`
-is a symlink into this monorepo, so a green local typecheck says nothing about
-what a consumer can resolve. The tarball is the only source that does.
+Not from the workspace and not from a git tag: a `bun link`ed
+`connect-helper/node_modules/@appstrate/core` is a symlink into this monorepo,
+so a green local typecheck says nothing about what a consumer can resolve. The
+tarball is the only source that does.
 
 Skipping this step does not break the build — it makes the next release's diff
 span two versions, so the `[Unreleased]` section is asked to document changes
@@ -140,9 +146,9 @@ _cancelled_ job forces a bump. Never re-point the tag at a new commit.
 
 ## The gate only bites with a token that can read private repos
 
-Both consumers are private, so the repository secret
+The consumer repo is private, so the repository secret
 **`CONSUMER_LOCKSTEP_TOKEN`** must hold a PAT or GitHub App token with
-`contents:read` on both. There is no separate preflight and no fallback token:
+`contents:read` on it. There is no separate preflight and no fallback token:
 the script checks capability with the real contents requests. An absent token or
 a token that cannot read a consumer makes that fetch fail. The strict `fail`
 policy blocks the publish, explicit `warn` reports the failed reads and

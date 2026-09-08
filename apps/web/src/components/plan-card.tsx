@@ -4,14 +4,20 @@ import { useTranslation } from "react-i18next";
 import { Check, Sparkles } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "@appstrate/core/format";
-import { PLAN_ICONS, PLAN_DESCRIPTION_KEYS, type BillingPlanDetail } from "../hooks/use-billing";
+import {
+  PLAN_ICONS,
+  PLAN_DESCRIPTION_KEYS,
+  isCheckoutPlanId,
+  type BillingPlanDetail,
+  type CheckoutPlanId,
+} from "../hooks/use-billing";
 
 interface PlanCardProps {
   plan: BillingPlanDetail;
   isCurrent?: boolean;
   isUpgrade?: boolean;
   disabled?: boolean;
-  onSelect?: (planId: string) => void;
+  onSelect?: (planId: CheckoutPlanId) => void;
 }
 
 function PlanCard({
@@ -24,6 +30,9 @@ function PlanCard({
   const { t } = useTranslation(["settings"]);
   const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
   const descKey = PLAN_DESCRIPTION_KEYS[plan.id];
+  // `free` has no Stripe price, so it is never a checkout target: narrowing
+  // here keeps the whole selection chain on the ids checkout accepts.
+  const upgradeTarget = isUpgrade && isCheckoutPlanId(plan.id) ? plan.id : null;
 
   return (
     <button
@@ -37,7 +46,7 @@ function PlanCard({
             ? "border-border bg-card hover:border-primary/50"
             : "border-border bg-card opacity-60",
       )}
-      onClick={isUpgrade && onSelect ? () => onSelect(plan.id) : undefined}
+      onClick={upgradeTarget && onSelect ? () => onSelect(upgradeTarget) : undefined}
       disabled={!isUpgrade || disabled}
     >
       {isCurrent && (
@@ -79,7 +88,7 @@ interface PlanGridProps {
   currentPlanId?: string;
   upgradeIds?: Set<string>;
   disabled?: boolean;
-  onSelect?: (planId: string) => void;
+  onSelect?: (planId: CheckoutPlanId) => void;
 }
 
 export function PlanGrid({

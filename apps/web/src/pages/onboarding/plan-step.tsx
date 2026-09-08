@@ -9,7 +9,7 @@ import {
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { useBilling, useCheckout } from "../../hooks/use-billing";
+import { useBilling, useCheckout, type CheckoutPlanId } from "../../hooks/use-billing";
 import { Spinner } from "../../components/spinner";
 import { PlanGrid } from "../../components/plan-card";
 
@@ -35,11 +35,11 @@ export function OnboardingPlanStep() {
   const currentPlanId = billing?.plan.id ?? "free";
   const upgradeIds = new Set(billing?.upgrades.map((u) => u.id));
 
-  const handleSelectPlan = (planId: string) => {
+  const handleSelectPlan = (planId: CheckoutPlanId) => {
     checkoutMutation.mutate(
-      { planId, returnUrl: "/onboarding/plan" },
+      { body: { plan_id: planId, return_url: "/onboarding/plan" } },
       {
-        onSuccess: (url) => {
+        onSuccess: ({ url }) => {
           window.location.href = url;
         },
       },
