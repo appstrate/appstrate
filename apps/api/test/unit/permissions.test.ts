@@ -317,7 +317,7 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
 
   it("excludes module-owned permissions — those are layered in at boot via getApiKeyAllowedScopes()", () => {
     // webhooks:*, oauth-clients:*, and billing:* are module-contributed
-    // (webhooks + oidc + cloud modules respectively). `apiKeyGrantable`
+    // (the webhooks, oidc and ee modules respectively). `apiKeyGrantable`
     // is opted-in per contribution, merged into the dynamic view by
     // `getApiKeyAllowedScopes()`. The core constant must not carry them
     // — otherwise disabling the owning module would leave dead scope

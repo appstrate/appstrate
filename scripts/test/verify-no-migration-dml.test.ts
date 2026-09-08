@@ -23,6 +23,7 @@ import {
   licencedTables,
   review,
   sanitize,
+  SCANS,
 } from "../verify-no-migration-dml.ts";
 
 /** `findDml` reports at least one statement. */
@@ -911,27 +912,46 @@ describe("findDml — the pure-DDL pass and its negative control", () => {
 
 describe("review", () => {
   const offending = `UPDATE "runs" SET "version_ref" = 'draft';`;
+  // The platform's own tree. `SCANS` carries one entry per migration
+  // directory; the rules are the directory's, so the set has to be passed in.
+  const platform = SCANS[0]!;
   const present = new Map(GRANDFATHERED.map((name) => [name, offending]));
 
   it("passes a grandfathered file that rewrites rows", () => {
-    expect(review(present)).toEqual([]);
+    expect(review(present, platform)).toEqual([]);
   });
 
   it("fails the identical content under any other name", () => {
     // Same bytes, different filename — the exemption is a list of files, not a
     // property of the SQL.
-    const problems = review(new Map([...present, ["9999_new_migration", offending]]));
+    const problems = review(new Map([...present, ["9999_new_migration", offending]]), platform);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("9999_new_migration.sql rewrites row contents");
     expect(problems[0]).toContain("scripts/migration");
   });
 
   it("points the author at `scripts/migration/`", () => {
-    const problems = review(new Map([...present, ["9999_new_migration", offending]]));
+    const problems = review(new Map([...present, ["9999_new_migration", offending]]), platform);
     expect(problems[0]).toContain("scripts/migration/");
   });
 
-  it("fails when a GRANDFATHERED entry names no migration", () => {
+  it("applies each set's own exemptions, not another set's", () => {
+    // A name grandfathered in one tree is not grandfathered in the other: one
+    // shared list across two directories would silently excuse whatever landed
+    // under a matching name in the second. Same bytes under the same name, one
+    // verdict each way.
+    const other = SCANS[1]!;
+    const inOther = new Map<string, string>([
+      ...other.grandfathered.map((name): [string, string] => [name, "SELECT 1;"]),
+      [GRANDFATHERED[0]!, offending],
+    ]);
+    expect(review(present, platform)).toEqual([]);
+    const problems = review(inOther, other);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`${other.dir}/${GRANDFATHERED[0]}.sql rewrites row contents`);
+  });
+
+  it("fails when a grandfathered entry names no migration", () => {
     // Every entry, not `GRANDFATHERED[0]`: the list's composition is itself
     // under review (an entry leaves when its file leaves the directory), so a
     // test that indexes into it pins whichever name happens to sort first and
@@ -939,7 +959,7 @@ describe("review", () => {
     for (const name of GRANDFATHERED) {
       const missing = new Map(present);
       missing.delete(name);
-      const problems = review(missing);
+      const problems = review(missing, platform);
       expect(problems).toHaveLength(1);
       expect(problems[0]).toContain(name);
       expect(problems[0]).toContain("not in packages/db/drizzle/");

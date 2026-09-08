@@ -246,7 +246,7 @@ async function resolvePersonaSpaceRole(
   if (!hasCustomRoles()) {
     throw viewAsForbidden(
       "Previewing a custom space role requires the `custom_roles` feature, provided by the " +
-        "Appstrate Cloud plan (the `@appstrate/cloud` module). The four built-in presets " +
+        "Appstrate Cloud plan (the `@appstrate/module-ee` module). The four built-in presets " +
         "(admin, builder, operator, viewer) are always previewable.",
     );
   }

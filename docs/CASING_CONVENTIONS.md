@@ -424,7 +424,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 
 **Internal sidecar↔platform wire fields** (snake_case, AFPS): the `/internal/integration-credentials/{scope}/{name}` GET + refresh endpoints emit all keys snake_case — `auth_key`, `auth_type`, `authorized_uris`, `scopes_granted`, `identity_claims`, `expires_at`, `delivery_plans`, `expires_at_epoch_ms`, and per-plan `header_name`, `header_prefix`, `allow_server_override`. The TS-internal source-of-truth type `IntegrationCredentialsWire` (in `@appstrate/connect/integration-credentials`) stays camelCase per the Zone 3 TS-internal convention; field-name translation happens at the JSON boundary via `serializeIntegrationCredentialsWire` (platform-side) and `normalizeIntegrationCredentialsWire` (sidecar-side). The legacy camelCase dual-emit was retired with AFPS — there is no carve-out for these endpoints. The RFC 8707 audience is emitted snake_case as `resource` only (no `audience` alias).
 
-**Cloud billing wire**: `usage_percent`, `credits_used`, `credit_quota`, `period_end`, `cancel_at_period_end`, `plan_id`, `return_url`
+**Billing wire** (`@appstrate/module-ee`): `usage_percent`, `credits_used`, `credit_quota`, `period_end`, `cancel_at_period_end`, `plan_id`, `return_url`
 
 **Universal DB convention** (camelCase carve-out on wire): `id`, `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`, `runNumber`, `userId`, `orgId`, `spaceId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `runOrigin`, `contextSnapshot`, `modelCredentialId`
 

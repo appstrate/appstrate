@@ -27,7 +27,7 @@
  * It covers module routers, but only **in-tree** modules can opt *in*.
  * `idempotency()` lives in `apps/api/src/middleware/` and is exported from no
  * package. Built-in dir modules import it by relative path (`webhooks` and
- * `oidc` both do); `@appstrate/module-chat`, `@appstrate/cloud` and any
+ * `oidc` both do); `@appstrate/module-chat`, `@appstrate/module-ee` and any
  * operator-installed module cannot, so every mutating route they register is
  * permanently in "refuse" mode. Nothing breaks today — none of them advertises
  * the header — but they are held to a policy they have no way to satisfy. See

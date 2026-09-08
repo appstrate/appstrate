@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Unit tests for {@link resolveSafePath} — the path-safety primitive
  * gating every `{ fromFile }` upload and `responseMode.toFile` download.

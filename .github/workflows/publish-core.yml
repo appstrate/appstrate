@@ -106,9 +106,11 @@ jobs:
 
       # Release procedure (ordering, bypass, token): docs/deployment/RELEASING_CORE.md
       #
-      # Both consumers are private, so there is deliberately no GITHUB_TOKEN
-      # fallback. The script handles every non-2xx according to policy. Only
-      # exact `warn` and `off` values bypass; unknown values fail closed.
+      # The one remaining consumer, `connect-helper`, is a private repo, so
+      # there is deliberately no GITHUB_TOKEN fallback: the workflow token
+      # cannot read it and would 404 on every file. The script handles every
+      # non-2xx according to policy. Only exact `warn` and `off` values bypass;
+      # unknown values fail closed.
       - name: Check consumer-repo lockstep
         working-directory: .
         env:

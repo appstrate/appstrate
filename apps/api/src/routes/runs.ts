@@ -601,7 +601,7 @@ export function createRunsRouter() {
   // aggregated from `llm_usage`, the runner ledger row settles, and the
   // `run_completed` log row + `onRunStatusChange` broadcast happen exactly
   // once. Pre-fix, this route wrote `status='cancelled'` and closed the sink
-  // directly — no terminal broadcast fired and the cloud module never debited
+  // directly — no terminal broadcast fired and a billing module never debited
   // credits for cancelled runs that had already burned LLM tokens.
   router.post("/runs/:id/cancel", requirePermission("runs", "cancel"), async (c) => {
     const runId = c.req.param("id")!;

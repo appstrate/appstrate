@@ -6,15 +6,24 @@
  * major-release carve-out from issue #1028 (a consumer cannot declare `^X.0.0`
  * before X.0.0 exists on npm, so at an X.0.0 release "one major behind" is the
  * only reachable state) and the non-major case that keeps the gate's teeth.
+ *
+ * The last block runs the script as a process against a mutated copy of its own
+ * source, restored in a `finally`. Do not run it in parallel with anything else
+ * that reads `scripts/check-consumer-versions.ts`.
  */
 
 import { describe, it, expect, afterEach, spyOn } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   assessDeclaredRange,
   assessDrift,
   fetchPackageJson,
   resolvePolicy,
 } from "../check-consumer-versions.ts";
+
+const REPO_ROOT = join(import.meta.dir, "..", "..");
+const GATE = join(REPO_ROOT, "scripts", "check-consumer-versions.ts");
 
 type V = [number, number, number];
 
@@ -124,6 +133,44 @@ describe("assessDeclaredRange", () => {
       detail: 'unparsable range "workspace:*", cannot verify drift',
     });
   });
+
+  it("fails a listed consumer that declares no range at all", () => {
+    // Rule 3 of the CONSUMERS doc-comment. This used to be a `-` log line
+    // counted as neither warning nor failure, so a consumer that dropped the
+    // dependency left the gate reporting `0 failure(s)` over one fewer repo.
+    const missing = assessDeclaredRange([6, 3, 0], undefined, "fail");
+    expect(missing.verdict).toBe("fail");
+    expect(missing.detail).toContain("does not consume");
+    expect(assessDeclaredRange([6, 3, 0], undefined, "warn").verdict).toBe("warn");
+  });
+});
+
+describe("scripts/check-consumer-versions.ts as a process", () => {
+  it("refuses to run with an empty CONSUMERS list", () => {
+    // A vacuous gate is worse than no gate: it prints `Summary: 0 failure(s)`
+    // over zero repos. The throw is at module load, so this reaches no network.
+    const original = readFileSync(GATE, "utf8");
+    const mutated = original.replace(
+      '  { repo: "appstrate/connect-helper", paths: ["package.json"] },\n',
+      "",
+    );
+    if (mutated === original) {
+      throw new Error("the mutation matched nothing — CONSUMERS was restructured.");
+    }
+    try {
+      writeFileSync(GATE, mutated);
+      const run = Bun.spawnSync({
+        cmd: ["bun", "scripts/check-consumer-versions.ts"],
+        cwd: REPO_ROOT,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(run.exitCode).not.toBe(0);
+      expect(run.stderr.toString()).toContain("CONSUMERS is empty");
+    } finally {
+      writeFileSync(GATE, original);
+    }
+  }, 60_000);
 });
 
 describe("fetchPackageJson", () => {
@@ -160,7 +207,9 @@ describe("fetchPackageJson", () => {
     // package and therefore HAS a package.json, so 404 is always a read
     // failure — it must reach main()'s fail-closed catch.
     stubFetch(404, "Not Found");
-    await expect(fetchPackageJson("appstrate/cloud", "package.json")).rejects.toThrow(/404/);
+    await expect(fetchPackageJson("appstrate/connect-helper", "package.json")).rejects.toThrow(
+      /404/,
+    );
   });
 
   it("names the token and the likely causes in the 404 message", async () => {
@@ -168,20 +217,20 @@ describe("fetchPackageJson", () => {
     // "the file was deleted" and sends them to look in the wrong place.
     process.env.GITHUB_TOKEN = "test-token";
     stubFetch(404, "Not Found");
-    const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
+    const err = await fetchPackageJson("appstrate/connect-helper", "package.json").catch(
       (e: unknown) => e as Error,
     );
     expect(err.message).toContain("READ failure");
     expect(err.message).toContain("CONSUMER_LOCKSTEP_TOKEN");
     expect(err.message).toContain("missing scope");
     expect(err.message).toContain("SSO not authorized");
-    expect(err.message).toContain("appstrate/cloud");
+    expect(err.message).toContain("appstrate/connect-helper");
   });
 
   it("names the publish-core secret when GITHUB_TOKEN is absent", async () => {
     delete process.env.GITHUB_TOKEN;
     stubFetch(404, "Not Found");
-    const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
+    const err = await fetchPackageJson("appstrate/connect-helper", "package.json").catch(
       (e: unknown) => e as Error,
     );
     expect(err.message).toContain("GITHUB_TOKEN is not configured");
@@ -190,15 +239,17 @@ describe("fetchPackageJson", () => {
 
   it("still throws on other non-2xx statuses", async () => {
     stubFetch(403, "Forbidden");
-    await expect(fetchPackageJson("appstrate/cloud", "package.json")).rejects.toThrow(/403/);
+    await expect(fetchPackageJson("appstrate/connect-helper", "package.json")).rejects.toThrow(
+      /403/,
+    );
   });
 
   it("returns the parsed package.json on success", async () => {
     stubFetch(200, "OK", {
-      name: "@appstrate/cloud",
-      dependencies: { "@appstrate/core": "^6.1.0" },
+      name: "@appstrate/connect-helper",
+      devDependencies: { "@appstrate/core": "^6.1.0" },
     });
-    const pkg = await fetchPackageJson("appstrate/cloud", "package.json");
-    expect(pkg.name).toBe("@appstrate/cloud");
+    const pkg = await fetchPackageJson("appstrate/connect-helper", "package.json");
+    expect(pkg.name).toBe("@appstrate/connect-helper");
   });
 });

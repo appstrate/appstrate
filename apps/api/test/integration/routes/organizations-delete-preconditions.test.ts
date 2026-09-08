@@ -8,7 +8,7 @@
  * second. `deleteOrganization` refuses (from inside its transaction) while
  * runs are in progress, so an owner who clicked "delete org" during a run got
  * a 400 back — but the module handlers had already run their destructive,
- * non-transactional teardown (the cloud module drains billing, cancels the
+ * non-transactional teardown (the ee module drains billing, cancels the
  * Stripe subscription and drops the billing account; the mcp module drops the
  * org from the RFC 8707 audience allowlist). The organization survived,
  * gutted, with no repair path.
@@ -118,7 +118,7 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
       expect(body.code).toBe("delete_failed");
 
       // THE assertion: no module may observe a deletion that never happened.
-      // Against the pre-fix ordering this array held one entry — the cloud
+      // Against the pre-fix ordering this array held one entry — the ee
       // module would already have cancelled the subscription by here.
       expect(orgDeleteCalls).toEqual([]);
 

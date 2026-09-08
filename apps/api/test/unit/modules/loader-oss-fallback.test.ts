@@ -6,16 +6,16 @@
  *   - the default registry (`MODULES` unset) is the OSS module set
  *     (oidc, webhooks, core-providers, @appstrate/module-codex,
  *     @appstrate/module-claude-code) and never attempts to dynamically
- *     import `@appstrate/cloud`. An OSS install without the private
- *     cloud package on disk MUST boot cleanly.
- *   - when a non-builtin specifier is listed but the npm package is not
+ *     import `@appstrate/module-ee`. An OSS install that never enables the
+ *     commercial module MUST boot cleanly.
+ *   - when a non-builtin specifier is listed but the package is not
  *     installed, the loader surfaces a wrapped error mentioning the
- *     specifier name (so operators see "Module \"@appstrate/cloud\" could
+ *     specifier name (so operators see "Module \"@appstrate/module-ee\" could
  *     not be loaded" instead of a raw ESM resolution stack trace).
  *
- * The latter is the OSS/Cloud contract from CLAUDE.md: the platform
+ * The latter is the OSS/EE contract from CLAUDE.md: the platform
  * should fail fast with a clear message rather than crash mysteriously
- * when a cloud-only deployment is misconfigured.
+ * when a paid deployment is misconfigured.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -51,7 +51,7 @@ describe("OSS-mode module loading", () => {
     resetModules();
   });
 
-  it("default registry is the OSS module set — cloud + subscription modules never auto-loaded", () => {
+  it("default registry is the OSS module set — EE + subscription modules never auto-loaded", () => {
     const previous = process.env.MODULES;
     setModulesEnv(undefined);
     try {

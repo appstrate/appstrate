@@ -10,7 +10,8 @@
  *   - `AUTH_BOOTSTRAP_TOKEN` redemption via `POST /api/auth/bootstrap/redeem`
  *
  * Side effects (all isolated — failures are logged, never re-raised):
- *   1. Emit `onOrgCreate` so module listeners (cloud free-tier, audit) see it.
+ *   1. Emit `onOrgCreate` so module listeners (the ee module's free-tier gate,
+ *      audit) see it.
  *   2. Create the default Space for the new org.
  *   3. Provision the hello-world default agent inside that Space.
  *

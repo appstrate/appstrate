@@ -102,7 +102,7 @@ export const integrationConnections = pgTable(
     // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
     // same note sits on the `model_provider_credentials` twin. There was one,
     // written beside `refresh_failure_count` on every transient refresh failure
-    // and read by nothing: no route, no DTO, no OpenAPI field, no `cloud`
+    // and read by nothing: no route, no DTO, no OpenAPI field, no module
     // consumer, no predicate. Its only readers were the integration tests
     // asserting the write happened. `refresh_failure_count` is the column that
     // drives the reconnect escalation; the timestamp was never part of that

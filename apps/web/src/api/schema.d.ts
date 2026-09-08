@@ -877,6 +877,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the current org's billing account
+         * @description Returns the org's current plan, credit usage, subscription status, and available upgrade tiers. Requires `billing:read` (granted to every org member).
+         */
+        get: operations["getEeBillingAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a Stripe Checkout session
+         * @description Returns a one-time Stripe Checkout URL the dashboard redirects to. Admin-only (`billing:manage`). Rate-limited to 5/min per org.
+         */
+        post: operations["createEeBillingCheckoutSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/contact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the billing contact
+         * @description The address invoices, receipts and payment alerts are sent to, plus the CC list. Requires `billing:manage`.
+         */
+        get: operations["getEeBillingContact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the billing contact
+         * @description Sets `billing_email` and/or `billing_cc`; omitted fields are left as they are, and `billing_email: null` clears the contact so it falls back to the organization's owners. The primary address is pushed to the Stripe customer so Stripe addresses its own receipts. Requires `billing:manage`.
+         */
+        patch: operations["updateEeBillingContact"];
+        trace?: never;
+    };
+    "/api/billing/managers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's billing managers
+         * @description Org users granted `billing:read` + `billing:manage` without being owners or admins. Requires `billing:manage`.
+         */
+        get: operations["listEeBillingManagers"];
+        /**
+         * Replace the organization's billing managers
+         * @description Replaces the whole set with `user_ids`. Every id must be a member of the organization, and none may be an owner or admin — those already hold `billing:*` through their org role, so listing them would grant nothing while making the list read as if they were the only ones who could. Requires `billing:manage`.
+         */
+        put: operations["replaceEeBillingManagers"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/portal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a Stripe Customer Portal session
+         * @description Returns a one-time Stripe Customer Portal URL the dashboard redirects to (manage payment method, cancel subscription, view invoices). Admin-only (`billing:manage`). Rate-limited to 5/min per org.
+         */
+        post: operations["createEeBillingPortalSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe webhook receiver
+         * @description Stripe-signed webhook receiver. Public path (no platform auth) — verified by `Stripe-Signature` header against `STRIPE_WEBHOOK_SECRET`. Idempotent via `ee_stripe_events`.
+         */
+        post: operations["receiveEeBillingStripeWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -4982,6 +5110,66 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        EeBillingAccount: {
+            plan: {
+                id: string;
+                name: string;
+            };
+            plans: components["schemas"]["EeBillingPlan"][];
+            usage_percent: number;
+            credits_used: number;
+            credit_quota: number;
+            /** Format: date-time */
+            period_end: string | null;
+            /**
+             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` during the period-end grace window, otherwise mirrors Stripe's `subscription.status`.
+             * @enum {string}
+             */
+            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceled" | "canceling";
+            /** @description Plans the org can upgrade into — empty when on the highest plan. */
+            upgrades: components["schemas"]["EeBillingUpgradePlan"][];
+        };
+        EeBillingContact: {
+            /**
+             * Format: email
+             * @description Primary billing address. `null` falls back to the organization's owners, resolved at send time.
+             */
+            billing_email: string | null;
+            /** @description Addresses copied on every billing email. */
+            billing_cc: string[];
+        };
+        EeBillingManager: {
+            /** @description Platform user id granted `billing:read` + `billing:manage`. */
+            user_id: string;
+            /** @description User id that granted it. */
+            added_by: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        EeBillingManagerList: {
+            managers: components["schemas"]["EeBillingManager"][];
+        };
+        EeBillingPlan: {
+            /** @enum {string} */
+            id: "free" | "starter" | "pro";
+            /** @description Display name (e.g. "Free", "Starter") */
+            name: string;
+            /** @description Monthly price in dollars */
+            price: number;
+            /** @description Credits granted per billing cycle */
+            credit_quota: number;
+            /** @description Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit. */
+            file_storage_bytes: number;
+        };
+        /** @description A catalog plan the org can upgrade into — an `EeBillingPlan` whose `id` is narrowed to a checkout target. */
+        EeBillingUpgradePlan: components["schemas"]["EeBillingPlan"] & {
+            id: components["schemas"]["EeCheckoutPlanId"];
+        };
+        /**
+         * @description A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `EeBillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.
+         * @enum {string}
+         */
+        EeCheckoutPlanId: "starter" | "pro";
         EndUserObject: {
             /** @description End-user ID (eu_ prefix) */
             id: string;
@@ -7271,7 +7459,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -8567,6 +8755,389 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    getEeBillingAccount: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Billing snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingAccount"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    createEeBillingCheckoutSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                    /** @description Path-relative redirect target (must start with `/`). Defaults to `/org-settings/billing`. */
+                    return_url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Checkout session URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        url: string;
+                    };
+                };
+            };
+            /** @description Validation error or invalid Stripe plan configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getEeBillingContact: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Billing contact */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingContact"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    updateEeBillingContact: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    billing_email?: string | null;
+                    billing_cc?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The resulting billing contact */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingContact"];
+                };
+            };
+            /** @description Invalid email address, or more than 5 CC addresses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listEeBillingManagers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The billing managers, oldest grant first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingManagerList"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    replaceEeBillingManagers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The complete set of billing managers. An empty array clears it. */
+                    user_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The resulting billing managers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingManagerList"];
+                };
+            };
+            /** @description A user id is not an org member, or is an owner/admin */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    createEeBillingPortalSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Customer portal URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        url: string;
+                    };
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    receiveEeBillingStripeWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description HMAC signature emitted by Stripe with each webhook delivery. */
+                "Stripe-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        received: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid Stripe signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Webhook processing error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
             };
         };
     };
@@ -18183,7 +18754,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -18406,7 +18977,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;

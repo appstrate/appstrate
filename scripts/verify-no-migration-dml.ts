@@ -30,10 +30,14 @@
  *     neither a write nor a licence. A `DO $$ … $$` block, which does execute,
  *     gets no such exemption. See `functionBodies`.
  *
- * Only NEW files are gated. Every migration already in the directory has run
- * on real databases and cannot be changed, so the eight that predate this rule
- * are listed in `GRANDFATHERED` below — explicitly, so the exemption is
- * reviewable rather than implicit, and checked against the directory so an
+ * Two migration trees are scanned, listed in `SCANS`: the platform's, and the
+ * one `packages/module-ee/` keeps for its own database. Each carries its own
+ * grandfather list.
+ *
+ * Only NEW files are gated. Every migration already in a directory has run
+ * on real databases and cannot be changed, so the ones that predate this rule
+ * are listed in `GRANDFATHERED` / `EE_GRANDFATHERED` below — explicitly, so the
+ * exemption is reviewable rather than implicit, and checked against the directory so an
  * entry cannot go on excusing a name nothing occupies.
  */
 
@@ -41,7 +45,6 @@ import { basename, join } from "node:path";
 import { readdirSync, readFileSync } from "node:fs";
 
 const REPO_ROOT = join(import.meta.dir, "..");
-const MIGRATIONS_DIR = join(REPO_ROOT, "packages/db/drizzle");
 
 /**
  * Migrations that carry data repair and predate this gate.
@@ -86,6 +89,31 @@ export const GRANDFATHERED: readonly string[] = [
   "0040_config_into_input",
   "0044_finish_file_rename",
   "0046_legacy_permission_scope_strings",
+];
+
+/**
+ * `packages/module-ee/` runs its own database and therefore its own migration
+ * tree — the only second one in the repo, and subject to the same §2 rule. Its
+ * two entries predate the gate for the same reason the platform's eight do:
+ * `0001_cursor_billing` re-keys usage records and backfills `cost_usd`,
+ * `0003_normalize_free_subscription_status` rewrites legacy free-tier rows.
+ * Both shipped and have been applied; the list is frozen the same way.
+ */
+export const EE_GRANDFATHERED: readonly string[] = [
+  "0001_cursor_billing",
+  "0003_normalize_free_subscription_status",
+];
+
+/** A migration directory and the exemptions that apply inside it. */
+export interface MigrationSet {
+  /** Repo-relative, and the name the findings quote. */
+  readonly dir: string;
+  readonly grandfathered: readonly string[];
+}
+
+export const SCANS: readonly MigrationSet[] = [
+  { dir: "packages/db/drizzle", grandfathered: GRANDFATHERED },
+  { dir: "packages/module-ee/drizzle/migrations", grandfathered: EE_GRANDFATHERED },
 ];
 
 /**
@@ -859,17 +887,17 @@ export function findDml(sql: string): Finding[] {
  *
  * Pure, so `scripts/test/verify-no-migration-dml.test.ts` can hold both
  * directions against it — including the grandfathering — with fixtures rather
- * than by mutating `packages/db/drizzle/`.
+ * than by mutating a real migration directory.
  */
-export function review(migrations: ReadonlyMap<string, string>): string[] {
+export function review(migrations: ReadonlyMap<string, string>, set: MigrationSet): string[] {
   const problems: string[] = [];
 
   for (const [name, sql] of migrations) {
-    if (GRANDFATHERED.includes(name)) continue;
+    if (set.grandfathered.includes(name)) continue;
     const findings = findDml(sql);
     if (findings.length === 0) continue;
     problems.push(
-      `packages/db/drizzle/${name}.sql rewrites row contents:\n` +
+      `${set.dir}/${name}.sql rewrites row contents:\n` +
         findings.map((f) => `    line ${f.line}: ${f.statement}`).join("\n") +
         `\n    → move it to scripts/migration/<NNNN>-<slug>.{sql,ts}`,
     );
@@ -883,11 +911,11 @@ export function review(migrations: ReadonlyMap<string, string>): string[] {
   // from permanently exempt to exempt-while-the-regex-says-so, which is the one
   // thing that list exists not to be. Membership is a historical fact, so it is
   // not re-derived from today's rules.
-  const dead = GRANDFATHERED.filter((name) => !migrations.has(name));
+  const dead = set.grandfathered.filter((name) => !migrations.has(name));
   if (dead.length > 0) {
     problems.push(
-      `${dead.length} GRANDFATHERED entr(y|ies) in scripts/verify-no-migration-dml.ts name a ` +
-        `migration that is not in packages/db/drizzle/:\n` +
+      `${dead.length} grandfathered entr(y|ies) in scripts/verify-no-migration-dml.ts name a ` +
+        `migration that is not in ${set.dir}/:\n` +
         dead.map((n) => `    - ${n}`).join("\n") +
         `\n    The file was renamed or removed. Repoint the entry, or delete it.`,
     );
@@ -897,13 +925,24 @@ export function review(migrations: ReadonlyMap<string, string>): string[] {
 }
 
 function main(): number {
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
+  const problems: string[] = [];
+  let scanned = 0;
+  let grandfathered = 0;
 
-  const problems = review(
-    new Map(files.map((f) => [basename(f, ".sql"), readFileSync(join(MIGRATIONS_DIR, f), "utf8")])),
-  );
+  for (const set of SCANS) {
+    const dir = join(REPO_ROOT, set.dir);
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    scanned += files.length;
+    grandfathered += set.grandfathered.length;
+    problems.push(
+      ...review(
+        new Map(files.map((f) => [basename(f, ".sql"), readFileSync(join(dir, f), "utf8")])),
+        set,
+      ),
+    );
+  }
 
   if (problems.length > 0) {
     for (const p of problems) console.error(`❌ ${p}`);
@@ -919,8 +958,8 @@ function main(): number {
   }
 
   console.log(
-    `✅ no data repair in drizzle migrations — ${files.length} file(s) scanned, ` +
-      `${GRANDFATHERED.length} grandfathered.`,
+    `✅ no data repair in drizzle migrations — ${scanned} file(s) scanned across ` +
+      `${SCANS.length} migration tree(s), ${grandfathered} grandfathered.`,
   );
   return 0;
 }

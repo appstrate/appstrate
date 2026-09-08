@@ -119,6 +119,36 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **The commercial module moved into this repository as `packages/module-ee`,
+  under its own licence.** The `appstrate/cloud` repo no longer holds code: the
+  Stripe billing, credit quotas, usage metering and billing managers now live in
+  the public tree, source-available under `packages/module-ee/LICENSE` rather
+  than Apache-2.0 (`bun run verify:license-boundary` enforces the split file by
+  file). It is still opt-in and still inert when absent from `MODULES` — the
+  specifier is now `@appstrate/module-ee` — and it ships inside the single
+  `ghcr.io/appstrate/appstrate` image, so there is no second image, no separate
+  release, and no `@appstrate/core` peer range to keep in lockstep
+  (`workspace:*`). Its environment is renamed with it: `CLOUD_DATABASE_URL` →
+  `EE_DATABASE_URL`, and `CLOUD_RECONCILIATION_{INTERVAL_SECONDS,REPLAY_WINDOW,BATCH_SIZE}`
+  → `EE_RECONCILIATION_*`. Its seven tables are renamed by the module's own
+  migration `0005_rename_ee_tables`, in one transaction, with every index and
+  constraint Postgres had named after them: `cloud_billing_accounts`,
+  `cloud_billing_cursor`, `cloud_billing_managers`, `cloud_billed_llm_usage`,
+  `cloud_free_tier_claims`, `cloud_usage_records` and `cloud_stripe_events`
+  become `ee_*`.
+
+  **OPERATOR ACTIONS.** Replace `@appstrate/cloud` with `@appstrate/module-ee`
+  in `MODULES`. Set `EE_DATABASE_URL` to the EXACT value `CLOUD_DATABASE_URL`
+  held: the module CREATES a database it does not find, so a different name does
+  not fail — it silently starts every organization on an empty free plan while
+  Stripe keeps charging them (the boot log warns when it creates one). If any of
+  the three `CLOUD_RECONCILIATION_*` keys were set, re-spell them
+  `EE_RECONCILIATION_*` or they silently revert to the defaults (`300`, `200`,
+  `100`). Then delete the old keys — a retired name is not read, and leaving it
+  in `.env` only makes the next reader think it is. Migration `0005` renames the
+  tables in one transaction and needs no data step; the rollback is the reverse
+  rename.
+
 - **A key is renamed through its edit dialog only.** The inline click-to-edit
   label in the credentials table is gone (`InlineEditableLabel` deleted).
 

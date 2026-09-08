@@ -32,4 +32,6 @@ services:
       S3_ENDPOINT: http://appstrate-minio:9000
       AWS_ACCESS_KEY_ID: e2e-minio
       AWS_SECRET_ACCESS_KEY: e2e-minio-password
-      LOG_LEVEL: warn
+      # Quiet by default; the EE mode of the script raises it to `info`, which
+      # is the level the two module boot lines it greps for are logged at.
+      LOG_LEVEL: "${HEALTH_E2E_LOG_LEVEL:-warn}"

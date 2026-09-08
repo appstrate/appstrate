@@ -402,8 +402,8 @@ function assertWithinOrgQuota(used: number, addBytes: number, limit: number | un
 
 /**
  * Set (or clear) an organization's per-org file storage limit — the narrow
- * capability the out-of-repo cloud module pilots per org via
- * `PlatformServices.setFileStorageLimit`. Billing-neutral: a technical byte
+ * capability a billing module (the ee module, `@appstrate/module-ee`) pilots
+ * per org via `PlatformServices.setFileStorageLimit`. Billing-neutral: a technical byte
  * ceiling, never a plan or price.
  *
  *  - `bytes` a non-negative safe integer → the org's override (takes precedence

@@ -501,6 +501,14 @@
     "//#verify:module-isolation": {
       "cache": false
     },
+    // `cache: false` like its `verify:*` siblings, and for the reason
+    // `//#verify:release-version` spells out: this gate's file set is the git
+    // INDEX, so `git add`ing a file changes the verdict. Nothing in an `inputs`
+    // list expresses that, and a cached replay would report "licence boundary
+    // clean" over a file it never read.
+    "//#verify:license-boundary": {
+      "cache": false
+    },
     "//#verify:no-migration-dml": {
       "cache": false
     },

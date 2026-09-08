@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Zod validators for the JSONB columns that previously accepted any
  * `Record<string, unknown>` from internal callers. The columns store data

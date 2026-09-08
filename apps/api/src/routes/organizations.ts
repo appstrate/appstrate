@@ -318,7 +318,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
     // do not reorder.
     //
     // `onOrgDelete` handlers do destructive work outside this database and
-    // outside any transaction we can roll back (the cloud module drains
+    // outside any transaction we can roll back (the ee module drains
     // billing then cancels the Stripe subscription and drops the billing
     // account; the mcp module drops the org from the RFC 8707 audience
     // allowlist). `deleteOrganization` refuses — from inside its transaction —

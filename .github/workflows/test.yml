@@ -272,6 +272,45 @@ jobs:
       - name: Run platform container health e2e
         run: bash scripts/health-container-e2e.sh
 
+  ee-container-e2e:
+    name: EE container health e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      # Bun's global download cache, keyed on the lockfile. Kept out of the
+      # shared bun-setup composite action on purpose: release/publish workflows
+      # must keep installing from a cold, unmediated registry.
+      - name: Cache Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+
+      # The sibling job above needs no install; this one does. Its EE mode reads
+      # the default MODULES set off the env schema rather than restating it, and
+      # `packages/env` imports zod.
+      - name: Install dependencies
+        run: bun install
+
+      # Same image, same compose topology, booted with @appstrate/module-ee on
+      # top of the schema's default MODULES — so the single image is proven to
+      # boot in ee mode. This is what the cloud repo's release-time `verify`
+      # job used to check, against a second image built FROM this one.
+      # Mandatory on every PR like its sibling: the module ships inside the
+      # image, so a change here can break the paying deployment with nothing
+      # else in CI booting it.
+      - name: Run EE container health e2e
+        run: bash scripts/health-container-e2e.sh
+        env:
+          HEALTH_E2E_EE: "1"
+
   runtime-e2e:
     name: Runtime container e2e
     # The runtime-pi file-provisioning spin only reproduces in the BUNDLED
