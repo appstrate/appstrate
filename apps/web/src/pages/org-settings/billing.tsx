@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -44,12 +42,11 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
 
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { features } = useAppConfig();
   const { can } = usePermissions();
-  // Gate the fetch on the feature flag (mirrors sidebar-billing) so a build
-  // without `@appstrate/module-ee` never fires the `/billing` request (404).
-  // The line-below <Navigate> still handles the visible redirect.
-  const { data: billing, isLoading, error } = useBilling({ enabled: features.billing });
+  // The route is mounted behind `RequirePermission permission="billing:read"`,
+  // a permission only `@appstrate/module-ee` contributes — so reaching this
+  // component already proves the module is loaded and `/api/billing` answers.
+  const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();
   const changePlanMutation = useChangePlan();
   const portalMutation = usePortal();
@@ -59,19 +56,14 @@ export function OrgSettingsBillingPage() {
   // Storage entitlement — core data (organizations.files_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit when
   // billing is on. Same source (useOrgStorage) as the org-settings/general
-  // storage section. Gated on the billing flag to mirror the credit fetch above.
-  const {
-    storage,
-    limitBytes: storageLimit,
-    percent: storagePercent,
-  } = useOrgStorage({ enabled: features.billing });
+  // storage section.
+  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
 
   // The two admin sections below are MOUNTED on the exact condition
   // `eeRequireAdmin()` checks (`billing:manage`), not merely hidden by it — so
   // their queries never fire for a caller the routes would answer with 403.
-  const canManageBilling = !!features.billing && can("billing:manage");
+  const canManageBilling = can("billing:manage");
 
-  if (!features.billing) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!billing) {

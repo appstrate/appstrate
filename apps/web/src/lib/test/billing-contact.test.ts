@@ -15,7 +15,6 @@ import {
   commitCcInput,
   hasBillingContactChanges,
   isBillingEmail,
-  parseCcEntries,
   toBillingContactDraft,
   type BillingContact,
 } from "../billing-contact.ts";
@@ -83,13 +82,14 @@ describe("the PATCH body", () => {
 
 describe("the CC input", () => {
   it("splits a pasted list on commas, semicolons and whitespace", () => {
-    expect(parseCcEntries("a@acme.test, b@acme.test;c@acme.test  d@acme.test")).toEqual([
-      "a@acme.test",
-      "b@acme.test",
-      "c@acme.test",
-      "d@acme.test",
-    ]);
-    expect(parseCcEntries("   ")).toEqual([]);
+    expect(commitCcInput("a@acme.test, b@acme.test;c@acme.test  d@acme.test", [])).toEqual({
+      ok: true,
+      billing_cc: ["a@acme.test", "b@acme.test", "c@acme.test", "d@acme.test"],
+    });
+    expect(commitCcInput("   ", ["cfo@acme.test"])).toEqual({
+      ok: true,
+      billing_cc: ["cfo@acme.test"],
+    });
   });
 
   it("validates each address the way the server does", () => {

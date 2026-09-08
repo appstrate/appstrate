@@ -13,8 +13,7 @@
  * `lib/test/billing-managers`, and the message a refused save produces in
  * `lib/test/billing-error`.
  *
- * `window.__APP_CONFIG__` (the `billing` feature) is read at render and the
- * stores read `localStorage` at module init, so both globals are installed
+ * The stores read `localStorage` at module init, so the globals are installed
  * before the dynamic imports below.
  */
 
@@ -23,7 +22,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
-  __APP_CONFIG__: { features: { billing: true }, trustedOrigins: [] },
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
 const { $api } = await import("../../api/client.ts");

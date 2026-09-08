@@ -38,8 +38,7 @@ const { spaceStore } = await import("../space-store.ts");
 const { queryClient } = await import("../../lib/query-client.ts");
 const { $api } = await import("../../api/client.ts");
 const { buildScopingHeaders, withViewAsParam } = await import("../../lib/scoping-headers.ts");
-const { endPreviewIfRefused, isViewAsRefusal, noteViewAsRefusal } =
-  await import("../../lib/view-as-refusal.ts");
+const { endPreviewIfRefused, noteViewAsRefusal } = await import("../../lib/view-as-refusal.ts");
 const { ViewAsBanner } = await import("../../components/view-as-banner.tsx");
 const { render } = await import("../../test/render.tsx");
 const { i18nReady } = await import("../../i18n.ts");
@@ -192,27 +191,6 @@ describe("realtime carrier", () => {
   });
 });
 
-describe("refusal detection", () => {
-  it("recognizes every code that means the persona was refused", () => {
-    for (const code of [
-      "invalid_view_as",
-      "view_as_unsupported",
-      "view_as_forbidden",
-      "view_as_not_found",
-    ]) {
-      expect(isViewAsRefusal(code)).toBe(true);
-    }
-  });
-
-  it("leaves alone a denial the persona correctly earned", () => {
-    expect(isViewAsRefusal("forbidden")).toBe(false);
-    // A private space the previewed role cannot see: the persona is working,
-    // not failing. Ending the preview here would make it unusable.
-    expect(isViewAsRefusal("not_found")).toBe(false);
-    expect(isViewAsRefusal(undefined)).toBe(false);
-  });
-});
-
 function refusal(status: number, code: string): Response {
   return new Response(JSON.stringify({ code, detail: `refused: ${code}` }), { status });
 }
@@ -264,6 +242,25 @@ describe("exit on refusal", () => {
 
   it("reports nothing when no preview is running", async () => {
     expect(await endPreviewIfRefused(refusal(403, "view_as_forbidden"))).toBe(false);
+  });
+
+  it("ends the preview on every code that means the persona was refused", async () => {
+    for (const code of [
+      "invalid_view_as",
+      "view_as_unsupported",
+      "view_as_forbidden",
+      "view_as_not_found",
+    ]) {
+      enterViewAs(PERSONA);
+      expect(await endPreviewIfRefused(refusal(403, code))).toBe(true);
+      expect(viewAsStore.getState().persona).toBeNull();
+    }
+  });
+
+  it("keeps the preview when the failure carries no code at all", async () => {
+    enterViewAs(PERSONA);
+    expect(await endPreviewIfRefused(new Response("{}", { status: 403 }))).toBe(false);
+    expect(viewAsStore.getState().persona).toEqual(PERSONA);
   });
 });
 

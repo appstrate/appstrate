@@ -202,9 +202,9 @@ packages/module-ee/
 │   │   ├── recipients.ts     # Who a billing email goes to (contact ∪ CC ∪ managers)
 │   │   ├── registry.ts       # BillingEmailType → renderer map (the one place a template is named)
 │   │   ├── send.ts           # Render + fan out to the recipients, via the platform mailer injected at init()
-│   │   └── templates/        # 13 templates. Billing lifecycle: subscription-confirmed, subscription-expired,
+│   │   └── templates/        # 12 templates. Billing lifecycle: subscription-confirmed, subscription-expired,
 │   │                         #   cancellation-confirmed, plan-changed, payment-receipt, payment-failed,
-│   │                         #   card-expiring, renewal-reminder, quota-warning. Platform overrides
+│   │                         #   card-expiring, quota-warning. Platform overrides
 │   │                         #   (via emailOverrides): verification, invitation, magic-link, reset-password
 │   ├── onboarding/
 │   │   └── post-signup.ts    # Free tier credit allocation + final drain / Stripe cancel on org deletion
@@ -217,7 +217,6 @@ packages/module-ee/
 │   ├── schema.ts             # Billing tables (Drizzle ORM)
 │   ├── drizzle.config.ts     # Drizzle Kit config (tablesFilter: ee_* tables only)
 │   └── migrations/           # SCHEMA only — incremental & re-runnable (production data exists)
-├── scripts/migration/        # One-off data repairs, run by an operator — never replayed
 ├── test/                     # Runs under the repository's test harness — see "Testing"
 ├── LICENSE                   # Appstrate Commercial License — NOT Apache-2.0
 ├── package.json
@@ -525,14 +524,22 @@ copy first — the CHANGELOG entry carries the full order.
 
 `drizzle/migrations/*.sql` describes the **schema** and is replayed on every
 platform database this module is enabled on, forever. A one-off rewrite of row
-**contents** is not schema — it goes in `scripts/migration/<NNNN>-<slug>.{sql,ts}` and is run deliberately by an
-operator (see that directory's README; `docs/NO_TRANSITIONAL_CODE.md` §2 at the
-repository root is the authority). The root `bun run verify:no-migration-dml`
+**contents** is not schema — it goes in `scripts/migration/<NNNN>-<slug>.{sql,ts}`
+at the REPOSITORY root, beside the platform's own, and is run deliberately by an
+operator (`docs/NO_TRANSITIONAL_CODE.md` §2 there is the authority). The root
+`bun run verify:no-migration-dml`
 scans this directory alongside the platform's and fails a new migration that
 writes rows unless a `SET NOT NULL` / `CHECK` / `VALIDATE CONSTRAINT` on the
 **same table** in the same file licences it. `0001_cursor_billing` and
 `0003_normalize_free_subscription_status` predate the gate and are listed in
 `EE_GRANDFATHERED` — that list may shrink, never grow.
+
+Money is what these tables hold. A task that touches `credits_used`,
+`credit_quota`, `cost_credits` or `cost_usd` is rehearsed against a restored
+copy, never reasoned about in the abstract — the billing sweep derives each
+debit as a **delta** against the stored cumulative
+(`src/billing/usage-recorder.ts`), so a rewritten cumulative silently re-bills or
+under-bills the next pass.
 
 ## Testing
 

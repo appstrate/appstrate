@@ -236,7 +236,7 @@ export interface AccountDebit {
 }
 
 /** The stamp written on a claim — see `ee_billed_llm_usage.pricing_status`. */
-export type ClaimPricingStatus = "priced" | "partial" | "unpriced" | "unknown";
+type ClaimPricingStatus = "priced" | "partial" | "unpriced" | "unknown";
 
 /**
  * How much of a ledger row's `costUsd` the platform could actually price.
@@ -246,7 +246,7 @@ export type ClaimPricingStatus = "priced" | "partial" | "unpriced" | "unknown";
  * so it maps to its own `unknown` stamp rather than being folded into either
  * side.
  */
-export function claimPricingStatus(row: LlmUsageLedgerRow): ClaimPricingStatus {
+function claimPricingStatus(row: LlmUsageLedgerRow): ClaimPricingStatus {
   return row.pricingStatus ?? "unknown";
 }
 

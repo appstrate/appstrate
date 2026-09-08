@@ -12,9 +12,8 @@ import { useOrg } from "./use-org";
  * `limitBytes` = effective_limit_bytes ?? null (null = unlimited). `percent` is
  * the clamped 0–100 integer, or null when unlimited (no meaningful ratio).
  *
- * The optional `enabled` composes with the presence of an org id, mirroring the
- * per-page gating each caller used inline before (e.g. billing also gates on the
- * `billing` feature flag).
+ * The optional `enabled` composes with the presence of an org id, so a caller
+ * that must not fire the fetch yet passes `false`.
  */
 export function useOrgStorage(options?: { enabled?: boolean }) {
   const { currentOrg } = useOrg();

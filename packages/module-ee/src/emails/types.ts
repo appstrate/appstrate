@@ -58,7 +58,6 @@ export type BillingEmailType =
   | "subscription-expired"
   | "plan-changed"
   | "quota-warning"
-  | "renewal-reminder"
   | "card-expiring";
 
 export interface SubscriptionConfirmedProps {
@@ -79,7 +78,6 @@ export interface PaymentReceiptProps {
 export interface PaymentFailedProps {
   planName: string;
   amount: number;
-  cardLast4: string | null;
   attemptNumber: number;
   updateUrl: string;
   locale: SupportedLocale;
@@ -113,14 +111,6 @@ export interface QuotaWarningProps {
   locale: SupportedLocale;
 }
 
-export interface RenewalReminderProps {
-  planName: string;
-  amount: number;
-  renewalDate: string; // ISO date
-  portalUrl: string;
-  locale: SupportedLocale;
-}
-
 export interface CardExpiringProps {
   cardLast4: string;
   expiryMonth: string; // "MM/YY"
@@ -136,7 +126,6 @@ export interface BillingEmailPropsMap {
   "subscription-expired": SubscriptionExpiredProps;
   "plan-changed": PlanChangedProps;
   "quota-warning": QuotaWarningProps;
-  "renewal-reminder": RenewalReminderProps;
   "card-expiring": CardExpiringProps;
 }
 

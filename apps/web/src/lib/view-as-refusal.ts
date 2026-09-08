@@ -14,7 +14,7 @@ import { VIEW_AS_HEADER, VIEW_AS_REFUSAL_CODES } from "@appstrate/core/permissio
 import { exitViewAs, viewAsStore } from "../stores/view-as-store";
 
 /** Did this failure refuse the PERSONA, rather than the operation? */
-export function isViewAsRefusal(code: string | undefined): boolean {
+function isViewAsRefusal(code: string | undefined): boolean {
   return code !== undefined && VIEW_AS_REFUSAL_CODES.has(code);
 }
 

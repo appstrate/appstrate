@@ -19,7 +19,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
-  __APP_CONFIG__: { features: { billing: true }, trustedOrigins: [] },
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
 const { $api } = await import("../../api/client.ts");

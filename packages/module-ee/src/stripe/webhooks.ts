@@ -651,13 +651,9 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           const amountDue = (invoice.amount_due ?? 0) / 100;
           const attemptCount = invoice.attempt_count ?? 1;
 
-          // Card last4 is best-effort — not always available on invoice.payment_failed
-          const cardLast4: string | null = null;
-
           sendBillingEmail(failedAccount.orgId, "payment-failed", {
             planName: plan?.name ?? failedAccount.planId,
             amount: amountDue,
-            cardLast4,
             attemptNumber: attemptCount,
             updateUrl: billingSettingsUrl(getAppUrl()),
             locale: "fr",

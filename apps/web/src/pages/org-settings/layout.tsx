@@ -130,7 +130,7 @@ export function OrgSettingsLayout() {
           to: "/org-settings/billing",
           icon: CreditCard,
           label: t("billing.tabTitle"),
-          show: !!features.billing && can("billing:read"),
+          show: can("billing:read"),
         },
       ],
     },

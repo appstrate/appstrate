@@ -8,7 +8,6 @@ import { renderCancellationConfirmedEmail } from "../../src/emails/templates/can
 import { renderSubscriptionExpiredEmail } from "../../src/emails/templates/subscription-expired.ts";
 import { renderPlanChangedEmail } from "../../src/emails/templates/plan-changed.ts";
 import { renderQuotaWarningEmail } from "../../src/emails/templates/quota-warning.ts";
-import { renderRenewalReminderEmail } from "../../src/emails/templates/renewal-reminder.ts";
 import { renderCardExpiringEmail } from "../../src/emails/templates/card-expiring.ts";
 import { renderBillingEmail } from "../../src/emails/registry.ts";
 import { billingSettingsUrl } from "../../src/emails/layout.ts";
@@ -83,7 +82,6 @@ describe("billing email templates", () => {
     const baseProps = {
       planName: "Starter",
       amount: 29,
-      cardLast4: "4242",
       attemptNumber: 1,
       updateUrl: "/settings/billing",
       locale: "fr" as const,
@@ -92,7 +90,6 @@ describe("billing email templates", () => {
     it("renders first attempt with friendly tone", () => {
       const result = renderPaymentFailedEmail(baseProps);
       expect(result.html).toContain("pas abouti");
-      expect(result.html).toContain("4242");
     });
 
     it("renders second attempt with more urgency", () => {
@@ -108,11 +105,6 @@ describe("billing email templates", () => {
     it("clamps attempt number above 3 to final warning", () => {
       const result = renderPaymentFailedEmail({ ...baseProps, attemptNumber: 5 });
       expect(result.html).toContain("Derniere tentative");
-    });
-
-    it("handles null cardLast4", () => {
-      const result = renderPaymentFailedEmail({ ...baseProps, cardLast4: null });
-      expect(result.html).not.toContain("Carte concern");
     });
 
     it("renders English version", () => {
@@ -224,31 +216,6 @@ describe("billing email templates", () => {
   });
 
   // -----------------------------------------------------------------------
-  // renewal-reminder
-  // -----------------------------------------------------------------------
-  describe("renewal-reminder", () => {
-    const baseProps = {
-      planName: "Pro",
-      amount: 99,
-      renewalDate: "2026-04-27T00:00:00.000Z",
-      portalUrl: "/settings/billing",
-      locale: "fr" as const,
-    };
-
-    it("renders French renewal reminder", () => {
-      const result = renderRenewalReminderEmail(baseProps);
-      expect(result.subject).toContain("renouvele");
-      expect(result.html).toContain("Pro");
-      expect(result.html).toContain("99");
-    });
-
-    it("renders English version", () => {
-      const result = renderRenewalReminderEmail({ ...baseProps, locale: "en" });
-      expect(result.subject).toContain("renews on");
-    });
-  });
-
-  // -----------------------------------------------------------------------
   // card-expiring
   // -----------------------------------------------------------------------
   describe("card-expiring", () => {
@@ -299,7 +266,6 @@ describe("billing email templates", () => {
       const result = renderBillingEmail("payment-failed", {
         planName: "Pro",
         amount: 99,
-        cardLast4: null,
         attemptNumber: 1,
         updateUrl: "/billing",
         locale: "en",
@@ -358,7 +324,6 @@ describe("billing email templates", () => {
           {
             planName: "Pro",
             amount: 99,
-            cardLast4: null,
             attemptNumber: 1,
             updateUrl: "/billing",
             locale: "fr",
@@ -394,17 +359,6 @@ describe("billing email templates", () => {
             creditsUsed: 17000,
             creditQuota: 20000,
             upgradeUrl: "/billing",
-            locale: "fr",
-          },
-          context,
-        ),
-        renderBillingEmail(
-          "renewal-reminder",
-          {
-            planName: "Pro",
-            amount: 99,
-            renewalDate: "2026-04-27T00:00:00.000Z",
-            portalUrl: "/billing",
             locale: "fr",
           },
           context,
@@ -476,7 +430,6 @@ describe("billing CTA links", () => {
       renderPaymentFailedEmail({
         planName: "Starter",
         amount: 29,
-        cardLast4: "4242",
         attemptNumber: 1,
         updateUrl: url,
         locale: "fr",
