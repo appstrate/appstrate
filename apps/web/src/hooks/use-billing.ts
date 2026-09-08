@@ -47,8 +47,56 @@ export function useBilling(options?: { enabled?: boolean }) {
   );
 }
 
+/**
+ * Exact key of {@link useBilling} — what a plan change invalidates so the plan,
+ * quota and status the page shows come back from the server rather than from a
+ * guess made in the browser.
+ */
+export function useBillingKey() {
+  const { header } = useOrgOnlyScope();
+  return $api.queryOptions("get", "/api/billing", { params: { header } }).queryKey;
+}
+
+/** The effective billing status of an org, as the spec enumerates it. */
+export type BillingStatus = components["schemas"]["EeBillingAccount"]["status"];
+
+/**
+ * Statuses at which Stripe still holds a subscription this org can be MOVED
+ * between plans — the client half of the module's `LIVE_SUBSCRIPTION_STATUSES`,
+ * and it has to agree with it or every click lands on a 409.
+ *
+ * `canceling` is the projection of `cancel_at_period_end` over a subscription
+ * that is otherwise active, trialing or past due, so it belongs here. `unpaid`,
+ * `paused` and `canceled` do not: Stripe has stopped collecting on them, and the
+ * server treats a new checkout as the way back.
+ */
+const CHANGEABLE_STATUSES: ReadonlySet<BillingStatus> = new Set<BillingStatus>([
+  "active",
+  "trialing",
+  "past_due",
+  "canceling",
+]);
+
+/**
+ * Which route a plan selection goes to.
+ *
+ * An org that already has a live subscription CHANGES it in place. Stripe
+ * Checkout only ever creates, so sending an upgrade there leaves the first
+ * subscription running beside the second and bills the customer twice — the
+ * server refuses that outright (`409 subscription_exists`), and this keeps the
+ * dashboard from asking for it.
+ */
+export function planSelectionRoute(status: BillingStatus): "checkout" | "plan-change" {
+  return CHANGEABLE_STATUSES.has(status) ? "plan-change" : "checkout";
+}
+
 export function useCheckout() {
   return $api.useMutation("post", "/api/billing/checkout");
+}
+
+/** Move the existing subscription onto another plan, with proration. */
+export function useChangePlan() {
+  return $api.useMutation("post", "/api/billing/plan");
 }
 
 export function usePortal() {

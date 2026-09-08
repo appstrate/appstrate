@@ -136,6 +136,17 @@ export const DEFAULT_QUOTE_RATES: QuoteRates = {
   computeCreditsPerChatTurn: COMPUTE_CREDITS_PER_CHAT_TURN,
 };
 
+/**
+ * Statuses at which Stripe still holds a subscription for this account — the
+ * set that decides CHANGE-IN-PLACE versus CHECKOUT.
+ *
+ * `past_due` belongs here: the subscription exists and Stripe is retrying it, so
+ * a second Checkout would create a SECOND subscription beside it and bill the
+ * org twice. Anything else (`canceled`, `incomplete_expired`, `null`) leaves
+ * nothing to modify, so a new Checkout is the only way back.
+ */
+export const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
+
 /** Subscription statuses that suspend all platform-funded usage, even when its quote is zero. */
 export const HARD_BLOCKED_STATUSES = new Set(["unpaid", "paused"]);
 

@@ -3,7 +3,12 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
-import { resetStripeMock, generateWebhookEvent, setNextError } from "../../helpers/stripe.ts";
+import {
+  resetStripeMock,
+  generateWebhookEvent,
+  setNextError,
+  requests,
+} from "../../helpers/stripe.ts";
 import { flushEeRedis } from "../../helpers/redis.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { getPlans } from "../../../src/config.ts";
@@ -202,6 +207,157 @@ describe("billing routes", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ plan_id: "starter" }),
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("REFUSES a second subscription for an org that already has one", async () => {
+      // Checkout only ever CREATES. Completing a second one leaves the first
+      // running and charges the customer twice, so the server — not the
+      // dashboard's buttons — is what closes the door.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_route_existing",
+        stripeSubscriptionId: "sub_route_existing",
+        subscriptionStatus: "active",
+      });
+
+      const res = await app.request("/api/billing/checkout", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "pro" }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      expect((await res.json()) as { code: string }).toMatchObject({
+        code: "subscription_exists",
+      });
+      expect(
+        requests.filter((r) => r.method === "POST" && r.path === "/v1/checkout/sessions"),
+      ).toHaveLength(0);
+    });
+
+    it("still opens a checkout for an org whose subscription has ended", async () => {
+      // `canceled` leaves nothing to modify, so Checkout is the only way back.
+      await seedBillingAccount({
+        orgId,
+        stripeCustomerId: "cus_route_ended",
+        stripeSubscriptionId: "sub_route_ended",
+        subscriptionStatus: "canceled",
+      });
+
+      const res = await app.request("/api/billing/checkout", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "starter" }),
+      });
+
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe("POST /api/billing/plan", () => {
+    it("moves the existing subscription onto the new price, with no second checkout", async () => {
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_plan_001",
+        stripeSubscriptionId: "sub_plan_001",
+        subscriptionStatus: "active",
+        creditQuota: 20000,
+      });
+
+      const res = await app.request("/api/billing/plan", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "pro" }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const updates = requests.filter(
+        (r) => r.method === "POST" && r.path === "/v1/subscriptions/sub_plan_001",
+      );
+      expect(updates).toHaveLength(1);
+      // The item id must travel with the price: `items[0][price]` alone ADDS a
+      // priced item instead of replacing the one that is there.
+      expect(updates[0]!.body).toMatchObject({
+        "items[0][id]": "si_test_001",
+        "items[0][price]": getPlans().pro.stripePriceId!,
+        proration_behavior: "create_prorations",
+        "metadata[planId]": "pro",
+        "metadata[orgId]": orgId,
+      });
+      expect(
+        requests.filter((r) => r.method === "POST" && r.path === "/v1/checkout/sessions"),
+      ).toHaveLength(0);
+    });
+
+    it("answers with the billing snapshot", async () => {
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeSubscriptionId: "sub_plan_002",
+        subscriptionStatus: "active",
+        creditsUsed: 5000,
+        creditQuota: 20000,
+      });
+
+      const res = await app.request("/api/billing/plan", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "pro" }),
+      });
+
+      // The PLAN itself is applied by the webhook Stripe sends back, so the
+      // snapshot still names the current one — everything else is live.
+      expect(await res.json()).toMatchObject({
+        plan: { id: "starter" },
+        status: "active",
+        usage_percent: 25,
+      });
+    });
+
+    it("refuses an org with no subscription to change", async () => {
+      await seedBillingAccount({ orgId, planId: "free" });
+
+      const res = await app.request("/api/billing/plan", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "pro" }),
+      });
+
+      expect(res.status).toBe(409);
+      expect((await res.json()) as { code: string }).toMatchObject({
+        code: "no_active_subscription",
+      });
+    });
+
+    it("rejects an unknown field rather than dropping it", async () => {
+      await seedBillingAccount({ orgId, stripeSubscriptionId: "sub_plan_003" });
+
+      const res = await app.request("/api/billing/plan", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "pro", return_url: "/elsewhere" }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects member role (admin-only)", async () => {
+      await seedBillingAccount({ orgId, stripeSubscriptionId: "sub_plan_004" });
+
+      const res = await app.request("/api/billing/plan", {
+        method: "POST",
+        headers: {
+          ...headers({ "X-Test-Org-Role": "member" }),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ plan_id: "pro" }),
       });
 
       expect(res.status).toBe(403);

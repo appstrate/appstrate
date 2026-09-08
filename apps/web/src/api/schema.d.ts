@@ -965,6 +965,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/billing/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the plan of the existing subscription
+         * @description Moves the organization's EXISTING Stripe subscription onto another plan, in place, with proration — the door for an org that already subscribes, where `POST /api/billing/checkout` would create a second subscription and bill it twice. Admin-only (`billing:manage`). Rate-limited to 5/min per org. Returns the billing snapshot; the new plan itself is applied when Stripe's `customer.subscription.updated` arrives, so the returned `plan` may still name the previous one.
+         */
+        post: operations["changeEeBillingPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/billing/portal": {
         parameters: {
             query?: never;
@@ -8840,6 +8860,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description The organization already has a subscription (`subscription_exists`) — change its plan with `POST /api/billing/plan` instead of starting a second one. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
             429: {
                 headers: {
@@ -9030,6 +9059,89 @@ export interface operations {
             };
             /** @description Caller lacks `billing:manage` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    changeEeBillingPlan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                };
+            };
+        };
+        responses: {
+            /** @description Billing snapshot after the change was sent to Stripe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingAccount"];
+                };
+            };
+            /** @description Validation error or invalid Stripe plan configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The organization has no subscription to change (`no_active_subscription`) — start a checkout instead. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

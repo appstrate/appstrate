@@ -9,7 +9,15 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
-import { useBilling, useCheckout, usePortal, type CheckoutPlanId } from "../../hooks/use-billing";
+import {
+  useBilling,
+  useBillingKey,
+  useChangePlan,
+  useCheckout,
+  usePortal,
+  planSelectionRoute,
+  type CheckoutPlanId,
+} from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
@@ -17,6 +25,7 @@ import { BillingManagersSection } from "../../components/billing-managers-sectio
 import { BillingContactSection } from "../../components/billing-contact-section";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { formatDateField } from "../../lib/format-date";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 // Keyed on the status enum the spec declares, not on `string`: a status added
@@ -42,7 +51,10 @@ export function OrgSettingsBillingPage() {
   // The line-below <Navigate> still handles the visible redirect.
   const { data: billing, isLoading, error } = useBilling({ enabled: features.billing });
   const checkoutMutation = useCheckout();
+  const changePlanMutation = useChangePlan();
   const portalMutation = usePortal();
+  const queryClient = useQueryClient();
+  const billingKey = useBillingKey();
 
   // Storage entitlement — core data (organizations.files_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit when
@@ -79,16 +91,41 @@ export function OrgSettingsBillingPage() {
   // offers the first one.
   const firstUpgradeId = upgradeIds[0];
 
-  const handleUpgrade = (planId: CheckoutPlanId) => {
+  const onMutationError = (err: unknown) => {
+    toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
+  };
+
+  /**
+   * Picking a plan does one of two different things.
+   *
+   * With no live subscription it opens Stripe Checkout. With one, it moves that
+   * subscription onto the new price instead: Checkout only ever creates, so
+   * taking an upgrade through it would leave the old subscription running and
+   * bill the org twice — which the server now refuses outright. The plan itself
+   * lands through the Stripe webhook, so the page refetches rather than assuming.
+   */
+  const handleSelectPlan = (planId: CheckoutPlanId) => {
+    if (planSelectionRoute(billing.status) === "plan-change") {
+      changePlanMutation.mutate(
+        { body: { plan_id: planId } },
+        {
+          onSuccess: () => {
+            toast.success(t("billing.planChangeRequested"));
+            void queryClient.invalidateQueries({ queryKey: billingKey });
+          },
+          onError: onMutationError,
+        },
+      );
+      return;
+    }
+
     checkoutMutation.mutate(
       { body: { plan_id: planId, return_url: "/org-settings/billing" } },
       {
         onSuccess: ({ url }) => {
           window.location.href = url;
         },
-        onError: (err) => {
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
-        },
+        onError: onMutationError,
       },
     );
   };
@@ -100,9 +137,7 @@ export function OrgSettingsBillingPage() {
         onSuccess: ({ url }) => {
           window.location.href = url;
         },
-        onError: (err) => {
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
-        },
+        onError: onMutationError,
       },
     );
   };
@@ -127,7 +162,7 @@ export function OrgSettingsBillingPage() {
               {t("billing.manage")}
             </Button>
           ) : firstUpgradeId ? (
-            <Button size="sm" onClick={() => handleUpgrade(firstUpgradeId)}>
+            <Button size="sm" onClick={() => handleSelectPlan(firstUpgradeId)}>
               {t("billing.upgrade")}
             </Button>
           ) : null}
@@ -226,8 +261,8 @@ export function OrgSettingsBillingPage() {
             plans={billing.plans}
             currentPlanId={billing.plan.id}
             upgrades={upgradeIds}
-            disabled={checkoutMutation.isPending}
-            onSelect={handleUpgrade}
+            disabled={checkoutMutation.isPending || changePlanMutation.isPending}
+            onSelect={handleSelectPlan}
           />
         </div>
       )}

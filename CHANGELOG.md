@@ -526,6 +526,17 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Billing: upgrading a paying organization no longer creates a second
+  subscription (`@appstrate/module-ee`).** The plan picker always opened Stripe
+  Checkout, and Checkout only ever CREATES — so an org that already subscribed
+  came out of an upgrade with two live subscriptions and two charges.
+  `POST /api/billing/checkout` now refuses an account whose subscription is
+  active, trialing or past due (`409 subscription_exists`), and the new
+  `POST /api/billing/plan` (`billing:manage`, 5/min) moves the existing
+  subscription's price item onto the chosen plan with proration. The dashboard
+  routes a plan click to whichever of the two applies. Downgrading to free is
+  unchanged — it is a cancellation, taken through the Customer Portal.
+
 - **Billing: an old subscription's events no longer destroy the active one
   (`@appstrate/module-ee`).** Every subscription-scoped Stripe webhook matched on
   `metadata.orgId` alone, which says which org OWNS a subscription and not that

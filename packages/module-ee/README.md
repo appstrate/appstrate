@@ -190,7 +190,8 @@ packages/module-ee/
 │   │   └── storage-entitlement.ts # Plan → platform file-storage limit projection (setFileStorageLimit)
 │   ├── stripe/
 │   │   ├── client.ts         # Stripe SDK singleton
-│   │   ├── checkout.ts       # Stripe Checkout session creation
+│   │   ├── checkout.ts       # Stripe Checkout session creation (refuses a second subscription)
+│   │   ├── plan.ts           # In-place plan change of an existing subscription (prorated)
 │   │   ├── portal.ts         # Stripe Customer Portal session creation
 │   │   └── webhooks.ts       # Webhook processing (idempotent, handles subscription lifecycle)
 │   ├── credits.ts            # Dollar-to-credits conversion (centralized, will evolve)
@@ -209,7 +210,7 @@ packages/module-ee/
 │   ├── scripts/
 │   │   └── repair-account.ts # CLI: bun run repair:account -- <orgId> <ownerEmail>
 │   └── routes/
-│       └── billing.ts        # GET /billing, POST /checkout, POST /portal, POST /webhooks,
+│       └── billing.ts        # GET /billing, POST /checkout, POST /plan, POST /portal, POST /webhooks,
 │                              #   GET|PUT /billing/managers, GET|PATCH /billing/contact
 ├── drizzle/
 │   ├── schema.ts             # Billing tables (Drizzle ORM)
@@ -233,6 +234,30 @@ Plans define quotas in **integer credits** (not floats, not dollars). All DB col
 | pro     | 80,000  | 80K cr. | $99/mo |
 
 Each plan has a `tier` (0/1/2) for upgrade ordering and a `name` for display.
+
+### Upgrading: checkout creates, `POST /api/billing/plan` moves
+
+Stripe Checkout only ever CREATES a subscription — it never reads
+`stripe_subscription_id`. An org that already subscribed and took an "upgrade"
+through it ended up with the old subscription still running beside the new one,
+billed twice. So the two doors are now separate and the SERVER enforces which
+one an org may use, not the dashboard's buttons:
+
+- `POST /api/billing/checkout` refuses an account whose subscription is
+  `active`, `trialing` or `past_due` — `409 subscription_exists`;
+- `POST /api/billing/plan` (`billing:manage`, 5/min) moves the EXISTING
+  subscription's single price item onto the new plan with
+  `proration_behavior: "create_prorations"`, and refuses an account with no live
+  subscription — `409 no_active_subscription`. The item id travels with the
+  price: `items: [{ price }]` alone ADDS a second priced item instead of
+  replacing the first, which is the same double charge in a smaller package.
+
+The route writes nothing to `ee_billing_accounts`. Stripe answers with
+`customer.subscription.updated`, and that handler — which resolves the plan from
+the live price item — remains the single place a plan transition is applied, so
+the returned snapshot may still name the previous plan while everything else in
+it is current. Downgrading to free is unchanged: it is a cancellation, taken
+through the Customer Portal.
 
 ### Subscription identity
 

@@ -184,6 +184,14 @@ export function startStripeMock(): { port: number } {
         return Response.json(response);
       }
 
+      // POST /v1/subscriptions/:id — subscription update (in-place plan change)
+      if (method === "POST" && path.startsWith("/v1/subscriptions/")) {
+        const id = path.split("/").pop()!;
+        const response = subscriptionOverride ?? defaultSubscriptionResponse(id);
+        subscriptionOverride = null;
+        return Response.json(response);
+      }
+
       // DELETE /v1/subscriptions/:id
       if (method === "DELETE" && path.startsWith("/v1/subscriptions/")) {
         const id = path.split("/").pop()!;
