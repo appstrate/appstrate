@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * Local type definitions matching @appstrate/emails contracts.
- * EE doesn't depend on @appstrate/emails — these types mirror the
- * EmailRenderer/EmailPropsMap shapes so EE templates are self-contained.
+ * The prop type of every billing email, plus the `BillingEmailType` union the
+ * registry keys on. This module does not depend on `@appstrate/emails`, so the
+ * renderer/props shapes it needs are declared here.
  */
 
-import type { OrgRole } from "../types.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 
 export type SupportedLocale = "fr" | "en";
 

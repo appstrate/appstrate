@@ -24,8 +24,10 @@ const orgLabels: Record<SupportedLocale, string> = {
 };
 
 /**
- * Appstrate Cloud-branded email layout — Appstrate logo, light theme with transparent background.
- * Works in both light and dark mode email clients.
+ * The billing emails' shared chrome: a white rounded card on a transparent
+ * page, with a plain-text `appstrate.com` link under it. No image, so nothing
+ * depends on a client loading remote content, and the transparent page body
+ * works in both light and dark mode email clients.
  */
 export function wrapEeLayout({ locale, content, footer, orgName }: LayoutProps): string {
   const trimmedOrgName = orgName?.trim();

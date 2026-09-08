@@ -123,23 +123,6 @@ Respect the user's role: actions beyond it will be refused by the platform — d
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
-  /**
-   * The caller's most recent runs (actor-scoped), newest first.
-   *
-   * Present on the wire but NOT rendered into the prompt — see the note in
-   * `formatCallerContext`. This interface describes the `/api/me/context`
-   * payload, which also backs the platform MCP `get_me` tool, so the field is
-   * documented here even though this module no longer reads it.
-   */
-  recent_runs?:
-    | {
-        package_id: string;
-        status: string;
-        run_number?: number | null;
-        started_at?: string | null;
-        error?: string | null;
-      }[]
-    | null;
   connections?:
     | {
         integration_id: string;
@@ -295,15 +278,14 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?
     }
     if (ctx.skills_truncated) lines.push("(list truncated)");
   }
-  // `recent_runs` is DELIBERATELY not rendered. It carried `started_at` and
-  // rewrote itself the moment the user launched anything — i.e. on exactly the
-  // turns this product exists for — which busted the system prompt's single
-  // cache breakpoint, and the conversation history behind it, on every one of
-  // them. The payload field stays on `CallerContext` because the same
-  // `/api/me/context` response backs the platform MCP `get_me` tool; only this
-  // rendering goes. SYSTEM_PROMPT tells the model to call `listRuns` when the
-  // user refers to a run without naming it — one tool call on that path, in
-  // exchange for a cacheable prefix on every turn.
+  // `/api/me/context` also carries `recent_runs`, and this block DELIBERATELY
+  // neither reads nor renders it. It carries `started_at` and rewrites itself
+  // the moment the user launches anything — i.e. on exactly the turns this
+  // product exists for — which would bust the system prompt's single cache
+  // breakpoint, and the conversation history behind it, on every one of them.
+  // SYSTEM_PROMPT tells the model to call `listRuns` when the user refers to a
+  // run without naming it — one tool call on that path, in exchange for a
+  // cacheable prefix on every turn.
   return lines.join("\n");
 }
 

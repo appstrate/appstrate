@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * Shared type definitions for @appstrate/module-ee.
- *
- * EE doesn't depend on @appstrate/shared-types or @appstrate/db, so
- * these types mirror the corresponding definitions in the main platform.
+ * Platform types this module reads, re-exported from `@appstrate/core` — the
+ * one package it depends on for them. Nothing here is a hand-written copy: core
+ * owns the `ORG_ROLES` tuple that drives both the `OrgRole` union and the
+ * `org_role` pg enum, and a copy is what let this module keep granting
+ * `billing:read` to a role the platform had already retired.
  */
 
 /**

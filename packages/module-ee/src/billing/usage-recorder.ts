@@ -823,8 +823,7 @@ export async function sweepLedgerBatch(
 /**
  * Report an org whose usage could not be debited because it has no billing
  * account. `error` level and one line per occurrence: this is a revenue fault
- * that needs an operator, and it used to be invisible (the pass aborted with a
- * generic "billing sweep tick crashed" that named no org).
+ * that needs an operator, and the line names the org it is about.
  */
 export function reportOrphanedOrg(orphan: OrphanedOrgDebt): void {
   logger.error("billable usage for an org with no billing account — recorded, NOT debited", {

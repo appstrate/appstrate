@@ -168,6 +168,10 @@ export function openApiPaths(): Record<string, unknown> {
             description: "Billing snapshot",
             content: { "application/json": { schema: billingAccountSchemaRef } },
           },
+          "403": {
+            description: "Caller lacks `billing:read`",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
           "404": {
             description: "No billing account exists for this org",
             content: { "application/problem+json": { schema: errorProblemRef } },

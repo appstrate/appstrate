@@ -128,7 +128,8 @@ COPY --from=build --parents /app/./packages/*/src /app/./packages/*/package.json
 # Non-`src` package assets that must ship alongside their package source.
 # Every `packages/*/drizzle` is graph-derived like the `src` globs above, so a
 # package that starts owning migrations needs no edit here: db's are applied to
-# the platform database at boot, module-ee's to its own database at init, and
+# the platform database at boot, module-ee's to that same platform database at
+# init under its own journal (`drizzle.ee_migrations`), and
 # the `src`-only globs above would otherwise leave the image loading the module
 # and dying on `Cannot find module '../drizzle/schema.ts'`.
 # core/schema is hand-listed — it is the one non-`drizzle` asset of its kind.

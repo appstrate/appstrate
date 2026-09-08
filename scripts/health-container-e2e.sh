@@ -12,9 +12,8 @@
 # HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
 # enabled and adds the "EE module" phase below (loaded, sweeping). The "EE
 # tables" and "Billing route" phases run in both modes and assert the opposite
-# outcome in each. That mode is the
-# `ee-container-e2e` job in .github/workflows/test.yml; it replaces the
-# release-time `verify` the cloud repo used to run against its own second image.
+# outcome in each. That mode is the `ee-container-e2e` job in
+# .github/workflows/test.yml.
 
 set -euo pipefail
 

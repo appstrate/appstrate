@@ -3,16 +3,16 @@
 /**
  * Usage quoting — the credit estimate for one admission attempt.
  *
- * The platform no longer decides which operations are free: it reports neutral
- * execution facts (`credentialSource`, `executionPlane`, `timeoutSeconds`) on
- * EVERY metered usage attempt, and this module turns those facts into an
- * estimated amount. Admission then gates on the amount, not on a boolean.
+ * The platform decides nothing about what is free: it reports neutral execution
+ * facts (`credentialSource`, `executionPlane`, `timeoutSeconds`) on EVERY
+ * metered usage attempt, and this module turns those facts into an estimated
+ * amount. Admission gates on the amount, not on a boolean.
  *
- * Why that matters: the old rule was "platform-provided model ⇒ gate, else
- * skip", which hard-codes "BYOK ⇒ free". That is true only while platform
- * compute is unbilled. The moment compute is billed, a platform-hosted BYOK run
- * has `model = 0`, `compute > 0` and MUST be gated. Quoting the components
- * separately makes enabling that a rate change, not a topology change.
+ * Why the split matters: "platform-provided model ⇒ gate, else skip" would
+ * hard-code "BYOK ⇒ free", which holds only while platform compute is unbilled.
+ * The moment compute is billed, a platform-hosted BYOK run has `model = 0`,
+ * `compute > 0` and MUST be gated. Quoting the components separately makes
+ * enabling that a rate change, not a topology change.
  *
  * `quoteUsage` is deliberately PURE — no DB, no clock, no module-scope config
  * read. Rates arrive as a parameter so a test can inject a non-zero compute

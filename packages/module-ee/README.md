@@ -197,8 +197,8 @@ packages/module-ee/
 │   │   └── webhooks.ts       # Webhook processing (idempotent, handles subscription lifecycle)
 │   ├── credits.ts            # Dollar-to-credits conversion (centralized, will evolve)
 │   ├── emails/
-│   │   ├── types.ts          # Local type definitions (mirrors @appstrate/emails contracts)
-│   │   ├── layout.ts         # EE-branded layout (dark theme, logo, footer)
+│   │   ├── types.ts          # Template prop types + the BillingEmailType union
+│   │   ├── layout.ts         # Shared chrome: white card, optional footer, text link
 │   │   ├── recipients.ts     # Who a billing email goes to (contact ∪ CC ∪ managers)
 │   │   ├── registry.ts       # BillingEmailType → renderer map (the one place a template is named)
 │   │   ├── send.ts           # Render + fan out to the recipients, via the platform mailer injected at init()
@@ -508,8 +508,8 @@ migration level `0003`: this package and the move into the platform database
 ship in the same release, so no deployment ever ran `0004` (billing managers,
 `billing_email`, `billing_cc`) or `0005` (the rename to `ee_*`) against a
 database of its own. The copy therefore takes the columns the two sides share —
-a target-only column takes its default, a source table the target's schema
-predates copies nothing — and every check runs BEFORE the target is migrated.
+a target-only column takes its default, a table only the TARGET declares
+(`ee_billing_managers`, absent from a `cloud_*` source) copies nothing — and every check runs BEFORE the target is migrated.
 
 It refuses, exit `1` and nothing written, a source that mixes both prefixes, an
 `ee_`/`cloud_` table it does not move, a source column the target does not

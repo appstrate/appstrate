@@ -371,9 +371,7 @@ export const UNNAMED_FILE = "file";
 function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);
   if (!r) return undefined;
-  // `id` in the tool result; `file_id` in the `file.published` log frame. The
-  // pre-#1177 `document_id` spelling is no longer read: no persisted frame
-  // carries it.
+  // `id` in the tool result; `file_id` in the `file.published` log frame.
   const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id);
   const uri = nonEmptyString(r.uri) ?? (id ? fileUri(id) : undefined);
   const name = nonEmptyString(r.name) ?? UNNAMED_FILE;
@@ -389,10 +387,9 @@ function asChatRunFile(raw: unknown): ChatRunFile | undefined {
  * The published file list of a persisted `run_and_wait` result. The tool
  * writes it under `files`, and that is the only key read.
  *
- * The pre-#1177 `documents` spelling used to be accepted here as well, on the
- * grounds that this payload IS the reload-safe source (it exists precisely
- * because run logs get pruned). It is gone with the rest of the rename: no
- * persisted result carries it.
+ * `files` is the only key read, even though this payload IS the reload-safe
+ * source (it exists precisely because run logs get pruned) — no persisted
+ * result carries any other spelling.
  */
 function rawFileList(record: Record<string, unknown> | null | undefined): unknown[] | undefined {
   const value = record?.files;

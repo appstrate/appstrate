@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import type { AppstrateModule, BeforeUsageParams, UsageRejection } from "@appstrate/core/module";
-import { initEeDb, migrateEeDb, closeEeDb } from "./db.ts";
+import { initEeDb, migrateEeDb, closeEeDb, getEeDb } from "./db.ts";
 import { initEeRedis, getEeRedis } from "./redis.ts";
 import { describeEnvIssues, getEeEnv } from "./env.ts";
 import { getAppUrl, setAppUrl, setPlatformServices } from "./platform.ts";
@@ -16,7 +16,6 @@ import {
   drainBillingSweeper,
 } from "./billing/billing-sweeper.ts";
 import { ensureCursorSeeded } from "./billing/usage-recorder.ts";
-import { getEeDb } from "./db.ts";
 import { onOrgCreate, onOrgDelete } from "./onboarding/post-signup.ts";
 import {
   checkoutBodySchema,
@@ -43,7 +42,7 @@ import { z } from "zod";
 //
 // Zero-footprint: when EE is absent from `MODULES`, `billing` disappears
 // from `CoreResources ∪ ModuleResources`, role sets, and the API-key
-// allowlist. OSS deployments no longer carry dead `billing:*` scope strings.
+// allowlist. An OSS deployment carries no `billing:*` scope string at all.
 declare module "@appstrate/core/permissions" {
   interface ModuleResources {
     billing: "read" | "manage";
@@ -236,9 +235,9 @@ const eeModule: AppstrateModule = {
     // The platform dispatches this hook on EVERY metered usage attempt and
     // never pre-classifies an operation as free; it reports neutral execution
     // facts and this module quotes them. Admission therefore gates on an
-    // estimated AMOUNT, not on "is the model platform-provided?" — the old rule
-    // hard-coded "BYOK ⇒ free", which stops being true the moment platform
-    // compute is billed.
+    // estimated AMOUNT, not on "is the model platform-provided?" — which would
+    // hard-code "BYOK ⇒ free" and stop being true the moment platform compute
+    // is billed.
     beforeUsage: async (params: BeforeUsageParams): Promise<UsageRejection | null> => {
       // Self-funded short-circuit: the org supplies both the credential and the
       // host (a remote BYOK run), so the platform funds nothing and there is

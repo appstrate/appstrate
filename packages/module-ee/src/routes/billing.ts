@@ -32,7 +32,7 @@ import {
   paymentServiceUnavailable,
 } from "../http-errors.ts";
 import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
-import type { OrgRole } from "../types.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 
 // Minimal env type — set by the platform's auth + RBAC middleware. `user` is
 // the caller as `apps/api/src/lib/auth-pipeline.ts` writes it (the same shape

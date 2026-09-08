@@ -520,7 +520,7 @@ The Drizzle snapshot includes the OAuth assignment column and matches the schema
 
 ## 12. Follow-ups
 
-- **Drop `viewer` from the `org_role` type** (#1275). `0058_drop_org_viewer.sql` has to recreate the type, since `ALTER TYPE … DROP VALUE` does not exist. It guards first — `DO $$ BEGIN IF EXISTS (SELECT 1 FROM org_members WHERE role = 'viewer') THEN RAISE EXCEPTION 'run scripts/migration/0008-org-viewer-to-guest.sql first'; END IF; END $$;` — so a database whose rows have not moved fails the deploy instead of losing them.
+- **Drop `viewer` from the `org_role` type** (#1275). A future migration would have to recreate the type, since `ALTER TYPE … DROP VALUE` does not exist. It would guard first — `DO $$ BEGIN IF EXISTS (SELECT 1 FROM org_members WHERE role = 'viewer') THEN RAISE EXCEPTION 'run scripts/migration/0008-org-viewer-to-guest.sql first'; END IF; END $$;` — so a database whose rows have not moved would fail the deploy instead of losing them.
 
 - **Extending a pending invitation from a space form.** One pending invitation exists per (organization, email), so a second invite for a pending address is refused with 409 `invitation_already_pending` and the administrator edits the existing invitation to add a space (§6.1, §8). Adding the space atomically from the space form would spare that round trip; a frontend read followed by a whole-list `PUT` is not a concurrency-safe merge and is not the shape to build.
 

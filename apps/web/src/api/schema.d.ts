@@ -8799,6 +8799,15 @@ export interface operations {
                     "application/json": components["schemas"]["EeBillingAccount"];
                 };
             };
+            /** @description Caller lacks `billing:read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description No billing account exists for this org */
             404: {
                 headers: {

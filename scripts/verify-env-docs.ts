@@ -98,27 +98,16 @@ const INFRA_ALLOWLIST: Record<string, string> = {
 /**
  * The variables `docs/ENV.md`'s MAIN table documents.
  *
- * The second table in the file — "File limits — renamed from `DOCUMENT_*`" —
- * is deliberately excluded. Its rows are RETIRED names that boot now refuses,
- * mirroring `RETIRED_ENV_RENAMES` in the schema; counting them as documented
- * variables would let a retired spelling satisfy a live key's requirement.
+ * ─── Only the `| Variable |` table counts; any other header closes it ───
  *
- * ─── Any table header closes the main table, not just `| Was` ────────
- *
- * That is what this comment used to CLAIM while the code tested for `| Was`
- * specifically. Measured against the exported parser: a doc with the main
- * table followed by a third table headed `| Name | Meaning |` returned
- * `["LIVE_ONE", "SHOULD_NOT_COUNT"]` — every backticked name under the third
- * header counted as documented. So adding, say, a "Deprecated / Replacement"
- * table to `docs/ENV.md` would let a LIVE schema key lose its row and keep this
- * gate green, because the retired spelling in the new table answers for it.
- *
- * The implementation now matches the comment, which is also the safer of the
- * two behaviours: a table this parser has never seen is a table whose meaning
- * it does not know, and the answer to "is this documentation?" for an unknown
- * table is no. Adding a new table costs nothing; adding one whose rows SHOULD
- * count means giving it the `| Variable |` header, which is a decision someone
- * makes on purpose.
+ * A backticked `SCREAMING_SNAKE` name under ANY other table header is not a
+ * documented variable. The alternative — keep counting until a specific header
+ * appears — lets a live schema key lose its row and keep this gate green,
+ * because a name in some other table answers for it. A table this parser has
+ * never seen is a table whose meaning it does not know, and the answer to "is
+ * this documentation?" for an unknown table is no. Adding a new table costs
+ * nothing; adding one whose rows SHOULD count means giving it the
+ * `| Variable |` header, which is a decision someone makes on purpose.
  *
  * Rows are told apart by shape rather than by position: a separator row is
  * dashes and pipes, a variable row's first cell is a backticked
