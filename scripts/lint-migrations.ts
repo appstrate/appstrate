@@ -126,8 +126,9 @@ const EXCLUDED_RULES: readonly string[] = [
  * upstream will ship a fix, the unreachable call path may become reachable —
  * and the only thing that reliably forces the re-decision is the gate going red
  * on a chosen morning. None of that applies here. A drizzle migration is
- * applied history: it has already run on production, it is never edited, and no
- * upgrade to anything can make it not have taken the lock it took. An expiry
+ * settled history: once committed it is never edited — drizzle keys the journal
+ * on its hash, so editing one invalidates every environment that applied it —
+ * and no upgrade to anything can make it not take the lock it takes. An expiry
  * date on these entries would come due with no lawful remedy — the only way to
  * clear it would be to write a new, later date. So there is none, deliberately;
  * do not copy the mechanism from `audit-dependencies.ts` where it makes no
@@ -150,8 +151,10 @@ const EXCLUDED_RULES: readonly string[] = [
  * delete, and a human pastes the replacements.
  *
  * Generated 2026-09-08 from `squawk --assume-in-transaction --exclude=…
- * --reporter json packages/db/drizzle/*.sql`: 171 findings, 106 (file, rule)
- * pairs across 47 of the 56 files.
+ * --reporter json packages/db/drizzle/*.sql`: 174 findings, 109 (file, rule)
+ * pairs across 48 of the 57 files. 106 of those pairs are the grandfathered
+ * seed; the last three are 0056's, and carry their own reasoning at the end of
+ * the list.
  */
 export type BaselineEntry = readonly [migration: string, rule: string];
 
@@ -262,6 +265,45 @@ export const BASELINE: readonly BaselineEntry[] = [
   ["0053_applications_to_spaces", "require-statement-timeout"],
   ["0054_drop_chat_message_parent_and_format", "require-lock-timeout"],
   ["0054_drop_chat_message_parent_and_format", "require-statement-timeout"],
+
+  // ─── 0056, and the one group here with a reason of its own ──────────
+  //
+  // Every entry above is grandfathered: it predates this gate and describes a
+  // lock somebody took before anything checked. These three do not. 0056
+  // landed with #1260 while this branch was open, and it is the FIRST file in
+  // the directory to have been written by an author who bounded its locks
+  // deliberately — it opens with `SET LOCAL lock_timeout = '3s'` and
+  // `SET LOCAL statement_timeout = '60s'` and a header explaining that on
+  // expiry "the batch aborts, boot fails its health gate — a failed deploy,
+  // not a silent skip". That is why the file trips neither timeout rule.
+  //
+  // The three that remain are exempt because their documented remedies buy
+  // nothing HERE, not because nobody got round to them. Read before deleting
+  // any of them:
+  //
+  //   constraint-missing-not-valid (§G, oauth_clients) — the remedy is
+  //     `ADD CONSTRAINT … NOT VALID` + `VALIDATE`, so the scan takes SHARE
+  //     UPDATE EXCLUSIVE instead of blocking writes. The statement two lines
+  //     above it is `ALTER TABLE oauth_clients DROP CONSTRAINT`, which takes
+  //     ACCESS EXCLUSIVE, and the whole batch is ONE transaction — so that
+  //     lock is already held to commit and the split changes nothing.
+  //
+  //   adding-not-nullable-field (§F, chat_sessions) — same shape. `ADD COLUMN`
+  //     locks the table exclusively and the `UPDATE` below it scans the table,
+  //     both before the `SET NOT NULL`. The scan costs time, not additional
+  //     blocking, and the file's `statement_timeout` bounds it.
+  //
+  //   require-enum-value-ordering (§A, org_role) — appends `guest` rather than
+  //     placing it. Positional, i.e. it only affects `ORDER BY` on the enum,
+  //     and the statement carries `IF NOT EXISTS` precisely so a
+  //     partially-applied environment converges: on one where the value is
+  //     already present, `AFTER` would not move it anyway.
+  //
+  // If a LATER migration trips these rules, it does not inherit this reasoning
+  // — check whether that file holds its own exclusive lock first.
+  ["0056_space_roles", "adding-not-nullable-field"],
+  ["0056_space_roles", "constraint-missing-not-valid"],
+  ["0056_space_roles", "require-enum-value-ordering"],
 ];
 
 /** One squawk finding, as `--reporter json` emits it. */
@@ -439,7 +481,8 @@ if (import.meta.main) {
       `a heavy lock is held until the batch commits. Fix the statement — see the rule page ` +
       `above — or, when it is genuinely unavoidable, bound it the way 0050 does: SET LOCAL ` +
       `lock_timeout (bounds acquisition) and SET LOCAL statement_timeout (bounds execution).\n` +
-      `BASELINE is applied history and must not grow.`,
+      `A new migration does not belong in BASELINE by default — an entry there needs a reason ` +
+      `that is true of THIS file, not "it was already merged".`,
   );
   process.exit(1);
 }
