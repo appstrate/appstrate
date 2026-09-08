@@ -586,7 +586,7 @@ export function createIntegrationsRouter() {
   // clients list so the UI re-badges the default without a second fetch.
   router.put(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/default-client",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
@@ -609,7 +609,7 @@ export function createIntegrationsRouter() {
   // PUT .../default-client. Returns the created client (secret omitted).
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/oauth-clients",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
@@ -652,7 +652,7 @@ export function createIntegrationsRouter() {
   // (DCR) clients are machine-managed and rejected by the service.
   router.put(
     "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const clientId = c.req.param("clientId")!;
@@ -685,7 +685,7 @@ export function createIntegrationsRouter() {
   // many.
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId",
-    requirePermission("integrations", "install"),
+    requirePermission("integrations", "configure"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const clientId = c.req.param("clientId")!;

@@ -554,6 +554,78 @@ describe("integrations:configure is never grantable to an API key", () => {
     ]);
   });
 
+  /**
+   * OAuth clients and the default among them are `integrations:configure`
+   * (spec §3.4), not `install`: registering a BYO app decides which OAuth
+   * application every connection in the space is minted against, which is
+   * governance, not installation. `install` IS API-key-grantable, so gating
+   * them on it let a key do what the vocabulary says no key may.
+   */
+  it("refuses an owner-minted install key on the OAuth client routes", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id, // owner
+      scopes: ["integrations:install"],
+    });
+    const asKey = {
+      Authorization: `Bearer ${key.rawKey}`,
+      "Content-Type": "application/json",
+    };
+
+    const created = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: asKey,
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+    });
+    expect(created.status).toBe(403);
+
+    const promoted = await app.request(
+      "/api/integrations/@myorg/gmail/auths/google/default-client",
+      {
+        method: "PUT",
+        headers: asKey,
+        body: JSON.stringify({ client_ref: "whatever" }),
+      },
+    );
+    expect(promoted.status).toBe(403);
+  });
+
+  it("an owner session registers the client and promotes it", async () => {
+    // The discriminating half: the same two requests over a cookie session,
+    // which holds `integrations:configure`.
+    const created = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+    });
+    expect(created.status).toBe(201);
+    const client = (await created.json()) as { id: string };
+
+    const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${client.id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+    });
+    expect(rotated.status).toBe(200);
+
+    const promoted = await app.request(
+      "/api/integrations/@myorg/gmail/auths/google/default-client",
+      {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_ref: client.id }),
+      },
+    );
+    expect(promoted.status).toBe(200);
+
+    const deleted = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${client.id}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(deleted.status).toBe(204);
+  });
+
   it("member-created api key requesting integrations:install is stripped to 403", async () => {
     // The pipeline intersects the key's scopes with the creator's effective
     // set in the key's space (a member holds the `operator` preset, which

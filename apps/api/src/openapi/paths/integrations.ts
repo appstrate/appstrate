@@ -610,7 +610,7 @@ export const integrationsPaths = {
         "org may hold N clients per auth (model-provider pattern). The first " +
         "registered client becomes the default; later ones are non-default until " +
         "promoted via PUT .../default-client. Rejected for auto-provisioned " +
-        "(DCR/CIMD) auths. Admin only.",
+        "(DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -664,7 +664,7 @@ export const integrationsPaths = {
       summary: "Rotate a custom OAuth client's credentials",
       description:
         "Rotates one custom client in place, by its id. Auto-provisioned " +
-        "(DCR/CIMD) clients are machine-managed and rejected. Admin only.",
+        "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -715,7 +715,7 @@ export const integrationsPaths = {
       summary: "Delete a custom OAuth client",
       description:
         "Deletes one custom client by id. If it was the default, the cascade " +
-        "falls to the system client (no auto-promotion). Admin only.",
+        "falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -770,7 +770,7 @@ export const integrationsPaths = {
         "client flags it default; selecting a system client un-flags the custom one " +
         "so the cascade falls to the system client. Existing connections are bound " +
         "to the client that minted them and are unaffected. Returns the refreshed " +
-        "clients list. Admin only.",
+        "clients list. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
