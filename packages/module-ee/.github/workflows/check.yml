@@ -1,0 +1,265 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Tag pushes don't trigger this workflow, so `release.yml` calls it as the
+  # gate before it builds an image — one definition of the quality bar.
+  workflow_call:
+    inputs:
+      appstrate_version:
+        description: >-
+          Tag of ghcr.io/<owner>/appstrate to typecheck and test against.
+          Leave unset to resolve the newest published OSS release at run time;
+          `release.yml` passes the exact resolved tag for its authoritative
+          pre-push check. There is deliberately NO default: a literal default
+          would be a second place the platform version lives, and it would rot.
+        type: string
+        required: false
+
+# Cancel previous runs on the same ref when a new push lands —
+# tight feedback loop for PR iteration. Mirrors appstrate/check.yml.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # No `packages: read`: ghcr.io/<owner>/appstrate is a PUBLIC package and pulls
+  # anonymously (verified — GHCR issues an anonymous pull token, and `docker run`
+  # succeeds with an empty DOCKER_CONFIG). Reading the OSS repo's releases needs
+  # no scope either, for the same reason.
+
+jobs:
+  # Which OSS image do `typecheck` and `test` run against? Both need the answer,
+  # so it is resolved ONCE here and passed down as a job output.
+  #
+  # There is no `:latest` tag on ghcr.io/<owner>/appstrate and there never has
+  # been: the OSS release workflow uses `docker/metadata-action` with
+  # `flavor: latest=auto`, which withholds `latest` from a semver prerelease, and
+  # every release so far is a `1.0.0-beta.X`. Hard-coding `latest` here is what
+  # made this workflow red on its first run (`manifest unknown`).
+  #
+  # Mechanism: the GitHub Releases API of the OSS repo.
+  #   · NOT `git ls-remote --tags` — a git tag exists the instant it is pushed,
+  #     i.e. BEFORE the release workflow has built anything. A GitHub Release is
+  #     created by that workflow's last job (`release` needs `build-and-push`),
+  #     so it is a far closer proxy for "the image is published".
+  #   · NOT the GHCR `/v2/.../tags/list` endpoint — it returns tags unordered and
+  #     undated, so "newest" would mean fetching and semver-sorting the lot. It
+  #     answers "does this tag exist", which is exactly what the check below uses
+  #     it for, and nothing more.
+  #   · NOT `/releases/latest` — it does not filter by tag shape, and this repo
+  #     publishes `core@X.Y.Z`, `afps-shared@X.Y.Z` and `afps-schema@X.Y.Z`
+  #     releases too. That is not hypothetical: `core@6.0.0` currently sits
+  #     between `v1.0.0-beta.44` and `v1.0.0-beta.45` in creation order, and none
+  #     of those package tags has a platform image. Hence the `^v[0-9]` filter.
+  #
+  # `gh` is authenticated only to lift the anonymous API rate limit (60/h shared
+  # across a runner IP → 1000/h); the OSS repo is public, so no scope is needed.
+  #
+  # Every failure path is fatal and says what could not be resolved. Falling back
+  # to a tag that "probably exists" is precisely the bug being fixed here.
+  resolve-oss-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+    steps:
+      - name: Resolve the OSS image to build against
+        id: resolve
+        env:
+          REQUESTED: ${{ inputs.appstrate_version }}
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${REQUESTED}" ]; then
+            TAG="${REQUESTED}"
+            echo "Tag supplied by the caller: ${TAG}"
+          else
+            echo "Resolving the newest published ${OWNER}/appstrate release..."
+            if ! RELEASES="$(gh api "repos/${OWNER}/appstrate/releases?per_page=100" 2>&1)"; then
+              echo "::error::Could not list releases of ${OWNER}/appstrate, so the newest OSS image tag is unresolvable. GitHub API said: ${RELEASES}"
+              exit 1
+            fi
+            TAG="$(printf '%s' "${RELEASES}" \
+              | jq -r 'map(select(.draft == false and (.tag_name | test("^v[0-9]")))) | .[0].tag_name // empty' \
+              | sed 's/^v//')"
+            if [ -z "${TAG}" ]; then
+              echo "::error::No published v* release found among the 100 newest releases of ${OWNER}/appstrate — cannot resolve an OSS image tag."
+              exit 1
+            fi
+            echo "Newest published OSS release: v${TAG}"
+          fi
+
+          IMAGE="ghcr.io/${OWNER}/appstrate:${TAG}"
+          if ! docker manifest inspect "${IMAGE}" > /dev/null 2>&1; then
+            echo "::error::Resolved ${IMAGE}, but no such image exists in GHCR. If a release was just cut, the image push may still be in flight; otherwise the tag is wrong."
+            exit 1
+          fi
+
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Using ${IMAGE}"
+
+  # eslint, prettier and the migration-DML gate resolve no `@appstrate/core`,
+  # so they stay on the runner where they are fastest. `bun run check` (tsc +
+  # eslint + prettier + verify:no-migration-dml) remains the local one-liner;
+  # CI splits it because tsc alone needs the image.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Check formatting
+        run: bun run format:check
+
+      # Reads only drizzle/migrations/*.sql, so it needs no `@appstrate/core`
+      # and belongs on the runner with the other core-free checks. It is the
+      # third member of `bun run check` locally.
+      - name: Verify no data repair in drizzle migrations
+        run: bun run verify:no-migration-dml
+
+  # `@appstrate/core` is an OPTIONAL PEER of this module: `bun install` does not
+  # fetch it, and the cloud image resolves it from the platform's own workspace
+  # copy at /app/packages/core (see Dockerfile). The typecheck therefore runs
+  # INSIDE that image, against the literal bytes that will run in production,
+  # instead of against an npm copy whose version merely claims to match. It also
+  # picks up the image's own `typescript`, which kills compiler skew for free.
+  #
+  # The repo is mounted READ-ONLY and copied inside the container before the
+  # `@appstrate/core` symlink is created: a read-write bind mount would leave a
+  # dangling symlink behind in the checked-out tree.
+  typecheck:
+    needs: resolve-oss-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OSS_IMAGE: ${{ needs.resolve-oss-image.outputs.image }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.11"
+
+      # Cloud's OWN dependencies (hono, zod, drizzle-orm, stripe, @types/bun, …)
+      # still come from the lockfile — only core comes from the image.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck against the OSS image
+        run: |
+          echo "Typechecking against ${OSS_IMAGE}"
+          docker run --rm -v "$PWD:/cloud:ro" --entrypoint sh "${OSS_IMAGE}" -c '
+            set -eu
+            cp -a /cloud /work
+            cd /work
+            mkdir -p node_modules/@appstrate
+            ln -sfn /app/packages/core node_modules/@appstrate/core
+            /app/packages/core/node_modules/.bin/tsc --noEmit -p tsconfig.json
+          '
+
+  # The billing tests (no-double-billing, settled frontier, transaction
+  # rollback, idempotency, org-deletion drain, concurrent sweeps) gated NOTHING
+  # before this job existed: `check` runs no test at all, so a PR could break
+  # the money path and still go green.
+  #
+  # No `services:` block on purpose: the test preload owns its containers
+  # (`docker compose -f test/setup/docker-compose.test.yml up -d --wait` →
+  # PostgreSQL 16 on :5434, Redis 7 on :6381) and sets every env var it needs
+  # (CLOUD_DATABASE_URL, REDIS_URL, Stripe test keys, MODULES) before
+  # initializing the module, which then self-migrates. GitHub-hosted
+  # `ubuntu-latest` ships Docker Engine + Compose v2, so the runner needs
+  # nothing beyond the checkout and Bun.
+  test:
+    needs: resolve-oss-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OSS_IMAGE: ${{ needs.resolve-oss-image.outputs.image }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The tests DO resolve `@appstrate/core` at runtime: `src/logger.ts`,
+      # `src/http-errors.ts`, `src/middleware.ts` and `src/routes/billing.ts`
+      # import VALUES from it, and every integration test loads them
+      # transitively. Since `bun install` no longer supplies core, it comes from
+      # the same image the typecheck uses.
+      #
+      # The WHOLE /app tree is extracted, with symlinks PRESERVED, and core is
+      # pointed at in place. Both halves of that are load-bearing:
+      #
+      #   · An earlier version of this step ran `tar -ch` on /app/packages/core
+      #     alone. `-h` dereferences `core/node_modules/pino` — a symlink into
+      #     bun's isolated store — and copies the pino package directory, but
+      #     pino's OWN dependencies are SIBLINGS of it inside the store
+      #     (.bun/pino@10.3.1/node_modules/{pino,pino-std-serializers,…}), and
+      #     the dereferenced copy has no path back to them. Core's direct deps
+      #     arrived, their children did not:
+      #     `Cannot find package 'pino-std-serializers' from …/pino/pino.js`.
+      #
+      #   · Keeping the symlinks means keeping the store, and keeping the store
+      #     means keeping /app's shape: core's links are RELATIVE
+      #     (`../../../node_modules/.bun/…`), so they only resolve while
+      #     packages/core still sits three levels under the tree root.
+      #
+      # 613 MB and ~17 s, measured. A pruned copy of just core's transitive
+      # closure is 42 MB and ~2 s (14 store entries) — but it needs a bespoke
+      # symlink-walker embedded in this workflow, whose failure mode is a
+      # PARTIALLY materialised core: exactly the bug above, rediscovered later
+      # and just as confusing. Not worth 15 seconds.
+      - name: Materialize @appstrate/core from the OSS image
+        run: |
+          # `pipefail` so a failing `docker run` is reported as such, instead of
+          # surfacing as tar's "this does not look like a tar archive" on the
+          # empty stream it leaves behind.
+          set -euo pipefail
+          echo "Extracting /app from ${OSS_IMAGE}"
+          rm -rf .oss-image node_modules/@appstrate/core
+          mkdir -p .oss-image node_modules/@appstrate
+          docker run --rm --entrypoint sh "${OSS_IMAGE}" -c 'tar -C / -cf - app' \
+            | tar -xf - -C .oss-image
+          ln -sfn "$PWD/.oss-image/app/packages/core" node_modules/@appstrate/core
+
+          # Not `test -f …/src/module.ts` — that passed on the broken tree too.
+          # Actually LOADING core exercises the transitive store resolution
+          # (core → pino → pino-std-serializers) that was silently missing.
+          bun -e 'await import("@appstrate/core/logger"); console.log("✓ @appstrate/core loads, transitive deps resolve")'
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Tear down test containers
+        if: always()
+        run: docker compose -f test/setup/docker-compose.test.yml down -v

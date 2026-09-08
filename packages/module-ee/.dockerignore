@@ -1,0 +1,12 @@
+node_modules
+.git
+.env
+.env.*
+!.env.example
+.turbo
+*.log
+src/__tests__
+eslint.config.js
+tsconfig.json
+.prettierrc
+CLAUDE.md
