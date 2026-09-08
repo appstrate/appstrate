@@ -10,7 +10,7 @@
 # in degraded mode and the image healthcheck must mark the container unhealthy.
 #
 # HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
-# enabled and adds one assertion (see "EE module" below). That mode is the
+# enabled and adds the "EE module" phase below (loaded, sweeping, routed). That mode is the
 # `ee-container-e2e` job in .github/workflows/test.yml; it replaces the
 # release-time `verify` the cloud repo used to run against its own second image.
 
@@ -160,7 +160,18 @@ if [ "$E2E_EE" = "1" ]; then
     echo 'EE module loaded but its billing sweeper never started' >&2
     exit 1
   fi
-  echo "ee_module=loaded"
+  # The log lines prove init ran; only a request proves the module's routers are
+  # mounted on the platform app. Unsigned, so Stripe is never reached: the route
+  # rejects a missing `stripe-signature` with 400. Measured on the same image
+  # WITHOUT the module in MODULES: 401, the platform's `/api/*` auth guard
+  # answering for an unrouted path — so any status but 400 is the regression.
+  webhook_status=$(curl -s -o /dev/null -w '%{http_code}' \
+    -X POST "http://127.0.0.1:${E2E_PORT}/api/billing/webhooks")
+  if [ "$webhook_status" != "400" ]; then
+    echo "POST /api/billing/webhooks returned $webhook_status, expected 400 — the EE routers are not mounted" >&2
+    exit 1
+  fi
+  echo "ee_module=loaded ee_routes=mounted"
 fi
 
 compose down --volumes --remove-orphans >/dev/null

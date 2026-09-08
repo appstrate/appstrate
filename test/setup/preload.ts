@@ -37,7 +37,6 @@ import {
 } from "./constants.ts";
 import {
   discoverModules,
-  envToApply,
   loadModuleRequirements,
   skipsInTier,
   type DiscoveredModule,
@@ -333,10 +332,10 @@ for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
   }
 
   // Modules cache their configuration at import/init, so this precedes the
-  // import. `??=`: an operator value already in the environment wins.
-  for (const [key, value] of Object.entries(envToApply(requirements, process.env))) {
-    process.env[key] = value;
-  }
+  // import. It overrides the ambient environment, like the platform's own
+  // DATABASE_URL above: the suite truncates and drops the tables it is pointed
+  // at, and a developer `.env` (Bun auto-loads it) may name a real one.
+  Object.assign(process.env, requirements.env ?? {});
 
   // Register the module itself so getTestApp() can mount its router
   const imported: { default?: AppstrateModule } = await import(indexFile);

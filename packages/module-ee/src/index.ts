@@ -67,7 +67,7 @@ function getAppUrl(): string {
 const eeModule: AppstrateModule = {
   manifest: {
     id: "ee",
-    name: "Appstrate Cloud",
+    name: "Appstrate EE",
     version: "0.1.0",
   },
 

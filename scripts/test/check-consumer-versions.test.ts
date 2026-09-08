@@ -6,15 +6,24 @@
  * major-release carve-out from issue #1028 (a consumer cannot declare `^X.0.0`
  * before X.0.0 exists on npm, so at an X.0.0 release "one major behind" is the
  * only reachable state) and the non-major case that keeps the gate's teeth.
+ *
+ * The last block runs the script as a process against a mutated copy of its own
+ * source, restored in a `finally`. Do not run it in parallel with anything else
+ * that reads `scripts/check-consumer-versions.ts`.
  */
 
 import { describe, it, expect, afterEach, spyOn } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   assessDeclaredRange,
   assessDrift,
   fetchPackageJson,
   resolvePolicy,
 } from "../check-consumer-versions.ts";
+
+const REPO_ROOT = join(import.meta.dir, "..", "..");
+const GATE = join(REPO_ROOT, "scripts", "check-consumer-versions.ts");
 
 type V = [number, number, number];
 
@@ -124,6 +133,44 @@ describe("assessDeclaredRange", () => {
       detail: 'unparsable range "workspace:*", cannot verify drift',
     });
   });
+
+  it("fails a listed consumer that declares no range at all", () => {
+    // Rule 3 of the CONSUMERS doc-comment. This used to be a `-` log line
+    // counted as neither warning nor failure, so a consumer that dropped the
+    // dependency left the gate reporting `0 failure(s)` over one fewer repo.
+    const missing = assessDeclaredRange([6, 3, 0], undefined, "fail");
+    expect(missing.verdict).toBe("fail");
+    expect(missing.detail).toContain("does not consume");
+    expect(assessDeclaredRange([6, 3, 0], undefined, "warn").verdict).toBe("warn");
+  });
+});
+
+describe("scripts/check-consumer-versions.ts as a process", () => {
+  it("refuses to run with an empty CONSUMERS list", () => {
+    // A vacuous gate is worse than no gate: it prints `Summary: 0 failure(s)`
+    // over zero repos. The throw is at module load, so this reaches no network.
+    const original = readFileSync(GATE, "utf8");
+    const mutated = original.replace(
+      '  { repo: "appstrate/connect-helper", paths: ["package.json"] },\n',
+      "",
+    );
+    if (mutated === original) {
+      throw new Error("the mutation matched nothing — CONSUMERS was restructured.");
+    }
+    try {
+      writeFileSync(GATE, mutated);
+      const run = Bun.spawnSync({
+        cmd: ["bun", "scripts/check-consumer-versions.ts"],
+        cwd: REPO_ROOT,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(run.exitCode).not.toBe(0);
+      expect(run.stderr.toString()).toContain("CONSUMERS is empty");
+    } finally {
+      writeFileSync(GATE, original);
+    }
+  }, 60_000);
 });
 
 describe("fetchPackageJson", () => {

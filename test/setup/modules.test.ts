@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The three decisions `test/setup/modules.ts` makes on behalf of two processes
- * that must agree — the preload (import/register/init a module?) and the
- * tier-0 runner (collect its test files?).
+ * The decisions `test/setup/modules.ts` makes on behalf of two processes that
+ * must agree — the preload (import/register/init a module?) and the tier-0
+ * runner (collect its test files?).
  *
- * No module in the repo declares `test/requirements.ts` yet, so nothing here
- * exercises these paths from real state. These assertions are the negative
- * control that absence cannot provide: a rejection that stopped rejecting, or a
- * skip that stopped skipping, would be invisible until the first module relied
- * on it — and would then present as the failure the declaration existed to
- * prevent.
+ * `packages/module-ee` is the only declaration on disk, so it exercises one
+ * shape. These assertions are the negative control it cannot provide: a
+ * rejection that stopped rejecting, or a skip that stopped skipping, would be
+ * invisible until a module relied on it — and would then present as the failure
+ * the declaration existed to prevent.
  */
 
 import { describe, it, expect } from "bun:test";
-import { discoverModules, envToApply, parseModuleRequirements, skipsInTier } from "./modules.ts";
+import { discoverModules, parseModuleRequirements, skipsInTier } from "./modules.ts";
 import { resolve } from "node:path";
 
 const SOURCE = "packages/module-x/test/requirements.ts";
@@ -74,20 +73,6 @@ describe("skipsInTier", () => {
   it("never skips a module that declares nothing", () => {
     expect(skipsInTier({}, true)).toBe(false);
     expect(skipsInTier({ postgres: false }, true)).toBe(false);
-  });
-});
-
-describe("envToApply", () => {
-  it("returns the declared entries the environment does not carry", () => {
-    expect(envToApply({ env: { A: "1", B: "2" } }, { B: "operator" })).toEqual({ A: "1" });
-  });
-
-  it("treats an empty string as set — `??=`, not `||=`", () => {
-    expect(envToApply({ env: { A: "1" } }, { A: "" })).toEqual({});
-  });
-
-  it("returns nothing when no env is declared", () => {
-    expect(envToApply({ postgres: true }, {})).toEqual({});
   });
 });
 

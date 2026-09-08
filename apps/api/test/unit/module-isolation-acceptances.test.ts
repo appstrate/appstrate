@@ -22,6 +22,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  importSpecifiers,
   reviewCrossModuleImports,
   reviewPlatformModuleImports,
   type AcceptedCrossModuleImport,
@@ -106,6 +107,19 @@ describe("reviewPlatformModuleImports", () => {
     expect(problems).toHaveLength(1);
   });
 
+  it("reports a relative import that lands inside a built-in module", () => {
+    // Built-ins live under `apps/api/src`, so a platform file reaches one with
+    // an ordinary relative path — no `@appstrate/module-*` specifier involved.
+    const problems = reviewPlatformModuleImports([
+      {
+        file: "apps/api/src/lib/boot.ts",
+        spec: "../modules/oidc/index.ts",
+        resolved: "apps/api/src/modules/oidc/index.ts",
+      },
+    ]);
+    expect(problems).toHaveLength(1);
+  });
+
   it("passes ordinary platform imports", () => {
     // The negative control. A rule that reported nothing and a rule that
     // reported everything would both leave the scan "clean" on today's repo.
@@ -133,5 +147,39 @@ describe("reviewPlatformModuleImports", () => {
         },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("importSpecifiers", () => {
+  it("reads a literal `import()` written with backticks", () => {
+    expect(importSpecifiers("void import(`@appstrate/module-ee`);")).toEqual([
+      "@appstrate/module-ee",
+    ]);
+  });
+
+  it("does not read a template with a substitution — that is the loader's form", () => {
+    expect(importSpecifiers("void import(`@appstrate/module-${id}`);")).toEqual([]);
+  });
+
+  it("ignores an import inside a comment", () => {
+    const source = [
+      '// import "@appstrate/module-ee";',
+      '/* import "@appstrate/module-chat"; */',
+      'import { boot } from "./boot.ts";',
+    ].join("\n");
+    expect(importSpecifiers(source)).toEqual(["./boot.ts"]);
+  });
+
+  it("does not mistake a `//` inside a specifier for a comment", () => {
+    expect(importSpecifiers('import { x } from "https://example.test/x.ts";')).toEqual([
+      "https://example.test/x.ts",
+    ]);
+  });
+
+  it("reads past a regex literal holding quote characters", () => {
+    // Treated as a string, the `["']` swallows the rest of the file and the
+    // import behind it disappears from the scan.
+    const source = ["const RE = /[\"']/g;", 'import "@appstrate/module-ee";'].join("\n");
+    expect(importSpecifiers(source)).toEqual(["@appstrate/module-ee"]);
   });
 });

@@ -1,20 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
-/**
- * What this module needs from the test harness (see `test/setup/modules.ts`).
- *
- * `postgres: true` — it runs `CREATE DATABASE` and connects with `postgres.js`
- * against a database of its own, neither of which the tier-0 PGlite adapter
- * offers. Under `TEST_TIER=0` the module is not imported, not initialized, and
- * its own test files are not collected.
- *
- * `env` is applied with `??=` before the module entry is imported, which is the
- * only window that works: the env is parsed and cached on the first
- * `getEeEnv()`. Values are computed, never asserted — the tier-0 runner imports
- * this file with only the ambient environment.
- */
+// Harness requirements (`test/setup/modules.ts`): tier-0 PGlite offers neither
+// CREATE DATABASE nor postgres.js. `env` is force-assigned before the entry is
+// imported because the suite DROPS these tables and a dev `.env` may name a
+// real one; values are computed, since tier 0 reads this with only ambient env.
 
-/** The module's own database on the platform's test PostgreSQL server. */
 function eeDatabaseUrl(): string {
   const url = new URL(
     process.env.DATABASE_URL ?? "postgres://test:test@localhost:5433/appstrate_test",
@@ -31,10 +21,7 @@ export default {
     STRIPE_WEBHOOK_SECRET: "whsec_test_secret_for_webhook_verification",
     STRIPE_PRICE_ID_STARTER: "price_starter_test",
     STRIPE_PRICE_ID_PRO: "price_pro_test",
-    // Disarm the periodic sweep. `init()` runs under the harness like any other
-    // module, and a timer firing mid-suite would bill rows a test seeded into
-    // the mock ledger. The sweep functions are still driven directly by
-    // `test/integration/services/billing-sweeper.test.ts`.
+    // A timer firing mid-suite would bill rows a test seeded into the ledger.
     EE_RECONCILIATION_INTERVAL_SECONDS: "0",
   },
 } as const;

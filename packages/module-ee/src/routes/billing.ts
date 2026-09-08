@@ -68,13 +68,22 @@ function getBillingStatus(account: {
  * `syncOrgStorageEntitlement`), so the dashboard can price storage next to
  * credits instead of leaving it invisible until a run hits the limit.
  */
-function planDetail(p: PlanDefinition): {
+interface PlanDetail {
   id: string;
   name: string;
   price: number;
   credit_quota: number;
   file_storage_bytes: number;
-} {
+}
+
+type CheckoutPlanId = (typeof CHECKOUT_PLAN_IDS)[number];
+
+/** A plan offered as an upgrade — its id is one `POST /checkout` accepts. */
+interface UpgradeDetail extends PlanDetail {
+  id: CheckoutPlanId;
+}
+
+function planDetail(p: PlanDefinition): PlanDetail {
   return {
     id: p.id,
     name: p.name,
@@ -82,6 +91,28 @@ function planDetail(p: PlanDefinition): {
     credit_quota: p.creditQuota,
     file_storage_bytes: p.fileStorageBytes,
   };
+}
+
+function isCheckoutPlan(p: PlanDefinition): p is PlanDefinition & { id: CheckoutPlanId } {
+  return CHECKOUT_PLAN_IDS.some((id) => id === p.id);
+}
+
+/**
+ * The plans the dashboard may offer above `currentTier`.
+ *
+ * `CHECKOUT_PLAN_IDS` is the membership test, not "has a Stripe price": the two
+ * agree today, and a plan given a price without being added to the constant
+ * would otherwise be offered as an upgrade and then rejected by the checkout
+ * schema that reads the same constant — a dead end in the UI.
+ */
+export function upgradeOptions(
+  plans: readonly PlanDefinition[],
+  currentTier: number,
+): UpgradeDetail[] {
+  return plans
+    .filter(isCheckoutPlan)
+    .filter((p) => p.stripePriceId !== null && p.tier > currentTier)
+    .map((p) => ({ ...planDetail(p), id: p.id }));
 }
 
 // Wire = snake_case (platform casing policy). The web sends plan_id / return_url.
@@ -158,9 +189,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
     const currentPlan = allPlans.find((p) => p.id === account.planId);
     const currentTier = currentPlan?.tier ?? 0;
 
-    const upgrades = allPlans
-      .filter((p) => p.stripePriceId && p.tier > currentTier)
-      .map(planDetail);
+    const upgrades = upgradeOptions(allPlans, currentTier);
 
     return c.json({
       plan: {

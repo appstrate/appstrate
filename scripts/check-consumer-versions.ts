@@ -61,6 +61,17 @@ const CONSUMERS: Consumer[] = [
   { repo: "appstrate/connect-helper", paths: ["package.json"] },
 ];
 
+// An empty list makes every loop below a no-op and prints `Summary: 0
+// failure(s)` — the gate reporting success for having checked nothing. The day
+// the last consumer is absorbed or retired, delete the gate and its workflow
+// step; do not leave it running over nothing.
+if (CONSUMERS.length === 0) {
+  throw new Error(
+    "CONSUMERS is empty — this gate would verify nothing and still report success. " +
+      "Remove the gate from publish-core.yml instead of emptying its list.",
+  );
+}
+
 const DEPENDENCY_NAME = "@appstrate/core";
 
 type DriftPolicy = "warn" | "fail" | "off";
@@ -154,15 +165,27 @@ export function assessDrift(
 }
 
 /**
- * Assess a consumer's declared range. A range that cannot be parsed is also a
- * consumer that cannot be verified, so it follows the active enforcement
- * policy instead of disappearing from the summary.
+ * Assess a consumer's declared range. A range that is absent or cannot be
+ * parsed is a consumer that cannot be verified, so it follows the active
+ * enforcement policy instead of disappearing from the summary.
  */
 export function assessDeclaredRange(
   local: [number, number, number],
-  range: string,
+  range: string | undefined,
   policy: Exclude<DriftPolicy, "off">,
 ): DriftAssessment {
+  if (range === undefined) {
+    // Rule 3 of the CONSUMERS doc-comment: a repo that stops consuming core
+    // leaves this list in the same pass. Logged and skipped, it was a listed
+    // consumer the gate had silently stopped covering while still counting it
+    // as read.
+    return {
+      verdict: policy === "fail" ? "fail" : "warn",
+      detail:
+        `declares no ${DEPENDENCY_NAME} range — listed as a consumer but does not ` +
+        `consume. Remove it from CONSUMERS, or restore the dependency.`,
+    };
+  }
   const consumer = parseSemver(range);
   if (!consumer) {
     return {
@@ -276,13 +299,11 @@ async function main(): Promise<void> {
         ...(pkg.devDependencies as Record<string, string> | undefined),
       };
       const range = deps[DEPENDENCY_NAME];
-      if (!range) {
-        console.log(`  - ${consumer.repo}/${path} — does not depend on ${DEPENDENCY_NAME}`);
-        continue;
-      }
-
       const { verdict, detail } = assessDeclaredRange(localVersion, range, POLICY);
-      const line = `${consumer.repo}/${path} pins ${range} — ${detail}`;
+      const line =
+        range === undefined
+          ? `${consumer.repo}/${path} ${detail}`
+          : `${consumer.repo}/${path} pins ${range} — ${detail}`;
       if (verdict === "fail") {
         console.error(`  ✗ ${line}`);
         failures++;

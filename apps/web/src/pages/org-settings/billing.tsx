@@ -61,9 +61,10 @@ export function OrgSettingsBillingPage() {
         : t(STATUS_I18N[billing.status] ?? "billing.noSubscription");
 
   const hasSubscription = billing.status !== "none";
+  const upgradeIds = billing.upgrades.map((u) => u.id);
   // Every upgrade is a checkout target by type, so the header button just
   // offers the first one.
-  const firstUpgradeId = billing.upgrades[0]?.id;
+  const firstUpgradeId = upgradeIds[0];
 
   const handleUpgrade = (planId: CheckoutPlanId) => {
     checkoutMutation.mutate(
@@ -211,7 +212,7 @@ export function OrgSettingsBillingPage() {
           <PlanGrid
             plans={billing.plans}
             currentPlanId={billing.plan.id}
-            upgrades={billing.upgrades}
+            upgrades={upgradeIds}
             disabled={checkoutMutation.isPending}
             onSelect={handleUpgrade}
           />

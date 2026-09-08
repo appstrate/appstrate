@@ -3,15 +3,18 @@
 /**
  * The classifier behind `verify:license-boundary`.
  *
- * `packages/module-ee/` does not exist yet, so the repo scan can only ever
- * exercise the Apache-2.0 half: the commercial branch — the whole reason the
- * gate exists — would ship unexecuted. These assertions drive both sides from
- * synthetic input, so the boundary is held from the day it is declared rather
- * than from the day the directory arrives.
+ * The repo scan reports only what the tree happens to contain; these assertions
+ * drive each branch from synthetic input, so the commercial side — the whole
+ * reason the gate exists — stays exercised whatever the tree looks like.
  */
 
 import { describe, it, expect } from "bun:test";
-import { checkLicenseHeader, expectedLicenseFor } from "../verify-license-boundary.ts";
+import {
+  LICENSED_GLOBS,
+  checkLicenseHeader,
+  expectedLicenseFor,
+} from "../verify-license-boundary.ts";
+import { SOURCE_GLOBS } from "../lib/tracked-files.ts";
 
 const APACHE = "// SPDX-License-Identifier: Apache-2.0";
 const COMMERCIAL = "// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial";
@@ -75,13 +78,22 @@ describe("checkLicenseHeader", () => {
   });
 
   it("rejects a non-`//` comment form", () => {
-    // No tracked `.ts`/`.tsx` file uses one, so accepting `#` or `<!-- -->`
-    // would be a branch nothing writes and nothing reads.
+    // No tracked source file uses one, so accepting `#` or `<!-- -->` would be
+    // a branch nothing writes and nothing reads.
     expect(
       checkLicenseHeader("apps/api/src/index.ts", ["# SPDX-License-Identifier: Apache-2.0"]),
     ).toContain("expected");
     expect(
       checkLicenseHeader("apps/api/src/index.ts", ["<!-- SPDX-License-Identifier: Apache-2.0 -->"]),
     ).toContain("expected");
+  });
+});
+
+describe("LICENSED_GLOBS", () => {
+  it("covers every extension eslint lints, plus `.mts` and `.cts`", () => {
+    // A licence claim on `.ts` alone leaves an unmarked `.mjs` — the shape the
+    // repo actually had: `eslint.config.mjs` carried no header while the gate
+    // reported clean.
+    expect(LICENSED_GLOBS).toEqual([...SOURCE_GLOBS, "*.mts", "*.cts"]);
   });
 });

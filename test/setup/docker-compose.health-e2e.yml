@@ -35,12 +35,3 @@ services:
       # Quiet by default; the EE mode of the script raises it to `info`, which
       # is the level the two module boot lines it greps for are logged at.
       LOG_LEVEL: "${HEALTH_E2E_LOG_LEVEL:-warn}"
-      # `@appstrate/module-ee` env, bare pass-throughs exactly like `MODULES` in
-      # docker-compose.yml: unset on the host stays unset in the container, so
-      # the platform run boots with the module inert and nothing to configure.
-      # The EE mode of scripts/health-container-e2e.sh exports all five.
-      EE_DATABASE_URL:
-      STRIPE_SECRET_KEY:
-      STRIPE_WEBHOOK_SECRET:
-      STRIPE_PRICE_ID_STARTER:
-      STRIPE_PRICE_ID_PRO:

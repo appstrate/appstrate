@@ -11,29 +11,24 @@ import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
 import { $api, type components } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
 
-export const PLAN_ICONS: Record<string, LucideIcon> = {
+/** One plan of the catalog: price, credit quota, and storage entitlement. */
+export type BillingPlanDetail = components["schemas"]["EeBillingPlan"];
+
+// Keyed on the catalog ids the spec enumerates, not on `string`: a plan added
+// to `EeBillingPlan.id` without an icon or a description key fails to compile
+// here instead of rendering a generic card at runtime.
+export const PLAN_ICONS: Record<BillingPlanDetail["id"], LucideIcon> = {
   free: Sparkles,
   starter: Zap,
   pro: Crown,
 };
 
 /** i18n key suffix for each plan description */
-export const PLAN_DESCRIPTION_KEYS: Record<string, string> = {
+export const PLAN_DESCRIPTION_KEYS: Record<BillingPlanDetail["id"], string> = {
   free: "onboarding.planFreeDescription",
   starter: "onboarding.planStarterDescription",
   pro: "onboarding.planProDescription",
 };
-
-/** One plan of the catalog: price, credit quota, and storage entitlement. */
-export type BillingPlanDetail = components["schemas"]["EeBillingPlan"];
-
-/**
- * One entry of `upgrades`: the same catalog plan with its `id` narrowed to the
- * ids checkout accepts. The module declares it as an intersection
- * (`EeBillingPlan & { id: EeCheckoutPlanId }`), so an upgrade reaches
- * `POST /api/billing/checkout` without a runtime guard on the way.
- */
-export type BillingUpgradePlanDetail = components["schemas"]["EeBillingUpgradePlan"];
 
 /**
  * A plan id `POST /api/billing/checkout` accepts — a strict subset of the

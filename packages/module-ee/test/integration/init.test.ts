@@ -10,7 +10,7 @@ describe("EE module exports", () => {
   describe("manifest", () => {
     it("has correct module metadata", () => {
       expect(eeModule.manifest.id).toBe("ee");
-      expect(eeModule.manifest.name).toBe("Appstrate Cloud");
+      expect(eeModule.manifest.name).toBe("Appstrate EE");
       expect(eeModule.manifest.version).toBe("0.1.0");
     });
   });

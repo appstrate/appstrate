@@ -10,31 +10,16 @@
  * services injected at init) is a legitimate backward dependency — modules
  * reference core entities; that is the FK-backward-ref pattern, not a violation.
  *
- * What this enforces, concretely, in two directions:
- *
- *   module → module. A module under `apps/api/src/modules/<m>` (or
- *   `packages/module-<m>/src`) MUST NOT import from another module's source
- *   tree. Importing another module's `schema.ts` is exactly how a cross-module
- *   SQL join would sneak in, so banning cross-module imports kills the join at
- *   the source.
- *
- *   core → module. No file under `apps/api/src` or any `packages/<p>/src` that
- *   is not a module may statically import one: neither the bare
- *   `@appstrate/module-<m>` specifier nor a relative path landing inside
- *   `packages/module-<m>`. Modules are opt-in at runtime through the `MODULES`
- *   env var; a static import makes one mandatory, links it into every build,
- *   and — once a module is under a different licence — drags that licence into
- *   the Apache-2.0 tree. The loader in `apps/api/src/lib/modules` is not
- *   affected: it calls `import(specifier)` with a variable, which no static
- *   specifier scan can match. A LITERAL `import("@appstrate/module-x")` does
- *   count, and should.
- *
- * `apps/web` is deliberately OUT of scope of the core → module rule: the SPA
- * imports `@appstrate/module-chat/ui` and `@appstrate/module-chat/unread` on
- * purpose — a module contributes its own UI, and the bundler needs the static
- * edge to build it. The rule is about the SERVER's runtime opt-in. Test files
- * (`test` directories, `*.test.ts`) are out of scope in both directions, as
- * they already were: `test/setup/preload.ts` loads every module by design.
+ * What this enforces, in two directions:
+ *   module → module. A module MUST NOT import another module's source tree —
+ *   importing its `schema.ts` is how a cross-module SQL join sneaks in.
+ *   core → module. No platform file may statically import a module, by bare
+ *   specifier or by a relative path landing in a module root: modules are opt-in
+ *   through `MODULES`, and a static import makes one mandatory and drags a
+ *   differently-licensed tree into the Apache-2.0 one. The loader's computed
+ *   `import(specifier)` is invisible to a specifier scan; a literal one is not.
+ * `apps/web` is out of scope of that rule (the SPA imports a module's UI on
+ * purpose); test files are, in both.
  *
  * Override via env: `MODULE_ISOLATION_POLICY=warn|fail|off`.
  */
@@ -102,13 +87,53 @@ function ownerOf(absPath: string): string | null {
   return null;
 }
 
-// Three forms: `import|export … from "x"`, `import("x")`, and the side-effect
-// `import "x"`. The third was missing, and it is the one form that reaches a
-// module for its side effects alone — exactly what a static module import would
-// be written as. Measured: `import "@appstrate/module-chat";` appended to
-// `apps/api/src/lib/boot.ts` was read by the scan and reported nothing.
+// Three forms, the third because a side-effect `import "x"` is how a static
+// module import would be written. The `import()` branch takes a backtick but
+// rejects `${`: a literal `import(`@appstrate/module-x`)` is caught, the
+// loader's computed specifier stays invisible.
 const IMPORT_RE =
-  /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']|\bimport\s+["']([^"']+)["']/g;
+  /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*[`"']([^`"'$]+)[`"']|\bimport\s+["']([^"']+)["']/g;
+
+/** Characters after which a `/` opens a regex literal rather than a division. */
+const REGEX_PRECEDERS = new Set("(,=:[!&|?{};+-*%~^<>");
+
+/**
+ * Blank the comments out: a commented-out import is not one. Strings are walked
+ * over so a `//` inside a specifier opens no comment, and so are regex literals
+ * — an unclosed `["']` would swallow the code behind it.
+ */
+function stripComments(source: string): string {
+  let out = "";
+  let prev = "";
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i]!;
+    if (ch === "/" && source[i + 1] === "/") {
+      const end = source.indexOf("\n", i);
+      i = end === -1 ? source.length : end;
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      i = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    const opensRegex = ch === "/" && (prev === "" || REGEX_PRECEDERS.has(prev));
+    if (ch === '"' || ch === "'" || ch === "`" || opensRegex) {
+      const close = opensRegex ? "/" : ch;
+      let j = i + 1;
+      while (j < source.length && source[j] !== close) j += source[j] === "\\" ? 2 : 1;
+      out += source.slice(i, j + 1);
+      i = j + 1;
+      prev = close;
+      continue;
+    }
+    out += ch;
+    if (!/\s/.test(ch)) prev = ch;
+    i++;
+  }
+  return out;
+}
 
 /** One relative import that crossed a module boundary, as the scan saw it. */
 export interface CrossModuleImport {
@@ -174,28 +199,27 @@ export function reviewCrossModuleImports(
 
 /** One import statement found in platform (non-module) source. */
 export interface PlatformImport {
-  /** Repo-relative path of the importing file. */
   file: string;
-  /** The import specifier, verbatim. */
   spec: string;
   /** Repo-relative path the specifier resolves to — relative imports only. */
   resolved?: string;
 }
 
+/** Repo-relative prefixes a resolved relative import lands on inside a module. */
+const MODULE_PATH_PREFIXES = ["packages/module-", "apps/api/src/modules/"];
+
 /**
- * Decide which platform imports reach into a module. Pure: the scan feeds it
- * every import it read, `test/unit/module-isolation-acceptances.test.ts` feeds
- * it synthetic ones.
- *
- * No acceptance list, deliberately. The module→module direction has one because
- * it inherited real violations; this direction has none today, and an empty
- * allowlist for a rule with no exceptions is a door left open.
+ * Decide which platform imports reach into a module. Pure — the tests feed it
+ * synthetic ones. No acceptance list: an empty allowlist is a door left open.
  */
 export function reviewPlatformModuleImports(imports: readonly PlatformImport[]): string[] {
   const problems: string[] = [];
   for (const imp of imports) {
     const bare = /^@appstrate\/module-[a-z0-9-]+/.exec(imp.spec);
-    const reaches = bare !== null || imp.resolved?.startsWith("packages/module-") === true;
+    const resolved = imp.resolved;
+    const reaches =
+      bare !== null ||
+      (resolved !== undefined && MODULE_PATH_PREFIXES.some((p) => resolved.startsWith(p)));
     if (!reaches) continue;
     problems.push(
       `${imp.file} imports \`${imp.spec}\` → reaches into a module. Modules are opt-in at ` +
@@ -206,12 +230,7 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
   return problems;
 }
 
-/**
- * Every non-test source file under `root`, relative to it.
- *
- * One walk for both directions — a second one would be a second definition of
- * "what counts as source", and the two would drift.
- */
+/** Every non-test source file under `root` — one definition of "source", not two. */
 async function sourceFilesUnder(root: string): Promise<string[]> {
   const files: string[] = [];
   const glob = new Glob("**/*.{ts,tsx}");
@@ -222,10 +241,10 @@ async function sourceFilesUnder(root: string): Promise<string[]> {
   return files;
 }
 
-/** Every import specifier in `source`, in order. */
-function importSpecifiers(source: string): string[] {
+/** Every import specifier in `source`, comments excluded, in order. */
+export function importSpecifiers(source: string): string[] {
   const specs: string[] = [];
-  for (const m of source.matchAll(IMPORT_RE)) {
+  for (const m of stripComments(source).matchAll(IMPORT_RE)) {
     const spec = m[1] ?? m[2] ?? m[3];
     if (spec) specs.push(spec);
   }
@@ -313,8 +332,10 @@ if (import.meta.main) {
   problems.push(...reviewCrossModuleImports(crossModuleImports, ACCEPTED_CROSS_MODULE_IMPORTS));
 
   // ─── core → module ──────────────────────────────────────────────────
-  // The platform source: `apps/api/src` plus every `packages/*/src` that is
-  // not a module. `apps/web` is absent on purpose — see the header.
+  // `apps/api/src` plus every non-module `packages/*/src` (`apps/web` absent on
+  // purpose — see the header). Built-ins live UNDER `apps/api/src`, so a file
+  // that is a module's own is skipped: reaching into itself is not a platform
+  // import, and the pass above owns every other case.
   const platformRoots: string[] = [resolve(ROOT, "apps/api/src")];
   {
     const glob = new Glob("*/src");
@@ -329,6 +350,7 @@ if (import.meta.main) {
   for (const root of platformRoots) {
     for (const rel of await sourceFilesUnder(root)) {
       const filePath = resolve(root, rel);
+      if (ownerOf(filePath)) continue;
       const source = await Bun.file(filePath).text();
       platformFilesScanned++;
       const file = relative(ROOT, filePath).split(sep).join("/");

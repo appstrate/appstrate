@@ -144,7 +144,7 @@ This module runs its **own** database (`EE_DATABASE_URL`, separate from the plat
 The repository's (Bun, Hono, Drizzle, PostgreSQL, Redis), plus:
 
 - **Stripe** (`stripe` SDK) — checkout, customer portal, webhooks
-- **ioredis** — rate limiting middleware (separate connection from BullMQ, `EE:` key prefix)
+- **ioredis** — rate limiting middleware (separate connection from BullMQ, `ee:` key prefix)
 
 ## Code Structure
 
@@ -155,8 +155,11 @@ packages/module-ee/
 │   ├── openapi.ts            # OpenAPI 3.1 contribution: paths + tags + component schemas for billing routes
 │   ├── config.ts             # Plan definitions (free/starter/pro), credit quotas, DEFAULT_QUOTE_RATES (compute rates ship at 0)
 │   ├── env.ts                # Zod-validated EE env vars (Stripe keys)
+│   ├── types.ts              # Types mirrored from the platform (EE depends on neither @appstrate/db nor shared-types)
+│   ├── platform.ts           # Holder for the PlatformServices handle injected at init(ctx)
+│   ├── http-errors.ts        # ApiError → RFC 9457 problem+json, the envelope core routes emit
 │   ├── db.ts                 # Drizzle client (lazy init, own EE_DATABASE_URL)
-│   ├── redis.ts              # ioredis client (lazy init, EE: prefix)
+│   ├── redis.ts              # ioredis client (lazy init, ee: prefix)
 │   ├── logger.ts             # Creates and exports a pino logger instance via @appstrate/core/logger createLogger()
 │   ├── middleware.ts          # Rate limiting + admin guard for EE routes
 │   ├── platform-org-queries.ts # The two org queries EE needs from the platform + EeInitContext
@@ -180,7 +183,12 @@ packages/module-ee/
 │   │   ├── types.ts          # Local type definitions (mirrors @appstrate/emails contracts)
 │   │   ├── layout.ts         # EE-branded layout (dark theme, logo, footer)
 │   │   ├── recipients.ts     # Who a billing email goes to (contact ∪ CC ∪ managers)
-│   │   └── templates/        # Branded email templates (verification, invitation)
+│   │   ├── registry.ts       # BillingEmailType → renderer map (the one place a template is named)
+│   │   ├── send.ts           # Render + fan out to the recipients, via the platform mailer injected at init()
+│   │   └── templates/        # 13 templates. Billing lifecycle: subscription-confirmed, subscription-expired,
+│   │                         #   cancellation-confirmed, plan-changed, payment-receipt, payment-failed,
+│   │                         #   card-expiring, renewal-reminder, quota-warning. Platform overrides
+│   │                         #   (via emailOverrides): verification, invitation, magic-link, reset-password
 │   ├── onboarding/
 │   │   └── post-signup.ts    # Free tier credit allocation + final drain / Stripe cancel on org deletion
 │   ├── scripts/

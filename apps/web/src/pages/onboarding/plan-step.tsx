@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   OnboardingLayout,
   useOnboardingGuard,
@@ -27,7 +29,7 @@ export function OnboardingPlanStep() {
     }
   }, [features.billing, navigate, nextRoute]);
 
-  const { data: billing, isLoading } = useBilling({ enabled: !!orgId });
+  const { data: billing, isLoading } = useBilling({ enabled: !!orgId && features.billing });
   const checkoutMutation = useCheckout();
 
   const goNext = () => nextRoute && navigate(nextRoute);
@@ -39,6 +41,9 @@ export function OnboardingPlanStep() {
       {
         onSuccess: ({ url }) => {
           window.location.href = url;
+        },
+        onError: (err) => {
+          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
         },
       },
     );
@@ -61,7 +66,7 @@ export function OnboardingPlanStep() {
         <PlanGrid
           plans={billing?.plans ?? []}
           currentPlanId={currentPlanId}
-          upgrades={billing?.upgrades}
+          upgrades={billing?.upgrades.map((u) => u.id)}
           disabled={checkoutMutation.isPending}
           onSelect={handleSelectPlan}
         />

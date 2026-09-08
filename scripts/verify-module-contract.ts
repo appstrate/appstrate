@@ -154,6 +154,24 @@ const DECLARER_ROOTS: Record<string, string> = {
   "module-ee": "packages/module-ee/src",
 };
 
+// The two module tables are one roster written twice, and the compiler cannot
+// tie them: `Record<string, …>` accepts any key. A module present in one and
+// absent from the other reads as a clean run — an owner missing from
+// DECLARER_ROOTS is never scanned, and one missing from MODULE_TENANT is
+// classified by whatever the lookup falls back to.
+{
+  const roots = Object.keys(DECLARER_ROOTS).sort();
+  const tenants = Object.keys(MODULE_TENANT).sort();
+  if (roots.join() !== tenants.join()) {
+    throw new Error(
+      `MODULE_TENANT and DECLARER_ROOTS name different modules: ` +
+        `only in MODULE_TENANT [${tenants.filter((m) => !roots.includes(m)).join(", ")}], ` +
+        `only in DECLARER_ROOTS [${roots.filter((m) => !tenants.includes(m)).join(", ")}]. ` +
+        `Every known module belongs in both.`,
+    );
+  }
+}
+
 const LEDGER: Record<ContractMember, LedgerEntry> = {
   // ── lifecycle — exempt ──────────────────────────────────────────────────
   shutdown: { kind: "lifecycle", owners: [] },
@@ -363,7 +381,9 @@ for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerE
           `Internalize it into that module, or reclassify as \`seam\` with a justification.`,
       );
     } else {
-      const tenants = new Set(entry.owners.map((o) => MODULE_TENANT[o] ?? "oss"));
+      // Every owner is a DECLARER_ROOTS key by the check below, and the two
+      // tables carry the same keys, so the lookup cannot miss.
+      const tenants = new Set(entry.owners.map((o) => MODULE_TENANT[o]));
       if (tenants.size < 2 && !entry.justification) {
         warnings.push(
           `\`${member}\` has ${ownerCount} owners but all in one license tenant (${[...tenants][0]}). ` +
@@ -447,6 +467,27 @@ function reportScanDrift(
 auditNamedSurface("HOOK_LEDGER", HOOK_LEDGER, "ModuleHooks");
 auditNamedSurface("EVENT_LEDGER", EVENT_LEDGER, "ModuleEvents");
 auditNamedSurface("SERVICE_LEDGER", SERVICE_LEDGER, "PlatformServices");
+
+// An owner nobody can scan is an owner nobody can contradict: the drift passes
+// above compare the ledger against what `DECLARER_ROOTS` walks, so a misspelt
+// or retired module id turns every check on that entry into a no-op while the
+// entry still counts towards the ">= 2 owners" rule.
+for (const [ledgerName, ledger] of [
+  ["LEDGER", LEDGER],
+  ["HOOK_LEDGER", HOOK_LEDGER],
+  ["EVENT_LEDGER", EVENT_LEDGER],
+  ["SERVICE_LEDGER", SERVICE_LEDGER],
+] as [string, Record<string, { owners: string[] }>][]) {
+  for (const [member, entry] of Object.entries(ledger)) {
+    for (const owner of entry.owners) {
+      if (owner in DECLARER_ROOTS) continue;
+      problems.push(
+        `unknown owner: ${ledgerName}.${member}.owners names \`${owner}\`, which is not a ` +
+          `module in DECLARER_ROOTS. Add the module there (and to MODULE_TENANT), or fix the name.`,
+      );
+    }
+  }
+}
 
 for (const w of warnings) console.warn(`⚠️  ${w}`);
 for (const p of problems) console.error(`❌ ${p}`);

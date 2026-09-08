@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Check, Sparkles } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "@appstrate/core/format";
 import {
   PLAN_ICONS,
   PLAN_DESCRIPTION_KEYS,
   type BillingPlanDetail,
-  type BillingUpgradePlanDetail,
   type CheckoutPlanId,
 } from "../hooks/use-billing";
 
@@ -29,7 +28,7 @@ function PlanCard({
   onSelect,
 }: PlanCardProps) {
   const { t } = useTranslation(["settings"]);
-  const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
+  const Icon = PLAN_ICONS[plan.id];
   const descKey = PLAN_DESCRIPTION_KEYS[plan.id];
   const isUpgrade = upgradeTarget !== undefined;
 
@@ -59,7 +58,7 @@ function PlanCard({
       </div>
 
       <div className="font-semibold">{plan.name}</div>
-      {descKey && <p className="text-muted-foreground mt-0.5 text-xs">{t(descKey)}</p>}
+      <p className="text-muted-foreground mt-0.5 text-xs">{t(descKey)}</p>
 
       <div className="mt-auto flex flex-col gap-0.5 pt-3">
         <span className="text-xl font-bold">
@@ -85,8 +84,8 @@ function PlanCard({
 interface PlanGridProps {
   plans: BillingPlanDetail[];
   currentPlanId?: string;
-  /** The upgrade targets, as the API returns them — already narrowed ids. */
-  upgrades?: readonly BillingUpgradePlanDetail[];
+  /** The ids the org may check out with, from `GET /api/billing`'s `upgrades`. */
+  upgrades?: readonly CheckoutPlanId[];
   disabled?: boolean;
   onSelect?: (planId: CheckoutPlanId) => void;
 }
@@ -105,7 +104,7 @@ export function PlanGrid({
           key={plan.id}
           plan={plan}
           isCurrent={plan.id === currentPlanId}
-          upgradeTarget={upgrades?.find((u) => u.id === plan.id)?.id}
+          upgradeTarget={upgrades?.find((id) => id === plan.id)}
           disabled={disabled}
           onSelect={onSelect}
         />
