@@ -65,8 +65,8 @@ export function betterAuthRateLimitStorage(
         // budget is spent and with an `Error` when the backend failed. The
         // Redis factory carries an in-memory insurance limiter, so an `Error`
         // reaching here means BOTH backends failed: nothing counted the
-        // request, and surfacing it — Better Auth turns it into a 500 — is
-        // the honest answer where reading it as a clean pass is not.
+        // request, so it is surfaced (Better Auth answers 500) rather than
+        // read as a clean pass.
         if (!rejection || typeof rejection !== "object" || !("msBeforeNext" in rejection)) {
           throw rejection;
         }

@@ -276,11 +276,8 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // smallest budget. `userinfo` keeps the provider default: it is
       // session-authenticated.
       //
-      // These per-IP rules are the whole model for the token endpoint: there
-      // is no per-client budget, because a client secret is 32 characters
-      // drawn at random by the provider and the brute-force surface worth
-      // bounding is user credentials, which Better Auth's own per-IP
-      // `/sign-in*` rule covers.
+      // Per-IP is the whole model here: there is no per-client budget, and the
+      // credential-guessing surface is covered by BA's own `/sign-in*` rule.
       rateLimit: {
         token: { window: 60, max: 20 },
         authorize: { window: 60, max: 30 },

@@ -8279,23 +8279,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Too many requests — Better Auth's per-IP limiter refused the call. */
+            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
                     "X-Retry-After"?: string;
                     [name: string]: unknown;
                 };
-                content: {
-                    /**
-                     * @example {
-                     *       "message": "Too many requests. Please try again later."
-                     *     }
-                     */
-                    "application/json": {
-                        message: string;
-                    };
-                };
+                content?: never;
             };
         };
     };
@@ -8432,23 +8423,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Too many requests — Better Auth's per-IP limiter refused the call. */
+            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
                     "X-Retry-After"?: string;
                     [name: string]: unknown;
                 };
-                content: {
-                    /**
-                     * @example {
-                     *       "message": "Too many requests. Please try again later."
-                     *     }
-                     */
-                    "application/json": {
-                        message: string;
-                    };
-                };
+                content?: never;
             };
         };
     };

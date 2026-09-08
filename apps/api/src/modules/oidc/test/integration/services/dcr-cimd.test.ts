@@ -38,6 +38,7 @@ import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/a
 import { getEnv } from "@appstrate/env";
 import { OIDC_IDENTITY_SCOPES } from "../../../auth/scopes.ts";
 import oidcModule from "../../../index.ts";
+import { APPSTRATE_CLI_CLIENT_ID, ensureCliClient } from "../../../services/ensure-cli-client.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -516,12 +517,20 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
     if (status === 400) expect(String(json.error)).not.toBe("invalid_target");
   });
 
-  // `private_key_jwt` carries the client id INSIDE the `client_assertion`, so a
-  // token request may legitimately name no `client_id` anywhere the before-hook
-  // can read. The confinement is held to the unidentified client too — if it
-  // were not, dropping `client_id` would be the way to mint an instance-wide
+  // `private_key_jwt` carries the client id INSIDE the `client_assertion`
+  // (RFC 7523 §3), which is where the before-hook reads it from. An assertion
+  // naming nobody identifies no client, and is held to the same confinement —
+  // otherwise dropping `client_id` would be the way to an instance-wide
   // audience.
-  async function tokenWithAssertion(resource: string) {
+
+  /** JWT-shaped; the guard reads the payload and never verifies the signature. */
+  function unsignedAssertion(claims: Record<string, unknown>): string {
+    const segment = (value: object) =>
+      btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return `${segment({ alg: "RS256", typ: "JWT" })}.${segment(claims)}.c2ln`;
+  }
+
+  async function tokenWithAssertion(resource: string, claims: Record<string, unknown>) {
     const res = await app.request("/api/auth/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -531,9 +540,7 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
         redirect_uri: "http://localhost:9914/callback",
         code_verifier: "x".repeat(43),
         client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-        // Shaped like a JWT so the provider takes the assertion path; its
-        // contents never have to verify — the before-hook answers first.
-        client_assertion: "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhbnkifQ.c2ln",
+        client_assertion: unsignedAssertion(claims),
         resource,
       }).toString(),
     });
@@ -544,15 +551,36 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
   }
 
   it("rejects the broad platform audience when the request names no client_id", async () => {
-    const { status, json } = await tokenWithAssertion(getEnv().APP_URL);
+    const { status, json } = await tokenWithAssertion(getEnv().APP_URL, { jti: "no-subject" });
     expect(status).toBe(400);
     expect(String(json.error)).toBe("invalid_target");
   });
 
   it("lets a per-org MCP audience past the gate when the request names no client_id", async () => {
-    const { json } = await tokenWithAssertion(getMcpOrgResourceUri(ORG_ID));
+    const { json } = await tokenWithAssertion(getMcpOrgResourceUri(ORG_ID), { jti: "no-subject" });
     // Past our gate — whatever the provider then says about the unverifiable
     // assertion, it is not `invalid_target`.
+    expect(String(json.error ?? "")).not.toBe("invalid_target");
+  });
+
+  it("confines a self-service client that names itself in its assertion", async () => {
+    const clientId = await registerSelfServiceClient();
+    const { status, json } = await tokenWithAssertion(getEnv().APP_URL, {
+      iss: clientId,
+      sub: clientId,
+    });
+    expect(status).toBe(400);
+    expect(String(json.error)).toBe("invalid_target");
+  });
+
+  it("lets an operator-provisioned client name the platform audience in its assertion", async () => {
+    await ensureCliClient();
+    const { status, json } = await tokenWithAssertion(getEnv().APP_URL, {
+      iss: APPSTRATE_CLI_CLIENT_ID,
+      sub: APPSTRATE_CLI_CLIENT_ID,
+    });
+    // Past this gate: the provider answers on the unverifiable assertion.
+    expect([400, 401]).toContain(status);
     expect(String(json.error ?? "")).not.toBe("invalid_target");
   });
 });

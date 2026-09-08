@@ -80,6 +80,10 @@ function resolveFromHeaders(headers: Headers): string | undefined {
 export function getClientIp(c: Context): string {
   const fromHeaders = resolveFromHeaders(c.req.raw.headers);
   if (fromHeaders) return fromHeaders;
+  // `middleware/client-ip.ts` already stored the socket address for this
+  // Request; reading it back keeps `getConnInfo` to one call per request.
+  const stored = requestIpStore.get(c.req.raw);
+  if (stored) return stored;
   try {
     const fromConn = getConnInfo(c).remote.address;
     if (fromConn) {

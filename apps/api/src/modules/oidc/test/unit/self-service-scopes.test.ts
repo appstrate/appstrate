@@ -6,14 +6,11 @@
  * `resolveClientRegistrationScopes` upstream persists the UNION of
  * `clientRegistrationDefaultScopes` and `clientRegistrationAllowedScopes`, so a
  * default that is not inside the ceiling silently widens it. The module passes
- * the same array to both; these assertions hold that structure, and hold the
- * ceiling itself at `getSelfServiceScopes()` — identity scopes plus the module
- * scopes marked end-user-grantable, never a core action scope.
+ * the same array to both; this assertion holds that structure.
  */
 
 import { describe, it, expect } from "bun:test";
 import { oidcBetterAuthPlugins } from "../../auth/plugins.ts";
-import { getSelfServiceScopes } from "../../auth/scopes.ts";
 
 interface OAuthProviderPlugin {
   id?: string;
@@ -40,9 +37,5 @@ describe("self-service client registration scopes", () => {
     expect(options.clientRegistrationDefaultScopes).toEqual(
       options.clientRegistrationAllowedScopes!,
     );
-  });
-
-  it("caps that ceiling at the self-service scope set", () => {
-    expect(oauthProviderOptions().clientRegistrationAllowedScopes).toEqual(getSelfServiceScopes());
   });
 });

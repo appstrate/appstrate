@@ -210,20 +210,52 @@ interface TokenRequestBody {
   grant_type?: string;
   resource?: string | string[];
   client_id?: string;
+  client_assertion?: string;
 }
 
 /**
- * Extract the `client_id` a token request is acting on, from the parsed body
- * or from the HTTP Basic auth header (`client_secret_basic`).
+ * The client id an unverified `client_assertion` names — RFC 7523 §3, where
+ * `iss` and `sub` are both the client id; the provider reads `sub ?? iss`, so
+ * does this. `null` for anything that does not decode to a JWT payload naming
+ * one consistently.
+ */
+function clientIdFromAssertion(assertion: string): string | null {
+  try {
+    const segment = assertion.split(".")[1] ?? "";
+    const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(
+      atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")),
+      (ch) => ch.charCodeAt(0),
+    );
+    const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!payload || typeof payload !== "object") return null;
+    const { sub, iss } = payload as { sub?: unknown; iss?: unknown };
+    if (sub !== undefined && iss !== undefined && sub !== iss) return null;
+    const id = sub ?? iss;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract the `client_id` a token request is acting on: the parsed body, the
+ * `client_assertion` (`private_key_jwt` may name the client nowhere else), or
+ * the HTTP Basic auth header (`client_secret_basic`).
  *
- * `null` means the request named no client in either place, which is a normal
- * shape rather than a malformed one: `private_key_jwt` carries the id inside
- * the `client_assertion`, and only the oauth-provider unpacks it. So `null`
- * identifies nothing, and callers hold it to the STRICTEST rule they enforce —
- * declining to name a client must never be a way around a confinement.
+ * Trusting the assertion unverified is safe because the provider then verifies
+ * it against the row this id names: an assertion naming an instance client
+ * clears the caller's gate and dies on the signature check, and one naming a
+ * self-service client stays confined.
+ *
+ * `null` identifies nothing, and callers hold it to the STRICTEST rule they
+ * enforce — declining to name a client must never be a way around a
+ * confinement.
  */
 function extractClientId(body: TokenRequestBody, request: Request | undefined): string | null {
   if (typeof body.client_id === "string" && body.client_id.length > 0) return body.client_id;
+  if (typeof body.client_assertion === "string")
+    return clientIdFromAssertion(body.client_assertion);
   const authHeader = request?.headers.get("authorization");
   if (!authHeader || !authHeader.toLowerCase().startsWith("basic ")) return null;
   try {
@@ -706,12 +738,7 @@ export function oidcGuardsPlugin() {
               // replayed off its resource. No-op when no protected resource is
               // registered (mcp module disabled) — `isProtectedResourceUri` is
               // false for everything, so a self-service client simply cannot mint.
-              // A request that identifies no client is held to the same rule:
-              // `private_key_jwt` puts the id inside the `client_assertion`
-              // and only the provider unpacks it, so a resolvable id is not
-              // something this hook can require — and if the absence of one
-              // relaxed the rule, omitting `client_id` would be the way past
-              // it. An instance client always names itself here.
+              // Unidentified ⇒ held to the self-service rule; see `extractClientId`.
               const clientId = extractClientId(body, ctx.request);
               if (clientId === null || (await isSelfServiceClient(clientId))) {
                 if (resources.length !== 1 || !isProtectedResourceUri(resources[0]!)) {

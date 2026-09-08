@@ -68,27 +68,38 @@ export async function flushRedis(): Promise<void> {
  *        the whole reset.
  * tier3: the keys outlive those objects; they are swept by prefix through the
  *        platform's own shared client (no second connection to keep the process
- *        alive), and only when something was consumed since the last reset.
+ *        alive), and only when something was consumed since the last reset and
+ *        that client is still live.
  */
 export async function resetBetterAuthRateLimitBuckets(): Promise<void> {
   const { resetBetterAuthRateLimitStorage, BETTER_AUTH_RATE_LIMIT_KEY_PREFIX } =
     await import("../../src/infra/rate-limit/better-auth-storage.ts");
   const consumed = resetBetterAuthRateLimitStorage();
   if (!consumed || !hasRedis()) return;
-  const { getRedisConnection } = await import("../../src/lib/redis.ts");
+  const { getRedisConnection, hasRedisConnection } = await import("../../src/lib/redis.ts");
+  // The limiter storage writes through this same shared client, so with none
+  // live nothing has been consumed through it since the close.
+  if (!hasRedisConnection()) return;
   const redis = getRedisConnection();
-  let cursor = "0";
-  do {
-    const [next, keys] = await redis.scan(
-      cursor,
-      "MATCH",
-      `${BETTER_AUTH_RATE_LIMIT_KEY_PREFIX}*`,
-      "COUNT",
-      1000,
+  try {
+    let cursor = "0";
+    do {
+      const [next, keys] = await redis.scan(
+        cursor,
+        "MATCH",
+        `${BETTER_AUTH_RATE_LIMIT_KEY_PREFIX}*`,
+        "COUNT",
+        1000,
+      );
+      if (keys.length > 0) await redis.unlink(...keys);
+      cursor = next;
+    } while (cursor !== "0");
+  } catch (err) {
+    throw new Error(
+      `resetBetterAuthRateLimitBuckets: sweeping ${BETTER_AUTH_RATE_LIMIT_KEY_PREFIX}* failed`,
+      { cause: err },
     );
-    if (keys.length > 0) await redis.unlink(...keys);
-    cursor = next;
-  } while (cursor !== "0");
+  }
 }
 
 /** Close Redis connection. Call in afterAll() of test suites that use Redis. No-op in tier0. */

@@ -90,6 +90,11 @@ describe("oauth2-token rate limit", () => {
 
     const refused = await postToken("203.0.113.10");
     expect(refused.status).toBe(429);
+    // Better Auth hands the runtime a string body and names no media type, so
+    // the refusal carries no `Content-Type` — the JSON is parsed unnegotiated.
+    expect(refused.headers.get("content-type")).toBeNull();
+    const body = (await refused.json()) as { message?: unknown };
+    expect(typeof body.message).toBe("string");
 
     // Better Auth answers `X-Retry-After` in seconds — the local device/CLI
     // limiters are the ones emitting `Retry-After`.

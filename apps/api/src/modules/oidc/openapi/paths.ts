@@ -10,23 +10,19 @@ import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
  * `#/components/responses/RateLimited` is a ProblemDetail under `Retry-After`.
  * Spelled out here rather than $ref'd so the spec states which one a caller
  * gets.
+ *
+ * No `content`: the limiter hands the runtime a string body and names no media
+ * type (`rateLimitResponse`, `better-auth/dist/api/rate-limiter`), so the
+ * response carries no `Content-Type` at all. A media type here would state a
+ * header the caller never receives; the body shape is in the description.
  */
 const providerRateLimited = {
-  description: "Too many requests — Better Auth's per-IP limiter refused the call.",
+  description:
+    'Too many requests — Better Auth\'s per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation.',
   headers: {
     "X-Retry-After": {
       description: "Seconds until the current window resets.",
       schema: { type: "string" },
-    },
-  },
-  content: {
-    "application/json": {
-      schema: {
-        type: "object",
-        required: ["message"],
-        properties: { message: { type: "string" } },
-      },
-      example: { message: "Too many requests. Please try again later." },
     },
   },
 };
