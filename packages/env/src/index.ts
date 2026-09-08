@@ -424,9 +424,9 @@ export const envSchema = z
     // ships neither. Append them to enable subscription providers.
     // `@appstrate/module-ee` — the commercial module (Stripe billing, credit
     // quotas, custom space roles) — is OPT-IN for a different reason: it is
-    // source-available, not Apache-2.0, and it needs its own database
-    // (`EE_DATABASE_URL`) plus the `STRIPE_*` variables, all of which it reads
-    // straight from `process.env` (see docs/ENV.md).
+    // source-available, not Apache-2.0, and it needs PostgreSQL (it keeps its
+    // `ee_*` tables in the platform database) plus the `STRIPE_*` variables,
+    // which it reads straight from `process.env` (see docs/ENV.md).
     // `MODULES=none` boots with zero modules (the only sentinel — `""`
     // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
     // pattern).

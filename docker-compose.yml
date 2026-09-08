@@ -407,7 +407,6 @@ services:
       # Inert until the module is in MODULES; the vars are read from
       # process.env by the module's own Zod schema (not in @appstrate/env).
       # Full list and defaults: .env.example, docs/ENV.md.
-      - EE_DATABASE_URL
       - STRIPE_SECRET_KEY
       - STRIPE_WEBHOOK_SECRET
       - STRIPE_PRICE_ID_STARTER

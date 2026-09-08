@@ -96,11 +96,13 @@ tree, no `__drizzle_migrations_<id>` table.
    module, use a hook (`beforeUsage`) or an event — never a direct import. A
    module reads another module's data via the platform API/events, never a
    cross-module SQL join.
-4. **Need a separate tenant?** A module that must own a physically isolated
-   database (the `@appstrate/module-ee` module, in-tree under `packages/module-ee`
-   and source-available) runs its own database (`EE_DATABASE_URL`) and its own
-   migrations, and reads platform data through `ctx.services`
-   (e.g. `services.usage.list`), never a cross-DB join.
+4. **Need tables the Apache-2.0 core schema must not carry?** A module in that
+   position (the `@appstrate/module-ee` module, in-tree under `packages/module-ee`
+   and source-available) keeps a Drizzle tree of its own and self-migrates it
+   into the platform database at `init()`, under a migration journal of its own
+   (`drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`).
+   It still reads platform data through `ctx.services`
+   (e.g. `services.usage.list`), never a SQL join across the licence boundary.
 
 ## Permissions
 

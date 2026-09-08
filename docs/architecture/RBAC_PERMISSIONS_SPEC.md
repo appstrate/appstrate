@@ -473,7 +473,7 @@ Core keeps its zero-billing-vocabulary invariant: the Apache-2.0 core (`apps/api
 
 Two concepts, deliberately separate:
 
-**Billing managers** — org users who may act on billing without being admins. Module table `ee_billing_managers(org_id, user_id, added_by, created_at)`, in the module's own database (`EE_DATABASE_URL`), managed at `PUT /api/billing/managers` (`billing:manage`), listed in the billing page. The module grants them `billing:read` + `billing:manage` through `principalPermissions` (§4.2) with `mayGrant: ["billing:read", "billing:manage"]`. Role grants stay: `billing:read` → owner/admin/member (a guest does not see the plan), `billing:manage` → owner/admin. GitHub's billing manager, without the enum.
+**Billing managers** — org users who may act on billing without being admins. Module table `ee_billing_managers(org_id, user_id, added_by, created_at)`, migrated into the platform database by the module itself, managed at `PUT /api/billing/managers` (`billing:manage`), listed in the billing page. The module grants them `billing:read` + `billing:manage` through `principalPermissions` (§4.2) with `mayGrant: ["billing:read", "billing:manage"]`. Role grants stay: `billing:read` → owner/admin/member (a guest does not see the plan), `billing:manage` → owner/admin. GitHub's billing manager, without the enum.
 
 **Billing contact** — where invoices, receipts and payment alerts go.
 
