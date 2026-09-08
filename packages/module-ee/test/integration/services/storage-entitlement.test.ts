@@ -384,10 +384,10 @@ describe("shutdown drain", () => {
   });
 
   it("REGRESSION: waits for a reconcile the tick started while the drain was already waiting", async () => {
-    // The drain used to snapshot [sweep, resync] once, at entry. The tick STARTS
-    // the reconcile from inside the very promise that snapshot is awaiting, so a
-    // drain entered mid-sweep saw no resync, returned the instant the sweep
-    // finished, and `closeEeDb()` ran underneath a reconcile that had begun in
+    // The tick STARTS the reconcile from inside the very promise a drain entered
+    // mid-sweep is awaiting. A drain that snapshotted [sweep, resync] once, at
+    // entry, would therefore see no resync, return the instant the sweep
+    // finished, and let `closeEeDb()` run underneath a reconcile that began in
     // between. Re-reading after every wait is what closes it.
     await seedBillingAccount({ orgId, planId: "starter" });
     // Seed the cursor so the FIRST tick reads the ledger (and blocks in the hook

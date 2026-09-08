@@ -41,17 +41,10 @@
 import { Glob } from "bun";
 import { dirname, relative, resolve, sep } from "node:path";
 import { moduleOwnedTables } from "./lib/drizzle-snapshots.ts";
+import { REGEX_PRECEDERS, scanQuoted, skipInterpolation } from "./lib/ts-lexer.ts";
 import { importSpecifiers } from "./verify-module-isolation.ts";
 
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
-
-/**
- * Characters after which a `/` opens a regex literal rather than a division —
- * the same set `verify-module-isolation.ts` walks with, and for the same
- * reason: an unterminated regex would swallow the code behind it and blank a
- * whole file's SQL out of the scan.
- */
-const REGEX_PRECEDERS = new Set("(,=:[!&|?{};+-*%~^");
 
 /** The tail of already-emitted code that makes a template literal SQL. */
 const SQL_TAG = /(?:^|[^\w$.])sql\s*$/;
@@ -156,56 +149,6 @@ export function sqlText(source: string): { text: string; literals: number } {
   }
 
   return { text: out, literals };
-}
-
-/**
- * Index just past the literal opened at `start` with `quote`. Handles the
- * backslash escape, which is what keeps `"a\"b"` from ending at the middle
- * quote and inverting every blanking decision after it.
- */
-function scanQuoted(source: string, start: number, quote: string): number {
-  let i = start + 1;
-  while (i < source.length) {
-    if (source[i] === "\\") i += 2;
-    else if (source[i] === quote) return i + 1;
-    else if (quote === "/" && source[i] === "\n") return i;
-    else i += 1;
-  }
-  return source.length;
-}
-
-/**
- * Index just past the `${…}` opened at `start`.
- *
- * Braces are counted, and string / template literals inside are skipped whole:
- * `${cond ? "}" : x}` closes on the wrong brace otherwise, and a nested
- * template (`${a}${`b${c}`}`) needs the recursion this loop performs by
- * re-entering on its own backtick branch.
- */
-function skipInterpolation(source: string, start: number): number {
-  let i = start + 2;
-  let depth = 1;
-  while (i < source.length && depth > 0) {
-    const ch = source[i]!;
-    if (ch === '"' || ch === "'" || ch === "`") {
-      if (ch === "`") {
-        i += 1;
-        while (i < source.length && source[i] !== "`") {
-          if (source[i] === "\\") i += 2;
-          else if (source[i] === "$" && source[i + 1] === "{") i = skipInterpolation(source, i);
-          else i += 1;
-        }
-        i += 1;
-      } else {
-        i = scanQuoted(source, i, ch);
-      }
-      continue;
-    }
-    if (ch === "{") depth += 1;
-    else if (ch === "}") depth -= 1;
-    i += 1;
-  }
-  return i;
 }
 
 /**

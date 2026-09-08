@@ -153,10 +153,10 @@ function scheduleNext(intervalSec: number): void {
 
 /**
  * How long {@link drainBillingSweeper} waits for in-flight work at shutdown.
- * Covers a full drain tick (`MAX_DRAIN_ITERATIONS` batches); the previous 5 s
- * routinely expired mid-pass and let `closeEeDb()` run underneath an open
- * transaction. A constant, not a parameter — every caller passed the default,
- * and a knob nobody turns is a knob that misleads.
+ *
+ * Sized to cover a full drain tick (`MAX_DRAIN_ITERATIONS` batches): a timeout
+ * that expires mid-pass lets `closeEeDb()` run underneath an open transaction.
+ * A constant, not a parameter — a knob nobody turns is a knob that misleads.
  */
 const DRAIN_TIMEOUT_MS = 60_000;
 
@@ -315,8 +315,7 @@ export async function runBillingSweep(): Promise<SweepResult> {
 
   while (
     result.processed >= batchSize &&
-    // Cursor progress, which this loop's contract has always claimed but never
-    // checked. It is load-bearing now that each pass also re-reads the replay
+    // Cursor progress — load-bearing because each pass also re-reads the replay
     // window: a pass that bills only below the watermark leaves the cursor
     // exactly where it was, and looping on it would re-read the same rows until
     // the iteration cap on every tick.

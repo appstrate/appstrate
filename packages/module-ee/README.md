@@ -456,18 +456,20 @@ the shape stays core's to define.
 
 ### Org deletion and the Stripe cancellation
 
-`onOrgDelete` used to call `subscriptions.cancel`, log a failure, and delete the
-billing account regardless. The subscription id died with the row, so a Stripe
-blip left a subscription charging a customer every month for an organization
-that no longer existed and nothing in the system could name it. A log line is a
-diagnosis, not a recovery.
+Calling `subscriptions.cancel`, logging a failure and deleting the billing
+account regardless would take the subscription id down with the row, so a Stripe
+blip would leave a subscription charging a customer every month for an
+organization that is gone, with nothing in the system able to name it. A log
+line is a diagnosis, not a recovery.
 
-The intent is written down first — `ee_billing_accounts.cancel_requested_at` —
-and the row survives a failed cancellation, `stripe_subscription_id` included.
-Rows are deleted only after Stripe confirms; a subscription Stripe no longer has
-(`resource_missing`/404, or a 400 refusing to update one already canceled)
-counts as confirmed, because the response to an earlier attempt may simply have
-been lost. Every billing tick calls `retryPendingCancellations`, which re-runs
+The intent is therefore written down first —
+`ee_billing_accounts.cancel_requested_at` — and the row survives a failed
+cancellation, `stripe_subscription_id` included. Rows are deleted only after
+Stripe confirms; a subscription Stripe does not have
+(`resource_missing`/404, or a 400 carrying its one already-canceled sentence,
+`A canceled subscription can only update its cancellation_details`, matched
+anchored so an unrelated 400 is a real failure) counts as confirmed, because the
+response to an earlier attempt may simply have been lost. Every billing tick calls `retryPendingCancellations`, which re-runs
 the same body for each account still carrying a `cancel_requested_at` and
 removes its rows on success. Steady state is zero rows and zero work, and a
 second `onOrgDelete` for the same org is a no-op — the account is already gone.

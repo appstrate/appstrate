@@ -266,9 +266,9 @@ describe("post-signup", () => {
     }
 
     it("REGRESSION: keeps the subscription reference when Stripe refuses", async () => {
-      // The account used to be deleted regardless, taking the subscription id
-      // with it — so a Stripe blip left a customer being charged for an org that
-      // no longer existed, with nothing in the system able to name it.
+      // Deleting the account regardless would take the subscription id with it,
+      // so a Stripe blip would leave a customer charged for an org that is gone,
+      // with nothing in the system able to name it.
       await seedBillingAccount({
         orgId,
         stripeCustomerId: "cus_retry",

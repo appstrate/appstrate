@@ -6,11 +6,11 @@
  *
  * WHY THIS IS NOT JUST A `subscriptions.cancel` CALL
  *
- * `onOrgDelete` used to call Stripe, log a failure, and delete the billing
- * account anyway. The subscription id died with the row, so a Stripe blip left a
- * subscription charging a customer every month for an organization that no
- * longer existed, with nothing left in the system that could name it. A log line
- * is a diagnosis, not a recovery.
+ * A cancellation Stripe does not confirm cannot be logged and forgotten: the
+ * subscription id lives on the billing account row, so deleting the row anyway
+ * would leave a subscription charging a customer every month for an
+ * organization that is gone, with nothing left in the system able to name it. A
+ * log line is a diagnosis, not a recovery.
  *
  * So the intent is written down first (`cancel_requested_at`) and the account
  * row — with its `stripe_subscription_id` — SURVIVES a failed cancellation. The

@@ -8,9 +8,9 @@
  * contributions boot — a `builder`-only grant would start passing, handing a
  * space admin less than a builder.
  *
- * The loader used to hold a private copy of the ordering, which made the
- * question undecidable in both places at once. This is the answer instead: the
- * order is checked against the thing that actually defines it, the preset →
+ * The loader holds no copy of the ordering — a second copy would make the
+ * question undecidable in both places at once. This file is the answer instead:
+ * the order is checked against the thing that actually defines it, the preset →
  * permission matrix, where "stronger" means "grants a superset".
  */
 

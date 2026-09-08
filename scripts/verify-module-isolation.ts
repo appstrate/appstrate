@@ -32,6 +32,7 @@
 import { Glob } from "bun";
 import { resolve, dirname, relative, sep } from "node:path";
 import { readGatePolicy } from "./lib/policy-env.ts";
+import { REGEX_PRECEDERS, scanQuoted } from "./lib/ts-lexer.ts";
 
 // Under CI the override is ignored, so a green pipeline can never be bought
 // with `MODULE_ISOLATION_POLICY=off` — same pin `verify-module-contract.ts`
@@ -100,18 +101,11 @@ const IMPORT_RE =
   /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*[`"']([^`"'$]+)[`"']|\bimport\s+["']([^"']+)["']/g;
 
 /**
- * Characters after which a `/` opens a regex literal rather than a division.
- * `<` and `>` are left out on purpose: this scan reads `.tsx`, where `</div>`
- * would otherwise open a phantom regex that blanks the rest of the file and
- * hides — or falsely reports — whatever follows. The cost is a regex literal
- * written directly after a comparison operator, which nothing here does.
- */
-const REGEX_PRECEDERS = new Set("(,=:[!&|?{};+-*%~^");
-
-/**
  * Blank the comments out: a commented-out import is not one. Strings are walked
  * over so a `//` inside a specifier opens no comment, and so are regex literals
- * — an unclosed `["']` would swallow the code behind it.
+ * — an unclosed `["']` would swallow the code behind it. The primitives are
+ * `scripts/lib/ts-lexer.ts`, shared with `verify-module-sql-boundary.ts`, whose
+ * scan has to end a literal in exactly the same place this one does.
  */
 function stripComments(source: string): string {
   let out = "";
@@ -132,10 +126,9 @@ function stripComments(source: string): string {
     const opensRegex = ch === "/" && (prev === "" || REGEX_PRECEDERS.has(prev));
     if (ch === '"' || ch === "'" || ch === "`" || opensRegex) {
       const close = opensRegex ? "/" : ch;
-      let j = i + 1;
-      while (j < source.length && source[j] !== close) j += source[j] === "\\" ? 2 : 1;
-      out += source.slice(i, j + 1);
-      i = j + 1;
+      const end = scanQuoted(source, i, close);
+      out += source.slice(i, end);
+      i = end;
       prev = close;
       continue;
     }

@@ -59,6 +59,10 @@ describe("persona-sensitive call sites", () => {
           "membership existence gate before the persona is applied",
         ],
         [
+          "apps/api/src/routes/api-keys.ts",
+          "membership existence before the cross-space branch — a persona is always an org role, so it never removes one",
+        ],
+        [
           "apps/api/src/routes/organizations.ts",
           "two membership-existence gates; the who-manages-whom policy reads `callerOrgRole`",
         ],

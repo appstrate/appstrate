@@ -17,7 +17,9 @@
  *     into problem+json);
  *   - a subscription turn (`subscription: true`, the one fact the chat module
  *     owns) is `"org"` whatever its preset resolves to, and is dispatched like
- *     any other — it runs inline in the platform's own process.
+ *     any other — it runs inline in the platform's own process;
+ *   - an organization whose deletion is reserved is refused before any of that,
+ *     hook or no hook: its usage rows would be cascade-deleted unbilled.
  *
  * These are the exact facts a metering module (the ee module) quotes against, so a
  * regression that stopped reporting one — or resurrected the old "skip the hook
@@ -26,6 +28,9 @@
  */
 
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { organizations } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import {
   initSystemModelProviderKeys,
@@ -41,6 +46,13 @@ import type {
 } from "@appstrate/core/module";
 
 const SYSTEM_PRESET = "sys-chat-model";
+
+/**
+ * A real uuid for an organization that does not exist. The gate reads
+ * `organizations.deleting_at` before anything else — an org row that is absent
+ * carries no reservation, which is every case below except the last.
+ */
+const ORG_ID = "00000000-0000-4000-a000-0000000000c1";
 
 function fakeInitCtx(): ModuleInitContext {
   return {
@@ -90,6 +102,55 @@ describe("checkUsageAllowed", () => {
     seedTestModelProviders();
   });
 
+  it("refuses a turn in an organization whose deletion is reserved", async () => {
+    // The reservation is a platform fact, not a module policy, so it answers
+    // with no module loaded at all. It is refused HERE and not only at the
+    // proxy: a rejected turn opens no MCP session and persists no message.
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+    const reservedOrgId = "00000000-0000-4000-a000-0000000000c2";
+    await db.insert(organizations).values({
+      id: reservedOrgId,
+      name: "Reserved",
+      slug: `reserved-${reservedOrgId.slice(-6)}`,
+      deletingAt: new Date(),
+    });
+
+    try {
+      const result = await checkUsageAllowed({
+        orgId: reservedOrgId,
+        presetId: SYSTEM_PRESET,
+        sessionId: "chs_reserved",
+        subscription: false,
+      });
+
+      expect(result).toEqual({
+        code: "org_deleting",
+        message: "This organization is being deleted; no new work can be admitted.",
+        status: 409,
+      });
+      expect(calls).toHaveLength(0);
+
+      // Control: the same call against an organization with no reservation
+      // reaches the hook.
+      await db
+        .update(organizations)
+        .set({ deletingAt: null })
+        .where(eq(organizations.id, reservedOrgId));
+      expect(
+        await checkUsageAllowed({
+          orgId: reservedOrgId,
+          presetId: SYSTEM_PRESET,
+          sessionId: "chs_reserved",
+          subscription: false,
+        }),
+      ).toBeNull();
+      expect(calls).toHaveLength(1);
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, reservedOrgId));
+    }
+  });
+
   it("dispatches the hook for an org-owned model with credentialSource 'org'", async () => {
     // Sanity: the org preset is genuinely not a system model.
     expect(getSystemModels().has("org-preset-123")).toBe(false);
@@ -98,7 +159,7 @@ describe("checkUsageAllowed", () => {
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
     const result = await checkUsageAllowed({
-      orgId: "org_1",
+      orgId: ORG_ID,
       presetId: "org-preset-123",
       sessionId: "chs_1",
       subscription: false,
@@ -111,7 +172,7 @@ describe("checkUsageAllowed", () => {
     expect(result).toBeNull();
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
-      orgId: "org_1",
+      orgId: ORG_ID,
       context: "chat",
       sessionId: "chs_1",
       credentialSource: "org",
@@ -130,7 +191,7 @@ describe("checkUsageAllowed", () => {
     );
 
     const result = await checkUsageAllowed({
-      orgId: "org_1",
+      orgId: ORG_ID,
       presetId: "org-preset-123",
       sessionId: "chs_1",
       subscription: false,
@@ -143,7 +204,7 @@ describe("checkUsageAllowed", () => {
   it("returns null for a system model when no metering module provides the hook", async () => {
     // No module loaded → OSS mode allows everything.
     const result = await checkUsageAllowed({
-      orgId: "org_1",
+      orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: "chs_1",
       subscription: false,
@@ -159,7 +220,7 @@ describe("checkUsageAllowed", () => {
     );
 
     const result = await checkUsageAllowed({
-      orgId: "org_1",
+      orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: "chs_42",
       subscription: false,
@@ -170,7 +231,7 @@ describe("checkUsageAllowed", () => {
     // shape), plus the two execution facts the module quotes against.
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
-      orgId: "org_1",
+      orgId: ORG_ID,
       context: "chat",
       sessionId: "chs_42",
       credentialSource: "system",
@@ -183,7 +244,7 @@ describe("checkUsageAllowed", () => {
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
     const result = await checkUsageAllowed({
-      orgId: "org_1",
+      orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: null,
       subscription: false,
@@ -205,7 +266,7 @@ describe("checkUsageAllowed", () => {
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
     const result = await checkUsageAllowed({
-      orgId: "org_1",
+      orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: "chs_sub",
       subscription: true,
@@ -214,7 +275,7 @@ describe("checkUsageAllowed", () => {
     expect(result).toBeNull();
     expect(calls).toEqual([
       {
-        orgId: "org_1",
+        orgId: ORG_ID,
         context: "chat",
         sessionId: "chs_sub",
         credentialSource: "org",
@@ -235,7 +296,7 @@ describe("checkUsageAllowed", () => {
     );
 
     const result = await checkUsageAllowed({
-      orgId: "org_1",
+      orgId: ORG_ID,
       presetId: "org-preset-123",
       sessionId: "chs_sub",
       subscription: true,
@@ -255,7 +316,7 @@ describe("checkUsageAllowed", () => {
 
     await expect(
       checkUsageAllowed({
-        orgId: "org_1",
+        orgId: ORG_ID,
         presetId: SYSTEM_PRESET,
         sessionId: "chs_stale",
       } as never),
@@ -272,7 +333,7 @@ describe("checkUsageAllowed", () => {
 
     await expect(
       checkUsageAllowed({
-        orgId: "org_1",
+        orgId: ORG_ID,
         presetId: SYSTEM_PRESET,
         sessionId: "chs_oss",
       } as never),

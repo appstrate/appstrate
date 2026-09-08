@@ -41,9 +41,9 @@ type SystemProxyUsageContext =
       /**
        * Where the referenced run's compute lives. ATTRIBUTION DATA ONLY: it is
        * reported onward as the hook's `executionPlane` fact and is never read
-       * as a gating input. This field previously formed half of an
-       * "already admitted at preflight" skip condition; that short-circuit was
-       * removed (see the comment on the dispatch below) and must not come back.
+       * as a gating input. Reading it as half of an "already admitted at
+       * preflight" skip condition is the bypass documented on the dispatch
+       * below, and must not be introduced here.
        */
       runOrigin: "platform" | "remote";
     }
@@ -118,15 +118,14 @@ export async function enforceSystemProxyAdmission(args: {
   //     mints its own `llm_usage` row (`source='proxy'`). It is never the
   //     continuation of the launch the preflight gate admitted.
   //
-  // Skipping the hook when the referenced run was platform-origin AND declared
-  // a system credential (`runs.model_source`) — as this used to — was therefore
-  // not "avoiding a double gate", it was an open bypass: a preflight quote is
-  // issued ONCE per run launch while the number of proxy calls attachable to
-  // that run id is unbounded, and once platform compute is billed the org's
-  // balance moves DURING the run, so admitting at launch gates later calls
-  // against a stale balance. An org past its quota (so every new run/turn is
-  // rejected)
-  // could keep spending indefinitely by stamping `X-Run-Id` of ANY still-alive
+  // Skipping the hook when the referenced run is platform-origin AND declares a
+  // system credential (`runs.model_source`) would therefore not be "avoiding a
+  // double gate", it would be an open bypass: a preflight quote is issued ONCE
+  // per run launch while the number of proxy calls attachable to that run id is
+  // unbounded, and once platform compute is billed the org's balance moves
+  // DURING the run, so admitting at launch gates later calls against a stale
+  // balance. An org past its quota (so every new run/turn is rejected) could
+  // keep spending indefinitely by stamping `X-Run-Id` of ANY still-alive
   // platform system run onto its proxy calls. `assertRunAttributable` only
   // binds an API-key principal to org + space, so any key in the space can
   // borrow any live run as a billing context.

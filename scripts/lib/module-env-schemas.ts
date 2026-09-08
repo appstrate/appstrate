@@ -33,13 +33,19 @@ export interface ModuleEnvSchema {
   id: string;
   /** Repo-relative path of the file that declares it. */
   file: string;
-  /** The exported binding's name, for the failure message. */
+  /** The exported binding names that contributed, comma-joined, for the failure message. */
   exportName: string;
-  /** The Zod object's `shape` — key → field. */
+  /** The union of every exported Zod object's `shape` — key → field. */
   shape: Record<string, ZodLikeField>;
 }
 
-/** Does `value` look like a Zod object schema? */
+/**
+ * Does `value` look like a Zod object schema?
+ *
+ * Structural, not nominal: these files are imported across the licence
+ * boundary and the gate must not carry a Zod version of its own to
+ * `instanceof` against.
+ */
 function isZodObject(value: unknown): value is { shape: Record<string, ZodLikeField> } {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as { shape?: unknown; safeParse?: unknown };
@@ -79,16 +85,27 @@ export async function moduleEnvSchemas(repoRoot: string): Promise<ModuleEnvFiles
     const id = rel.slice(0, rel.indexOf("/")).replace(/^module-/, "");
     const file = `packages/${rel}`;
     const loaded = (await import(pathToFileURL(abs).href)) as Record<string, unknown>;
-    const entry = Object.entries(loaded).find(([, value]) => isZodObject(value));
-    if (!entry) {
+    // EVERY exported Zod object, unioned — not the first one found. A module
+    // that splits its variables across two schemas (a required half and an
+    // optional one, say) would otherwise have the second half read by no gate
+    // at all, which is the silent-coverage-hole this file exists to close, one
+    // level down. A key declared by two of them is one key either way: the
+    // gates hold NAMES to the docs, and the field they end up with is the last
+    // export's.
+    const zodExports = Object.entries(loaded).filter(
+      (entry): entry is [string, { shape: Record<string, ZodLikeField> }] => isZodObject(entry[1]),
+    );
+    if (zodExports.length === 0) {
       unstructured.push({ id, file });
       continue;
     }
+    const shape: Record<string, ZodLikeField> = {};
+    for (const [, schema] of zodExports) Object.assign(shape, schema.shape);
     schemas.push({
       id,
       file,
-      exportName: entry[0],
-      shape: (entry[1] as { shape: Record<string, ZodLikeField> }).shape,
+      exportName: zodExports.map(([name]) => name).join(", "),
+      shape,
     });
   }
   schemas.sort((a, b) => a.id.localeCompare(b.id));

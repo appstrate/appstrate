@@ -3,15 +3,14 @@
 /**
  * DELETE /api/orgs/:orgId — deletability is a PRECONDITION, not a side effect.
  *
- * Regression cover for a severe, user-triggerable, irreversible data-loss bug:
- * the route used to emit `onOrgDelete` first and call `deleteOrganization`
- * second. `deleteOrganization` refuses (from inside its transaction) while
- * runs are in progress, so an owner who clicked "delete org" during a run got
- * a 400 back — but the module handlers had already run their destructive,
- * non-transactional teardown (the ee module drains billing, cancels the
- * Stripe subscription and drops the billing account; the mcp module drops the
- * org from the RFC 8707 audience allowlist). The organization survived,
- * gutted, with no repair path.
+ * Cover for a severe, user-triggerable, irreversible data-loss shape: emitting
+ * `onOrgDelete` before `deleteOrganization`. `deleteOrganization` refuses (from
+ * inside its transaction) while runs are in progress, so an owner who clicks
+ * "delete org" during a run gets a 400 back — and with that ordering the module
+ * handlers would already have run their destructive, non-transactional teardown
+ * (the ee module drains billing, cancels the Stripe subscription and drops the
+ * billing account; the mcp module drops the org from the RFC 8707 audience
+ * allowlist), leaving the organization gutted with no repair path.
  *
  * The load-bearing assertion in this file is therefore NEGATIVE: with an
  * in-progress run, the `onOrgDelete` handler must NOT have been invoked at
@@ -129,7 +128,7 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
       expect(body.code).toBe("delete_failed");
 
       // THE assertion: no module may observe a deletion that never happened.
-      // Against the pre-fix ordering this array held one entry — the ee
+      // With the emit ahead of the refusal this array holds one entry — the ee
       // module would already have cancelled the subscription by here.
       expect(orgDeleteCalls).toEqual([]);
 
@@ -156,12 +155,12 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
 
 /**
  * The precondition above is only worth what it still means once the modules
- * have acted. It used to mean nothing: it read outside any lock, so a run
- * admitted after it made the in-transaction check refuse a deletion whose
- * Stripe subscription was already cancelled. `reserveOrgDeletion` decides and
- * records the deletion in one transaction, under the same per-org key run
- * admission takes, and admission refuses a reserved org — so no run can appear
- * in that window, and a sequence interrupted after the reservation resumes.
+ * have acted, and a read outside any lock means nothing there: a run admitted
+ * after it would make the in-transaction check refuse a deletion whose Stripe
+ * subscription is already cancelled. `reserveOrgDeletion` decides and records
+ * the deletion in one transaction, under the same per-org key run admission
+ * takes, and admission refuses a reserved org — so no run can appear in that
+ * window, and a sequence interrupted after the reservation resumes.
  */
 describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
   beforeEach(async () => {
