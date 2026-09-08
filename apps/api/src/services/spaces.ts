@@ -29,17 +29,9 @@ export const spaceSettingsSchema = z.object({
 type SpaceSettings = z.infer<typeof spaceSettingsSchema>;
 
 /**
- * Every space of `orgId` the caller reaches, with their role in each
- * (RBAC spec §6.3). One query for the spaces and one for the caller's whole
- * membership set — never one lookup per space.
- *
- * Owner/admin see all; a `member` additionally sees `closed` spaces they
- * cannot enter (so they know to ask); a `guest` and a `private` space both
- * need an explicit row. The filtering is the listing's, not the resolver's:
- * `resolveSpaceRole` answers "what role", this answers "which spaces".
- *
- * `overlay` replaces the caller's own rows wholesale — what a role preview hands
- * in (`lib/view-as.ts`), so the listing is the persona's.
+ * Every space of `orgId` the caller reaches, with their role in each (RBAC spec
+ * §6.3): one query for spaces, one for memberships, `isSpaceVisibleTo` filters.
+ * `overlay` replaces the caller's own rows (role preview, `lib/view-as.ts`).
  */
 export async function listSpacesForPrincipal(
   orgId: string,
@@ -61,18 +53,11 @@ export async function listSpacesForPrincipal(
 }
 
 /**
- * May this caller know that this space exists? (RBAC spec §6.3.)
- *
- * ONE function, two call sites — the listing above and `GET /api/spaces/:id`.
- * Split, they drift, and the drift is silent in exactly one direction: a
- * by-id read that is more permissive than the listing hands out the spaces the
- * listing was written to hide.
- *
- * A role of its own always makes a space visible. Without one, a single case
- * remains: a `closed` space, to a `member`, so they know it exists and can ask
- * for it. A `private` space is invisible, and a `guest` sees only what it was
- * explicitly added to — "org users" and "space members" being two different
- * things is the whole reason `guest` exists.
+ * May this caller know that this space exists? (RBAC spec §6.3.) ONE function
+ * for the listing and `GET /api/spaces/:id`, so a by-id read can never be more
+ * permissive than the listing. Own role: visible. Otherwise only a `closed`
+ * space to a `member` (so they can ask); `private` is invisible and a `guest`
+ * sees only what it was explicitly added to.
  */
 export function isSpaceVisibleTo(
   orgRole: OrgRole,
@@ -122,10 +107,8 @@ export async function createDefaultSpace(orgId: string, createdBy?: string) {
 }
 
 /**
- * All spaces of an organization, ordered by creation date (newest first).
- * Deliberately NOT exported: every caller must go through
- * {@link listSpacesForPrincipal}, which is the one that applies §6.3 filtering
- * — a raw list handed to a route is a list nobody filtered.
+ * All spaces of an organization, newest first. NOT exported: every caller goes
+ * through {@link listSpacesForPrincipal}, which applies §6.3 filtering.
  */
 async function listSpaces(orgId: string) {
   return db

@@ -8,19 +8,9 @@ import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group
 import { roleI18nKey } from "../hooks/use-permissions";
 
 /**
- * Choosing an organization role, as described radio options.
- *
- * Three at most, each carrying its own description, so the choice reads as a
- * legend instead of a closed list plus one hint. Shared by the invitation form
- * and the role-preview dialog: what a role means is one answer, and two copies
- * of it drift.
- *
- * NOT used by the OAuth signup-policy form, which is a native `<select>` with
- * its own `oauthClients.signupRoleOption.*` labels and a single hint below —
- * a different control for a different question (a policy, not a person).
- *
- * `orgSettings.inviteRoleAriaLabel` is the shared legend; it keeps the name of
- * its first caller rather than costing a locale rename for cosmetics.
+ * Organization role as described radio options, shared by the invitation form
+ * and the role-preview dialog so what a role means has one copy. The OAuth
+ * signup-policy form deliberately keeps its own `<select>` (a policy, not a person).
  */
 export function OrgRoleOptions({
   options,

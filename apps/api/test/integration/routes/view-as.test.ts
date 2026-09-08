@@ -18,11 +18,11 @@ import {
 } from "@appstrate/core/permissions";
 import type { AppstrateModule } from "@appstrate/core/module";
 import { getTestApp, setFeatureFlag } from "../../helpers/app.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import { viewAsWire, type ViewAsPersona as ViewAsSnapshot } from "../../../src/lib/view-as.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
-  authHeaders,
   createTestContext,
   createTestUser,
   memberContext,
@@ -67,6 +67,7 @@ declare module "@appstrate/core/permissions" {
 }
 
 const ACTIVE = "X-View-As-Active";
+const SSE_ACCEPT = { Accept: "text/event-stream" };
 
 /** Let PG LISTEN dispatch to SSE subscribers. */
 function wait(ms = 150): Promise<void> {
@@ -85,9 +86,68 @@ interface ListedOrg {
   permissions: string[];
 }
 
-interface Problem {
-  code: string;
-  status: number;
+// `view !== undefined`, not a truthiness test: the empty string is a header a
+// client can send and one this suite asserts is refused.
+function viewHeader(view?: string): Record<string, string> {
+  return view !== undefined ? { "X-View-As": view } : {};
+}
+
+async function expectJson<T>(response: Response, status = 200): Promise<T> {
+  expect(response.status, await response.clone().text()).toBe(status);
+  return (await response.json()) as T;
+}
+
+/**
+ * An SSE stream that opened is a 200 whose body has to be released — and never
+ * read: an open stream has no end for `.text()` to wait for.
+ */
+async function expectOpened(response: Response): Promise<Response> {
+  expect(response.status, response.status === 200 ? "" : await response.text()).toBe(200);
+  await response.body?.cancel();
+  return response;
+}
+
+async function withFeature(name: string, on: boolean, run: () => Promise<void>): Promise<void> {
+  const restore = setFeatureFlag(name, on);
+  try {
+    await run();
+  } finally {
+    restore();
+  }
+}
+
+/** Registers a denial handler that records `pick(ctx)`; the suite's `afterEach` unregisters it. */
+function captureDenials<T>(pick: (ctx: PermissionDenialContext) => T): T[] {
+  const seen: T[] = [];
+  setPermissionDenialHandler((ctx) => {
+    seen.push(pick(ctx));
+  });
+  return seen;
+}
+
+function fromContext(ctx: PermissionDenialContext, key: string): unknown {
+  return (ctx.c as { get: (key: string) => unknown }).get(key);
+}
+
+function agentBody(name: string, displayName: string, description: string) {
+  return {
+    manifest: {
+      name,
+      display_name: displayName,
+      description,
+      schema_version: "0.1",
+      version: "0.1.0",
+      type: "agent",
+    },
+    content: "Do the thing",
+  };
+}
+
+async function libraryAgentIds(headers: Record<string, string>): Promise<string[]> {
+  const body = await expectJson<{ packages: { agent: Array<{ id: string }> } }>(
+    await app.request("/api/library", { headers }),
+  );
+  return body.packages.agent.map((pkg) => pkg.id);
 }
 
 describe("view as role", () => {
@@ -98,6 +158,8 @@ describe("view as role", () => {
     owner = await createTestContext({ orgSlug: "view-as" });
   });
 
+  afterEach(() => setPermissionDenialHandler(null));
+
   /** `X-View-As` for a persona in the org's default space. */
   function persona(orgRole: "member" | "guest", role?: string, spaceId = owner.defaultSpaceId) {
     return role === undefined
@@ -105,39 +167,51 @@ describe("view as role", () => {
       : `org_role=${orgRole}; space=${spaceId}; role=${role}`;
   }
 
-  // `view !== undefined`, not a truthiness test: the empty string is a header a
-  // client can send and one this suite asserts is refused.
-  function listSpaces(view?: string) {
-    return app.request("/api/spaces", {
-      headers: orgOnlyHeaders(owner, view !== undefined ? { "X-View-As": view } : {}),
+  interface Call {
+    method?: string;
+    body?: unknown;
+    view?: string;
+    /** `X-Space-Id`; omitted for org-only routes. */
+    space?: string;
+    ctx?: TestContext;
+    headers?: Record<string, string>;
+  }
+
+  /** A session request under the org context, optionally in a space and under a persona. */
+  function request(path: string, call: Call = {}) {
+    const hasBody = call.body !== undefined;
+    return app.request(path, {
+      method: call.method ?? (hasBody ? "POST" : "GET"),
+      headers: orgOnlyHeaders(call.ctx ?? owner, {
+        ...viewHeader(call.view),
+        ...(call.space ? { "X-Space-Id": call.space } : {}),
+        ...(hasBody ? { "Content-Type": "application/json" } : {}),
+        ...call.headers,
+      }),
+      body: hasBody ? JSON.stringify(call.body) : undefined,
     });
   }
 
+  const listSpaces = (view?: string) => request("/api/spaces", { view });
+
   async function listedSpaces(view?: string): Promise<ListedSpace[]> {
-    const response = await listSpaces(view);
-    expect(response.status, await response.clone().text()).toBe(200);
-    return ((await response.json()) as { data: ListedSpace[] }).data;
+    return (await expectJson<{ data: ListedSpace[] }>(await listSpaces(view))).data;
+  }
+
+  async function listedOrgs(path: string, view?: string, ctx?: TestContext): Promise<ListedOrg[]> {
+    return (await expectJson<{ data: ListedOrg[] }>(await request(path, { view, ctx }))).data;
   }
 
   function createAgent(name: string, view?: string) {
-    return app.request("/api/packages/agents", {
-      method: "POST",
-      headers: authHeaders(owner, {
-        "Content-Type": "application/json",
-        ...(view ? { "X-View-As": view } : {}),
-      }),
-      body: JSON.stringify({
-        manifest: {
-          name,
-          display_name: "Preview probe",
-          description: "Written to prove the persona is enforced on writes",
-          schema_version: "0.1",
-          version: "0.1.0",
-          type: "agent",
-        },
-        content: "Do the thing",
-      }),
+    return request("/api/packages/agents", {
+      view,
+      space: owner.defaultSpaceId,
+      body: agentBody(name, "Preview probe", "Written to prove the persona is enforced on writes"),
     });
+  }
+
+  function space(name: string, visibility: "private" | "closed") {
+    return seedSpace({ orgId: owner.orgId, name, visibility });
   }
 
   // ─── 1. The persona narrows reads AND writes ──────────────────────
@@ -163,37 +237,27 @@ describe("view as role", () => {
   // ─── 2. A guest with no assignment reaches nothing ────────────────
 
   it("shows a guest with no space assignment an empty catalog and the role's walls", async () => {
-    const privateSpace = await seedSpace({
-      orgId: owner.orgId,
-      name: "Private",
-      visibility: "private",
-    });
+    const privateSpace = await space("Private", "private");
     const view = persona("guest");
 
     expect(await listedSpaces(view)).toEqual([]);
-    expect((await listedSpaces()).map((space) => space.id).sort()).toEqual(
+    expect((await listedSpaces()).map((s) => s.id).sort()).toEqual(
       [owner.defaultSpaceId, privateSpace.id].sort(),
     );
 
-    const inSpace = (spaceId: string, header?: string) =>
-      app.request("/api/agents", {
-        headers: authHeaders(owner, {
-          "X-Space-Id": spaceId,
-          ...(header ? { "X-View-As": header } : {}),
-        }),
-      });
+    const inSpace = (spaceId: string, view?: string) =>
+      request("/api/agents", { space: spaceId, view });
 
     // An open space the guest was never added to is a 403; a private one does
     // not exist for them at all.
-    const openRefusal = await inSpace(owner.defaultSpaceId, view);
-    expect(openRefusal.status).toBe(403);
-    expect(((await openRefusal.json()) as Problem).code).toBe("not_a_space_member");
-    const hidden = await inSpace(privateSpace.id, view);
-    expect(hidden.status).toBe(404);
+    await expectProblem(await inSpace(owner.defaultSpaceId, view), 403, {
+      code: "not_a_space_member",
+    });
     // The persona's own wall, answered AS the persona — the generic code and
     // the active marker. This is what `view_as_not_found` has to be told apart
     // from, or a client would end the preview every time it 404s.
-    expect(((await hidden.json()) as Problem).code).toBe("not_found");
+    const hidden = await inSpace(privateSpace.id, view);
+    await expectProblem(hidden, 404, { code: "not_found" });
     expect(hidden.headers.get(ACTIVE)).toBe("1");
 
     expect((await inSpace(owner.defaultSpaceId)).status).toBe(200);
@@ -203,8 +267,7 @@ describe("view as role", () => {
   // ─── 3. The persona only ever removes ─────────────────────────────
 
   it("never grants a permission the real caller lacks, custom bundles included", async () => {
-    const restore = setFeatureFlag("custom_roles", true);
-    try {
+    await withFeature("custom_roles", true, async () => {
       const role = await seedSpaceRole({
         orgId: owner.orgId,
         key: "auditor",
@@ -224,92 +287,62 @@ describe("view as role", () => {
 
       // The org listing is narrowed the same way, and the org role it reports is
       // the persona's — the SPA derives its top-level gates from this row.
-      const orgs = async (header?: string) => {
-        const response = await app.request("/api/orgs", {
-          headers: orgOnlyHeaders(owner, header ? { "X-View-As": header } : {}),
-        });
-        expect(response.status, await response.clone().text()).toBe(200);
-        return ((await response.json()) as { data: ListedOrg[] }).data;
-      };
-      const [previewedOrg] = await orgs(view);
-      const [realOrg] = await orgs();
+      const [previewedOrg] = await listedOrgs("/api/orgs", view);
+      const [realOrg] = await listedOrgs("/api/orgs");
       expect(previewedOrg?.role).toBe("member");
       expect(realOrg?.role).toBe("owner");
       expect(realOrg?.permissions).toContain("members:remove");
       expect(previewedOrg?.permissions).not.toContain("members:remove");
       const realOrgPermissions = new Set(realOrg?.permissions);
       expect(previewedOrg?.permissions.filter((p) => !realOrgPermissions.has(p))).toEqual([]);
-    } finally {
-      restore();
-    }
+    });
   });
 
   // ─── 4. Refusals, never a fall-back ───────────────────────────────
 
   describe("refusals", () => {
-    const denials: string[] = [];
-
-    beforeEach(() => {
-      denials.length = 0;
-      setPermissionDenialHandler((ctx: PermissionDenialContext) => {
-        denials.push(ctx.required);
-      });
-    });
-
-    afterEach(() => setPermissionDenialHandler(null));
-
     it("names the persona on a denial decided UNDER a preview", async () => {
       // `installPermissionAuditLogger` is what production registers; the fields
       // it logs are asserted here through the same seam it uses.
-      const records: Array<Record<string, unknown>> = [];
-      setPermissionDenialHandler((ctx: PermissionDenialContext) => {
-        const c = ctx.c as { get: (key: string) => unknown };
-        const p = c.get("viewAs") as ViewAsSnapshot | undefined;
-        records.push({
+      const records = captureDenials((ctx) => {
+        const p = fromContext(ctx, "viewAs") as ViewAsSnapshot | undefined;
+        return {
           required: ctx.required,
-          role: c.get("orgRole"),
+          role: fromContext(ctx, "orgRole"),
           viewAs: p ? viewAsWire(p) : undefined,
-        });
+        };
       });
-      try {
-        // A disjunction refusal, which is the shape that reaches the hook
-        // outside `makePermissionGuard`.
-        const refused = await app.request(`/api/spaces/${owner.defaultSpaceId}/roles`, {
-          headers: orgOnlyHeaders(owner, { "X-View-As": persona("member", "preset:builder") }),
-        });
-        expect(refused.status).toBe(403);
-        expect(records).toHaveLength(1);
-        // The REAL role beside the persona: a trail that lost either could not
-        // tell an abuse attempt from a preview.
-        expect(records[0]).toMatchObject({
-          role: "owner",
-          viewAs: {
-            org_role: "member",
-            space: {
-              space_id: owner.defaultSpaceId,
-              role: { kind: "preset", key: "builder", name: "builder" },
-            },
+      // A disjunction refusal, which is the shape that reaches the hook
+      // outside `makePermissionGuard`.
+      const refused = await request(`/api/spaces/${owner.defaultSpaceId}/roles`, {
+        view: persona("member", "preset:builder"),
+      });
+      expect(refused.status).toBe(403);
+      expect(records).toHaveLength(1);
+      // The REAL role beside the persona: a trail that lost either could not
+      // tell an abuse attempt from a preview.
+      expect(records[0]).toMatchObject({
+        role: "owner",
+        viewAs: {
+          org_role: "member",
+          space: {
+            space_id: owner.defaultSpaceId,
+            role: { kind: "preset", key: "builder", name: "builder" },
           },
-        });
-      } finally {
-        setPermissionDenialHandler(null);
-      }
+        },
+      });
     });
 
     it("refuses a caller who is neither owner nor admin, and audits the attempt", async () => {
+      const denials = captureDenials((ctx) => ctx.required);
       const asMember = await memberContext(owner, "member");
 
-      const refused = await app.request("/api/spaces", {
-        headers: orgOnlyHeaders(asMember, { "X-View-As": persona("guest") }),
-      });
-      expect(refused.status).toBe(403);
-      expect(((await refused.json()) as Problem).code).toBe("view_as_forbidden");
+      const refused = await request("/api/spaces", { ctx: asMember, view: persona("guest") });
+      await expectProblem(refused, 403, { code: "view_as_forbidden" });
       expect(denials).toEqual(["view_as:guest"]);
 
       // The same caller without the header still reads its own spaces.
-      expect((await app.request("/api/spaces", { headers: orgOnlyHeaders(asMember) })).status).toBe(
-        200,
-      );
+      expect((await request("/api/spaces", { ctx: asMember })).status).toBe(200);
     });
 
     it("refuses a credential that cannot carry a persona", async () => {
@@ -319,14 +352,14 @@ describe("view as role", () => {
         createdBy: owner.user.id,
         scopes: ["spaces:read"],
       });
-      const withKey = (extra: Record<string, string> = {}) =>
+      const withKey = (view?: string) =>
         app.request("/api/spaces", {
-          headers: { Authorization: `Bearer ${key.rawKey}`, ...extra },
+          headers: { Authorization: `Bearer ${key.rawKey}`, ...viewHeader(view) },
         });
 
-      const refused = await withKey({ "X-View-As": persona("member", "preset:viewer") });
-      expect(refused.status).toBe(400);
-      expect(((await refused.json()) as Problem).code).toBe("view_as_unsupported");
+      await expectProblem(await withKey(persona("member", "preset:viewer")), 400, {
+        code: "view_as_unsupported",
+      });
       expect((await withKey()).status).toBe(200);
     });
 
@@ -340,43 +373,32 @@ describe("view as role", () => {
       ["org_role=member; org_role=guest", "a repeated key"],
       ["org_role=member; unknown=1", "an unknown key"],
     ])("refuses %p — %s", async (header) => {
-      const response = await listSpaces(header);
-      expect(response.status, await response.clone().text()).toBe(400);
-      expect(((await response.json()) as Problem).code).toBe("invalid_view_as");
+      await expectProblem(await listSpaces(header), 400, { code: "invalid_view_as" });
     });
 
     it("refuses a persona this listing cannot place", async () => {
       const view = persona("member", "preset:viewer");
+      const orgs = (headers: Record<string, string>) =>
+        app.request("/api/orgs", { headers: { Cookie: owner.cookie, ...headers } });
+
       // No `X-Org-Id`: the listings are exempt from org context, so nothing
       // names the org the role is previewed in.
-      const orphan = await app.request("/api/orgs", {
-        headers: { Cookie: owner.cookie, "X-View-As": view },
-      });
-      expect(orphan.status).toBe(400);
-      expect(((await orphan.json()) as Problem).code).toBe("invalid_view_as");
+      await expectProblem(await orgs(viewHeader(view)), 400, { code: "invalid_view_as" });
 
       // An org the caller is not a member of matches no row to narrow.
       const other = await createTestContext({ orgSlug: "view-as-stranger" });
-      const stranger = await app.request("/api/orgs", {
-        headers: { Cookie: owner.cookie, "X-Org-Id": other.orgId, "X-View-As": view },
-      });
-      expect(stranger.status).toBe(404);
-      expect(((await stranger.json()) as Problem).code).toBe("view_as_not_found");
+      const stranger = await orgs({ "X-Org-Id": other.orgId, ...viewHeader(view) });
+      await expectProblem(stranger, 404, { code: "view_as_not_found" });
 
       // Control: the same header with the caller's own org is answered.
-      const placed = await app.request("/api/orgs", {
-        headers: orgOnlyHeaders(owner, { "X-View-As": view }),
-      });
+      const placed = await request("/api/orgs", { view });
       expect(placed.status).toBe(200);
       expect(placed.headers.get(ACTIVE)).toBe("1");
     });
 
     it("refuses a malformed space id at the header, not at some later field", async () => {
       const malformed = await listSpaces("org_role=member; space=app_legacy; role=preset:viewer");
-      expect(malformed.status).toBe(400);
-      const body = (await malformed.json()) as Problem & { param?: string };
-      expect(body.code).toBe("invalid_view_as");
-      expect(body.param).toBe("X-View-As");
+      await expectProblem(malformed, 400, { code: "invalid_view_as", param: "X-View-As" });
       // Control: the same request with a well-shaped id gets past parsing.
       expect((await listSpaces(persona("member", "preset:viewer"))).status).toBe(200);
     });
@@ -384,43 +406,34 @@ describe("view as role", () => {
     it("refuses a space that is not in the organization", async () => {
       const other = await createTestContext({ orgSlug: "view-as-other" });
       const response = await listSpaces(persona("member", "preset:viewer", other.defaultSpaceId));
-      expect(response.status).toBe(404);
       // Its OWN code, not the generic `not_found`: this is the preview dying,
       // not the previewed role failing to find something. A client cannot tell
       // "drop the persona" from "this row does not exist for you" otherwise.
-      expect(((await response.json()) as Problem).code).toBe("view_as_not_found");
+      await expectProblem(response, 404, { code: "view_as_not_found" });
       expect((await listSpaces()).status).toBe(200);
     });
 
     it("refuses a custom role that belongs to another organization", async () => {
-      const restore = setFeatureFlag("custom_roles", true);
-      try {
+      await withFeature("custom_roles", true, async () => {
         const other = await createTestContext({ orgSlug: "view-as-foreign" });
         const foreign = await seedSpaceRole({ orgId: other.orgId, key: "foreign" });
         const refused = await listSpaces(persona("member", `custom:${foreign.id}`));
-        expect(refused.status).toBe(404);
-        expect(((await refused.json()) as Problem).code).toBe("view_as_not_found");
+        await expectProblem(refused, 404, { code: "view_as_not_found" });
         const mine = await seedSpaceRole({ orgId: owner.orgId, key: "mine" });
         expect((await listSpaces(persona("member", `custom:${mine.id}`))).status).toBe(200);
-      } finally {
-        restore();
-      }
+      });
     });
 
     it("refuses a custom role where the custom_roles feature is off", async () => {
       const role = await seedSpaceRole({ orgId: owner.orgId, key: "ungated" });
-      const restore = setFeatureFlag("custom_roles", false);
-      try {
+      await withFeature("custom_roles", false, async () => {
         const response = await listSpaces(persona("member", `custom:${role.id}`));
-        expect(response.status).toBe(403);
         // A view-as refusal, not the role routes' `feature_unavailable`: every
         // way a persona is turned down must be a code the client drops it on.
-        expect(((await response.json()) as Problem).code).toBe("view_as_forbidden");
+        await expectProblem(response, 403, { code: "view_as_forbidden" });
         // A preset preview stays available on the same deployment.
         expect((await listSpaces(persona("member", "preset:viewer"))).status).toBe(200);
-      } finally {
-        restore();
-      }
+      });
     });
   });
 
@@ -431,15 +444,7 @@ describe("view as role", () => {
     await addOrgMember(other.orgId, owner.user.id, "owner");
     const view = persona("member", "preset:viewer");
 
-    const myOrgs = async (header?: string) => {
-      const response = await app.request("/api/me/orgs", {
-        headers: orgOnlyHeaders(owner, header !== undefined ? { "X-View-As": header } : {}),
-      });
-      expect(response.status, await response.clone().text()).toBe(200);
-      return ((await response.json()) as { data: ListedOrg[] }).data;
-    };
-
-    const previewed = await myOrgs(view);
+    const previewed = await listedOrgs("/api/me/orgs", view);
     const previewedHere = previewed.find((org) => org.id === owner.orgId);
     const previewedThere = previewed.find((org) => org.id === other.orgId);
     expect(previewedHere?.role).toBe("member");
@@ -449,17 +454,12 @@ describe("view as role", () => {
     expect(previewedThere?.role).toBe("owner");
     expect(previewedThere?.permissions).toContain("members:remove");
 
-    const real = await myOrgs();
+    const real = await listedOrgs("/api/me/orgs");
     expect(real.find((org) => org.id === owner.orgId)?.role).toBe("owner");
   });
 
   it("offers only the roles the persona could assign", async () => {
-    const roles = async (header?: string) => {
-      const response = await app.request(`/api/spaces/${owner.defaultSpaceId}/roles`, {
-        headers: orgOnlyHeaders(owner, header !== undefined ? { "X-View-As": header } : {}),
-      });
-      return response;
-    };
+    const roles = (view?: string) => request(`/api/spaces/${owner.defaultSpaceId}/roles`, { view });
 
     // Preset `builder` holds no `space-members:*`, so the roles catalogue is
     // not even readable — the same wall a real builder hits.
@@ -468,11 +468,10 @@ describe("view as role", () => {
     // Preset `admin` reads it, but a role is only offered if the persona itself
     // holds every permission in it.
     const asSpaceAdmin = await roles(persona("member", "preset:admin"));
-    expect(asSpaceAdmin.status, await asSpaceAdmin.clone().text()).toBe(200);
-    expect(asSpaceAdmin.headers.get(ACTIVE)).toBe("1");
-    const offered = ((await asSpaceAdmin.json()) as { data: Array<{ key: string }> }).data.map(
+    const offered = (await expectJson<{ data: Array<{ key: string }> }>(asSpaceAdmin)).data.map(
       (role) => role.key,
     );
+    expect(asSpaceAdmin.headers.get(ACTIVE)).toBe("1");
     expect(offered).toEqual(expect.arrayContaining(["admin", "builder", "operator", "viewer"]));
 
     const real = await roles();
@@ -484,14 +483,11 @@ describe("view as role", () => {
 
   it("records the persona on a write made under preview", async () => {
     const view = persona("member", "preset:admin");
-    const patch = (header?: string) =>
-      app.request(`/api/spaces/${owner.defaultSpaceId}`, {
+    const patch = (view?: string) =>
+      request(`/api/spaces/${owner.defaultSpaceId}`, {
         method: "PATCH",
-        headers: orgOnlyHeaders(owner, {
-          "Content-Type": "application/json",
-          ...(header ? { "X-View-As": header } : {}),
-        }),
-        body: JSON.stringify({ name: header ? "Renamed under preview" : "Renamed for real" }),
+        view,
+        body: { name: view ? "Renamed under preview" : "Renamed for real" },
       });
 
     expect((await patch(view)).status).toBe(200);
@@ -501,10 +497,10 @@ describe("view as role", () => {
       .select()
       .from(auditEvents)
       .where(and(eq(auditEvents.orgId, owner.orgId), eq(auditEvents.action, "space.updated")));
-    const previewed = rows.find((row) =>
-      (row.after as { name?: string }).name?.includes("preview"),
-    );
-    const real = rows.find((row) => (row.after as { name?: string }).name?.includes("real"));
+    const renamedTo = (needle: string) =>
+      rows.find((row) => (row.after as { name?: string }).name?.includes(needle));
+    const previewed = renamedTo("preview");
+    const real = renamedTo("real");
 
     expect(previewed?.actorId).toBe(owner.user.id);
     expect(previewed?.actorType).toBe("user");
@@ -526,51 +522,30 @@ describe("view as role", () => {
       const target = await createTestUser();
       await addOrgMember(owner.orgId, target.id, "member");
       const view = persona("member", "preset:admin");
-      const headers = (header?: string) =>
-        orgOnlyHeaders(owner, {
-          "Content-Type": "application/json",
-          ...(header ? { "X-View-As": header } : {}),
-        });
       const memberPath = `/api/orgs/${owner.orgId}/members/${target.id}`;
 
-      const changeRole = (header?: string) =>
-        app.request(memberPath, {
-          method: "PUT",
-          headers: headers(header),
-          body: JSON.stringify({ role: "admin" }),
-        });
+      const changeRole = (view?: string) =>
+        request(memberPath, { method: "PUT", view, body: { role: "admin" } });
       expect((await changeRole(view)).status).toBe(403);
       expect((await changeRole()).status).toBe(200);
 
-      const remove = (header?: string) =>
-        app.request(memberPath, { method: "DELETE", headers: headers(header) });
+      const remove = (view?: string) => request(memberPath, { method: "DELETE", view });
       expect((await remove(view)).status).toBe(403);
       expect((await remove()).status).toBe(204);
     });
 
     it("refuses the space catalog writes a previewed member cannot reach", async () => {
       const view = persona("member", "preset:admin");
-      const headers = (header?: string) =>
-        orgOnlyHeaders(owner, {
-          "Content-Type": "application/json",
-          ...(header ? { "X-View-As": header } : {}),
-        });
 
-      const create = (header?: string) =>
-        app.request("/api/spaces", {
-          method: "POST",
-          headers: headers(header),
-          body: JSON.stringify({ name: header ? "Under preview" : "For real" }),
-        });
+      const create = (view?: string) =>
+        request("/api/spaces", { view, body: { name: view ? "Under preview" : "For real" } });
       // `spaces:write` is org-level and admin-tier: preset `admin` in a space
       // does not buy it, which is the whole point of the two-layer model.
       expect((await create(view)).status).toBe(403);
-      const created = await create();
-      expect(created.status).toBe(201);
-      const createdId = ((await created.json()) as { id: string }).id;
+      const createdId = (await expectJson<{ id: string }>(await create(), 201)).id;
 
-      const remove = (header?: string) =>
-        app.request(`/api/spaces/${createdId}`, { method: "DELETE", headers: headers(header) });
+      const remove = (view?: string) =>
+        request(`/api/spaces/${createdId}`, { method: "DELETE", view });
       expect((await remove(view)).status).toBe(403);
       expect((await remove()).status).toBe(204);
     });
@@ -578,14 +553,7 @@ describe("view as role", () => {
     it("answers the package catalog as a member would, not as the org catalog admin", async () => {
       // Installed in no space: only someone who manages the ORG catalog sees it.
       await seedAgent({ id: "@view-as/uninstalled", orgId: owner.orgId });
-      const library = async (header?: string) => {
-        const response = await app.request("/api/library", {
-          headers: orgOnlyHeaders(owner, header ? { "X-View-As": header } : {}),
-        });
-        expect(response.status, await response.clone().text()).toBe(200);
-        const body = (await response.json()) as { packages: { agent: Array<{ id: string }> } };
-        return body.packages.agent.map((pkg) => pkg.id);
-      };
+      const library = (view?: string) => libraryAgentIds(orgOnlyHeaders(owner, viewHeader(view)));
 
       expect(await library()).toContain("@view-as/uninstalled");
       expect(await library(persona("member", "preset:admin"))).not.toContain(
@@ -632,14 +600,9 @@ describe("view as role", () => {
     });
 
     it("drops what the previewed role grants and the previewer does not hold", async () => {
-      const listedFor = async (ctx: TestContext, header?: string) => {
-        const response = await app.request("/api/orgs", {
-          headers: orgOnlyHeaders(ctx, header !== undefined ? { "X-View-As": header } : {}),
-        });
-        expect(response.status, await response.clone().text()).toBe(200);
-        const body = (await response.json()) as { data: ListedOrg[] };
-        return body.data.find((org) => org.id === ctx.orgId)?.permissions ?? [];
-      };
+      const listedFor = async (ctx: TestContext, view?: string) =>
+        (await listedOrgs("/api/orgs", view, ctx)).find((org) => org.id === ctx.orgId)
+          ?.permissions ?? [];
 
       // A REAL member of the org holds the probe — this is what the persona is
       // claiming to show.
@@ -667,41 +630,24 @@ describe("view as role", () => {
     // `builder` row in a PRIVATE space — reachable only through that row.
     const source = await createTestContext({ orgSlug: "view-as-source" });
     await addOrgMember(source.orgId, owner.user.id, "member");
-    const vault = await seedSpace({
-      orgId: source.orgId,
-      name: "Vault",
-      visibility: "private",
-    });
+    const vault = await seedSpace({ orgId: source.orgId, name: "Vault", visibility: "private" });
     await seedSpaceMember({ spaceId: vault.id, userId: owner.user.id, presetRole: "builder" });
 
-    const created = await app.request("/api/packages/agents", {
-      method: "POST",
-      headers: authHeaders(source, { "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        manifest: {
-          name: "@view-as-source/shared",
-          display_name: "Shared",
-          description: "Lives in another organization",
-          schema_version: "0.1",
-          version: "0.1.0",
-          type: "agent",
-        },
-        content: "Do the thing",
-      }),
+    const created = await request("/api/packages/agents", {
+      ctx: source,
+      space: source.defaultSpaceId,
+      body: agentBody("@view-as-source/shared", "Shared", "Lives in another organization"),
     });
     expect(created.status, await created.clone().text()).toBe(201);
     await seedInstalledPackage(vault.id, "@view-as-source/shared");
 
     // Persona `builder` in the previewing owner's OWN org, so the write half of
     // the fork is satisfied there and the only question left is the source org.
-    const fork = (header?: string) =>
-      app.request("/api/packages/@view-as-source/shared/fork", {
-        method: "POST",
-        headers: authHeaders(owner, {
-          "Content-Type": "application/json",
-          ...(header ? { "X-View-As": header } : {}),
-        }),
-        body: JSON.stringify({ name: header ? "under-preview" : "for-real" }),
+    const fork = (view?: string) =>
+      request("/api/packages/@view-as-source/shared/fork", {
+        view,
+        space: owner.defaultSpaceId,
+        body: { name: view ? "under-preview" : "for-real" },
       });
 
     // The persona narrows org A. In org B the caller is nobody's persona — they
@@ -721,43 +667,31 @@ describe("view as role", () => {
       await initRealtime();
     });
 
-    function stream(query: string, ctx: TestContext = owner) {
-      return app.request(
-        `/api/realtime/runs?orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}${query}`,
-        { headers: { Cookie: ctx.cookie, Accept: "text/event-stream" } },
-      );
+    /** The runs stream for `ctx`, carrying the persona as the `view_as` query parameter. */
+    function stream(opts: { spaceId?: string; view?: string; ctx?: TestContext } = {}) {
+      const ctx = opts.ctx ?? owner;
+      const query =
+        `orgId=${ctx.orgId}&spaceId=${opts.spaceId ?? ctx.defaultSpaceId}` +
+        (opts.view !== undefined ? `&view_as=${encodeURIComponent(opts.view)}` : "");
+      return app.request(`/api/realtime/runs?${query}`, {
+        headers: { Cookie: ctx.cookie, ...SSE_ACCEPT },
+      });
     }
 
     it("stops a previewed guest at the same wall the HTTP pipeline does", async () => {
-      const privateSpace = await seedSpace({
-        orgId: owner.orgId,
-        name: "Private",
-        visibility: "private",
-      });
-      const guest = encodeURIComponent(persona("guest"));
+      const privateSpace = await space("Private", "private");
+      const view = persona("guest");
 
-      const open = await stream(`&${"view_as"}=${guest}`);
-      expect(open.status).toBe(403);
-      expect(((await open.json()) as Problem).code).toBe("not_a_space_member");
+      const open = await stream({ view });
+      await expectProblem(open, 403, { code: "not_a_space_member" });
       expect(open.headers.get(ACTIVE)).toBe("1");
 
-      const hidden = await app.request(
-        `/api/realtime/runs?orgId=${owner.orgId}&spaceId=${privateSpace.id}&view_as=${guest}`,
-        { headers: { Cookie: owner.cookie, Accept: "text/event-stream" } },
-      );
-      expect(hidden.status).toBe(404);
+      expect((await stream({ spaceId: privateSpace.id, view })).status).toBe(404);
 
       // Control: the same two streams without the persona are the owner's.
-      const asOwner = await stream("");
-      expect(asOwner.status).toBe(200);
+      const asOwner = await expectOpened(await stream());
       expect(asOwner.headers.get(ACTIVE)).toBeNull();
-      await asOwner.body?.cancel();
-      const asOwnerPrivate = await app.request(
-        `/api/realtime/runs?orgId=${owner.orgId}&spaceId=${privateSpace.id}`,
-        { headers: { Cookie: owner.cookie, Accept: "text/event-stream" } },
-      );
-      expect(asOwnerPrivate.status).toBe(200);
-      await asOwnerPrivate.body?.cancel();
+      await expectOpened(await stream({ spaceId: privateSpace.id }));
     });
 
     it("opens for a previewed viewer but withholds the debug frames the role cannot see", async () => {
@@ -767,29 +701,24 @@ describe("view as role", () => {
         orgId: owner.orgId,
         spaceId: owner.defaultSpaceId,
       });
-      const viewer = encodeURIComponent(persona("member", "preset:viewer"));
 
-      const response = await stream(`&view_as=${viewer}`);
+      const response = await stream({ view: persona("member", "preset:viewer") });
       expect(response.status).toBe(200);
       expect(response.headers.get(ACTIVE)).toBe("1");
 
       // `runs:delete` is what gates debug-level frames, and a viewer has none.
+      const log = (level: string, message: string) =>
+        pgNotify("run_log_insert", {
+          org_id: owner.orgId,
+          space_id: owner.defaultSpaceId,
+          run_id: run.id,
+          level,
+          message,
+        });
       await wait();
-      await pgNotify("run_log_insert", {
-        org_id: owner.orgId,
-        space_id: owner.defaultSpaceId,
-        run_id: run.id,
-        level: "debug",
-        message: "debug-secret",
-      });
+      await log("debug", "debug-secret");
       await wait();
-      await pgNotify("run_log_insert", {
-        org_id: owner.orgId,
-        space_id: owner.defaultSpaceId,
-        run_id: run.id,
-        level: "info",
-        message: "info-visible",
-      });
+      await log("info", "info-visible");
       const events = await collectSSEEvents(response.body!, 1, {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
@@ -799,73 +728,44 @@ describe("view as role", () => {
     });
 
     it("refuses the persona as a header, pointing at the query parameter", async () => {
+      const view = persona("member", "preset:viewer");
       const refused = await app.request(
         `/api/realtime/runs?orgId=${owner.orgId}&spaceId=${owner.defaultSpaceId}`,
-        {
-          headers: {
-            Cookie: owner.cookie,
-            Accept: "text/event-stream",
-            "X-View-As": persona("member", "preset:viewer"),
-          },
-        },
+        { headers: { Cookie: owner.cookie, ...SSE_ACCEPT, ...viewHeader(view) } },
       );
-      expect(refused.status).toBe(400);
-      const body = (await refused.json()) as Problem & { detail: string };
-      expect(body.code).toBe("invalid_view_as");
+      const body = await expectProblem(refused, 400, { code: "invalid_view_as" });
       expect(body.detail).toContain("view_as");
       // Control: the same persona as the query parameter opens the stream.
-      const opened = await stream(
-        `&view_as=${encodeURIComponent(persona("member", "preset:viewer"))}`,
-      );
-      expect(opened.status).toBe(200);
-      await opened.body?.cancel();
+      await expectOpened(await stream({ view }));
     });
 
     it("audits an ineligible caller's attempt with the actor that made it", async () => {
-      const seen: Array<{ required: string; actorId?: string; orgId?: string; role?: string }> = [];
-      setPermissionDenialHandler((ctx: PermissionDenialContext) => {
-        const c = ctx.c as {
-          get: (key: string) => unknown;
-        };
-        seen.push({
-          required: ctx.required,
-          actorId: (c.get("user") as { id: string } | undefined)?.id,
-          orgId: c.get("orgId") as string | undefined,
-          role: c.get("orgRole") as string | undefined,
-        });
+      const seen = captureDenials((ctx) => ({
+        required: ctx.required,
+        actorId: (fromContext(ctx, "user") as { id: string } | undefined)?.id,
+        orgId: fromContext(ctx, "orgId") as string | undefined,
+        role: fromContext(ctx, "orgRole") as string | undefined,
+      }));
+      const user = await createTestUser();
+      await addOrgMember(owner.orgId, user.id, "member");
+      const refused = await stream({
+        ctx: { ...owner, cookie: user.cookie },
+        view: persona("guest"),
       });
-      try {
-        const user = await createTestUser();
-        await addOrgMember(owner.orgId, user.id, "member");
-        const refused = await app.request(
-          `/api/realtime/runs?orgId=${owner.orgId}&spaceId=${owner.defaultSpaceId}&view_as=${encodeURIComponent(persona("guest"))}`,
-          { headers: { Cookie: user.cookie, Accept: "text/event-stream" } },
-        );
-        expect(refused.status).toBe(403);
-        expect(((await refused.json()) as Problem).code).toBe("view_as_forbidden");
-        // A denial record naming no actor is not a record: these routes run
-        // outside the pipeline, so nothing else would have put them on the
-        // context.
-        expect(seen).toEqual([
-          {
-            required: "view_as:guest",
-            actorId: user.id,
-            orgId: owner.orgId,
-            role: "member",
-          },
-        ]);
-      } finally {
-        setPermissionDenialHandler(null);
-      }
+      await expectProblem(refused, 403, { code: "view_as_forbidden" });
+      // A denial record naming no actor is not a record: these routes run
+      // outside the pipeline, so nothing else would have put them on the
+      // context.
+      expect(seen).toEqual([
+        { required: "view_as:guest", actorId: user.id, orgId: owner.orgId, role: "member" },
+      ]);
     });
 
     it("refuses a malformed persona on the query parameter", async () => {
-      const refused = await stream("&view_as=org_role=owner");
-      expect(refused.status).toBe(400);
-      expect(((await refused.json()) as Problem).code).toBe("invalid_view_as");
-      const opened = await stream("");
-      expect(opened.status).toBe(200);
-      await opened.body?.cancel();
+      await expectProblem(await stream({ view: "org_role=owner" }), 400, {
+        code: "invalid_view_as",
+      });
+      await expectOpened(await stream());
     });
 
     it("refuses a persona on a credential that cannot carry one", async () => {
@@ -875,15 +775,11 @@ describe("view as role", () => {
         createdBy: owner.user.id,
         scopes: ["runs:read"],
       });
-      const refused = await app.request(
-        `/api/realtime/runs?token=${key.rawKey}&view_as=${encodeURIComponent(persona("guest"))}`,
-      );
-      expect(refused.status).toBe(400);
-      expect(((await refused.json()) as Problem).code).toBe("view_as_unsupported");
+      const withKey = (query = "") => app.request(`/api/realtime/runs?token=${key.rawKey}${query}`);
 
-      const allowed = await app.request(`/api/realtime/runs?token=${key.rawKey}`);
-      expect(allowed.status).toBe(200);
-      await allowed.body?.cancel();
+      const refused = await withKey(`&view_as=${encodeURIComponent(persona("guest"))}`);
+      await expectProblem(refused, 400, { code: "view_as_unsupported" });
+      await expectOpened(await withKey());
     });
   });
 
@@ -893,7 +789,7 @@ describe("view as role", () => {
     /** What `chat-stream.ts` forwards: the caller's already-resolved set. */
     const SCOPE = ["spaces:read", "agents:read", "skills:read"] as const;
 
-    async function libraryOverLoopback(orgRole: string, viewAs?: unknown): Promise<string[]> {
+    function loopbackHeaders(orgRole: string, viewAs?: unknown): Record<string, string> {
       const token = mintMcpLoopbackToken({
         userId: owner.user.id,
         email: owner.user.email,
@@ -903,22 +799,16 @@ describe("view as role", () => {
         permissions: [...SCOPE],
         viewAs,
       });
-      const response = await app.request("/api/library", {
-        headers: { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
-      });
-      expect(response.status, await response.clone().text()).toBe(200);
-      const body = (await response.json()) as { packages: { agent: Array<{ id: string }> } };
-      return body.packages.agent.map((pkg) => pkg.id);
+      return { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId };
     }
+
+    const libraryOverLoopback = (orgRole: string, viewAs?: unknown) =>
+      libraryAgentIds(loopbackHeaders(orgRole, viewAs));
 
     it("reaches a closed space the persona is a member of, and only with the claim", async () => {
       // A CLOSED space reaches nobody without a row, so what the hop sees there
       // depends on the persona's overlay and on nothing else.
-      const closed = await seedSpace({
-        orgId: owner.orgId,
-        name: "Closed",
-        visibility: "closed",
-      });
+      const closed = await space("Closed", "closed");
       await seedAgent({ id: "@view-as/in-closed", orgId: owner.orgId });
       await seedInstalledPackage(closed.id, "@view-as/in-closed");
 
@@ -940,18 +830,7 @@ describe("view as role", () => {
       // A persona applies in ONE org. Adopting this one would narrow nothing
       // (every accessor is org-keyed) and stamp a marker no persona earned.
       const response = await app.request("/api/library", {
-        headers: {
-          Authorization: `Bearer ${mintMcpLoopbackToken({
-            userId: owner.user.id,
-            email: owner.user.email,
-            name: owner.user.name,
-            orgId: owner.orgId,
-            orgRole: "owner",
-            permissions: [...SCOPE],
-            viewAs: { orgId: foreign.orgId, orgRole: "member", space: null },
-          })}`,
-          "X-Org-Id": owner.orgId,
-        },
+        headers: loopbackHeaders("owner", { orgId: foreign.orgId, orgRole: "member", space: null }),
       });
       expect(response.status).toBe(200);
       expect(response.headers.get(ACTIVE)).toBeNull();
@@ -974,31 +853,28 @@ describe("view as role", () => {
     // still be refused the operation it drives — which only holds if the header
     // survives the hop into `POST /api/spaces`.
     const view = persona("member", "preset:operator");
-    const invoke = async (header?: string) => {
-      const response = await app.request(`/api/mcp/o/${owner.orgId}`, {
-        method: "POST",
-        headers: {
-          ...authHeaders(owner, header ? { "X-View-As": header } : {}),
-          "content-type": "application/json",
-          Accept: "application/json, text/event-stream",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "tools/call",
-          params: {
-            name: "invoke_operation",
-            arguments: {
-              operation_id: "createSpace",
-              body: { name: header ? "Via preview" : "Via owner" },
+    const invoke = async (view?: string) => {
+      const envelope = await expectJson<{
+        result?: { isError?: boolean; content?: Array<{ text: string }> };
+      }>(
+        await request(`/api/mcp/o/${owner.orgId}`, {
+          view,
+          space: owner.defaultSpaceId,
+          headers: { Accept: "application/json, text/event-stream" },
+          body: {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+              name: "invoke_operation",
+              arguments: {
+                operation_id: "createSpace",
+                body: { name: view ? "Via preview" : "Via owner" },
+              },
             },
           },
         }),
-      });
-      expect(response.status, await response.clone().text()).toBe(200);
-      const envelope = (await response.json()) as {
-        result?: { isError?: boolean; content?: Array<{ text: string }> };
-      };
+      );
       const text = envelope.result?.content?.[0]?.text ?? "{}";
       return {
         isError: Boolean(envelope.result?.isError),
@@ -1030,10 +906,9 @@ describe("view as role", () => {
     expect(denied.headers.get(ACTIVE)).toBe("1");
 
     // A refusal OF the persona is not: nothing was ever previewed.
-    const refused = await app.request("/api/spaces", {
-      headers: orgOnlyHeaders(await memberContext(owner, "member"), {
-        "X-View-As": persona("guest"),
-      }),
+    const refused = await request("/api/spaces", {
+      ctx: await memberContext(owner, "member"),
+      view: persona("guest"),
     });
     expect(refused.status).toBe(403);
     expect(refused.headers.get(ACTIVE)).toBeNull();

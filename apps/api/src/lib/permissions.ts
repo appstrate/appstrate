@@ -4,26 +4,15 @@
  * RBAC Permission Registry — org-role matrix, space-role presets, API-key
  * allowlist.
  *
- * The resource catalog itself (`CoreResources`, `CoreResource`, the level
- * table, `requireCorePermission`) lives in `@appstrate/core/permissions` so
- * both core routes and externally-published modules can type-check against
- * the same surface without pulling in the API package. This file only holds
- * the runtime policy — who gets what — which is coupled to the auth pipeline
- * and not shippable from npm.
+ * The resource catalog (`CoreResources`, `CoreResource`, the level table,
+ * `requireCorePermission`) lives in `@appstrate/core/permissions`; this file
+ * holds only the runtime policy, coupled to the auth pipeline.
  *
- * ## Two levels, one Set
- *
- * Every permission belongs to exactly one level (RBAC spec §3.4). An org role
- * grants org-level strings ({@link orgPermissions}); a space role grants
- * space-level ones ({@link spacePermissions}), and which space role a caller
- * holds is answered per request by the resolver in `lib/space-role.ts` from a
- * `space_members` row. {@link effectivePermissions} unions the two halves and
- * applies the credential ceiling, so `c.get("permissions")` and every guard
- * keep the exact shape they had.
- *
- * A route outside a space context therefore sees org-level strings only — a
- * space-level guard can never pass on an org route, which is the property the
- * split exists for.
+ * Every permission is org-level OR space-level (RBAC spec §3.4): org roles
+ * grant the former ({@link orgPermissions}), space roles the latter
+ * ({@link spacePermissions}, resolved per request in `lib/space-role.ts`);
+ * {@link effectivePermissions} unions them under the credential ceiling, so a
+ * space-level guard can never pass on a route without space context.
  *
  * ## Core vs module resources
  *
@@ -96,27 +85,14 @@ export type Action<R extends Resource = Resource> = R extends CoreResource
 export type Permission = CorePermission | ModulePermission;
 
 // ---------------------------------------------------------------------------
-// Org roles → org-level permissions (RBAC spec §3.2)
-//
-// Only ORG-LEVEL strings live here — the type makes a space-level string a
-// compile error. What an org role reaches inside a space comes from the
-// space-role preset it maps to (below), which is what lets a later phase
-// swap the implicit mapping for an explicit `space_members` row without
-// touching this table.
+// Org roles → org-level permissions (RBAC spec §3.2). Only ORG-LEVEL strings
+// live here — the type makes a space-level string a compile error.
 // ---------------------------------------------------------------------------
 
-/**
- * Owner: every org-level permission, derived from the core catalog rather
- * than re-listed — a new org-level resource reaches the owner the moment it
- * is declared, instead of silently reaching nobody.
- */
+/** Owner: every org-level permission, derived from the catalog so a new one reaches the owner unlisted. */
 const OWNER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = ORG_LEVEL_PERMISSIONS;
 
-/**
- * Admin: everything except deleting the organization and renaming it.
- * `org:update` (name/slug) is owner-only per RBAC spec §3.4 — it is the org's
- * identity, and the route that writes it has always been owner-gated.
- */
+/** Admin: everything except `org:delete` and `org:update` — the org's identity is owner-only (RBAC spec §3.4). */
 const ADMIN_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>(
   [...OWNER_ORG_PERMISSIONS].filter((p) => p !== "org:delete" && p !== "org:update"),
 );
@@ -126,31 +102,25 @@ const MEMBER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevel
   "org:read",
   "members:read",
   "spaces:read",
-  // A space `admin` who is only an org member assigns roles in their space, so
-  // they must be able to LIST what is assignable. Defining a bundle stays
-  // owner/admin (`roles:write` / `roles:delete`) — see RBAC spec §13.6.
+  // A space `admin` who is only an org member must LIST assignable roles;
+  // defining a bundle stays owner/admin (RBAC spec §13.6).
   "roles:read",
   "models:read",
   "proxies:read",
-  // Members run completions through the platform with the org's configured
-  // models (powers first-party chat / remote CLI for ordinary members, not
-  // just admins). Usage metered per call in `llm_usage`.
+  // Completions with the org's models (first-party chat, remote CLI); metered per call in `llm_usage`.
   "llm-proxy:call",
 ]);
 
 /**
  * Guest: an org identity with no implicit reach into any space (RBAC spec
- * §3.2). Same infrastructure reads as a member minus `members:read` — a guest
- * is an outside collaborator and has no business enumerating the org
- * directory.
+ * §3.2). Member reads minus `members:read` — no enumerating the org directory.
  */
 const GUEST_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelPermission>([
   "org:read",
   "spaces:read",
   "models:read",
   "proxies:read",
-  // A guest still runs completions in the spaces they were added to; the
-  // proxy is org-metered and not space-scoped, so the grant lives here.
+  // The proxy is org-metered, not space-scoped, so a guest's grant lives here.
   "llm-proxy:call",
 ]);
 
@@ -163,18 +133,11 @@ const ORG_ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<OrgLevelPermission>> = {
 };
 
 // ---------------------------------------------------------------------------
-// Space-role presets → space-level permissions (RBAC spec §3.3)
-//
-// Constants, not rows: a new space-level permission joins the right preset in
-// the same commit that adds it, with no data migration. The type makes an
-// org-level string a compile error, so the two halves cannot leak into each
-// other.
+// Space-role presets → space-level permissions (RBAC spec §3.3). Constants,
+// not rows: a new space-level permission joins its preset in the same commit.
 // ---------------------------------------------------------------------------
 
-/**
- * `admin`: run the space — every space-level permission, derived from the
- * core catalog for the same reason the owner set is.
- */
+/** `admin`: every space-level permission, derived from the catalog. */
 const ADMIN_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = SPACE_LEVEL_PERMISSIONS;
 
 /** Families a `builder` authors and operates with, but does not govern. */
@@ -196,11 +159,9 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "mcp-servers:read",
     "runs:read",
     "runs:cancel",
-    // Files (read only — deleting is preset admin, or the creator via the
-    // per-file capability check, which needs no grant)
+    // Files: read only — deleting is preset admin or the creator (per-file capability check).
     "files:read",
-    // Schedules (read only — creating/editing schedules, incl. choosing the
-    // execution identity, is a governance operation; #738).
+    // Schedules: read only — choosing the execution identity is governance (#738).
     "schedules:read",
     "persistence:read",
     // Browse the catalog + self-connect; install/uninstall is preset admin.
@@ -311,12 +272,8 @@ export function getApiKeyAllowedScopes(): ReadonlySet<string> {
 }
 
 /**
- * Org-level permissions of `role`: the static grants union the module
- * contributions declared at `level: "org"`.
- *
- * This is the whole set a caller holds outside a space. The space half is
- * resolved per request against a `space_members` row — see
- * `lib/space-role.ts` and {@link effectivePermissions}.
+ * Org-level permissions of `role`: static grants union module contributions at
+ * `level: "org"`. The space half is resolved per request (`lib/space-role.ts`).
  */
 export function orgPermissions(role: OrgRole): Set<Permission> {
   return new Set<Permission>([
@@ -325,10 +282,7 @@ export function orgPermissions(role: OrgRole): Set<Permission> {
   ]);
 }
 
-/**
- * Space-level permissions of a preset: the static grants union the module
- * contributions that named the preset.
- */
+/** Space-level permissions of a preset: static grants union module contributions naming it. */
 export function presetPermissions(preset: SpaceRolePreset): Set<Permission> {
   return new Set<Permission>([
     ...SPACE_PRESET_PERMISSIONS[preset],
@@ -337,14 +291,9 @@ export function presetPermissions(preset: SpaceRolePreset): Set<Permission> {
 }
 
 /**
- * Every space-level string the running platform understands: the core catalog
- * plus whatever the loaded modules put in a preset.
- *
- * A module may declare a space-level resource with `presets: []` (legal —
- * API-key-only access); such a string is reachable by no role and therefore by
- * no custom role either, which is fail-closed and the right default. This is
- * the vocabulary a custom `space_roles.permissions` array is filtered against
- * at resolve time, so an unknown string never reaches `Set.has`.
+ * Every space-level string the running platform understands: the allowlist a
+ * custom `space_roles.permissions` array is filtered against. A module resource
+ * with `presets: []` is reachable by no role, custom ones included (fail-closed).
  */
 export function knownSpaceLevelPermissions(): ReadonlySet<string> {
   const known = new Set<string>(SPACE_LEVEL_PERMISSIONS);
@@ -369,11 +318,9 @@ export interface SpaceVocabularyGroup {
 }
 
 /**
- * The vocabulary a custom space role may draw from, grouped for a picker
- * (`GET /api/roles/vocabulary`, RBAC spec §6.2). Same source as
- * {@link knownSpaceLevelPermissions} — that function IS the validator's
- * allowlist, so what the picker offers and what the validator accepts cannot
- * drift.
+ * Custom-role vocabulary grouped for a picker (`GET /api/roles/vocabulary`,
+ * RBAC spec §6.2). Same source as {@link knownSpaceLevelPermissions}, so what
+ * the picker offers and what the validator accepts cannot drift.
  */
 export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
   const apiKeyAllowed = getApiKeyAllowedScopes();
@@ -395,12 +342,10 @@ export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
 }
 
 /**
- * Effective permissions for one request: the caller's org-level set union its
- * space-level set (empty on a route with no space context), intersected with
- * the credential's ceiling.
- *
+ * Effective permissions for one request: org-level set ∪ space-level set
+ * (empty outside a space context), intersected with the credential ceiling.
  * `scopeCeiling` is the API-key scope list or the OIDC scope claim; a cookie
- * session has none, so the union stands as-is.
+ * session has none.
  */
 export function effectivePermissions(input: {
   orgPermissions: ReadonlySet<string>;
@@ -421,9 +366,8 @@ export function effectivePermissions(input: {
 }
 
 /**
- * What an org LISTING row says a role grants at org level, sorted for a stable
- * wire order. No space half on purpose: the space slice is answered per space
- * by `GET /api/spaces`.
+ * Org-level grants of `role` as an org LISTING shows them, sorted. No space
+ * half: the space slice is answered per space by `GET /api/spaces`.
  */
 export function listedOrgPermissions(role: OrgRole): string[] {
   return [...orgPermissions(role)].sort();
@@ -436,23 +380,15 @@ export function listedOrgPermissions(role: OrgRole): string[] {
  * The two rules are deliberately different in kind:
  *
  *  - A scope that is not API-key-grantable — a typo, a retired spelling, or a
- *    session-only permission such as `org:delete` or `integrations:configure`
- *    — is a REFUSAL (400 naming the offending value). It is not a request the
- *    server can honour in any narrower form, and dropping it mints a key that
- *    silently lacks the access the caller asked for. `POST /api/api-keys
- *    {"scopes":["oops"]}` answering 201 with `scopes: []` is a key that 403s
- *    on everything.
+ *    session-only permission such as `org:delete` — is a REFUSAL (400 naming
+ *    the value): dropping it would mint a key that silently lacks what was asked.
  *  - A scope the creator does not itself hold is FILTERED. "You cannot
  *    delegate more than you have" is a rule, not a mistake, and the
  *    scopes-omitted default (`validateScopes([...getApiKeyAllowedScopes()])`)
- *    depends on it: it hands in the full allowlist precisely so the creator's
- *    own set narrows it.
+ *    depends on it.
  *
- * `creatorEffective` is the creator's effective set **in the key's space** —
- * the request that mints a key is space-scoped, so it is exactly the
- * `permissions` the pipeline already computed for that request (RBAC spec
- * §7.1). A `builder` therefore cannot mint `api-keys:create`, because a
- * builder does not hold it.
+ * `creatorEffective` is the creator's effective set in the key's space — the
+ * `permissions` the pipeline computed for the minting request (RBAC spec §7.1).
  *
  * @throws ApiError 400 `invalid_request` when a scope is not grantable to an
  *   API key.

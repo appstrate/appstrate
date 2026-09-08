@@ -87,11 +87,8 @@ export const updateRoleSchema = z
   .strict();
 
 /**
- * A pending invitation's role AND its space assignments are editable until it
- * is accepted. Omitting `space_assignments` keeps the ones already stored —
- * the role rules are then re-checked against them, so changing the role to
- * `guest` on an invitation carrying no space is refused here just as it is at
- * invite time.
+ * Omitting `space_assignments` keeps the stored ones; the role rules are
+ * re-checked against them, so `guest` on a space-less invitation is refused.
  */
 export const updateInvitationSchema = z
   .object({
@@ -101,11 +98,8 @@ export const updateInvitationSchema = z
   .strict();
 
 /**
- * Org role the who-manages-whom policies below judge against, as resolved by
- * `orgPathContext` (`middleware/org-path-context.ts`) — the persona's under a
- * role preview, so the preview cannot manage members the previewed role could
- * not. The route's permission guard has already proved the membership row
- * exists; the throw is the fail-closed backstop, not an expected branch.
+ * Org role the who-manages-whom policies judge against: the persona's under a
+ * role preview. The route guard already proved membership; the throw is a backstop.
  */
 function actingOrgRole(c: Context<AppEnv>): OrgRole {
   const role = callerOrgRole(c, c.req.param("orgId"));
@@ -115,9 +109,7 @@ function actingOrgRole(c: Context<AppEnv>): OrgRole {
 
 const router = new Hono<AppEnv>();
 
-// No org-path middleware here: `orgPathContext` is mounted once at the app
-// root for the whole `/api/orgs/:orgId*` family (including the module routers
-// that mount under it), and it carries the API-key cross-org pin too.
+// Org-path context + API-key org pin come from `orgPathContext`, mounted once at the app root.
 
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
@@ -127,17 +119,14 @@ router.get("/", async (c) => {
   // creator belongs to.
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
-  // Once for the listing: the persona names one org, and one this listing
-  // cannot place is refused rather than ignored.
+  // A persona naming an org this listing cannot place is refused, not ignored.
   await resolveListingViewAs(c, orgs);
 
   return c.json(
     listResponse(
       await Promise.all(
         orgs.map(async (o) => {
-          // Role and org-level reach in THAT org, ceiling-applied (RBAC spec
-          // §6.5) — the SPA reads the permissions rather than re-deriving them.
-          // Both are the persona's in the org being previewed.
+          // Ceiling-applied, per org, the persona's under a preview (RBAC spec §6.5).
           const identity = await listedOrgIdentityForCaller(c, o.id, o.role);
           return {
             id: o.id,
@@ -279,13 +268,9 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
 router.get("/:orgId", async (c) => {
   const orgId = c.req.param("orgId")!;
 
-  // Membership, not RBAC: every org role reads its own org, and an API key
-  // must keep working here. `orgRole` is the membership row both paths
-  // already loaded — `orgPathContext` for a session (it sets the key only when
-  // the row exists), the auth pipeline for a key, whose `validateApiKey`
-  // inner-joins the creator's live membership and whose org the same middleware
-  // pins to the path. Re-querying would be a second identical round-trip per
-  // request.
+  // Membership, not RBAC: every org role reads its own org, and API keys must
+  // keep working. `orgRole` is the row `orgPathContext` (session) or the auth
+  // pipeline (key) already loaded — set only when it exists.
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   return c.json(await buildOrgDetail(c, orgId));
@@ -386,19 +371,15 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
 // magic-link side channel. When SMTP is configured the invitation email is
 // sent; otherwise the admin shares the returned token/link out of band.
 //
-// One pending invitation per (org, email): a second create for an address that
-// already holds a valid pending one is a 409 `invitation_already_pending`
-// carrying `invitation_id`, and the caller edits that invitation (PUT
-// /invitations/:id) to add a space or change the role. The space Members page
-// relies on this — inviting a guest there is the same POST, so without it a
-// second space would silently drop the first assignment and the shared link.
+// One pending invitation per (org, email): a duplicate is a 409
+// `invitation_already_pending` carrying `invitation_id`; the caller edits that
+// one (PUT /invitations/:id) instead — the space Members page relies on this.
 router.post("/:orgId/members", requirePermission("members", "invite"), async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, addMemberSchema);
   const role = data.role;
-  // Before the try: these are 400/404 refusals about the request, and the
-  // catch below turns everything it wraps into a 500 `invitation_failed`.
+  // Before the try: the catch below turns anything it wraps into a 500.
   await assertSpaceAssignmentsValid({ orgId, role, assignments: data.space_assignments });
 
   try {
@@ -525,9 +506,7 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
   const orgId = c.req.param("orgId")!;
   const targetUserId = c.req.param("userId")!;
 
-  // Who-manages-whom runs after the guard, inside the handler: RBAC answers
-  // "may this principal remove members at all", the policy answers "may it
-  // remove THIS one".
+  // The guard answered "may remove members at all"; the policy answers "THIS one".
   const actorRole = actingOrgRole(c);
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
@@ -576,9 +555,8 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
     throw forbidden("You cannot assign this role to this member");
   }
 
-  // Promoting to owner/admin drops every explicit space grant the member held
-  // (the org role subsumes them). The rows are gone, so the audit is the only
-  // record of what a later demotion will NOT restore.
+  // Promoting to owner/admin drops the member's explicit space grants; the audit
+  // is the only record of what a later demotion will NOT restore.
   const revoked = await updateMemberRole(orgId, targetUserId, data.role);
   await recordAuditFromContext(c, {
     action: "org.member_role_updated",
@@ -615,9 +593,8 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
 router.get("/:orgId/settings", async (c) => {
   const orgId = c.req.param("orgId")!;
 
-  // Membership gate — without it any cookie-session user could read an
-  // arbitrary org's settings by passing its id (`orgPathContext` only pins
-  // API keys, not sessions). Same already-loaded row as GET /:orgId.
+  // Membership gate (`orgPathContext` only pins API keys, not sessions); same
+  // already-loaded row as GET /:orgId.
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   const settings = await getOrgSettings(orgId);

@@ -1,17 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Org context for `/api/orgs/:orgId*`, where the org is in the PATH.
- *
- * That family skips `requireOrgContext` (`skipOrgContext`,
- * `lib/auth-pipeline.ts`), so the pipeline's permission step never runs for it
- * and this middleware IS that step. Mounted ONCE at the app root, ahead of the
- * orgs router and of every module router, so a module mounting under
- * `/api/orgs/:orgId/…` inherits it rather than deriving a second, ceiling-free
- * answer — which is exactly how an API key scoped to `runs:read` once reached
- * oidc's `cli-sessions` with its creator's full org authority.
- *
- * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4.2
+ * Org context for `/api/orgs/:orgId*` (org in the PATH). That family skips
+ * `requireOrgContext`, so this middleware IS the permission step. Mounted ONCE
+ * at the app root so every router under `/api/orgs/:orgId/…`, modules included,
+ * inherits it instead of deriving a ceiling-free answer (RBAC spec §4.2).
  */
 
 import type { Context, Next } from "hono";
@@ -22,36 +15,28 @@ import { principalGrants } from "../lib/principal-permissions.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import type { AppEnv } from "../types/index.ts";
 
-/**
- * Non-membership is `next()`, not a throw: the route's own guard decides the
- * status. The orgs router answers 403 from `requirePermission`, the oidc
- * cli-session routes from {@link requireOrgPathMembership}.
- */
+/** Non-membership is `next()`, not a throw: the route's own guard decides the status. */
 async function orgPathContext(c: Context<AppEnv>, next: Next) {
   const orgId = c.req.param("orgId");
   if (!orgId) return next();
 
-  // A pinned org wins over the path, exactly as it wins over `X-Org-Id` in
-  // `requireOrgContext`, and it is checked for EVERY credential before anything
-  // else: a token scoped to org A whose holder is also a member of org B must
-  // not reach B by naming B in the URL — and that caller never reaches the
-  // derivation below, so checking it there would be checking nothing.
+  // A pinned org wins over the path (as over `X-Org-Id` in `requireOrgContext`)
+  // and is checked for EVERY credential: a token scoped to org A must not reach
+  // org B by naming it in the URL.
   const pinned = c.get("orgId");
   if (pinned && pinned !== orgId) {
     throw forbidden("Path organization does not match authenticated organization");
   }
 
-  // Every other auth method already wrote a CEILING-LIMITED set (API-key scopes
-  // ∩ creator role, a token's scope claim) and keeps it; overwriting it with the
-  // membership row's full role set is a privilege escalation.
+  // Non-session methods already hold a CEILING-LIMITED set; overwriting it with
+  // the membership row's full role set would be a privilege escalation.
   if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) return next();
 
   const member = await getOrgMember(orgId, c.get("user").id);
   if (!member) return next();
 
   const role = member.role;
-  // Same position as the pipeline's permission step on the header-org path:
-  // after the real org role, before the single `permissions` write below.
+  // After the real org role, before the single `permissions` write.
   await resolveViewAs(c, orgId, role);
   // Never space-scoped, so the org half is the whole answer.
   const { orgPermissions, effective } = orgHalfFor(c, orgId, role, await principalGrants(c, orgId));
@@ -62,10 +47,7 @@ async function orgPathContext(c: Context<AppEnv>, next: Next) {
   return next();
 }
 
-/**
- * 403 on non-membership, for routes that want it before their permission guard
- * runs. Reads what `orgPathContext` wrote and derives nothing.
- */
+/** 403 on non-membership, ahead of a route's permission guard. Reads what `orgPathContext` wrote. */
 export async function requireOrgPathMembership(c: Context<AppEnv>, next: Next) {
   const orgId = c.req.param("orgId");
   if (!orgId) throw forbidden("Not a member of this organization");
@@ -76,8 +58,8 @@ export async function requireOrgPathMembership(c: Context<AppEnv>, next: Next) {
 }
 
 /**
- * The chain, in order, as one value so `index.ts` and the test harness cannot
- * mount half of it. `apiKeyOrgScopeGuard` FIRST: a key bound to org A is
- * refused on `/api/orgs/B/...` before anything reads B's rows.
+ * One value so `index.ts` and the test harness cannot mount half the chain.
+ * `apiKeyOrgScopeGuard` FIRST: a key bound to org A is refused on `/api/orgs/B`
+ * before anything reads B's rows.
  */
 export const ORG_PATH_MIDDLEWARE = [apiKeyOrgScopeGuard, orgPathContext] as const;

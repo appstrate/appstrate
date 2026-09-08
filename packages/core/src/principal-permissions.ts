@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Extra org-level permissions for ONE user in ONE org, without inventing an org
- * role. Why not a role: the motivating case is a billing manager, and an org
+ * Extra org-level permissions for ONE user in ONE org, without an org role — an org
  * role named `billing` would put cloud vocabulary in an Apache-2.0 enum.
- *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4.2, §10
  */
 
@@ -21,16 +19,11 @@ export interface PrincipalPermissionContext {
 /** The `AppstrateModule.principalPermissions` shape. */
 export interface ModulePrincipalPermissions {
   /**
-   * Every org-level string this module may ever grant. Validated at boot; an
-   * API-key- or end-user-grantable entry is refused, because those ceilings can
-   * never carry a session-only grant. A resolver answer outside this list is
-   * dropped, so a buggy module cannot widen its own reach past boot review.
+   * Every org-level string this module may ever grant; validated at boot, and a resolver
+   * answer outside it is dropped (a buggy module cannot widen its reach past boot review).
    */
   mayGrant: readonly string[];
-  /**
-   * Extra org-level permissions for one principal. Called once per session
-   * request on a cache miss — keep it to one indexed lookup.
-   */
+  /** Called once per session request on a cache miss — keep it to one indexed lookup. */
   resolve(ctx: PrincipalPermissionContext): Promise<readonly string[]>;
 }
 
@@ -42,11 +35,7 @@ export interface RegisteredPrincipalPermissions extends ModulePrincipalPermissio
 
 const EMPTY: ReadonlySet<string> = new Set<string>();
 
-/**
- * The same 10s the org-settings cache uses, for the same reason: the real
- * invalidation is the bus, and the TTL only bounds how long a LOST broadcast
- * can leave a replica stale.
- */
+/** Same 10s as the org-settings cache: the bus invalidates, the TTL only bounds a LOST broadcast. */
 const TTL_MS = 10_000;
 
 /** `orgId:userId` → the filtered union. */
@@ -63,10 +52,7 @@ const warned = new Set<string>();
 
 const keyOf = (orgId: string, userId: string): string => `${orgId}:${userId}`;
 
-/**
- * Platform boot wiring; a module never calls it. Re-registering drops the cache,
- * whose answers were computed from other declarations.
- */
+/** Platform boot wiring. Re-registering drops the cache, whose answers came from other declarations. */
 export function setPrincipalPermissionsProviders(
   registered: readonly RegisteredPrincipalPermissions[] | null,
 ): void {
@@ -76,9 +62,8 @@ export function setPrincipalPermissionsProviders(
 }
 
 /**
- * The union over every declaring module, each answer filtered to its own
- * `mayGrant`. With none — the OSS baseline — returns the shared empty set
- * without touching the cache, so zero-footprint holds down to the allocation.
+ * Union over every declaring module, each answer filtered to its own `mayGrant`.
+ * With none (the OSS baseline) the cache is never touched.
  */
 export async function resolvePrincipalPermissions(
   ctx: PrincipalPermissionContext,
@@ -127,10 +112,9 @@ function warnUndeclared(moduleId: string, permission: string): void {
 }
 
 /**
- * Drop one principal's grants, or every principal of `orgId` — on all replicas,
- * through the cache bus. The granting module calls this from its own writes;
- * the platform cannot know when a module's table changed. The org-wide form
- * clears everything: the primitive is keyed, not prefixed, and such writes are rare.
+ * Drop one principal's grants, or every principal of `orgId` (a full clear — the cache is
+ * keyed, not prefixed), on all replicas. The granting module calls this from its own
+ * writes; the platform cannot know when a module's table changed.
  */
 export function invalidatePrincipalPermissions(orgId: string, userId?: string): void {
   if (userId === undefined) cache.clear();

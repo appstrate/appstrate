@@ -333,14 +333,11 @@ async function initSortedModules(
   const sorted = topoSort(modules);
   // Compute the RBAC snapshot from module contributions and register it
   // BEFORE init() runs, so any module that calls `orgPermissions(...)` /
-  // `presetPermissions(...)`
-  // during init (e.g. seeding default API keys with module-owned scopes)
-  // sees the merged view.
+  // `presetPermissions(...)` during init (e.g. seeding default API keys with
+  // module-owned scopes) sees the merged view.
   const rbacSnapshot = collectModulePermissions(sorted);
   setModulePermissionsProvider(() => rbacSnapshot);
-  // Per-principal grants are validated against the merged vocabulary above, so
-  // this must follow the snapshot registration — a module may name its OWN
-  // org-level contribution in `mayGrant`.
+  // Must follow the snapshot: `mayGrant` is validated against the merged vocabulary.
   setPrincipalPermissionsProviders(collectPrincipalPermissions(sorted));
   // Audit trace: `endUserGrantable` permissions are reachable through
   // end-user OAuth/OIDC tokens issued by embedding apps — a much broader
@@ -399,11 +396,8 @@ const MODULE_RBAC_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
  *   - empty `actions` (would contribute nothing)
  *   - one `level` per resource across all of a module's entries
  *   - `grantTo` / `presets` name a known org role / space preset
- *   - `presets` is upward-closed in the preset order (see
- *     {@link assertPresetsUpwardClosed})
- *   - an empty `grantTo`/`presets` is legal and silent: it declares the
- *     resource without granting it, which is what an API-key-only or
- *     principal-granted resource looks like
+ *   - `presets` is upward-closed (see {@link assertPresetsUpwardClosed})
+ *   - an empty `grantTo`/`presets` is legal: declares without granting
  *
  * Returns the snapshot in `ModulePermissionsSnapshot` shape — Sets keyed
  * by org role and by space preset, plus the API-key allowlist union.
@@ -450,22 +444,9 @@ export function collectModulePermissions(
 }
 
 /**
- * Aggregate `principalPermissions` from every loaded module, validating each
- * declared `mayGrant` entry before the platform will ever grant it (RBAC spec
- * §4.2). Two rules, both fail-fast and both naming the module and the string:
- *
- *   - the string is a known ORG-level permission — core catalog, or a
- *     `level: "org"` contribution of some loaded module. A space-level string
- *     is granted per space and this surface has no space, so it could only
- *     ever be dead weight in the org set.
- *   - the string is NOT `apiKeyGrantable` / `endUserGrantable`. The surface is
- *     evaluated for session-shaped callers only, so a delegated credential's
- *     ceiling can never carry the grant; declaring one would advertise access
- *     no key can obtain.
- *
- * Reads the merged allowlists (`getApiKeyAllowedScopes`,
- * `getModuleEndUserAllowedScopes`), so it must run AFTER the module RBAC
- * snapshot is registered.
+ * Aggregate `principalPermissions` from every module, validating each `mayGrant`
+ * string at boot (RBAC spec §4.2; the throws below state the two rules). Reads
+ * the merged allowlists, so it must run AFTER the module RBAC snapshot.
  */
 export function collectPrincipalPermissions(
   modules: readonly AppstrateModule[],
@@ -513,12 +494,8 @@ export function collectPrincipalPermissions(
 }
 
 /**
- * Every org-level permission string the running platform understands: the core
- * catalog plus each loaded module's `level: "org"` entries. Walks the
- * contributions rather than reading the role snapshot, because a module may
- * legally declare an org-level resource with `grantTo: []` — reachable by no
- * role, and therefore absent from the snapshot, yet still a real string a
- * per-principal grant may name.
+ * Walks the contributions rather than the role snapshot: a `grantTo: []`
+ * resource is absent from the snapshot yet a real string `mayGrant` may name.
  */
 function knownOrgLevelPermissions(modules: readonly AppstrateModule[]): ReadonlySet<string> {
   const known = new Set<string>(ORG_LEVEL_PERMISSIONS);
@@ -560,9 +537,7 @@ function validateContribution(
   }
   ownerByResource.set(resource, moduleId);
 
-  // One resource lives at one level. Two entries disagreeing would put half
-  // the actions in the org slice and half in the presets, so a role would
-  // hold `read` but never `write` with nothing failing at boot.
+  // One resource, one level: split entries would leave a role with `read` but never `write`.
   if (level !== "org" && level !== "space") {
     throw new Error(
       `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown level ` +
@@ -616,15 +591,9 @@ function validateContribution(
 }
 
 /**
- * The four presets are nested — `viewer ⊂ operator ⊂ builder ⊂ admin` — and
- * core's own preset table honours that. A module's `presets` list must too:
- * naming `builder` without `admin` means a space admin holds LESS than a
- * builder for that one resource, which no caller can reason about and which
- * silently contradicts the ordering test every core preset is held to.
- *
- * Boot error, not a warning: the wrong answer here is a permission a space
- * admin is refused, and it would only ever be found by someone hitting the
- * 403.
+ * Presets are nested (`viewer ⊂ operator ⊂ builder ⊂ admin`), so `presets` must
+ * be upward-closed: `builder` without `admin` would give a space admin LESS than
+ * a builder. Boot error, not a warning: the wrong answer is a 403 nobody looks for.
  */
 const PRESETS_STRONGEST_FIRST: readonly SpaceRolePreset[] = [
   "admin",

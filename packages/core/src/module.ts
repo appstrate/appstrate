@@ -223,8 +223,7 @@ export interface AppstrateModule {
    *
    * Aggregated by the platform at boot and merged into:
    *   1. `orgPermissions(role)` / `presetPermissions(preset)` — adds module
-   *      entries to the per-role / per-preset
-   *      permission set written to `c.get("permissions")`.
+   *      entries to the per-role / per-preset set written to `c.get("permissions")`.
    *   2. `API_KEY_ALLOWED_SCOPES` — module entries become grantable
    *      through API keys (filtered against creator's role at issuance).
    *   3. `requirePermission(resource, action)` — runtime check is purely
@@ -270,54 +269,22 @@ export interface AppstrateModule {
   permissionsContribution?(): ModulePermissionContribution[];
 
   /**
-   * RBAC contribution, the other half: org-level permissions granted to a
-   * specific PRINCIPAL (one user in one org) rather than to a role.
+   * Org-level permissions granted to a PRINCIPAL (one user in one org) rather
+   * than to a role — for a population the module maintains (cloud's billing
+   * managers, RBAC spec §10; an SSO group mapping). Composes with
+   * {@link permissionsContribution}, which still declares the resource and its
+   * role grants; this hands extra copies of those strings to named users.
    *
-   * Use it when the population that holds a permission is a list of people the
-   * module maintains, not a role: cloud's billing managers (RBAC spec §10), an
-   * SSO group mapping. Use {@link permissionsContribution} instead when the
-   * grant follows from the caller's org role or space role — that is the
-   * common case and this one never replaces it. The two compose: a module
-   * declares its resource and its role grants with `permissionsContribution`,
-   * then hands extra copies of those same strings to named principals here.
+   * Not a `ModuleHooks` member: every declaring module is consulted and the
+   * answers are UNIONED; a throwing resolver is isolated (logged, grants nothing).
    *
-   * Not a member of `ModuleHooks`, because it is neither dispatch mode the
-   * hooks map offers: every module that declares it is consulted (unlike
-   * first-match) and the answers are UNIONED rather than merely broadcast. A
-   * throwing resolver is isolated — logged, contributing nothing — so one
-   * module's outage cannot lock a caller out of permissions another module,
-   * or their own role, grants them.
-   *
-   * ```ts
-   * principalPermissions: {
-   *   mayGrant: ["billing:read", "billing:manage"],
-   *   resolve: async ({ orgId, userId }) => (await isBillingManager(orgId, userId)
-   *     ? ["billing:read", "billing:manage"]
-   *     : []),
-   * },
-   * ```
-   *
-   * Constraints enforced at boot (fail-fast), each naming the module and the
-   * offending string:
-   *   - every `mayGrant` entry is a known ORG-level permission — a core
-   *     org-level string, or one this module (or another loaded one)
-   *     contributed at `level: "org"`. A space-level string is refused: it is
-   *     granted per space, and this surface has no space.
-   *   - no `mayGrant` entry is `apiKeyGrantable` / `endUserGrantable`. Those
-   *     ceilings belong to delegated credentials, which this surface is never
-   *     evaluated for, so declaring one would promise a grant that can never
-   *     be honoured.
-   *
-   * At runtime the resolver is called once per session request per principal,
-   * on a cache miss, and its answer is filtered to `mayGrant` — an undeclared
-   * string is dropped and logged, never granted. Cache invalidation is the
-   * module's own job: call `invalidatePrincipalPermissions(orgId, userId?)`
-   * from `@appstrate/core/principal-permissions` after writing the table the
-   * resolver reads.
-   *
-   * No-op on platforms that don't load this module — the OSS zero-footprint
-   * invariant holds, and with no module declaring it the platform never even
-   * reads the cache.
+   * Boot constraints (fail-fast): every `mayGrant` entry is a known ORG-level
+   * permission (core, or contributed at `level: "org"`), and none is
+   * `apiKeyGrantable` / `endUserGrantable` — this surface is never evaluated
+   * for delegated credentials. At runtime the answer is filtered to `mayGrant`;
+   * cache invalidation is the module's job (`invalidatePrincipalPermissions`
+   * from `@appstrate/core/principal-permissions` after its own writes).
+   * No-op when the module is not loaded.
    */
   principalPermissions?: ModulePrincipalPermissions;
 
@@ -401,79 +368,46 @@ export interface AppstrateModule {
  */
 interface ModulePermissionContributionBase<R extends Extract<ModuleResource, string>> {
   /**
-   * Resource name (e.g. "tasks") — a key of the module's `ModuleResources`
-   * augmentation. Must be unique across loaded modules and disjoint from
-   * core resources (both enforced at boot).
+   * A key of the module's `ModuleResources` augmentation; unique across loaded
+   * modules and disjoint from core resources (both enforced at boot).
    */
   resource: R;
-  /**
-   * Actions to grant for this resource, narrowed to those the augmentation
-   * declares for `R` (e.g. `["read", "write"]`).
-   */
+  /** Actions to grant, narrowed to those the augmentation declares for `R`. */
   actions: readonly Extract<ModuleResources[R], string>[];
   /**
-   * When `true`, every `<resource>:<action>` produced by this entry is
-   * added to the API-key allowlist so org admins can mint keys with
-   * these scopes. Defaults to `false` — module permissions are
-   * session-only unless explicitly opted in.
+   * When `true`, every `<resource>:<action>` here joins the API-key allowlist.
+   * Defaults to `false` — session-only unless opted in.
    */
   apiKeyGrantable?: boolean;
   /**
-   * When `true`, every `<resource>:<action>` produced by this entry can be
-   * carried by an end-user OAuth2/OIDC token (the embedding-app flow). The
-   * platform's OIDC strategy filters end-user JWT scopes against this
-   * allowlist before writing them to `c.get("permissions")` — without the
-   * opt-in, a module's resource is unreachable through end-user tokens
-   * even if the JWT advertises it.
-   *
-   * Defaults to `false` — module permissions are dashboard/instance/API-key
-   * only unless explicitly opted in. Use this for modules whose data is
-   * meant to be addressed per-end-user (per-user data streams, end-user
-   * profiles, notifications…). Avoid for admin/destructive surfaces (those should
-   * stay session-only or API-key-only).
-   *
-   * No-op on platforms that don't load the OIDC module — the flag is
-   * simply ignored when no end-user pipeline exists.
+   * When `true`, every `<resource>:<action>` here may be carried by an end-user
+   * OAuth2/OIDC token; the OIDC strategy filters end-user JWT scopes against
+   * this allowlist. Defaults to `false`. Opt in for per-end-user data only,
+   * never for admin/destructive surfaces. Ignored when no end-user pipeline is loaded.
    */
   endUserGrantable?: boolean;
 }
 
 /**
- * One resource's RBAC contribution from a module — declares the actions
- * available, the level they live at, who grants them, and whether they can
- * be issued through API keys. See `AppstrateModule.permissionsContribution`.
- *
- * `level` is the discriminant (RBAC spec §3.4): an org-level resource is
- * granted by org roles (`grantTo`), a space-level one by space-role presets
- * (`presets`). There is no default and no fallback — a resource whose rows
- * carry a `space_id` is space-level, everything else is org-level.
- *
- * A module that contributes permissions MUST ship the `declare module`
- * block: without it `ModuleResources` stays empty, this type resolves to
- * `never`, and `permissionsContribution()` cannot return anything.
+ * One resource's RBAC contribution from a module. `level` is the discriminant
+ * (RBAC spec §3.4): org-level resources are granted by org roles (`grantTo`),
+ * space-level ones by space-role presets (`presets`); no default — a resource
+ * whose rows carry a `space_id` is space-level. Requires the `declare module`
+ * block: without it `ModuleResources` is empty and this type is `never`.
  */
 export type ModulePermissionContribution = {
   [R in Extract<ModuleResource, string>]:
     | (ModulePermissionContributionBase<R> & {
         level: "org";
         /**
-         * Org roles that grant every listed action. The platform unions these
-         * into `orgPermissions(role)`. Omit a role to leave it without
-         * access.
-         *
-         * Granular per-action grants (e.g. owner gets write, member gets read
-         * only) are supported by listing the resource multiple times with
-         * different `actions`/`grantTo` combinations.
+         * Org roles that grant every listed action; list the resource twice to
+         * split actions across roles.
          */
         grantTo: ReadonlyArray<OrgRole>;
       })
     | (ModulePermissionContributionBase<R> & {
         level: "space";
-        /**
-         * Space-role presets that grant every listed action. Same granularity
-         * rule as `grantTo`: list the resource twice to split actions across
-         * presets.
-         */
+        /** Space-role presets that grant every listed action; same split rule as `grantTo`. */
         presets: ReadonlyArray<SpaceRolePreset>;
       });
 }[Extract<ModuleResource, string>];
@@ -1301,21 +1235,13 @@ export interface ModuleInitContext {
   /** Lazy email sender (breaks circular deps at module load time). */
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /**
-   * Query helper: emails of the org's OWNERS.
-   *
-   * The live fallback for an unset billing contact — owners are the identity
-   * an organization cannot exist without, so this is the one recipient list
-   * that is always non-empty. It is deliberately not "admins too": an admin is
-   * an operational role, and billing mail is not an operational notification.
+   * Query helper: emails of the org's OWNERS — the one recipient list that is
+   * always non-empty. Deliberately not admins: billing mail is not operational.
    */
   getOrgOwnerEmails: (orgId: string) => Promise<string[]>;
   /**
-   * Query helper: resolve `userIds` to org members.
-   *
-   * A id that is not a member of `orgId` is ABSENT from the result rather than
-   * an error — a module storing user ids of its own (billing managers, say)
-   * must be able to ask "which of these are still members" in one round trip,
-   * and a removed member is the ordinary answer, not an exception.
+   * Query helper: resolve `userIds` to org members. A non-member id is ABSENT
+   * from the result, not an error — "which of these are still members" in one round trip.
    */
   getOrgMembers: (orgId: string, userIds: readonly string[]) => Promise<ModuleOrgMember[]>;
   /**

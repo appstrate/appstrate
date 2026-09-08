@@ -89,30 +89,19 @@ interface SSEAuthResult {
   userId: string;
   orgId: string;
   /**
-   * Whether the subscriber sees debug-level `run_log` events
-   * (services/realtime.ts) — the only thing this flag gates. Read from
-   * `runs:delete`, the admin-grade action of the run family: `runs:read`
-   * opens the stream for everyone, so it cannot discriminate here.
+   * Gates debug-level `run_log` events only (services/realtime.ts). Read from
+   * `runs:delete`: `runs:read` opens the stream for everyone, so it cannot discriminate.
    */
   canReadDebugLogs: boolean;
   spaceId: string;
 }
 
 /**
- * These SSE routes are exempt from the auth pipeline (`skipAuth` matches
- * `/api/realtime/`), so the principal's permission set is resolved here rather
- * than read from the context. It is the PRINCIPAL's set in the streamed space,
- * not the API key's ceiling: debug-log visibility follows the principal behind
- * the stream, and narrowing it to the key's scopes would hide debug frames
- * from a `runs:read`-only key that is allowed to see them today.
- *
- * `null` when the principal has no role in that space — a guest without a row,
- * or a member of a closed/private space they were never added to. The caller
- * turns that into a denied stream.
- *
- * `memberRow` is passed in rather than loaded here because under a role preview
- * it is the persona's overlay, not a row this user has; `persona` then supplies
- * the org half's real set, exactly as the HTTP pipeline does.
+ * SSE routes skip the auth pipeline (`skipAuth` matches `/api/realtime/`), so
+ * the PRINCIPAL's permission set in the streamed space is resolved here — not
+ * the API key's ceiling, which the caller intersects afterwards. `null` when
+ * the principal has no role in that space. `memberRow` is the persona's overlay
+ * under a role preview, so it is passed in rather than loaded.
  */
 function resolveSpaceGrants(
   c: Context<AppEnv>,
@@ -123,8 +112,6 @@ function resolveSpaceGrants(
 ): ReadonlySet<string> | null {
   const ref = resolveSpaceRole(personaFor(c, orgId)?.orgRole ?? realRole, space, memberRow);
   if (!ref) return null;
-  // `orgHalfFor` applies the persona to the org half; the space half is already
-  // the persona's, resolved from its overlay above.
   return new Set<string>([
     ...orgHalfFor(c, orgId, realRole).orgPermissions,
     ...spacePermissions(ref),
@@ -140,25 +127,18 @@ function resolveSpaceGrants(
  *
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
  *
- * Both branches go through the same canonical resolution as the HTTP pipeline
- * (for a key: scopes ∩ the creator's live authority in the key's space; for a
- * session: the org ∪ space union) and both must carry `runs:read` to open any
- * run stream. A caller that reached the space without that permission is
- * rejected with 403 instead of silently inheriting admin.
+ * Both branches resolve permissions as the HTTP pipeline does (key: scopes ∩
+ * creator's live authority in the key's space; session: org ∪ space) and both
+ * must carry `runs:read`; 403 otherwise, never inherited admin.
  *
- * ROLE PREVIEW: these routes are exempt from the auth pipeline, so the
- * `X-View-As` guard never runs for them — and the browser client is an
- * `EventSource`, which cannot send a header at all. The persona therefore
- * arrives as `?view_as=`, in the same grammar, and goes through the same
- * validation. A stream opened under a persona is the persona's stream: it sees
- * what that role would see, and stops where that role would stop.
+ * ROLE PREVIEW arrives as `?view_as=` (same grammar and validation as
+ * `X-View-As`): an `EventSource` cannot send a header, and the header guard
+ * never runs for these pipeline-exempt routes.
  */
 async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null> {
   const viewAsRaw = c.req.query(VIEW_AS_QUERY);
   if (c.req.header(VIEW_AS_HEADER) !== undefined) {
-    // These routes skip the auth pipeline, so the header's own guard never runs
-    // for them. Refusing beats ignoring: a client that believes it is previewing
-    // must not be handed a stream of the caller's real authority.
+    // Refuse, never ignore: a client that believes it is previewing must not get real authority.
     throw new ApiError({
       status: 400,
       code: "invalid_view_as",
@@ -172,8 +152,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   const token = c.req.query("token");
   if (token?.startsWith("ask_")) {
     if (viewAsRaw !== undefined) {
-      // Same refusal the HTTP transport guard gives: a key carries a ceiling of
-      // its own and no session to narrow.
+      // Same refusal as the HTTP transport guard: a key has no session to narrow.
       throw new ApiError({
         status: 400,
         code: "view_as_unsupported",
@@ -185,17 +164,13 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
-    // The key's `spaceId` comes straight off the `api_keys` row, so this is
-    // the shape check for that path: `assertSpaceId` refuses anything that is
-    // not a canonical `spc_` id before it reaches the stream. The row is then
-    // loaded because the space's visibility and default role are what decide
-    // the creator's membership.
+    // `spaceId` comes straight off the `api_keys` row: shape-check it here. The
+    // space row decides the creator's membership (visibility + default role).
     assertSpaceId(keyInfo.spaceId);
     const keySpace = await validateSpaceInOrg(keyInfo.spaceId, keyInfo.orgId);
     if (!keySpace) return null;
 
-    // The creator's live authority in the key's space (RBAC spec §7.1): a
-    // creator who lost the space leaves the key with nothing to read here.
+    // Creator's LIVE authority in the key's space (RBAC spec §7.1).
     const grants = resolveSpaceGrants(
       c,
       keyInfo.orgId,
@@ -217,8 +192,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
-      // From the CEILINGED set, not from `grants`: a key whose scopes stop at
-      // `runs:read` must not stream verbose logs just because its creator could.
+      // From the ceilinged set, not `grants`: the key's scopes bound debug-log visibility.
       canReadDebugLogs: permissions.has("runs:delete"),
       spaceId: keyInfo.spaceId,
     };
@@ -242,9 +216,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   if (!space) return null;
 
   const role = member.role;
-  // Published before the persona is judged: `reportPermissionDenial` reads them
-  // off the context, and outside the pipeline nothing else puts them there — a
-  // denial record naming no actor is not a record.
+  // Set before the persona is judged: `reportPermissionDenial` names the actor from the context.
   c.set("user", {
     id: session.user.id,
     email: session.user.email ?? "",
@@ -259,13 +231,10 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     realOrgRole: role,
     onDenial: (required) => reportPermissionDenial(c, required),
   });
-  // Published before the stream opens so the marker reaches BOTH halves: the
-  // success path below reads it, and a refusal raised from here leaves through
-  // `errorHandler`, which stamps the marker on the problem response.
+  // Set now so a refusal below also carries the marker (`errorHandler` stamps it).
   if (persona) c.set("viewAs", persona);
 
-  // Same membership resolution the HTTP pipeline applies (`applySpacePermissions`):
-  // being in the org is not being in the space.
+  // Same as `applySpacePermissions`: being in the org is not being in the space.
   const grants = resolveSpaceGrants(
     c,
     orgId,
@@ -276,10 +245,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       : await loadSpaceMember(space.id, session.user.id),
   );
   if (!grants) {
-    // `null` here is exactly what `applySpacePermissions` turns into 403 / 404
-    // on the HTTP pipeline; the stream answers the same, so a member-less
-    // caller is not told to log in again for an authenticated session that is
-    // simply outside the space.
+    // Same 403 / 404 split as `applySpacePermissions`, not a 401 for an authenticated session.
     if (space.visibility === "private") {
       throw notFound(`Space '${space.id}' not found in this organization`);
     }
@@ -290,9 +256,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       detail: `You are not a member of space '${space.id}'`,
     });
   }
-  // Same floor as the API-key branch above. A cookie session carries no scope
-  // ceiling, so its effective set IS `grants` — a custom space role without
-  // `runs:read` must not open a run stream just because it reached the space.
+  // Same floor as the key branch; a session has no ceiling, so its effective set IS `grants`.
   if (!grants.has("runs:read")) {
     throw forbidden("Caller does not have the 'runs:read' permission in this space");
   }
@@ -344,9 +308,7 @@ function openRealtimeStream(
   // this surface set nothing, so it was the one SSE endpoint unprotected
   // against a buffering proxy. Costs nothing when no proxy is in front.
   c.header("X-Accel-Buffering", "no");
-  // Same marker the HTTP pipeline stamps, for the same reason: a client must be
-  // able to tell a stream (or a refusal) that is the persona's from one that is
-  // its own. Set here rather than per route so all three streams carry it.
+  // Same marker the HTTP pipeline stamps; here so all three streams carry it.
   if (c.get("viewAs")) c.header(VIEW_AS_ACTIVE_HEADER, "1");
   return streamSSE(c, async (stream) => {
     // Queue + signal so events written by PG NOTIFY callbacks are flushed

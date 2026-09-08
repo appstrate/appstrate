@@ -55,23 +55,11 @@ export function isSpaceScopedPath(path: string): boolean {
 
 /**
  * Resolve the caller's role in `space` and rewrite `permissions` to the
- * effective set there (RBAC spec §4.2).
- *
- * Exported because a router outside `SPACE_SCOPED_PREFIXES` — the spaces
- * router itself, or a module gating a space-level resource off an explicit
- * `spaceId` field — must reach the same code path; otherwise its guard can
- * never pass for a non-admin.
- *
- * The principal whose membership is resolved is `c.get("user")`, which is the
- * API key's **creator** under key auth and under end-user impersonation (the
- * key's own row is what the pipeline resolved), and the subject under a
- * session or dashboard token (RBAC spec §7.1).
- *
- * A caller whose `orgRole` was never resolved keeps whatever set its auth
- * strategy wrote: an OIDC end-user token carries a fixed allowlist and no org
- * role, and end-users are never space members (§7.2).
- *
- * Under a preview the persona's overlay replaces the caller's own membership.
+ * effective set there (RBAC spec §4.2). Exported so routers outside
+ * `SPACE_SCOPED_PREFIXES` (the spaces router, module routes) reach the same
+ * path. The principal is `c.get("user")`: the API key's CREATOR under key auth
+ * and end-user impersonation, the subject otherwise (§7.1). A caller with no
+ * `orgRole` (OIDC end-user token) keeps its strategy's fixed allowlist (§7.2).
  *
  * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
  *   `private` — a private space does not exist for someone who is not in it.
@@ -82,8 +70,7 @@ export async function applySpacePermissions(
 ): Promise<void> {
   if (!c.get("orgRole")) return;
 
-  // Under a preview both halves are the persona's, so the wall it hits is the
-  // wall the previewed role hits.
+  // Under a preview both halves are the persona's.
   const ref = resolveSpaceRole(
     callerOrgRole(c, space.orgId),
     space,
@@ -176,9 +163,8 @@ export function requireSpaceContext() {
         assertSpaceId(active.id);
         c.set("spaceId", active.id);
         c.set("space", active);
-        // The in-process MCP re-entry lands on the default space; the token
-        // subject's membership there decides what it reaches — every `member`
-        // is implicit, a `guest` without a row is refused (spec §7.3).
+        // The token subject's membership in the default space decides what it
+        // reaches — a `guest` without a row is refused (spec §7.3).
         await applySpacePermissions(c, active);
         return next();
       }
@@ -192,24 +178,17 @@ export function requireSpaceContext() {
 }
 
 /**
- * Wire the core seam a module route uses to enter a space
- * (`enterSpaceContext`, `@appstrate/core/permissions`).
- *
- * Registered at MODULE EVALUATION, not from a boot function: both the
- * production wiring (`apps/api/src/index.ts`) and the test harness
- * (`apps/api/test/helpers/app.ts`) import `requireSpaceContext` from this file,
- * so the registration cannot be present in one and missing in the other — the
- * exact drift a second wiring call site would reintroduce.
+ * Wire the core seam a module route uses to enter a space (`enterSpaceContext`).
+ * Registered at MODULE EVALUATION so production wiring and the test harness,
+ * which both import `requireSpaceContext` from here, cannot drift.
  */
 setSpaceContextApplier(async (c, spaceId) => {
   const ctx = c as Context<AppEnv>;
   const orgId = ctx.get("orgId");
   const explicit = spaceId ?? ctx.get("spaceId") ?? ctx.req.header("X-Space-Id");
-  // Same rule as `requireSpaceContext`: the org's default space answers a
-  // header-less caller ONLY for the trusted in-process MCP re-entry. A module
-  // route is not a weaker door than a core one — a session or CLI caller that
-  // omits `X-Space-Id` gets the same 400 it would get on `/api/agents`, rather
-  // than silently landing in the default space (`SPACES.md` §Resolving).
+  // Same rule as `requireSpaceContext`: the default space answers a header-less
+  // caller ONLY for the trusted in-process MCP re-entry; a module route is not
+  // a weaker door than a core one (`SPACES.md` §Resolving).
   if (!explicit && !isInternalDispatch(ctx.req.raw.headers)) {
     throw invalidRequest(
       "Space context required. Provide X-Space-Id header or use an API key.",
@@ -223,9 +202,8 @@ setSpaceContextApplier(async (c, spaceId) => {
     throw notFound(`Space '${explicit ?? "(default)"}' not found in this organization`);
   }
   // Deliberately does NOT write `spaceId`: that key is the CREDENTIAL's space
-  // for an API key, and a module naming another space must not be able to
-  // rewrite it — the webhooks module compares the two to refuse a key reaching
-  // a sibling space. `space` and `permissions` are what entering a space means.
+  // for an API key and a module must not be able to rewrite it (the webhooks
+  // module compares the two to refuse a key reaching a sibling space).
   ctx.set("space", space);
   await applySpacePermissions(ctx, space);
 });

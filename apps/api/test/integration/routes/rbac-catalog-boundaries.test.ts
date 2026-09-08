@@ -6,6 +6,7 @@ import { packages, spaceMembers, spacePackages } from "@appstrate/db/schema";
 import { zipArtifact } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { assertDbCount, getDbRow } from "../../helpers/assertions.ts";
 import {
   addOrgMember,
   authHeaders,
@@ -38,24 +39,12 @@ const content = "---\nname: secret\ndescription: Private skill\n---\n\nPrivate i
 const manifest = { name: ID, version: "0.1.0", type: "skill", description: "Private description" };
 
 let ctx: TestContext;
+/** The guest: org `guest`, explicit `builder` in the default space. */
 let headers: Record<string, string>;
 let guestId: string;
 let privateId: string;
 
-async function installIn(spaceId: string) {
-  await seedInstalledPackage(spaceId, ID);
-}
-
-async function skill() {
-  await seedPackage({
-    id: ID,
-    orgId: ctx.orgId,
-    createdBy: ctx.user.id,
-    type: "skill",
-    draftManifest: manifest,
-    draftContent: content,
-  });
-}
+const installIn = (spaceId: string) => seedInstalledPackage(spaceId, ID);
 
 async function keyHeaders(scopes: string[]) {
   const key = await seedApiKey({
@@ -66,6 +55,60 @@ async function keyHeaders(scopes: string[]) {
   });
   return { Authorization: `Bearer ${key.rawKey}` };
 }
+
+/** A pending invitation whose email must never reach a caller without invite authority. */
+const seedSecretInvitation = () =>
+  createInvitation({
+    orgId: ctx.orgId,
+    email: "secret@example.com",
+    role: "member",
+    invitedBy: ctx.user.id,
+    spaceAssignments: [],
+  });
+
+/** Swap the guest's default-space row from the `builder` preset to a custom bundle. */
+async function assignGuestCustomRole(permissions: string[]) {
+  const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
+  await db
+    .update(spaceMembers)
+    .set({ presetRole: null, customRoleId: role.id })
+    .where(eq(spaceMembers.userId, guestId));
+  return role;
+}
+
+const orgDetail = async (h: Record<string, string>) => {
+  const res = await app.request(`/api/orgs/${ctx.orgId}`, { headers: h });
+  expect(res.status).toBe(200);
+  return (await res.json()) as OrgDetail;
+};
+
+const library = async (h: Record<string, string>) => {
+  const res = await app.request("/api/library", { headers: h });
+  expect(res.status).toBe(200);
+  return (await res.json()) as Library;
+};
+
+const deleteSkill = (h: Record<string, string>) =>
+  app.request(`/api/packages/skills/${ID}`, { method: "DELETE", headers: h });
+
+/** A single-skill `.afps` archive as an upload form, `manifest.name` overridable. */
+function skillArchiveForm(id = ID, fields: Record<string, string> = {}) {
+  const archive = zipArtifact({
+    "manifest.json": new TextEncoder().encode(JSON.stringify({ ...manifest, name: id })),
+    "SKILL.md": new TextEncoder().encode(content),
+  });
+  const form = new FormData();
+  form.append("file", new File([archive], "secret.afps"));
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  return form;
+}
+
+const importArchive = (path: string, form: FormData, h: Record<string, string>) =>
+  app.request(path, { method: "POST", headers: h, body: form });
+
+/** The seeded skill is still on disk with its original draft — the refusal wrote nothing. */
+const expectSecretUntouched = async () =>
+  expect((await getDbRow(packages, eq(packages.id, ID))).draftContent).toBe(content);
 
 beforeEach(async () => {
   await truncateAll();
@@ -81,51 +124,38 @@ beforeEach(async () => {
   });
   privateId = hidden.id;
   headers = { ...authHeaders(ctx), Cookie: guest.cookie };
-  await skill();
+  await seedPackage({
+    id: ID,
+    orgId: ctx.orgId,
+    createdBy: ctx.user.id,
+    type: "skill",
+    draftManifest: manifest,
+    draftContent: content,
+  });
 });
 
 describe("organization detail privacy", () => {
   it("returns no directory or invitations to a guest", async () => {
-    await createInvitation({
-      orgId: ctx.orgId,
-      email: "secret@example.com",
-      role: "member",
-      invitedBy: ctx.user.id,
-      spaceAssignments: [],
-    });
-    const response = await app.request(`/api/orgs/${ctx.orgId}`, { headers });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as OrgDetail;
+    await seedSecretInvitation();
+    const body = await orgDetail(headers);
     expect(body.members).toEqual([]);
     expect(body.invitations).toEqual([]);
     expect(JSON.stringify(body)).not.toContain("secret@example.com");
   });
 
   it("exposes invitations only with invite authority and applies the key ceiling", async () => {
-    await createInvitation({
-      orgId: ctx.orgId,
-      email: "secret@example.com",
-      role: "member",
-      invitedBy: ctx.user.id,
-      spaceAssignments: [],
-    });
-    const owner = await app.request(`/api/orgs/${ctx.orgId}`, { headers: authHeaders(ctx) });
-    expect(((await owner.json()) as OrgDetail).invitations).toHaveLength(1);
-    const restricted = await app.request(`/api/orgs/${ctx.orgId}`, {
-      headers: await keyHeaders(["spaces:read"]),
-    });
-    expect(restricted.status).toBe(200);
-    const body = (await restricted.json()) as OrgDetail;
-    expect(body.members).toEqual([]);
-    expect(body.invitations).toEqual([]);
+    await seedSecretInvitation();
+    expect((await orgDetail(authHeaders(ctx))).invitations).toHaveLength(1);
+
+    const restricted = await orgDetail(await keyHeaders(["spaces:read"]));
+    expect(restricted.members).toEqual([]);
+    expect(restricted.invitations).toEqual([]);
+
     const member = await createTestUser();
     await addOrgMember(ctx.orgId, member.id, "member");
-    const memberResponse = await app.request(`/api/orgs/${ctx.orgId}`, {
-      headers: { ...authHeaders(ctx), Cookie: member.cookie },
-    });
-    const memberBody = (await memberResponse.json()) as OrgDetail;
-    expect(memberBody.members.length).toBeGreaterThan(0);
-    expect(memberBody.invitations).toEqual([]);
+    const asMember = await orgDetail({ ...authHeaders(ctx), Cookie: member.cookie });
+    expect(asMember.members.length).toBeGreaterThan(0);
+    expect(asMember.invitations).toEqual([]);
   });
 });
 
@@ -133,10 +163,8 @@ describe("library visibility", () => {
   it("hides private and inaccessible closed spaces and their package metadata", async () => {
     await installIn(privateId);
     await seedSpace({ orgId: ctx.orgId, name: "Closed space", visibility: "closed" });
-    const response = await app.request("/api/library", { headers });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as Library;
-    expect(body.spaces.map((space: { id: string }) => space.id)).toEqual([ctx.defaultSpaceId]);
+    const body = await library(headers);
+    expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
     expect(body.packages.skill).toEqual([]);
     expect(JSON.stringify(body)).not.toContain(ID);
     expect(JSON.stringify(body)).not.toContain(privateId);
@@ -145,16 +173,9 @@ describe("library visibility", () => {
   it("lists only readable types and installation mappings for accessible spaces", async () => {
     await installIn(ctx.defaultSpaceId);
     await installIn(privateId);
-    const response = await app.request("/api/library", { headers });
-    const body = (await response.json()) as Library;
-    expect(body.packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
-    const role = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["agents:read"] });
-    await db
-      .update(spaceMembers)
-      .set({ presetRole: null, customRoleId: role.id })
-      .where(eq(spaceMembers.userId, guestId));
-    const restricted = await app.request("/api/library", { headers });
-    expect(((await restricted.json()) as Library).packages.skill).toEqual([]);
+    expect((await library(headers)).packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
+    await assignGuestCustomRole(["agents:read"]);
+    expect((await library(headers)).packages.skill).toEqual([]);
   });
 
   it("filters installed package metadata by the credential's type read scopes", async () => {
@@ -173,13 +194,9 @@ describe("library visibility", () => {
   });
 
   it("retains owner uninstalled catalog access but pins an owner API key to its space", async () => {
-    const owner = await app.request("/api/library", { headers: authHeaders(ctx) });
-    expect(((await owner.json()) as Library).packages.skill[0]?.id).toBe(ID);
-    const restricted = await app.request("/api/library", {
-      headers: await keyHeaders(["spaces:read", "skills:read"]),
-    });
-    const body = (await restricted.json()) as Library;
-    expect(body.spaces.map((space: { id: string }) => space.id)).toEqual([ctx.defaultSpaceId]);
+    expect((await library(authHeaders(ctx))).packages.skill[0]?.id).toBe(ID);
+    const body = await library(await keyHeaders(["spaces:read", "skills:read"]));
+    expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
     expect(body.packages.skill).toEqual([]);
   });
 });
@@ -207,91 +224,60 @@ describe("shared package authority", () => {
       body: JSON.stringify({ packageId: ID }),
     });
     expect(install.status).toBe(404);
-    expect(await db.select().from(packages).where(eq(packages.id, ID))).toHaveLength(1);
+    await assertDbCount(packages, eq(packages.id, ID), 1);
   });
 
   it("allows a builder to delete a package installed only in their space", async () => {
     await installIn(ctx.defaultSpaceId);
-    const response = await app.request(`/api/packages/skills/${ID}`, { method: "DELETE", headers });
-    expect(response.status).toBe(204);
-    expect(await db.select().from(packages).where(eq(packages.id, ID))).toHaveLength(0);
+    expect((await deleteSkill(headers)).status).toBe(204);
+    await assertDbCount(packages, eq(packages.id, ID), 0);
   });
 
   it("requires deletion authority in every shared installation, not only visibility", async () => {
     await installIn(ctx.defaultSpaceId);
     await installIn(privateId);
     await seedSpaceMember({ spaceId: privateId, userId: guestId, presetRole: "viewer" });
-    const response = await app.request(`/api/packages/skills/${ID}`, { method: "DELETE", headers });
-    expect(response.status).toBe(403);
+    expect((await deleteSkill(headers)).status).toBe(403);
     await db
       .update(spaceMembers)
       .set({ presetRole: "builder" })
       .where(eq(spaceMembers.spaceId, privateId));
-    const allowed = await app.request(`/api/packages/skills/${ID}`, { method: "DELETE", headers });
-    expect(allowed.status).toBe(204);
+    expect((await deleteSkill(headers)).status).toBe(204);
   });
 
   it("cannot use an owner key in A to mutate a package shared with B", async () => {
     await installIn(ctx.defaultSpaceId);
     await installIn(privateId);
-    const response = await app.request(`/api/packages/skills/${ID}`, {
-      method: "DELETE",
-      headers: await keyHeaders(["skills:delete"]),
-    });
-    expect(response.status).toBe(403);
+    expect((await deleteSkill(await keyHeaders(["skills:delete"]))).status).toBe(403);
   });
 
   it("preserves write-only credentials for packages installed exclusively in their pinned space", async () => {
     await installIn(ctx.defaultSpaceId);
-    const response = await app.request(`/api/packages/skills/${ID}`, {
-      method: "DELETE",
-      headers: await keyHeaders(["skills:delete"]),
-    });
-    expect(response.status).toBe(204);
+    expect((await deleteSkill(await keyHeaders(["skills:delete"]))).status).toBe(204);
   });
 
   it("refuses a force import of a hidden existing package before it writes", async () => {
     await installIn(privateId);
-    const archive = zipArtifact({
-      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
-      "SKILL.md": new TextEncoder().encode(content),
-    });
-    const form = new FormData();
-    form.append("file", new File([archive], "secret.afps"));
-    form.append("force", "true");
-    const response = await app.request("/api/packages/import", {
-      method: "POST",
-      headers,
-      body: form,
-    });
+    const form = skillArchiveForm(ID, { force: "true" });
+    const response = await importArchive("/api/packages/import", form, headers);
     expect(response.status, await response.clone().text()).toBe(404);
-    const [row] = await db.select().from(packages).where(eq(packages.id, ID));
-    expect(row?.draftContent).toBe(content);
+    await expectSecretUntouched();
   });
 
   it("imports a new skill with only skills:write, then denies an inaccessible overwrite with that credential", async () => {
     const authorization = await keyHeaders(["skills:write"]);
-    const archiveFor = (id: string) =>
-      zipArtifact({
-        "manifest.json": new TextEncoder().encode(JSON.stringify({ ...manifest, name: id })),
-        "SKILL.md": new TextEncoder().encode(content),
-      });
-    const own = new FormData();
-    own.append("file", new File([archiveFor("@catalog/own")], "own.afps"));
-    const created = await app.request("/api/packages/import", {
-      method: "POST",
-      headers: authorization,
-      body: own,
-    });
+    const created = await importArchive(
+      "/api/packages/import",
+      skillArchiveForm("@catalog/own"),
+      authorization,
+    );
     expect(created.status, await created.clone().text()).toBe(201);
     await installIn(privateId);
-    const hidden = new FormData();
-    hidden.append("file", new File([archiveFor(ID)], "hidden.afps"));
-    const overwritten = await app.request("/api/packages/import?force=true", {
-      method: "POST",
-      headers: authorization,
-      body: hidden,
-    });
+    const overwritten = await importArchive(
+      "/api/packages/import?force=true",
+      skillArchiveForm(ID),
+      authorization,
+    );
     expect(overwritten.status).toBe(404);
   });
 
@@ -335,53 +321,35 @@ describe("shared package authority", () => {
   it("uses the stored package type for an existing bundle root's install permission", async () => {
     await db.update(packages).set({ type: "integration" }).where(eq(packages.id, ID));
     await installIn(privateId);
-    const role = await seedSpaceRole({
-      orgId: ctx.orgId,
-      permissions: ["skills:write", "integrations:write", "integrations:read"],
-    });
-    await db
-      .update(spaceMembers)
-      .set({ presetRole: null, customRoleId: role.id })
-      .where(eq(spaceMembers.userId, guestId));
+    const role = await assignGuestCustomRole([
+      "skills:write",
+      "integrations:write",
+      "integrations:read",
+    ]);
     await seedSpaceMember({
       spaceId: privateId,
       userId: guestId,
       presetRole: null,
       customRoleId: role.id,
     });
-    const archive = zipArtifact({
-      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
-      "SKILL.md": new TextEncoder().encode(content),
-    });
-    const form = new FormData();
-    form.append("file", new File([archive], "secret.afps"));
-    const response = await app.request("/api/packages/import-bundle", {
-      method: "POST",
+    const response = await importArchive(
+      "/api/packages/import-bundle",
+      skillArchiveForm(),
       headers,
-      body: form,
-    });
+    );
     expect(response.status, await response.clone().text()).toBe(403);
-    expect(
-      await db.select().from(spacePackages).where(eq(spacePackages.packageId, ID)),
-    ).toHaveLength(1);
+    await assertDbCount(spacePackages, eq(spacePackages.packageId, ID), 1);
   });
 
   it("rejects a carried hidden package during bundle authorization before any import write", async () => {
     await installIn(privateId);
-    const archive = zipArtifact({
-      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
-      "SKILL.md": new TextEncoder().encode(content),
-    });
-    const form = new FormData();
-    form.append("file", new File([archive], "secret.afps"));
-    const response = await app.request("/api/packages/import-bundle", {
-      method: "POST",
+    const response = await importArchive(
+      "/api/packages/import-bundle",
+      skillArchiveForm(),
       headers,
-      body: form,
-    });
+    );
     expect(response.status, await response.clone().text()).toBe(404);
-    const [row] = await db.select().from(packages).where(eq(packages.id, ID));
-    expect(row?.draftContent).toBe(content);
+    await expectSecretUntouched();
   });
 
   it("refuses hidden dependencies before creating an agent", async () => {
@@ -403,8 +371,6 @@ describe("shared package authority", () => {
       }),
     });
     expect(response.status, await response.clone().text()).toBe(404);
-    expect(await db.select().from(packages).where(eq(packages.id, "@catalog/leak"))).toHaveLength(
-      0,
-    );
+    await assertDbCount(packages, eq(packages.id, "@catalog/leak"), 0);
   });
 });
