@@ -306,6 +306,10 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
     if (wildcardEnabled) {
       return (
+        // This handler only CANCELS bubbling (the picker sits inside a
+        // clickable accordion row); it has no behaviour of its own, so a
+        // tabIndex and a key handler here would be a tab stop that does nothing.
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
         <div
           className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
           onClick={(e) => e.stopPropagation()}
@@ -346,6 +350,8 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   }
 
   return (
+    // Bubbling shield, as above: cancels, does not act.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
       onClick={(e) => e.stopPropagation()}

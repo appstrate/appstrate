@@ -30,12 +30,18 @@ const Alert = React.forwardRef<
 Alert.displayName = "Alert";
 
 const AlertTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
-  ({ className, ...props }, ref) => (
+  // `children` is destructured and placed explicitly rather than arriving via
+  // `{...props}`: a heading whose content is invisible to a static reader is
+  // indistinguishable from an empty one, and `jsx-a11y/heading-has-content`
+  // reads it as empty. Same rendered output, one fewer blind spot.
+  ({ className, children, ...props }, ref) => (
     <h5
       ref={ref}
       className={cn("mb-1 leading-none font-medium tracking-tight", className)}
       {...props}
-    />
+    >
+      {children}
+    </h5>
   ),
 );
 AlertTitle.displayName = "AlertTitle";

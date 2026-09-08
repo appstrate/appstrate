@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
@@ -28,6 +28,10 @@ export function PackageCard({
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (window.getSelection()?.toString()) return;
+    // The title link and the nested controls handle their own activation —
+    // without this the card would navigate a second time on top of them (and
+    // open TWO tabs on cmd-click, since the anchor already opens one).
+    if ((e.target as HTMLElement).closest("a,button")) return;
     if (e.metaKey || e.ctrlKey) {
       window.open(href, "_blank");
     } else {
@@ -36,13 +40,21 @@ export function PackageCard({
   };
 
   return (
+    // Whole-card click is a MOUSE convenience. The keyboard and screen-reader
+    // path is the real `<Link>` on the title below, which also carries the href
+    // a `role="link"` here could not (open-in-new-tab, copy link address).
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       className="border-border bg-card hover:border-foreground/20 hover:bg-accent/50 flex h-full w-full cursor-pointer flex-col rounded-lg border p-4 transition-colors"
       onClick={handleCardClick}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="text-foreground truncate text-sm font-medium">{displayName}</h2>
+          <h2 className="truncate text-sm font-medium">
+            <Link to={href} className="text-foreground hover:underline">
+              {displayName}
+            </Link>
+          </h2>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {source === "system" && (
@@ -62,7 +74,7 @@ export function PackageCard({
           )}
           {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
           {type === "agent" && (
-            <div onClick={(e) => e.stopPropagation()}>
+            <div>
               <RunAgentButton
                 packageId={id}
                 variant="ghost"
@@ -93,6 +105,10 @@ export function PackageCard({
         <ScrollBar orientation="horizontal" className="h-0 opacity-0" />
       </ScrollArea>
       {actions && (
+        // `actions` is an arbitrary ReactNode, so the `closest("a,button")`
+        // guard above cannot cover it; this handler only CANCELS bubbling, it
+        // has no behaviour of its own and must not become a tab stop.
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
         <div
           className="border-border mt-3 flex items-center justify-between gap-2 border-t pt-3"
           onClick={(e) => e.stopPropagation()}

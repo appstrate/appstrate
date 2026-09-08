@@ -139,6 +139,10 @@ export function ReadOnlyFileTree({
 
   return (
     <div ref={scrollRef} className={cn("overflow-auto", className)}>
+      {/* Roving tabindex: the tab stop lives on ONE treeitem (`tabbableId`
+          above), per the ARIA tree pattern — a tabIndex here would add a
+          second one, which is what the rule below would have us do. */}
+      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
       <div
         role="tree"
         aria-label={label}
@@ -153,6 +157,9 @@ export function ReadOnlyFileTree({
           const isFocused = node.id === focusedId;
           const Icon = node.kind === "file" ? FileIcon : row.expanded ? FolderOpen : Folder;
           return (
+            // The tree's keyboard handling is `onKeyDown={handleKeyDown}` on the
+            // `role="tree"` container above; the rule only reads this element.
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events
             <div
               key={node.id}
               role="treeitem"

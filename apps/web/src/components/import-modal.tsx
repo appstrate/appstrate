@@ -194,6 +194,18 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
+        // The file input below is `display:none`, so it is not focusable and
+        // the drop zone was the only affordance — mouse-only. Made operable
+        // instead of exempted: the accessible name comes from the visible
+        // prompt inside (or the chosen file name), so nothing is restated.
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
       >
         <input
           ref={inputRef}

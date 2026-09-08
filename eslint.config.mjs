@@ -3,6 +3,7 @@ import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import react from "eslint-plugin-react";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
@@ -693,6 +694,162 @@ export default tseslint.config(
       "react/jsx-no-constructed-context-values": "error",
       "react/no-unstable-nested-components": ["error", { allowAsProps: true }],
       "react/no-object-type-as-default-prop": "error",
+    },
+  },
+  {
+    // Accessibility over every file that can hold JSX. The SPA is a dashboard
+    // people keep open all day and NOTHING checked that a control had an
+    // accessible name, that a click handler sat on something focusable, or
+    // that a label reached its input.
+    //
+    // `**\/*.tsx` rather than the three trees that hold JSX today
+    // (`apps/web/src`, `packages/ui/src`, `packages/module-chat/src/ui` — all
+    // 288 tracked `.tsx`, `git ls-files`, 2026-09-08): TypeScript refuses JSX
+    // in a `.ts` file, so the extension IS the population, and a superset
+    // covers the next package that ships a frontend. The `.tsx` restriction is
+    // not a cost decision — these rules read the JSX AST only, no type program.
+    //
+    // 6.10.2 declares `peerDependencies: {eslint: "^3 || … || ^9"}` and this
+    // repo runs eslint 10, so `bun add` warns. Exercised rather than assumed,
+    // 2026-09-08: rules report, options are honoured, and eslint's
+    // unused-disable-directive accounting sees the plugin's rule ids (a
+    // directive for a rule with no violation goes red). It is the newest
+    // release; there is no eslint-10 line to move to.
+    //
+    // ─── What the first run found ───────────────────────────────────────
+    //
+    // `recommended` names 34 rules: 31 at `error` and 3 it ships `off`. All of
+    // them were measured over those 288 files, 2026-09-08 — the 3 included, so
+    // that promoting one or leaving it off is a call made on data — bar
+    // `label-has-for`, deprecated upstream. Each rule at its documented
+    // options. 49 findings across 29 files:
+    //
+    //     18  no-autofocus                            turned off, below
+    //      9  click-events-have-key-events            3 fixed, 6 exempted at site
+    //      9  label-has-associated-control            all 9: `depth`, below
+    //      7  no-static-element-interactions          3 fixed, 4 exempted at site
+    //      3  no-noninteractive-tabindex              3 exempted at site
+    //      1  interactive-supports-focus              exempted at site
+    //      1  no-noninteractive-element-interactions  exempted at site
+    //      1  heading-has-content                     fixed
+    //      0  the other 25 measured rules
+    //
+    // Small enough to FIX rather than baseline, and that mattered: eslint has
+    // no native accepted-violations file, so a baseline here would have meant
+    // inventing a mechanism — a seeded list plus its own liveness check, the
+    // way `lint-migrations.ts` does — to carry findings a day's work removes.
+    // Every hit is now either fixed in this commit or carries a directive
+    // naming the reason at the site, and those directives are
+    // self-cleaning: eslint's
+    // `reportUnusedDisableDirectives` defaults to "warn" and `scripts/lint.ts`
+    // runs `--max-warnings 0`, so a directive that stops matching a real
+    // violation FAILS the gate rather than rotting in place.
+    //
+    // ─── Rules deliberately not enabled ─────────────────────────────────
+    //
+    //  - `no-autofocus` (in `recommended`, turned OFF here). 16 of its 18 hits
+    //    are focus moved in RESPONSE to a user action, which is the opposite
+    //    of the hazard the rule names: 9 are the first field of a dialog the
+    //    user just opened, 5 are an inline-edit affordance that swaps a label
+    //    for an input on click, 1 is the chat composer, 1 is
+    //    `schema-form/templates.tsx` forwarding RJSF's own `autofocus` field
+    //    option. Deleting those props would leave focus BEHIND the dialog that
+    //    just opened, and the rule has no option that separates the two cases.
+    //    The other 2 — `welcome.tsx` and the org-name field in
+    //    `onboarding/create-step.tsx` — autofocus on page load, which IS the
+    //    case the rule is about; left in place because whether onboarding
+    //    should grab focus is a product call, not a lint fix.
+    //
+    //  - `anchor-ambiguous-text` (already `off`, left off). Its check is a word
+    //    list — "click here", "here", "link", "learn more". This UI is French
+    //    (i18next), and every anchor's text is a `t()` call, so the rule has
+    //    nothing to read: 0 hits, and it would still be 0 with the mistake
+    //    present. A rule that cannot go red is not a gate.
+    //
+    //  - `label-has-for` is deprecated upstream in favour of
+    //    `label-has-associated-control`; `recommended` ships it `off`.
+    //
+    // ─── Two rules configured ───────────────────────────────────────────
+    //
+    // `control-has-associated-label` is the one rule PROMOTED out of the `off`
+    // set: nothing else in the set says "this control has no accessible name".
+    // Measured against seeded controls, 2026-09-08: `<button />` RED,
+    // `<button><svg/></button>` RED, `<button><ShieldCheck/></button>` GREEN —
+    // a capitalised child could render text, so the rule lets it pass. That
+    // last shape is how this SPA writes every icon button (lucide-react inside
+    // `<Button size="icon">`), so the rule's real reach here is narrow — kept
+    // because narrow is more than none, and it costs nothing.
+    //
+    // Its options are spelled out below because they are load-bearing —
+    // `recommended` ships this rule as `["off", {…defaults}]`, and flat config
+    // replaces a rule entry whole, so writing `"error"` on its own SILENTLY
+    // discards `ignoreElements`/`ignoreRoles`/`includeRoles`. Measured
+    // 2026-09-08 over the 288 files: with the defaults restored, 0 hits; with
+    // them dropped, 14 — every one of those 14 an `<input>`/`<textarea>` the
+    // default `ignoreElements` exists to skip, because this rule reads only
+    // the control's own subtree and cannot see a `<label htmlFor>` SIBLING
+    // (clearest at `packages/ui/src/schema-form/widgets.tsx:64`, where the
+    // matching label sits four lines below the input it labels).
+    //
+    // `label-has-associated-control` default `depth: 2` produced all 9 of its
+    // hits, and every one was a real label whose text sits under a Tailwind
+    // layout wrapper (`<label><Checkbox/><span><span>{t(…)}</span></span>`).
+    // Measured 2026-09-08 over the 288 files: depth 2 -> 9 hits, depth 3 -> 0,
+    // depth 25 -> 0. `depth` only bounds the search for label TEXT, and a
+    // label with no text has none at any depth, so raising it to the schema's
+    // maximum costs no detection — it just stops the rule failing the next
+    // time someone adds a wrapper. Verified against a seeded `<label />`: red
+    // at depth 25.
+    //
+    // `controlComponents` was tried and dropped: measured, adding
+    // `["Checkbox"]` changed the hit count by 0 in either direction, so it
+    // would have been configuration that documents an intent the rule never
+    // acts on. `assert: "both"` was tried and dropped too — it reports 22
+    // labels that DO nest a native `<input type="checkbox">` (e.g.
+    // `oauth-client-form-modal.tsx:311`), i.e. it is unsound in 6.10.2.
+    //
+    // ─── What this cannot see ───────────────────────────────────────────
+    //
+    // jsx-a11y reads one JSX element at a time and cannot cross a component
+    // boundary, which in a Radix/shadcn codebase is most of the interesting
+    // surface. It does not know that `<Checkbox>` renders a `role="checkbox"`
+    // button, that `<TooltipTrigger asChild>` clones ARIA onto its child, or
+    // that `<DialogContent>` already manages focus — so it produces both
+    // false positives (every at-site directive in this commit traces to one)
+    // and blind spots — `<Button size="icon"><Trash2/></Button>` with no
+    // `aria-label` is the SPA's commonest icon control and no rule here can
+    // see it. It also never reads `apps/web/index.html`, so `html-has-lang`
+    // is enabled and structurally dead. This is a floor on hand-written JSX, not an
+    // accessibility audit; naming icon-only design-system buttons needs either
+    // a rule that resolves components or a runtime pass (axe).
+    files: ["**/*.tsx"],
+    plugins: { "jsx-a11y": jsxA11y },
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      "jsx-a11y/no-autofocus": "off",
+      "jsx-a11y/label-has-associated-control": ["error", { depth: 25 }],
+      "jsx-a11y/control-has-associated-label": [
+        "error",
+        {
+          // The plugin's documented defaults, restated because `"error"` alone
+          // drops them (see above). `input`/`textarea` are skipped by the rule
+          // itself — `label-has-associated-control` is what covers those.
+          ignoreElements: ["audio", "canvas", "embed", "input", "textarea", "tr", "video"],
+          ignoreRoles: [
+            "grid",
+            "listbox",
+            "menu",
+            "menubar",
+            "radiogroup",
+            "row",
+            "tablist",
+            "toolbar",
+            "tree",
+            "treegrid",
+          ],
+          includeRoles: ["alert", "dialog"],
+        },
+      ],
     },
   },
   {

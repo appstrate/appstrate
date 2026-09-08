@@ -44,6 +44,7 @@ export function RunCostReadout({ cost, pricingStatus, className }: RunCostReadou
             place the caveat is stated. */}
         <TooltipTrigger asChild>
           <span
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the tabIndex IS the accessibility fix here (see above)
             tabIndex={0}
             className={cn("cursor-default underline decoration-dotted", className)}
           >

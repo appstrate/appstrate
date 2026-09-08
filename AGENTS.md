@@ -137,6 +137,7 @@ appstrate/
 - React Query keys: typed-client hooks use `[method, path, init]` (org/space scope rides in `init`). Run/schedule/package caches keep pinned legacy keys because the SSE patcher invalidates by those names
 - Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at serve time)
 - Always use `<Modal>` from `components/modal.tsx` for dialogs
+- **Accessibility floor** — `eslint-plugin-jsx-a11y` `recommended` runs at `error` over every `.tsx` in the repo (`eslint.config.mjs`), so a click handler on a `<div>`, an `<img>` with no `alt` or a `<label>` with no text fails `bun run lint`. It reads one JSX element at a time and cannot see through a component: an icon-only `<Button size="icon">` with no `aria-label` passes, so keep naming those by hand
 
 ### Docker Integration
 

@@ -117,6 +117,7 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
                 in this header teach one affordance rather than two. */}
             <TooltipTrigger asChild>
               <span
+                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the tabIndex IS the accessibility fix here (see above)
                 tabIndex={0}
                 className="text-foreground cursor-default font-medium underline decoration-dotted"
               >
