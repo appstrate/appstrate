@@ -65,20 +65,38 @@ import { resolve } from "node:path";
 const MODULE_ROOT = resolve(import.meta.dir, "../../packages/module-ee");
 
 /**
- * The seven tables under their TARGET names. Declaration order in
- * `packages/module-ee/drizzle/schema.ts`; no foreign key runs between them
- * (they reference the platform's `organizations` by value only), so the order
- * is documentation, not a constraint.
+ * Column names the module's newest drizzle snapshot declares, per target table.
+ * The snapshot is the module's own statement of its schema, and reading it is
+ * what keeps this script from carrying a second copy that a migration can make
+ * wrong. Which snapshot is newest comes from the journal, never from a literal
+ * index.
  */
-export const EE_TABLES = [
-  "ee_billing_accounts",
-  "ee_usage_records",
-  "ee_stripe_events",
-  "ee_billed_llm_usage",
-  "ee_free_tier_claims",
-  "ee_billing_cursor",
-  "ee_billing_managers",
-] as const;
+function declaredColumns(): Map<string, string[]> {
+  const meta = resolve(MODULE_ROOT, "drizzle/migrations/meta");
+  const journal = JSON.parse(readFileSync(resolve(meta, "_journal.json"), "utf8")) as {
+    entries: { idx: number }[];
+  };
+  const idx = Math.max(...journal.entries.map((e) => e.idx));
+  const snapshot = JSON.parse(
+    readFileSync(resolve(meta, `${String(idx).padStart(4, "0")}_snapshot.json`), "utf8"),
+  ) as { tables: Record<string, { name: string; columns: Record<string, unknown> }> };
+
+  const declared = new Map<string, string[]>();
+  for (const table of Object.values(snapshot.tables)) {
+    declared.set(table.name, Object.keys(table.columns));
+  }
+  return declared;
+}
+
+const DECLARED = declaredColumns();
+
+/**
+ * The tables under their TARGET names, read off the snapshot above and sorted
+ * so the printed plan is stable. No foreign key runs between them (they
+ * reference the platform's `organizations` by value only), so the order is
+ * presentation, not a constraint.
+ */
+export const EE_TABLES = [...DECLARED.keys()].sort();
 
 /** The part of a table name the two prefixes share: `ee_usage_records` → `usage_records`. */
 const LOGICAL = EE_TABLES.map((t) => t.slice("ee_".length));
@@ -194,24 +212,6 @@ function detectPrefix(tables: string[]): SourcePrefix {
   return ee.length > 0 ? "ee_" : "cloud_";
 }
 
-/** Column names the module's newest drizzle snapshot declares, per target table. */
-function declaredColumns(): Map<string, string[]> {
-  const meta = resolve(MODULE_ROOT, "drizzle/migrations/meta");
-  const journal = JSON.parse(readFileSync(resolve(meta, "_journal.json"), "utf8")) as {
-    entries: { idx: number }[];
-  };
-  const idx = Math.max(...journal.entries.map((e) => e.idx));
-  const snapshot = JSON.parse(
-    readFileSync(resolve(meta, `${String(idx).padStart(4, "0")}_snapshot.json`), "utf8"),
-  ) as { tables: Record<string, { name: string; columns: Record<string, unknown> }> };
-
-  const declared = new Map<string, string[]>();
-  for (const table of Object.values(snapshot.tables)) {
-    declared.set(table.name, Object.keys(table.columns));
-  }
-  return declared;
-}
-
 /**
  * What the copy will carry, table by table. Reads the snapshot rather than the
  * target for the target's shape: the target may not be migrated yet, and every
@@ -220,13 +220,10 @@ function declaredColumns(): Map<string, string[]> {
  * so by the time a plan exists the two are the source's columns exactly.
  */
 async function planTables(src: SQL, prefix: SourcePrefix): Promise<TablePlan[]> {
-  const declared = declaredColumns();
   const plans: TablePlan[] = [];
 
   for (const [i, table] of EE_TABLES.entries()) {
-    const wanted = declared.get(table);
-    if (!wanted) throw new Error(`${table} is absent from the module's newest drizzle snapshot`);
-
+    const wanted = DECLARED.get(table)!;
     const source = `${prefix}${LOGICAL[i]!}`;
     if ((await countRows(src, source)) === null) {
       plans.push({ table, source: null, defaulted: [] });

@@ -5,9 +5,12 @@
  *
  * 1. Starts test containers (PostgreSQL + Redis + MinIO + DinD) if not already running
  * 2. Sets environment variables for the test database and Redis
- * 3. Runs the core Drizzle migrations against the test database. Modules own no
- *    tables, so this one step creates every table in the schema — including the
- *    ones modules read and write (see apps/api/src/modules/README.md).
+ * 3. Runs the core Drizzle migrations against the test database — the tables a
+ *    module reads and writes live in the core schema and are created here (see
+ *    apps/api/src/modules/README.md). `@appstrate/module-ee` is the exception:
+ *    it keeps a Drizzle tree of its own and self-migrates its `ee_*` tables
+ *    into the platform database from its `init()`, which phase 3 below runs.
+ *    That is why step 4 can name tables this step never created.
  * 4. Registers the tables a module reads/writes for truncation
  *
  * Module discovery — two roots:
@@ -293,17 +296,10 @@ if (TIER0) {
 // The two layouts, and the `test/tables.ts` / `test/requirements.ts`
 // conventions beside them, are described in `./modules.ts` — which the tier-0
 // runner reads too, so that a module this preload refuses to load is also a
-// module whose tests bun does not collect. Modules do NOT own migrations: their
-// tables live in the core schema and are created by the core migration step
-// above, as the code below says. This block used to promise a
-// `drizzle/migrations/` convention as well, which nothing here has read since
-// the tables moved.
+// module whose tests bun does not collect.
 
 const repoRoot = resolve(import.meta.dir, "../..");
 const moduleEntries: DiscoveredModule[] = discoverModules(repoRoot);
-
-// Modules no longer own migrations — their tables live in the core schema and
-// are created by the core migration step above. Nothing to apply per module.
 
 // Dynamic imports are async — bun supports top-level await in preloads.
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
