@@ -143,9 +143,5 @@
     "ai": "^7.0.48",
     "@ai-sdk/react": "^4.0.51",
     "@ai-sdk/provider-utils": "^5.0.18"
-  },
-  "patchedDependencies": {
-    "@better-auth/oauth-provider@1.7.0-beta.4": "patches/@better-auth%2Foauth-provider@1.7.0-beta.4.patch",
-    "@better-auth/cimd@1.7.0-beta.4": "patches/@better-auth%2Fcimd@1.7.0-beta.4.patch"
   }
 }
