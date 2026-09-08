@@ -369,6 +369,13 @@ to accept only their own half, so the wrong-mode call does not compile.
   effects only; errors in one handler are **isolated** and do not block others —
   that isolation is the difference from a broadcast hook.
 
+`onOrgDelete` must be **idempotent**. The platform reserves the deletion
+(`organizations.deleting_at`) before it emits, so the organization cannot be
+saved by a concurrent run and the operator can simply repeat the DELETE when a
+later step fails — which emits the event again for the same org id. Tear down
+what is still there, and treat what is already gone as success; never make the
+second call throw, and never make it charge, refund or cancel anything twice.
+
 Names are defined in `packages/core/src/module.ts` (`FirstMatchHooks` /
 `BroadcastHooks` / `ModuleHooks`, `ModuleEvents`). To add a new hook or event,
 update that file first — including its `scripts/verify-module-contract.ts`

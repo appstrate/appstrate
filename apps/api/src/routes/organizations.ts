@@ -13,7 +13,7 @@ import {
   getUserOrganizations,
   getOrgById,
   updateOrganization,
-  assertOrgDeletable,
+  reserveOrgDeletion,
   deleteOrganization,
   getOrgMembers,
   getOrgMember,
@@ -314,7 +314,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
   const orgId = c.req.param("orgId")!;
 
   try {
-    // Refuse FIRST, notify SECOND, delete THIRD — the order is load-bearing,
+    // Reserve FIRST, notify SECOND, delete THIRD — the order is load-bearing,
     // do not reorder.
     //
     // `onOrgDelete` handlers do destructive work outside this database and
@@ -322,14 +322,19 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
     // billing then cancels the Stripe subscription and drops the billing
     // account; the mcp module drops the org from the RFC 8707 audience
     // allowlist). `deleteOrganization` refuses — from inside its transaction —
-    // when runs are in progress. With the emit first, that refusal left a
-    // surviving-but-gutted organization no repair path can rebuild. Asserting
-    // deletability up front means modules only ever observe a deletion the
-    // platform has already committed to.
+    // when runs are in progress, so with the emit first that refusal left a
+    // surviving-but-gutted organization no repair path can rebuild.
+    //
+    // The reservation is what makes the refusal impossible AFTER the modules
+    // have acted: it checks deletability and stamps `deleting_at` in one
+    // transaction, under the per-org lock run admission takes, and admission
+    // then refuses the reserved org. Anything that fails from here on leaves
+    // the reservation standing, and repeating this DELETE resumes — the hooks
+    // are required to tolerate a second `onOrgDelete` for the same org.
     //
     // Both calls throw plain Errors, and both land on the same 400
     // `delete_failed` below — the wire contract is unchanged.
-    await assertOrgDeletable(orgId);
+    await reserveOrgDeletion(orgId);
 
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
     await emitEvent("onOrgDelete", orgId);

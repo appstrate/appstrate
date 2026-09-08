@@ -468,6 +468,7 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<vo
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
   );
+  await refuseReservedForDeletion(tx, scope.orgId);
   const [row] = await tx
     .select({ active: count() })
     .from(runs)
@@ -483,6 +484,31 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<vo
       code: "org_run_concurrency_exceeded",
       title: "Org Run Concurrency Exceeded",
       detail: `Organization concurrent run limit reached (${cap}). Wait for in-flight runs to complete.`,
+    });
+  }
+}
+
+/**
+ * Refuse admission into an organization whose deletion is reserved.
+ *
+ * Read under the per-org admission lock, beside the concurrency count and for
+ * the same reason: `reserveOrgDeletion` sets `deleting_at` while holding this
+ * key, so a run is admitted strictly before the reservation or refused by it —
+ * never in between, which is where the deletion used to lose its guarantee
+ * after modules had already torn down what they own.
+ */
+async function refuseReservedForDeletion(tx: DbTx, orgId: string): Promise<void> {
+  const [org] = await tx
+    .select({ deletingAt: organizations.deletingAt })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  if (org?.deletingAt) {
+    throw new ApiError({
+      status: 409,
+      code: "org_deleting",
+      title: "Organization Is Being Deleted",
+      detail: "This organization is being deleted; no new run can be started.",
     });
   }
 }

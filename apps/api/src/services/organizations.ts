@@ -471,7 +471,7 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
 }
 
 /**
- * Pre-flight: is this organization deletable at all?
+ * Reserve the deletion of this organization.
  *
  * MUST be awaited by callers BEFORE anything observes the deletion —
  * concretely, before the route emits `onOrgDelete`. The ordering is
@@ -483,39 +483,61 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
  * its transaction, when runs are in progress — the org row survives but comes
  * back stripped of everything the handlers tore down, and no repair path can
  * rebuild it (the debt is summed over rows that were just deleted, and a
- * consumed free-tier claim does not come back). So: refuse first, notify
- * second, delete third.
+ * consumed free-tier claim does not come back).
  *
- * This is a precondition, NOT the race guard. It reads outside any
- * transaction, so a run admitted between here and the delete slips through;
- * the in-transaction check in `deleteOrganization` (which holds the per-org
- * run-admission advisory lock) is what closes that window. Keep both.
+ * A read alone could not carry that weight: it ran outside any lock, so a run
+ * admitted between it and the deletion transaction still turned the module
+ * teardown into a loss. The check and the reservation therefore commit
+ * TOGETHER, holding the same per-org advisory key `createRun` takes before its
+ * own count + INSERT — so a concurrent admission is either already visible to
+ * the count here, or blocked until `deleting_at` is set, at which point
+ * `createRun` refuses it (409 `org_deleting`). The deletability decided here
+ * cannot be invalidated behind the modules' back.
  *
- * Throws the same `Error` messages the transaction would, so the route maps
- * either failure onto the same `400 delete_failed` response.
+ * Idempotent: a reservation that already stands is not an error, it is the
+ * state a retried DELETE is meant to find. Whatever failed after the first
+ * reservation — a module hook, the deletion transaction — is retried by
+ * repeating the whole sequence, and the module hooks are required to tolerate
+ * that (a second `onOrgDelete` for the same org).
+ *
+ * The transaction holds no network call: the lock is released before the route
+ * emits anything.
+ *
+ * Throws the same `Error` messages the deletion transaction would, so the
+ * route maps either failure onto the same `400 delete_failed` response.
  */
-export async function assertOrgDeletable(orgId: string): Promise<void> {
-  const [org] = await db
-    .select({ id: organizations.id })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  if (!org) throw new Error("Failed to delete organization: not found");
+export async function reserveOrgDeletion(orgId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(orgId)})::bigint)`,
+    );
 
-  if ((await countInProgressRuns(db, orgId)) > 0) {
-    throw new Error("Cannot delete organization: runs are in progress");
-  }
+    const [org] = await tx
+      .select({ id: organizations.id, deletingAt: organizations.deletingAt })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+      .for("update");
+    if (!org) throw new Error("Failed to delete organization: not found");
+
+    if ((await countInProgressRuns(tx, orgId)) > 0) {
+      throw new Error("Cannot delete organization: runs are in progress");
+    }
+
+    if (org.deletingAt) return;
+    await tx
+      .update(organizations)
+      .set({ deletingAt: new Date() })
+      .where(eq(organizations.id, orgId));
+  });
 }
 
 export async function deleteOrganization(orgId: string): Promise<void> {
   // Delete in FK-safe order within a transaction. The in-progress-runs check
-  // lives INSIDE the transaction (was previously a separate read before it):
-  // outside, a run could transition pending/running in the window between the
-  // check and the delete (TOCTOU), so we'd cascade-delete a live run's rows.
-  // Doing the count in the same transaction as the deletes — which take row
-  // locks on the runs being removed — closes that window. `assertOrgDeletable`
-  // is the caller-facing precondition, not a replacement for this check: it
-  // reads without the lock, so only the count below is race-free.
+  // lives INSIDE the transaction as well as in `reserveOrgDeletion`: the
+  // reservation is what makes a new admission impossible, this count is what
+  // proves it for the rows about to be cascade-deleted, and the two are
+  // separated by the module teardown. Keep both.
   await db.transaction(async (tx) => {
     // Serialize against concurrent run admission. `createRun` acquires this
     // same per-org advisory lock before its count + INSERT. Taking it here

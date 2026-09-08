@@ -64,6 +64,15 @@ export const organizations = pgTable(
     // billing-neutral: this is a technical byte ceiling, never a plan or price.
     // bigint (mode: number) — mirrors `files_bytes_used` above.
     filesBytesLimit: bigint("files_bytes_limit", { mode: "number" }),
+    // When a deletion of this organization was reserved. Written inside the
+    // same transaction that checks for in-progress runs, under the per-org
+    // run-admission advisory lock, and BEFORE `onOrgDelete` lets modules tear
+    // down anything outside this database. That is what makes the sequence
+    // resumable: run admission refuses a reserved org, so the deletability
+    // check cannot be invalidated behind the modules' back, and a DELETE
+    // retried after a failed hook finds the reservation standing and carries
+    // on. NULL for every organization that is not being deleted.
+    deletingAt: timestamp("deleting_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

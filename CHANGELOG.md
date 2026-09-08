@@ -526,6 +526,56 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Deleting an organization reserves the deletion before any module tears
+  anything down (migration `0057`).** `DELETE /api/orgs/:orgId` checked
+  deletability without a lock, emitted `onOrgDelete` — where modules cancel a
+  Stripe subscription and drop rows of their own — and only then opened the
+  transaction that re-checks in-progress runs and refuses when it finds any. A
+  run admitted in that window turned the refusal into a surviving organization
+  stripped of what the handlers had already destroyed, with no repair path. The
+  check and a `organizations.deleting_at` stamp now commit together under the
+  per-org advisory key run admission takes, and `createRun` refuses a reserved
+  organization (409 `org_deleting`), so the decision cannot be invalidated
+  behind the modules' back. A DELETE that fails after the reservation leaves it
+  standing and can simply be retried; module `onOrgDelete` handlers must
+  therefore tolerate a second call for the same organization. The migration is
+  one nullable column and rewrites no row.
+
+- **Revoking an API key requires `api-keys:revoke` in the key's own space.**
+  The guard answered for the space the request carried and the service then
+  updated org-wide, so a delegated administrator of one space could revoke a
+  key of a private sibling space, given only its id. A key whose space the
+  caller cannot reach now answers with that space's own wall (404 for a private
+  one). An API key still revokes only inside the space it is pinned to.
+
+- **Integration OAuth clients are `integrations:configure`, not
+  `integrations:install`.** Registering, rotating, deleting a BYO OAuth client
+  and choosing the default one are governance (RBAC spec §3.4), and `install`
+  is API-key-grantable — so a key could swap the OAuth application a whole
+  space authenticates through. The four routes now require the session-only
+  permission the SPA already gated them on.
+
+- **The billing managers card no longer clears itself when the member roster
+  fails to load.** Without the roster every saved manager read as "no longer a
+  member", which made the list dirty and turned Save into a `PUT` of the empty
+  set. The card stops at an error state instead.
+
+- **The models page stops asking for credentials a member cannot read.** The
+  credentials list and the provider registry are both behind
+  `model-provider-credentials:read`; they are now fetched only when the caller
+  holds it, instead of collecting two guaranteed 403s per visit.
+
+- **An OAuth client's signup role and space grants are locked while signup is
+  off.** The role select is disabled and the space grants are neither rendered
+  nor validated unless the client allows signup — the policy the server stores
+  is nothing at all while the flag is off.
+
+- **A role can be repaired after a module is unloaded.** The role editor
+  rendered only the permissions it could name, kept the rest selected
+  invisibly, and resent them on every save, which the server refused with a 400
+  no control could clear. Permissions the platform no longer knows are now
+  listed as unavailable, with a way to remove them.
+
 - **Unit tests green again after the 2026-09-07 LiteLLM catalog refresh
   (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
   `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor

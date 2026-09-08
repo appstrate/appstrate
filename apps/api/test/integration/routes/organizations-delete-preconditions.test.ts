@@ -30,7 +30,9 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
-import { organizations } from "@appstrate/db/schema";
+import { organizations, runs } from "@appstrate/db/schema";
+import { reserveOrgDeletion } from "../../../src/services/organizations.ts";
+import { createRun } from "../../../src/services/state/runs.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 
@@ -73,6 +75,15 @@ async function seedRunInOrg(
     spaceId: ctx.defaultSpaceId,
     status,
   });
+}
+
+/** The reservation stamp, or `null` when the org is not being deleted. */
+async function deletingAt(orgId: string): Promise<Date | null> {
+  const [row] = await db
+    .select({ deletingAt: organizations.deletingAt })
+    .from(organizations)
+    .where(eq(organizations.id, orgId));
+  return row?.deletingAt ?? null;
 }
 
 async function orgExists(orgId: string): Promise<boolean> {
@@ -139,6 +150,91 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
 
     expect(res.status).toBe(204);
     expect(orgDeleteCalls).toEqual([ctx.orgId]);
+    expect(await orgExists(ctx.orgId)).toBe(false);
+  });
+});
+
+/**
+ * The precondition above is only worth what it still means once the modules
+ * have acted. It used to mean nothing: it read outside any lock, so a run
+ * admitted after it made the in-transaction check refuse a deletion whose
+ * Stripe subscription was already cancelled. `reserveOrgDeletion` decides and
+ * records the deletion in one transaction, under the same per-org key run
+ * admission takes, and admission refuses a reserved org — so no run can appear
+ * in that window, and a sequence interrupted after the reservation resumes.
+ */
+describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    orgDeleteCalls = [];
+    app = getTestApp();
+  });
+
+  it("refuses to admit a run into a reserved organization", async () => {
+    const ctx = await createTestContext({ orgName: "Reserved Org" });
+    const pkg = await seedPackage({ orgId: ctx.orgId });
+
+    await reserveOrgDeletion(ctx.orgId);
+
+    const err = await createRun(
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      { id: "run_after_reservation", packageId: pkg.id, actor: null, input: null },
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect((err as { code?: string } | null)?.code).toBe("org_deleting");
+    const rows = await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("admits a run into an organization that is not reserved", async () => {
+    // Control: the refusal above is the reservation, not the route being shut.
+    const ctx = await createTestContext({ orgName: "Live Org" });
+    const pkg = await seedPackage({ orgId: ctx.orgId });
+
+    await createRun(
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      { id: "run_no_reservation", packageId: pkg.id, actor: null, input: null },
+    );
+
+    const rows = await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("refuses the reservation while a run admitted earlier is still in progress", async () => {
+    const ctx = await createTestContext({ orgName: "Busy Org" });
+    await seedRunInOrg(ctx, "running");
+
+    await expect(reserveOrgDeletion(ctx.orgId)).rejects.toThrow(/runs are in progress/);
+    expect(await deletingAt(ctx.orgId)).toBeNull();
+  });
+
+  it("keeps the reservation when a later step fails, and the retry deletes", async () => {
+    const ctx = await createTestContext({ orgName: "Interrupted Org" });
+    await reserveOrgDeletion(ctx.orgId);
+    const reservedAt = await deletingAt(ctx.orgId);
+    expect(reservedAt).not.toBeNull();
+
+    // Stand in for whatever failed after the reservation: the next attempt
+    // cannot finish while this row is in progress.
+    await seedRunInOrg(ctx, "running");
+    const refused = await app.request(`/api/orgs/${ctx.orgId}`, {
+      method: "DELETE",
+      headers: { Cookie: ctx.cookie },
+    });
+    expect(refused.status).toBe(400);
+    // The reservation is not rolled back by the failure — it is the state the
+    // retry is meant to find, unchanged.
+    expect((await deletingAt(ctx.orgId))?.getTime()).toBe(reservedAt!.getTime());
+
+    await db.update(runs).set({ status: "success" }).where(eq(runs.orgId, ctx.orgId));
+    const retried = await app.request(`/api/orgs/${ctx.orgId}`, {
+      method: "DELETE",
+      headers: { Cookie: ctx.cookie },
+    });
+    expect(retried.status).toBe(204);
     expect(await orgExists(ctx.orgId)).toBe(false);
   });
 });
