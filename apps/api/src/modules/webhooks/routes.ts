@@ -33,7 +33,7 @@ import {
 } from "./service.ts";
 import type { WebhookInfo } from "@appstrate/shared-types";
 import { ApiError, forbidden } from "../../lib/errors.ts";
-import { readJsonBody } from "../../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { enterSpaceContext, makePermissionGuard } from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
 import { assertSpaceId } from "../../lib/ids.ts";

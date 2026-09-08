@@ -31,7 +31,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";

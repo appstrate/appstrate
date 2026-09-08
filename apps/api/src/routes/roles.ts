@@ -15,7 +15,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { assertSpaceRoleId } from "../lib/ids.ts";
 import { listResponse } from "../lib/list-response.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceLevelVocabulary } from "../lib/permissions.ts";
 import { recordAuditFromContext } from "../services/audit.ts";

@@ -176,8 +176,8 @@ packages/module-ee/
 │   ├── db.ts                 # Drizzle client + migrator (lazy init on DATABASE_URL, ee_migrations journal)
 │   ├── redis.ts              # ioredis client (lazy init, ee: prefix)
 │   ├── logger.ts             # Creates and exports a pino logger instance via @appstrate/core/logger createLogger()
-│   ├── middleware.ts          # Rate limiting + admin guard for EE routes
-│   ├── platform-org-queries.ts # The two org queries EE needs from the platform + EeInitContext
+│   ├── middleware.ts          # Rate limiting for EE routes (RBAC is core's requireModulePermission)
+│   ├── platform-org-queries.ts # Holder for the two ModuleInitContext org queries EE keeps after init()
 │   ├── billing/
 │   │   ├── managers.ts        # Billing managers: resolver, set replacement, principal-permission invalidation
 │   │   ├── contact.ts         # Billing contact: read/patch + Stripe customer email push
@@ -444,9 +444,9 @@ Two consumers:
 `getOrgOwnerEmails(orgId)` and `getOrgMembers(orgId, userIds)` — the latter
 resolves ids to `{ userId, email, role }` and simply OMITS an id that is not a
 member of that org, which is what makes one call serve both the membership
-refusal above and the manager address book. `src/platform-org-queries.ts`
-declares them and narrows `init`'s parameter to `EeInitContext`, so the
-requirement sits in the signature rather than in a comment.
+refusal above and the manager address book. `src/platform-org-queries.ts` holds
+the pair captured at `init(ctx)`, typed as a `Pick` of `ModuleInitContext` so
+the shape stays core's to define.
 
 ### Org deletion and the Stripe cancellation
 

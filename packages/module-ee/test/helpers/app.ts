@@ -10,7 +10,7 @@
 import { Hono } from "hono";
 import eeModule from "../../src/index.ts";
 import { createBillingRoutes } from "../../src/routes/billing.ts";
-import type { OrgRole } from "../../src/types.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 
 /**
  * The permissions the platform's RBAC aggregation grants `orgRole` from this

@@ -33,7 +33,7 @@ import {
   isVersionSupported,
   unsupportedApiVersion,
 } from "../lib/api-versions.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,

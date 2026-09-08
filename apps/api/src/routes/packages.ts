@@ -58,7 +58,7 @@ import {
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import {

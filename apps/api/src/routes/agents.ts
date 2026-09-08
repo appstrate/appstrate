@@ -34,7 +34,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";

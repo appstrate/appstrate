@@ -295,6 +295,22 @@ export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as 
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
 
 /**
+ * The org roles that already run the organization: they hold every org-level
+ * permission the platform and its modules define, in every space, without a
+ * `space_members` row.
+ *
+ * One name for a fact four call sites used to spell `["owner", "admin"]` on
+ * their own — the billing-manager refusal (a grant to one of these roles means
+ * nothing), the SPA's picker that hides them, its role-preview trigger, and
+ * the space-member picker. A role promoted into or out of this set changes all
+ * four together or none of them, and only the first shape is a decision.
+ */
+export const ORG_ROLES_WITH_FULL_ACCESS = ["owner", "admin"] as const;
+
+/** Org role union of {@link ORG_ROLES_WITH_FULL_ACCESS} — `"owner" | "admin"`. */
+export type OrgRoleWithFullAccess = (typeof ORG_ROLES_WITH_FULL_ACCESS)[number];
+
+/**
  * Space visibility (RBAC spec §3.1): `open` — every org `member` is an implicit member
  * with the space's `default_role`; `closed` — listed, entered only with a `space_members`
  * row; `private` — invisible without a row (404, not 403).
@@ -321,10 +337,19 @@ export interface SpaceAssignment {
 // ignored.
 // ---------------------------------------------------------------------------
 
-/** Org roles a preview may take. `owner`/`admin` excluded: a preview only removes. */
-export const VIEW_AS_ORG_ROLES = ["member", "guest"] as const;
+/**
+ * Org roles a preview may take: every role that is NOT
+ * {@link ORG_ROLES_WITH_FULL_ACCESS}. Derived rather than listed, because "a
+ * preview only removes" is exactly the statement that the previewable roles are
+ * the complement of the ones that hold everything — a role added to either
+ * tuple by hand would break that on one side only.
+ */
+export type ViewAsOrgRole = Exclude<OrgRole, OrgRoleWithFullAccess>;
 
-export type ViewAsOrgRole = (typeof VIEW_AS_ORG_ROLES)[number];
+export const VIEW_AS_ORG_ROLES: readonly [ViewAsOrgRole, ...ViewAsOrgRole[]] = ORG_ROLES.filter(
+  (role): role is ViewAsOrgRole =>
+    !(ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(role),
+) as [ViewAsOrgRole, ...ViewAsOrgRole[]];
 
 /** HTTP carrier: `org_role=…; space=…; role=preset:…|custom:…`. */
 export const VIEW_AS_HEADER = "X-View-As";

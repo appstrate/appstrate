@@ -17,7 +17,7 @@ import {
   linkPairingCredential,
 } from "../services/model-providers/pairings.ts";
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getOrgModelProviderCredential } from "../services/model-providers/credentials.ts";
 

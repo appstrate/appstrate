@@ -117,7 +117,7 @@ function tokenMatches(presented: string, expected: string): boolean {
  * response (malformed JSON and schema violations are both client errors
  * — the orchestrator must never see an unvalidated payload).
  *
- * NOTE: deliberately NOT the platform's `apps/api/src/lib/request-body.ts`
+ * NOTE: deliberately NOT `@appstrate/core/request-body`'s
  * `readJsonBody`. This is the standalone runner daemon: it speaks a different
  * wire shape (a `{ ok, data | res }` result the caller unwraps, plain `{ error }`
  * bodies) instead of throwing RFC-9457 `ApiError`s, so the divergence is

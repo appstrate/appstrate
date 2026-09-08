@@ -197,7 +197,10 @@ describe("billing routes", () => {
       expect(res.status).toBe(400);
     });
 
-    it("rejects member role (admin-only)", async () => {
+    it("rejects member role (admin-only) as RFC 9457 problem+json", async () => {
+      // The guard is the platform's own (`requireModulePermission`), which
+      // signals by throwing; this asserts the module router renders that throw
+      // as the same problem body a core route would.
       await seedBillingAccount({ orgId });
 
       const res = await app.request("/api/billing/checkout", {
@@ -210,6 +213,40 @@ describe("billing routes", () => {
       });
 
       expect(res.status).toBe(403);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      expect((await res.json()) as { code: string; detail: string }).toMatchObject({
+        code: "forbidden",
+        detail: "Insufficient permissions: billing:manage required",
+      });
+    });
+
+    it("names the unknown field it refuses instead of dropping it", async () => {
+      await seedBillingAccount({ orgId });
+
+      const res = await app.request("/api/billing/checkout", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "starter", promo_code: "FREE" }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      const body = (await res.json()) as { errors?: { field: string }[] };
+      expect(body.errors?.map((e) => e.field)).toContain("promo_code");
+    });
+
+    it("reports the real schema violation, not a stock sentence", async () => {
+      await seedBillingAccount({ orgId });
+
+      const res = await app.request("/api/billing/checkout", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "starter", return_url: 42 }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { field: string }[] };
+      expect(body.errors?.map((e) => e.field)).toEqual(["return_url"]);
     });
 
     it("REFUSES a second subscription for an org that already has one", async () => {

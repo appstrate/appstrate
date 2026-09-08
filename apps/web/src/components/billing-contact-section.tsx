@@ -34,7 +34,7 @@ import { Spinner } from "./spinner";
  * Where invoices, receipts and dunning mail go instead of every owner's inbox.
  *
  * Mounted only where `features.billing && can("billing:manage")` holds — the
- * condition `eeRequireAdmin()` checks. An empty primary address is not a
+ * condition the module's routes check. An empty primary address is not a
  * missing value: it is the org asking for the owners fallback, which is why
  * the form can clear the field and why the save sends `null` for it.
  *

@@ -59,8 +59,8 @@ export function OrgSettingsBillingPage() {
   // storage section.
   const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
 
-  // The two admin sections below are MOUNTED on the exact condition
-  // `eeRequireAdmin()` checks (`billing:manage`), not merely hidden by it — so
+  // The two admin sections below are MOUNTED on the exact condition the
+  // module's admin routes check (`billing:manage`), not merely hidden by it — so
   // their queries never fire for a caller the routes would answer with 403.
   const canManageBilling = can("billing:manage");
 

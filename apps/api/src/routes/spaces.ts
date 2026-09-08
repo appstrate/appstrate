@@ -17,7 +17,7 @@ import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { apiKeySpaceScopeGuard } from "../middleware/guards.ts";
 import { ApiError, forbidden, invalidRequest, internalError, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { listResponse } from "../lib/list-response.ts";
 import {

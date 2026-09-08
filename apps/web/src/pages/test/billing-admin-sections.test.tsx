@@ -4,7 +4,8 @@
  * The two admin-only billing sections: who sees them, what they show, and what
  * a save puts on the wire.
  *
- * Gating is the interesting half. `eeRequireAdmin()` is `billing:manage`, so
+ * Gating is the interesting half. The module's admin routes require
+ * `billing:manage`, so
  * that — not the org role — is what mounts the sections: a member who can only
  * READ billing gets the plan cards and nothing else.
  *

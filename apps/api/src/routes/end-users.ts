@@ -17,7 +17,7 @@ import {
   deleteEndUser,
 } from "../services/end-users.ts";
 import { invalidRequest } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 import { recordAuditFromContext } from "../services/audit.ts";

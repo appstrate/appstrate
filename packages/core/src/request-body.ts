@@ -3,11 +3,11 @@
 /**
  * Canonical request-body reader for JSON routes.
  *
- * Two failure modes were handled inconsistently across the API, both yielding
- * a 500 that should have been a 400:
+ * Two failure modes are handled inconsistently by hand-rolled readers, both
+ * yielding a 500 that should have been a 400:
  *
  *  1. `await c.req.json()` on a malformed / truncated / empty body throws a raw
- *     `SyntaxError`, which the global error handler maps to `internalError()`
+ *     `SyntaxError`, which a global error handler maps to `internalError()`
  *     (500) instead of a client 400.
  *  2. `c.req.json<T>()` casts without validating, so a well-formed-JSON-but-
  *     wrong-shape body (`{ content: 1 }`) slips past TypeScript and blows up
@@ -23,14 +23,21 @@
  * becomes `{}` and validates, while MALFORMED JSON still 400s. This replaces the
  * `c.req.json().catch(() => ({}))` dialect, which silently swallowed malformed
  * JSON into `{}` and could mask a broken request as a bad-shape (or accepted) one.
+ *
+ * It lives in core rather than in `apps/api` because a module cannot import
+ * from the platform's source tree: without this, every module route re-derives
+ * the malformed/invalid split by hand, and each copy phrases its own 400 —
+ * which is how one of them ended up reporting every schema failure as
+ * "plan_id is required". Hono is an optional peer dependency of this package
+ * and only its `Context` TYPE is touched here.
  */
 
 import type { Context } from "hono";
 import type { z } from "zod";
-import { invalidRequest, parseBody } from "@appstrate/core/api-errors";
+import { invalidRequest, parseBody } from "./api-errors.ts";
 
 /** Options for {@link readJsonBody}. */
-interface ReadJsonBodyOptions {
+export interface ReadJsonBodyOptions {
   /** Field-path prefix forwarded to `parseBody` for nested error reporting. */
   param?: string;
   /** Treat a missing / whitespace-only body as `{}` instead of a 400. */

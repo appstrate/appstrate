@@ -48,7 +48,7 @@ const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, str
  * Who may act on billing without running the organization (RBAC spec §10).
  *
  * Mounted only where `features.billing && can("billing:manage")` holds — the
- * exact condition `eeRequireAdmin()` checks.
+ * exact condition the module's routes check.
  *
  * A save is a `PUT` of the whole set, so it is refused wholesale over one stale
  * id — a manager since promoted to admin, or since removed from the org. Those

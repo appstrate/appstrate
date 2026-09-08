@@ -49,7 +49,7 @@ import {
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, internalError, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import {
   parseListPagination,

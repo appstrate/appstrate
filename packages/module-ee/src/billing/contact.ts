@@ -35,10 +35,12 @@ export const MAX_BILLING_CC = 5;
  * caller may set one without restating the other; `billing_email: null` is the
  * explicit way to clear the contact and go back to the owner fallback.
  */
-export const billingContactPatchSchema = z.object({
-  billing_email: z.email().nullable().optional(),
-  billing_cc: z.array(z.email()).max(MAX_BILLING_CC).optional(),
-});
+export const billingContactPatchSchema = z
+  .object({
+    billing_email: z.email().nullable().optional(),
+    billing_cc: z.array(z.email()).max(MAX_BILLING_CC).optional(),
+  })
+  .strict();
 
 export interface BillingContact {
   billingEmail: string | null;

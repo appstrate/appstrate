@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
-import type { AppstrateModule, BeforeUsageParams, UsageRejection } from "@appstrate/core/module";
+import type {
+  AppstrateModule,
+  BeforeUsageParams,
+  ModuleInitContext,
+  UsageRejection,
+} from "@appstrate/core/module";
 import { initEeDb, migrateEeDb, closeEeDb, getEeDb } from "./db.ts";
 import { initEeRedis, getEeRedis } from "./redis.ts";
 import { describeEnvIssues, getEeEnv } from "./env.ts";
 import { getAppUrl, setAppUrl, setPlatformServices } from "./platform.ts";
-import { setOrgQueries, type EeInitContext } from "./platform-org-queries.ts";
+import { setOrgQueries } from "./platform-org-queries.ts";
 import { checkQuota, QuotaExceededError } from "./billing/quota-check.ts";
 import { quoteUsage } from "./billing/usage-quote.ts";
 import { logger } from "./logger.ts";
@@ -68,11 +73,7 @@ const eeModule: AppstrateModule = {
     version: "0.1.0",
   },
 
-  // `EeInitContext` narrows the platform's `ModuleInitContext` with the two
-  // org queries this module needs (`platform-org-queries.ts`). `init` is a
-  // method on the contract, so the narrowing is accepted — and it puts EE's
-  // requirement in the signature instead of in a comment.
-  async init(ctx: EeInitContext) {
+  async init(ctx: ModuleInitContext) {
     // Fail-fast: validate all EE env vars first. The rethrow names the offending
     // variables — an operator reading a boot crash needs to know WHICH of the
     // module's env vars is wrong, not that one is.

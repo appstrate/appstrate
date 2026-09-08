@@ -10,7 +10,7 @@ import { profiles, user as userTable, organizationMembers } from "@appstrate/db/
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { conflict, forbidden, internalError, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { getErrorMessage } from "@appstrate/core/errors";

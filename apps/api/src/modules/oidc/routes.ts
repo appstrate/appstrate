@@ -24,7 +24,7 @@ import { idempotency } from "../../middleware/idempotency.ts";
 import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
 import { notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
-import { readJsonBody } from "../../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
