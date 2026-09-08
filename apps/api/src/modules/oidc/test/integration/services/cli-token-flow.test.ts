@@ -46,7 +46,7 @@ import { cliRefreshToken, deviceCode } from "@appstrate/db/schema";
 import { _hashRefreshTokenForTesting } from "../../../services/cli-tokens.ts";
 import {
   verifyEndUserAccessToken as verifyToken,
-  overrideJwksResolver,
+  overrideJwks,
 } from "../../../services/enduser-token.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -120,7 +120,7 @@ describe("POST /api/auth/cli/token — grant_type=device_code (issue #165)", () 
     // Fresh JWKS resolver — `enduser-token.ts` caches a resolver in
     // memory, and a prior test suite may have seeded it with keys from
     // a now-truncated `jwks` table.
-    overrideJwksResolver(null);
+    overrideJwks(null);
     await createTestContext({ orgSlug: "clitoken" });
     await ensureCliClient();
   });
@@ -353,7 +353,7 @@ describe("POST /api/auth/cli/token — grant_type=refresh_token", () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
-    overrideJwksResolver(null);
+    overrideJwks(null);
     await createTestContext({ orgSlug: "cliref" });
     await ensureCliClient();
   });
@@ -674,7 +674,7 @@ describe("POST /api/auth/cli/revoke", () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
-    overrideJwksResolver(null);
+    overrideJwks(null);
     await createTestContext({ orgSlug: "clirev" });
     await ensureCliClient();
   });
@@ -831,7 +831,7 @@ describe("device-session metadata (issue #251)", () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
-    overrideJwksResolver(null);
+    overrideJwks(null);
     await createTestContext({ orgSlug: "climeta" });
     await ensureCliClient();
   });

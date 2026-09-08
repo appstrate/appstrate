@@ -78,9 +78,8 @@ beforeAll(async () => {
   await startJwksServer();
   const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
   const { default: oidcModule } = await import("../../../index.ts");
-  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
-  const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
-  overrideJwksResolver(localSet as unknown as Parameters<typeof overrideJwksResolver>[0]);
+  const { overrideJwks } = await import("../../../services/enduser-token.ts");
+  overrideJwks(async () => ({ keys: [publicJwk] }));
   app = getTestApp({ modules: [oidcModule] });
 });
 

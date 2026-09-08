@@ -35,6 +35,9 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { createResourceServerChallenge } from "@better-auth/oauth-provider";
+import { createInsufficientScopeError } from "@better-auth/core/oauth2";
+import { APIError } from "better-auth/api";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
@@ -298,24 +301,32 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // RFC 9728 §5.1 challenge: on a 401 (no/invalid token) or 403 (insufficient
   // scope) the generic responder attaches this so a spec-compliant client
   // (Claude Code, …) discovers the PRM URL and starts/steps-up an OAuth flow.
-  // Registered for the per-org PREFIX so it fires on every org's endpoint; the
-  // `resource_metadata` URL is derived from the ACTUAL request path so it points
-  // at the requested org's well-known (the challenge builder receives the
-  // request origin, but the per-org PRM path is recovered from `c.req.path` via
-  // the registry's path-prefix match — we rebuild it from the request path
-  // captured by the responder. Anchored on the canonical APP_URL base for the
-  // same proxy-safety reason as the PRM `resource` above.
+  // Registered for the per-org PREFIX so it fires on every org's endpoint,
+  // while the resource is derived from the ACTUAL request path — the tokenless
+  // client is pointed at the requested org's well-known and gets a token bound
+  // to the right org. Anchored on the canonical APP_URL base (via
+  // `getMcpOrgResourceUri`) for the same proxy-safety reason as the PRM
+  // `resource` above.
+  //
+  // `createResourceServerChallenge` owns the serialization: it inserts the
+  // well-known segment ahead of the resource path per RFC 9728 §3.1, quotes
+  // every auth-param per RFC 6750, and answers a DPoP failure with the RFC 9449
+  // `DPoP` challenge. The responder hands us a status, not the error the
+  // pipeline raised, so each status is expressed as the error upstream keys
+  // off: a bare 401 for "no or invalid token", and — because reaching this
+  // prefix at all is gated on `mcp:read` — an insufficient-scope error for the
+  // 403, which is the step-up signal an MCP client acts on.
   registerAuthChallenge(MCP_PREFIX, ({ status, path }) => {
-    const appBase = getPublicAppOrigin();
-    // `path` is the requested resource path (e.g. `/api/mcp/o/<orgId>`); the
-    // per-org PRM lives at the path-insertion well-known for THAT path, so the
-    // tokenless client discovers the right org's metadata and requests a token
-    // bound to the right org.
-    const resourceMetadata = `${appBase}${PRM_PATH_PREFIX}${path}`;
-    const base = `Bearer resource_metadata="${resourceMetadata}", scope="${MCP_SCOPES.join(" ")}"`;
-    // 403 here means the caller authenticated but lacks an mcp scope — signal
-    // step-up per RFC 6750 §3.1 so the client requests the missing scope.
-    return status === 403 ? `${base}, error="insufficient_scope"` : base;
+    const resource = deriveOrgResourceUri(path);
+    if (!resource) return undefined;
+    const error =
+      status === 403
+        ? createInsufficientScopeError(MCP_SCOPES)
+        : new APIError("UNAUTHORIZED", { message: "invalid access token" });
+    const challenge = createResourceServerChallenge(error, resource, {
+      challengeScopes: MCP_SCOPES,
+    });
+    return new Headers(challenge?.headers).get("WWW-Authenticate") ?? undefined;
   });
 
   // Rate-limit before the permission check so repeated probing (including by a

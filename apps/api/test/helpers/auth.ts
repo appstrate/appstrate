@@ -170,18 +170,19 @@ export async function createTestUser(
 
 /**
  * Create a test organization and add the given user as owner.
- * Also creates a default space (required by many flows).
+ * Also creates a default space (required by many flows). Pass `id` when the
+ * test must know the org id before the row exists.
  */
 export async function createTestOrg(
   userId: string,
-  overrides: Partial<{ name: string; slug: string }> = {},
+  overrides: Partial<{ id: string; name: string; slug: string }> = {},
 ): Promise<{ org: TestOrg; defaultSpaceId: string }> {
   const slug = overrides.slug ?? `test-org-${nextId()}`;
   const name = overrides.name ?? `Test Org ${slug}`;
 
   const [org] = await db
     .insert(organizations)
-    .values({ name, slug, createdBy: userId })
+    .values({ ...(overrides.id ? { id: overrides.id } : {}), name, slug, createdBy: userId })
     .returning();
 
   // Add user as owner

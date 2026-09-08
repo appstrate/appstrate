@@ -42,7 +42,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { overrideJwksResolver } from "../../../services/enduser-token.ts";
+import { overrideJwks } from "../../../services/enduser-token.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
@@ -188,7 +188,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   beforeAll(() => {
     // Make sure the JWKS cache starts clean so verifyEndUserAccessToken
     // fetches the ES256 keys the jwt plugin just installed.
-    overrideJwksResolver(null);
+    overrideJwks(null);
   });
 
   /**
@@ -215,7 +215,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
-    overrideJwksResolver(null);
+    overrideJwks(null);
     resetOidcGuardsLimiters();
     ctx = await createTestContext({ orgSlug: "e2eoauth" });
     const client = await registerClient(ctx);

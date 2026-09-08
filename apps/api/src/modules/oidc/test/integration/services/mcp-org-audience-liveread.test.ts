@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll, afterEach } from
 import { eq } from "drizzle-orm";
 import { oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
+import { createTestOrg, createTestUser } from "../../../../../../test/helpers/auth.ts";
 import { db, truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
@@ -109,8 +110,13 @@ async function tokenErrorFor(clientId: string, resource?: string) {
 }
 
 describe("RFC 8707 resource gate on the AS", () => {
-  const orgId = "00000000-0000-0000-0000-0000000000aa";
-  const orgUri = getMcpOrgResourceUri(orgId);
+  // A fresh org id per case. `oauth_resources` sits outside `truncateAll`, and
+  // the mcp module's periodic reconcile deletes per-org rows whose org is
+  // absent from `organizations` — so a case that needs its row to stay creates
+  // the organization, and one that asserts the row's absence simply never does.
+  let orgId: string;
+  let orgUri: string;
+  let ownerId: string;
 
   // The protected-resource registry is a process-wide singleton shared with the
   // live app. Snapshot before this file replaces the family and restore after,
@@ -123,16 +129,13 @@ describe("RFC 8707 resource gate on the AS", () => {
     restoreProtectedResources(resourceSnapshot);
   });
 
-  // `oauth_resources` is deliberately outside `truncateAll` (see
-  // `oidc/test/tables.ts`), so this file owns its own row lifecycle.
-  const dropOrgResource = () =>
-    db.delete(oauthResource).where(eq(oauthResource.identifier, orgUri));
-
   beforeEach(async () => {
     await truncateAll();
-    await dropOrgResource();
     await flushRedis();
     resetOidcGuardsLimiters();
+    orgId = crypto.randomUUID();
+    orgUri = getMcpOrgResourceUri(orgId);
+    ({ id: ownerId } = await createTestUser());
     // Register the per-org resource FAMILY (mirrors the production registration
     // in `mcp/router.ts`) so the self-service resource-restriction guard (which
     // checks the protected-resource registry, not the resource table) passes —
@@ -148,18 +151,26 @@ describe("RFC 8707 resource gate on the AS", () => {
     });
   });
 
+  // `oauth_resources` is deliberately outside `truncateAll` (see
+  // `oidc/test/tables.ts`), so this file owns its own row lifecycle.
   afterEach(async () => {
-    await dropOrgResource();
+    await db.delete(oauthResource).where(eq(oauthResource.identifier, orgUri));
   });
 
   it("rejects the per-org resource with invalid_target BEFORE its row exists", async () => {
+    // No organization, no row: the reconcile can only converge on the state
+    // this case asserts.
     const clientId = await register();
     expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
   });
 
   it("accepts the per-org resource AFTER its row is inserted at runtime", async () => {
     const clientId = await register();
+    // The organization does not exist yet, so nothing can insert its row.
     expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
+    // Now the org is real and its row is written, exactly as `onOrgCreate`
+    // does — and the reconcile keeps it rather than sweeping it away.
+    await createTestOrg(ownerId, { id: orgId, slug: `liveread-${orgId.slice(0, 8)}` });
     await db
       .insert(oauthResource)
       .values({
@@ -178,6 +189,9 @@ describe("RFC 8707 resource gate on the AS", () => {
 
   it("rejects a resource whose row is disabled", async () => {
     const clientId = await register();
+    // A live org, so `disabled` is the only thing the gate can be reading: the
+    // reconcile writes the same identifier, and the upsert wins over its row.
+    await createTestOrg(ownerId, { id: orgId, slug: `liveread-${orgId.slice(0, 8)}` });
     await db
       .insert(oauthResource)
       .values({
@@ -186,7 +200,7 @@ describe("RFC 8707 resource gate on the AS", () => {
         name: "disabled org endpoint",
         disabled: true,
       })
-      .onConflictDoNothing({ target: oauthResource.identifier });
+      .onConflictDoUpdate({ target: oauthResource.identifier, set: { disabled: true } });
     expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
   });
 

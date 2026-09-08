@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import * as jose from "jose";
 import { _resetCacheForTesting } from "@appstrate/env";
-import type { JwksResolver } from "../../services/enduser-token.ts";
+import type { JwksFetch } from "../../services/enduser-token.ts";
 
 // NOTE: must set env BEFORE importing the service (getEnv caches).
 // We pick an ephemeral port below and rewrite APP_URL to match.
@@ -22,7 +22,7 @@ let server: ReturnType<typeof Bun.serve> | null = null;
 let privateKey: jose.CryptoKey;
 let kid: string;
 let publicJwk: jose.JWK;
-let localJwks: JwksResolver;
+let localJwks: JwksFetch;
 
 async function startJwksServer() {
   const { publicKey, privateKey: priv } = await jose.generateKeyPair("ES256", {
@@ -48,7 +48,7 @@ async function startJwksServer() {
   });
   process.env.APP_URL = `http://127.0.0.1:${server.port}`;
   _resetCacheForTesting();
-  localJwks = jose.createLocalJWKSet({ keys: [publicJwk] }) as unknown as JwksResolver;
+  localJwks = async () => ({ keys: [publicJwk] });
 }
 
 async function mintToken(payload: Record<string, unknown>, audience?: string) {
@@ -173,5 +173,60 @@ describe("verifyEndUserAccessToken", () => {
       .setExpirationTime("2m")
       .sign(privateKey);
     expect(await verifyEndUserAccessToken(noSub, { jwks: localJwks })).toBeNull();
+  });
+
+  // The two cache properties the verifier inherits from `verifyJwsAccessToken`,
+  // asserted through the module source (`overrideJwks`) — `deps.jwks` is
+  // deliberately uncached, so it cannot show either.
+  it("reads the key set once for two verifies inside the cache TTL", async () => {
+    const { verifyEndUserAccessToken, overrideJwks } =
+      await import("../../services/enduser-token.ts");
+    let reads = 0;
+    overrideJwks(async () => {
+      reads += 1;
+      return { keys: [publicJwk] };
+    });
+    try {
+      expect(
+        await verifyEndUserAccessToken(await mintToken({ sub: "auth_user_1" })),
+      ).not.toBeNull();
+      expect(reads).toBe(1);
+      expect(
+        await verifyEndUserAccessToken(await mintToken({ sub: "auth_user_2" })),
+      ).not.toBeNull();
+      expect(reads).toBe(1);
+    } finally {
+      overrideJwks(null);
+    }
+  });
+
+  it("re-reads the key set exactly once for an unknown kid, then refuses the token", async () => {
+    const { verifyEndUserAccessToken, overrideJwks } =
+      await import("../../services/enduser-token.ts");
+    let reads = 0;
+    overrideJwks(async () => {
+      reads += 1;
+      return { keys: [publicJwk] };
+    });
+    try {
+      expect(
+        await verifyEndUserAccessToken(await mintToken({ sub: "auth_user_1" })),
+      ).not.toBeNull();
+      expect(reads).toBe(1);
+      // Signed by a key the served set never carries — what a client presenting
+      // a token from the far side of a rotation looks like.
+      const { privateKey: rotated } = await jose.generateKeyPair("ES256", { extractable: true });
+      const rotatedToken = await new jose.SignJWT({ sub: "auth_user_1" })
+        .setProtectedHeader({ alg: "ES256", kid: "rotated-key" })
+        .setIssuer(`${process.env.APP_URL!}/api/auth`)
+        .setAudience(process.env.APP_URL!)
+        .setIssuedAt()
+        .setExpirationTime("2m")
+        .sign(rotated);
+      expect(await verifyEndUserAccessToken(rotatedToken)).toBeNull();
+      expect(reads).toBe(2);
+    } finally {
+      overrideJwks(null);
+    }
   });
 });

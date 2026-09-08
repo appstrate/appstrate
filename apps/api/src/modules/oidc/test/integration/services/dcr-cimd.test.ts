@@ -25,6 +25,7 @@ import { _rebuildAuthForTesting } from "@appstrate/db/auth";
 import { decodeJwt } from "jose";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
+import { createTestOrg, createTestUser } from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import {
@@ -521,7 +522,11 @@ describe("CIMD refresh keeps the platform stamp", () => {
   // platform's own discriminators have to be re-asserted on every one —
   // `onClientRefreshed` is what does that. This suite drives a real
   // registration, a real refresh and a real mint.
-  const ORG_ID = "00000000-0000-0000-0000-0000000000d1";
+  //
+  // The org this suite binds its tokens to is real: `oauth_resources` sits
+  // outside `truncateAll`, and the mcp module's periodic reconcile deletes
+  // per-org rows whose org is absent from `organizations` — which would take
+  // this suite's audience row with it.
 
   let documentOctet = 100;
   let clientId: string;
@@ -643,7 +648,9 @@ describe("CIMD refresh keeps the platform stamp", () => {
     documentOctet += 1;
     clientId = `https://93.184.216.${documentOctet}/client.json`;
     redirectUri = `https://93.184.216.${documentOctet}/callback`;
-    orgUri = getMcpOrgResourceUri(ORG_ID);
+    const { id: ownerId } = await createTestUser();
+    const { org } = await createTestOrg(ownerId, { slug: "cimd-refresh" });
+    orgUri = getMcpOrgResourceUri(org.id);
     fetchDocument = spyOn(cimdTransport, "fetchClientMetadataResource").mockImplementation(
       async () =>
         Response.json({
