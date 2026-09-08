@@ -136,4 +136,66 @@ describe("API keys carry their creator's authority in the key's space", () => {
     expect(ok.status).toBe(201);
     expect(((await ok.json()) as { scopes: string[] }).scopes).toEqual(["integrations:install"]);
   });
+
+  /**
+   * `api-keys:revoke` is space-level, so holding it in one space says nothing
+   * about a key in another. The delegated administrator below runs space A and
+   * cannot even see B; the key id is the only thing they hold, and it must not
+   * be enough.
+   */
+  describe("revoking a key of another space", () => {
+    it("answers a delegated space admin with the sibling space's own 404", async () => {
+      const a = await seedSpace({ orgId: owner.orgId, visibility: "private" });
+      const b = await seedSpace({ orgId: owner.orgId, visibility: "private" });
+      const guest = await createTestUser();
+      await addOrgMember(owner.orgId, guest.id, "guest");
+      await seedSpaceMember({ spaceId: a.id, userId: guest.id, presetRole: "admin" });
+
+      const inB = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: b.id,
+        createdBy: owner.user.id,
+        scopes: ["agents:read"],
+      });
+      const headers = authHeaders({ ...owner, cookie: guest.cookie }, { "X-Space-Id": a.id });
+
+      // B does not exist for them, and neither does a key inside it.
+      expect((await app.request(`/api/spaces/${b.id}`, { headers })).status).toBe(404);
+      const denied = await app.request(`/api/api-keys/${inB.id}`, { method: "DELETE", headers });
+      expect(denied.status).toBe(404);
+
+      // Still live: the 404 is a refusal, not a revocation that answered oddly.
+      const listed = await app.request("/api/api-keys", {
+        headers: authHeaders(owner, { "X-Space-Id": b.id }),
+      });
+      expect(((await listed.json()) as { data: { id: string }[] }).data).toHaveLength(1);
+
+      // Control: the same caller, the same permission, a key in the space they
+      // actually administer.
+      const inA = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: a.id,
+        createdBy: owner.user.id,
+        scopes: ["agents:read"],
+      });
+      const allowed = await app.request(`/api/api-keys/${inA.id}`, { method: "DELETE", headers });
+      expect(allowed.status).toBe(204);
+    });
+
+    it("lets an owner revoke across spaces — admin of every space", async () => {
+      const other = await seedSpace({ orgId: owner.orgId, visibility: "private" });
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: other.id,
+        createdBy: owner.user.id,
+        scopes: ["agents:read"],
+      });
+
+      const res = await app.request(`/api/api-keys/${key.id}`, {
+        method: "DELETE",
+        headers: authHeaders(owner),
+      });
+      expect(res.status).toBe(204);
+    });
+  });
 });

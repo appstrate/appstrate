@@ -195,7 +195,10 @@ export const apiKeysPaths = {
       operationId: "revokeApiKey",
       tags: ["API Keys"],
       summary: "Revoke an API key",
-      description: "Revoke (soft-delete) an API key. The key will immediately stop working.",
+      description:
+        "Revoke (soft-delete) an API key. The key will immediately stop working. " +
+        "`api-keys:revoke` is required in the KEY's own space, not in the space the " +
+        "request carries; a key whose space the caller cannot reach answers 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

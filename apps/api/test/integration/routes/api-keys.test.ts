@@ -291,11 +291,10 @@ describe("API Keys API", () => {
     });
   });
 
-  // Issue #172 (extension) — `revokeApiKey(keyId, orgId)` filtered by org
-  // only, letting an API key in Space A revoke any key in the org (other
-  // spaces included). The fix passes the caller's bound spaceId for
-  // API-key auth; sessions stay org-wide.
-  describe("API key cross-space revoke (issue #172 extension)", () => {
+  // A key delegates authority in exactly one space, so it revokes only there.
+  // The session half of the same rule — the permission is required in the
+  // KEY's space — is pinned in `api-keys-space-authority.test.ts`.
+  describe("API key cross-space revoke", () => {
     it("API key in Space A cannot revoke a key in Space B (same org)", async () => {
       const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space" });
       const callerKey = await seedApiKey({
@@ -345,7 +344,7 @@ describe("API Keys API", () => {
       expect(res.status).toBe(204);
     });
 
-    it("session admin can revoke any key in the org (regression guard)", async () => {
+    it("session owner revokes a key of another space — admin everywhere", async () => {
       const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space 2" });
       const victimKey = await seedApiKey({
         orgId: ctx.orgId,
