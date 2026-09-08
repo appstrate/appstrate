@@ -348,14 +348,13 @@ Tokens minted for env-provisioned instance clients carry `actor_type: "user"` an
 4. Receive JWT access token. Call `GET /api/organizations` with `Authorization: Bearer <token>` → list of orgs the user belongs to. Satellite displays an org picker.
 5. Subsequent calls include `X-Org-Id: <selected>` — core resolves the org and role per-request via the `X-Org-Id` middleware.
 
-### Why not `type: "native"` / public clients (CLI, desktop)?
+### Public / native clients (CLI, desktop)
 
-Two blockers identified at Phase 1:
+A public client is one whose `token_endpoint_auth_method` is `"none"` — that is the whole definition; there is no separate flag and no stored `type`. Its application type lives in `application_type` (`"web"` | `"native"`), which the provider reads at registration to decide which redirect URIs it accepts (`validateClientRedirectUri`).
 
-1. ~~**`isValidRedirectUri` rejects loopback redirects in production** (`services/redirect-uri.ts`) — dev-mode only. A CLI cannot register `http://127.0.0.1:<port>/callback` in prod.~~ Resolved (#1012): `isValidRedirectUri` now accepts `http://` for any loopback host regardless of environment, reusing the DCR path's own predicate (`isLoopbackHost` from `@better-auth/core/utils/host`, RFC 8252 §7.3). The dashboard form's pre-check (`apps/web/src/modules/oidc/lib/redirect-uri.ts`) is deliberately a superset of it — the server stays the authority.
-2. **Better Auth `@better-auth/oauth-provider` strict-equality matches `redirect_uri`** — no RFC 8252 port-flexible matching. A CLI would have to register a fixed port or a list of fallback ports.
-
-Support for public clients (CLI / desktop / pure-SPA) is tracked as a follow-up. Better Auth oauth-provider DOES technically support public clients (`token_endpoint_auth_method: "none"`, `type: "native"`/`"user-agent-based"`, PKCE auto-enforced, no secret generated — see `utils-B9Pj9EPf.mjs:408` and `index.mjs:1182` in the plugin dist), so the future work is localized to `redirect-uri.ts` and `createClient`.
+- **How they are created**: `services/ensure-cli-client.ts` provisions the CLI's client (`applicationType: "native"`, `tokenEndpointAuthMethod: "none"`, no secret); `services/instance-client-sync.ts` reconciles env-declared and auto-provisioned clients through the same `createClient` shape. On the Dynamic Client Registration path, the guards plugin's `before` hook (`auth/guards.ts`) defaults an unspecified `application_type` to `"native"` — MCP clients register a loopback redirect and declare no application type, and `"web"` would refuse every one of them.
+- **PKCE is mandatory** for them: `isPKCERequired` returns "pkce is required for public clients" whenever `token_endpoint_auth_method` is `"none"`, whatever the client's own `require_pkce` says.
+- **Loopback ports are flexible** (RFC 8252 §7.3): the provider matches the requested redirect against the registered ones through `stripLoopbackRedirectPort`, so a client registered on `http://127.0.0.1/callback` matches `http://127.0.0.1:63785/callback` at runtime. It port-flexes `http:` loopback IP literals and the bare name `localhost`, and nothing else. Our registration gate (`services/redirect-uri.ts`, `isLoopbackHost`) is deliberately wider — it also admits `*.localhost` subdomains — so a `tenant.localhost` redirect registers but is matched port-exactly.
 
 ## Security notes
 

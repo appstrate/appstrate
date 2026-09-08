@@ -121,9 +121,12 @@ What happens under the hood:
   protected resource, so they can never obtain a platform-wide token in the first
   place. Cookie- and API-key-authenticated callers carry no token audience and
   are unaffected by either check.
-- **CIMD fetch is SSRF-protected:** private/link-local/cloud-metadata ranges are
-  blocked, with a 5s timeout, a 5KB body cap, JSON-only responses, and no
-  redirect following — plus the platform's own host denylist.
+- **CIMD fetch is SSRF-protected:** the document is fetched over HTTPS only,
+  through a single DNS lookup whose every answer must be publicly routable, with
+  the connection pinned to that address; no redirects are followed, the response
+  must be JSON, and it is bounded by a 5s timeout and a 5KB body cap. The
+  platform adds a literal host denylist on top, which also covers the run
+  network's internal Docker aliases.
 - **DCR is bounded:** self-registered clients may request only identity + MCP
   scopes (never core action scopes), PKCE is required, and the registration
   endpoint is rate-limited per IP. The browser consent screen and the user's own

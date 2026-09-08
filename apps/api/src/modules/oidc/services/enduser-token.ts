@@ -182,10 +182,9 @@ export async function verifyEndUserAccessToken(
   // so verification never depends on the AS plugin having run; cache rebuilt
   // only when the org set changes, so this hot path stays O(1)). jose passes
   // when the token's `aud` intersects the list; the per-org MCP resource server
-  // then
-  // additionally requires ITS exact URI in `aud` (RFC 8707 MUST), confining the
-  // token to that one org, and an MCP-scoped token reaching other routes is
-  // contained by the outbound audience guard + RBAC.
+  // then additionally requires ITS exact URI in `aud` (RFC 8707 MUST),
+  // confining the token to that one org, and an MCP-scoped token reaching other
+  // routes is contained by the outbound audience guard + RBAC.
   const audience = getEndUserVerifyAudiences();
 
   const tryVerify = async (jwks: JwksResolver) =>

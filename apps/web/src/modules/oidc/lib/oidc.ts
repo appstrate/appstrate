@@ -112,9 +112,9 @@ async function initPkceFlow(
 
   // `resource` is required by `oidcGuardsPlugin` (RFC 8707) on both the
   // authorize and token endpoints. `config.issuer` is one of the server's
-  // configured protected resources (`${APP_URL}/api/auth`). The SPA never consumes the
-  // minted tokens — the BA session cookie is the real auth — but the
-  // grant still has to succeed, so `resource` is non-negotiable.
+  // configured protected resources (`${APP_URL}/api/auth`). The SPA never
+  // consumes the minted tokens — the BA session cookie is the real auth — but
+  // the grant still has to succeed, so `resource` is non-negotiable.
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,

@@ -265,10 +265,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // (`getMcpOrgResourceUri(:org)`), NOT the request origin: it is the exact
   // string the client echoes back as the RFC 8707 `resource` at the token
   // endpoint, where it must match the org's `oauth_resources` row (also
-  // APP_URL-derived) and the resource-server audience check. Behind a reverse proxy where the
-  // public origin differs from an internal request host, an origin-derived value
-  // would silently break audience binding. Doc URLs derive from the same
-  // APP_URL base so discovery stays consistent.
+  // APP_URL-derived) and the resource-server audience check. Behind a reverse
+  // proxy where the public origin differs from an internal request host, an
+  // origin-derived value would silently break audience binding. Doc URLs derive
+  // from the same APP_URL base so discovery stays consistent.
   //
   // `authorization_servers` MUST be the AS *issuer identifier*, not the bare
   // origin. Better Auth mounts the OAuth AS at `basePath: "/api/auth"` (see

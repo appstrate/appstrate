@@ -11,19 +11,16 @@
  *                   "urn:ietf:params:oauth:grant-type:jwt-bearer"]
  *
  * The extra `jwt-bearer` grant is declared, never used by the browser
- * authorization-code flow. `@better-auth/cimd` once rejected any document whose
- * `grant_types` was not a subset of `{authorization_code, refresh_token}`, so
- * every claude.ai connection failed at `/oauth2/authorize` with
- * `invalid_client` — RFC 7591 §2 says `grant_types` enumerates what a client
- * *may* use and an AS that does not support a declared grant should ignore it,
- * not reject the client. The platform carried a local patch for that; 1.7.3
- * validates the shape only and the patch is gone.
+ * authorization-code flow, and RFC 7591 §2 says `grant_types` enumerates what a
+ * client *may* use: an AS that does not support a declared grant ignores it
+ * rather than rejecting the client. `@better-auth/cimd` validates the shape and
+ * imposes no grant-type ceiling.
  *
- * What is pinned here is the property the patch existed for, not the patch:
- * `validateCimdMetadata` — the exact validator the plugin runs during client
- * resolution, called with the same options production leaves at their defaults
- * — accepts that document. A future upstream that reintroduces a grant-type
- * ceiling breaks this file instead of breaking claude.ai in production.
+ * What is pinned here is that property: `validateCimdMetadata` — the exact
+ * validator the plugin runs during client resolution, called with the same
+ * options production leaves at their defaults — accepts that document. An
+ * upstream that introduces a grant-type ceiling breaks this file instead of
+ * breaking claude.ai in production.
  *
  * Error *messages* are upstream's and are deliberately not asserted; only the
  * verdict and the metadata the AS goes on to persist are ours to care about.
