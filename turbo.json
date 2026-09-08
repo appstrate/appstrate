@@ -442,6 +442,67 @@
     "//#verify:no-migration-dml": {
       "cache": false
     },
+    // Caches, and the input list below is the whole of why. This verdict is a
+    // pure function of three file sets — the drizzle schema modules, the
+    // committed migration directory, and the drizzle-kit pin — with no git ref,
+    // no clock and no network in it, which is the condition
+    // `//#verify:type-coverage` and `//#verify:env-docs` already satisfy.
+    //
+    // `packages/*/src/**` rather than `packages/db/src/schema/**`, because the
+    // schema files import ACROSS workspace packages: `@appstrate/core/module`,
+    // `@appstrate/core/model-generation` and `@appstrate/afps-shared/token-usage`
+    // are all imported from `packages/db/src/schema/*.ts`, and drizzle-kit
+    // resolves them. A list stopping at the db package would replay a cached
+    // "no drift" over a core change that moved the generated SQL — the exact
+    // false GREEN this gate exists to prevent.
+    //
+    // Probed 2026-09-08 with `turbo run '//#verify:migration-drift' --dry=json`
+    // (hash read from `.tasks[0].hash`), EDITING each file rather than
+    // `touch`ing it — turbo hashes content, so a `touch` moves nothing and reads
+    // as a false negative:
+    //
+    //   baseline                                       f86160cc3dc51ab3
+    //   + a column in packages/db/src/schema/spaces.ts  3ef34eae3377693a
+    //   + a line in packages/core/src/module.ts         d80c3d4447c1b6b4
+    //   + a new packages/db/drizzle/zz_probe.sql        a6df660083081e73
+    //
+    // and reverting each edit returned the hash to f86160cc3dc51ab3 exactly.
+    //
+    "//#verify:migration-drift": {
+      "inputs": [
+        "packages/*/src/**",
+        "packages/*/package.json",
+        "packages/db/drizzle/**",
+        "scripts/verify-migration-drift.ts",
+        "package.json"
+      ]
+    },
+    // Caches, same reasoning as its neighbour above: the verdict is squawk's
+    // opinion of a fixed set of `.sql` files, plus the `BASELINE` inside the
+    // script, plus the pinned squawk version. `bun.lock` is listed because the
+    // version pin in `package.json` is only half of what decides which binary
+    // runs; a lockfile change that moved `squawk-cli` must re-run the lint.
+    //
+    // Probed 2026-09-08, same method as above:
+    //
+    //   baseline                                        9d3747fc27f39c91
+    //   + a new packages/db/drizzle/zz_probe.sql         eab2b13cc871eeca
+    //   + a line in scripts/lint-migrations.ts           382126dde93034f7
+    //
+    // and reverting each edit returned the hash to 9d3747fc27f39c91 exactly.
+    // The new-file case is worth naming: turbo hashes untracked-but-unignored
+    // files too, so a migration a developer has written and not yet `git
+    // add`-ed still invalidates this task.
+    //
+    "//#lint:migrations": {
+      "inputs": [
+        "packages/db/drizzle/*.sql",
+        "scripts/lint-migrations.ts",
+        "scripts/lib/tracked-files.ts",
+        "package.json",
+        "bun.lock"
+      ]
+    },
     "//#verify:module-contract": {
       "cache": false
     },

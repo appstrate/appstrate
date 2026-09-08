@@ -380,9 +380,22 @@ const config: KnipConfig = {
         // Documentation examples, compiled by their own README instructions.
         "examples/**/*.ts",
       ],
-      // The examples illustrate what a *consumer* writes; the SDK they import
-      // is deliberately not a dependency of this repo's root manifest.
-      ignoreDependencies: ["@earendil-works/pi-coding-agent"],
+      /**
+       * `@earendil-works/pi-coding-agent`: the examples illustrate what a
+       * *consumer* writes; the SDK they import is deliberately not a dependency
+       * of this repo's root manifest.
+       *
+       * `squawk-cli`: a BINARY, never an import. `scripts/lint-migrations.ts`
+       * spawns `node_modules/.bin/squawk` by path — knip reads import graphs
+       * and `package.json` script strings, and this invocation is in neither,
+       * so it reports the package as unused. `ignoreBinaries` does not cover
+       * it: that list is about a bin NAME knip saw in a script and could not
+       * resolve, and knip never sees this one at all. Deleting the dependency
+       * on that report would leave `bun run lint:migrations` throwing "squawk
+       * not found" — the script checks for the binary before spawning it, so
+       * the failure would at least be legible, but it would be a failure.
+       */
+      ignoreDependencies: ["@earendil-works/pi-coding-agent", "squawk-cli"],
     },
 
     "apps/api": {
