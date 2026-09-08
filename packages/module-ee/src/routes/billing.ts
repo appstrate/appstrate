@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 import { createCheckoutSession } from "../stripe/checkout.ts";
 import { createPortalSession } from "../stripe/portal.ts";
 import { handleWebhook } from "../stripe/webhooks.ts";
-import { getPlans, WARNING_STATUSES, type PlanDefinition } from "../config.ts";
+import { CHECKOUT_PLAN_IDS, getPlans, WARNING_STATUSES, type PlanDefinition } from "../config.ts";
 import { logger } from "../logger.ts";
 import { eeRateLimit, eeRequireAdmin, eeRequirePermission } from "../middleware.ts";
 import {
@@ -86,7 +86,7 @@ function planDetail(p: PlanDefinition): {
 
 // Wire = snake_case (platform casing policy). The web sends plan_id / return_url.
 export const checkoutBodySchema = z.object({
-  plan_id: z.enum(["starter", "pro"]),
+  plan_id: z.enum(CHECKOUT_PLAN_IDS),
   return_url: z.string().startsWith("/").optional(),
 });
 

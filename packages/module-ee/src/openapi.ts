@@ -9,8 +9,12 @@
  * nothing — the zero-footprint invariant holds.
  */
 
+import { CHECKOUT_PLAN_IDS } from "./config.ts";
+
 const billingAccountSchemaRef = { $ref: "#/components/schemas/EeBillingAccount" } as const;
 const billingPlanSchemaRef = { $ref: "#/components/schemas/EeBillingPlan" } as const;
+const billingUpgradePlanRef = { $ref: "#/components/schemas/EeBillingUpgradePlan" } as const;
+const checkoutPlanIdRef = { $ref: "#/components/schemas/EeCheckoutPlanId" } as const;
 // EE errors use the platform's shared RFC 9457 Problem Details schema
 // (contributed by core), so the billing surface matches the rest of the API.
 const errorProblemRef = { $ref: "#/components/schemas/ProblemDetail" } as const;
@@ -29,6 +33,12 @@ export function openApiTags() {
 
 export function openApiComponentSchemas(): Record<string, unknown> {
   return {
+    EeCheckoutPlanId: {
+      type: "string",
+      enum: [...CHECKOUT_PLAN_IDS],
+      description:
+        "A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `EeBillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.",
+    },
     EeBillingPlan: {
       type: "object",
       required: ["id", "name", "price", "credit_quota", "file_storage_bytes"],
@@ -43,6 +53,17 @@ export function openApiComponentSchemas(): Record<string, unknown> {
             "Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit.",
         },
       },
+    },
+    // The intersection is what carries the narrowing to a client: a caller that
+    // reads `upgrades[i].id` gets a checkout id, not a catalog id, so handing
+    // it to `POST /api/billing/checkout` needs no guard on the way.
+    EeBillingUpgradePlan: {
+      allOf: [
+        billingPlanSchemaRef,
+        { type: "object", required: ["id"], properties: { id: checkoutPlanIdRef } },
+      ],
+      description:
+        "A catalog plan the org can upgrade into — an `EeBillingPlan` whose `id` is narrowed to a checkout target.",
     },
     EeBillingManager: {
       type: "object",
@@ -125,7 +146,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         upgrades: {
           type: "array",
           description: "Plans the org can upgrade into — empty when on the highest plan.",
-          items: billingPlanSchemaRef,
+          items: billingUpgradePlanRef,
         },
       },
     },
@@ -171,7 +192,7 @@ export function openApiPaths(): Record<string, unknown> {
                 required: ["plan_id"],
                 additionalProperties: false,
                 properties: {
-                  plan_id: { type: "string", enum: ["starter", "pro"] },
+                  plan_id: checkoutPlanIdRef,
                   return_url: {
                     type: "string",
                     description:

@@ -7,15 +7,16 @@ import { formatBytes } from "@appstrate/core/format";
 import {
   PLAN_ICONS,
   PLAN_DESCRIPTION_KEYS,
-  isCheckoutPlanId,
   type BillingPlanDetail,
+  type BillingUpgradePlanDetail,
   type CheckoutPlanId,
 } from "../hooks/use-billing";
 
 interface PlanCardProps {
   plan: BillingPlanDetail;
   isCurrent?: boolean;
-  isUpgrade?: boolean;
+  /** The id to check out with, present exactly when this plan is an upgrade. */
+  upgradeTarget?: CheckoutPlanId;
   disabled?: boolean;
   onSelect?: (planId: CheckoutPlanId) => void;
 }
@@ -23,16 +24,14 @@ interface PlanCardProps {
 function PlanCard({
   plan,
   isCurrent = false,
-  isUpgrade = false,
+  upgradeTarget,
   disabled = false,
   onSelect,
 }: PlanCardProps) {
   const { t } = useTranslation(["settings"]);
   const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
   const descKey = PLAN_DESCRIPTION_KEYS[plan.id];
-  // `free` has no Stripe price, so it is never a checkout target: narrowing
-  // here keeps the whole selection chain on the ids checkout accepts.
-  const upgradeTarget = isUpgrade && isCheckoutPlanId(plan.id) ? plan.id : null;
+  const isUpgrade = upgradeTarget !== undefined;
 
   return (
     <button
@@ -86,7 +85,8 @@ function PlanCard({
 interface PlanGridProps {
   plans: BillingPlanDetail[];
   currentPlanId?: string;
-  upgradeIds?: Set<string>;
+  /** The upgrade targets, as the API returns them — already narrowed ids. */
+  upgrades?: readonly BillingUpgradePlanDetail[];
   disabled?: boolean;
   onSelect?: (planId: CheckoutPlanId) => void;
 }
@@ -94,7 +94,7 @@ interface PlanGridProps {
 export function PlanGrid({
   plans,
   currentPlanId,
-  upgradeIds,
+  upgrades,
   disabled = false,
   onSelect,
 }: PlanGridProps) {
@@ -105,7 +105,7 @@ export function PlanGrid({
           key={plan.id}
           plan={plan}
           isCurrent={plan.id === currentPlanId}
-          isUpgrade={upgradeIds?.has(plan.id) ?? false}
+          upgradeTarget={upgrades?.find((u) => u.id === plan.id)?.id}
           disabled={disabled}
           onSelect={onSelect}
         />

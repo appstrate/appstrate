@@ -7,13 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppConfig } from "../../hooks/use-app-config";
-import {
-  isCheckoutPlanId,
-  useBilling,
-  useCheckout,
-  usePortal,
-  type CheckoutPlanId,
-} from "../../hooks/use-billing";
+import { useBilling, useCheckout, usePortal, type CheckoutPlanId } from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
@@ -67,9 +61,9 @@ export function OrgSettingsBillingPage() {
         : t(STATUS_I18N[billing.status] ?? "billing.noSubscription");
 
   const hasSubscription = billing.status !== "none";
-  // The catalog carries `free`, which checkout refuses; the header button
-  // offers the first upgrade Stripe can actually price.
-  const firstUpgradeId = billing.upgrades.map((u) => u.id).find(isCheckoutPlanId);
+  // Every upgrade is a checkout target by type, so the header button just
+  // offers the first one.
+  const firstUpgradeId = billing.upgrades[0]?.id;
 
   const handleUpgrade = (planId: CheckoutPlanId) => {
     checkoutMutation.mutate(
@@ -217,7 +211,7 @@ export function OrgSettingsBillingPage() {
           <PlanGrid
             plans={billing.plans}
             currentPlanId={billing.plan.id}
-            upgradeIds={new Set(billing.upgrades.map((u) => u.id))}
+            upgrades={billing.upgrades}
             disabled={checkoutMutation.isPending}
             onSelect={handleUpgrade}
           />

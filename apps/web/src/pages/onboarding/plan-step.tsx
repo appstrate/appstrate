@@ -33,8 +33,6 @@ export function OnboardingPlanStep() {
   const goNext = () => nextRoute && navigate(nextRoute);
 
   const currentPlanId = billing?.plan.id ?? "free";
-  const upgradeIds = new Set(billing?.upgrades.map((u) => u.id));
-
   const handleSelectPlan = (planId: CheckoutPlanId) => {
     checkoutMutation.mutate(
       { body: { plan_id: planId, return_url: "/onboarding/plan" } },
@@ -63,7 +61,7 @@ export function OnboardingPlanStep() {
         <PlanGrid
           plans={billing?.plans ?? []}
           currentPlanId={currentPlanId}
-          upgradeIds={upgradeIds}
+          upgrades={billing?.upgrades}
           disabled={checkoutMutation.isPending}
           onSelect={handleSelectPlan}
         />

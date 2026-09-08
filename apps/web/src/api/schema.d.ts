@@ -5127,7 +5127,7 @@ export interface components {
              */
             status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceled" | "canceling";
             /** @description Plans the org can upgrade into — empty when on the highest plan. */
-            upgrades: components["schemas"]["EeBillingPlan"][];
+            upgrades: components["schemas"]["EeBillingUpgradePlan"][];
         };
         EeBillingContact: {
             /**
@@ -5161,6 +5161,15 @@ export interface components {
             /** @description Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit. */
             file_storage_bytes: number;
         };
+        /** @description A catalog plan the org can upgrade into — an `EeBillingPlan` whose `id` is narrowed to a checkout target. */
+        EeBillingUpgradePlan: components["schemas"]["EeBillingPlan"] & {
+            id: components["schemas"]["EeCheckoutPlanId"];
+        };
+        /**
+         * @description A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `EeBillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.
+         * @enum {string}
+         */
+        EeCheckoutPlanId: "starter" | "pro";
         EndUserObject: {
             /** @description End-user ID (eu_ prefix) */
             id: string;
@@ -8794,8 +8803,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
-                    plan_id: "starter" | "pro";
+                    plan_id: components["schemas"]["EeCheckoutPlanId"];
                     /** @description Path-relative redirect target (must start with `/`). Defaults to `/settings/billing`. */
                     return_url?: string;
                 };

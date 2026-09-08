@@ -16,6 +16,19 @@ export interface PlanDefinition {
 /** Byte multiplier for plan storage entitlements. */
 export const GIB = 1024 * 1024 * 1024;
 
+/**
+ * The plans checkout accepts — every plan with a Stripe price, which is the
+ * catalog minus `free`. Declared here rather than at either consumer because
+ * the fact it encodes is a property of the catalog below (`free` is the one
+ * `PlanDefinition` whose `stripePriceId` is `null`), and both the request
+ * schema (`routes/billing.ts`) and the wire contract (`openapi.ts`) have to
+ * mean the same set.
+ */
+export const CHECKOUT_PLAN_IDS = ["starter", "pro"] as const;
+
+/** A plan id `POST /api/billing/checkout` accepts. */
+export type CheckoutPlanId = (typeof CHECKOUT_PLAN_IDS)[number];
+
 export interface Plans {
   free: PlanDefinition;
   starter: PlanDefinition;

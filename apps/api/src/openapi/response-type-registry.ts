@@ -261,6 +261,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // dashboard consumes the generated spec type.
   EeBillingAccount: "module-ee billing wire DTO; the row lives in the module's own database",
   EeBillingPlan: "module-ee plan catalog wire DTO, built from `config.ts`; no persisted row",
+  EeBillingUpgradePlan:
+    "module-ee EeBillingPlan narrowed to the plans checkout accepts; an allOf intersection, no persisted row",
+  EeCheckoutPlanId:
+    "module-ee checkout plan-id enum shared by the request body and `upgrades[].id`",
   EeBillingManager:
     "module-ee billing-manager wire DTO; the row lives in the module's own database",
   EeBillingManagerList: "module-ee list envelope around EeBillingManager",
