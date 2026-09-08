@@ -26,6 +26,7 @@
     "@appstrate/module-chat": "workspace:*",
     "@appstrate/module-claude-code": "workspace:*",
     "@appstrate/module-codex": "workspace:*",
+    "@appstrate/module-ee": "workspace:*",
     "@appstrate/module-observability": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@appstrate/shared-types": "workspace:*",

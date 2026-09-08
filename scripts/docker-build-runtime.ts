@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Build the runtime image PAIR — `appstrate-pi` + `appstrate-sidecar`.
  *

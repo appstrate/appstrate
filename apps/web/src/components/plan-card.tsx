@@ -1,29 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Check, Sparkles } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "@appstrate/core/format";
-import { PLAN_ICONS, PLAN_DESCRIPTION_KEYS, type BillingPlanDetail } from "../hooks/use-billing";
+import {
+  PLAN_ICONS,
+  PLAN_DESCRIPTION_KEYS,
+  type BillingPlanDetail,
+  type CheckoutPlanId,
+} from "../hooks/use-billing";
 
 interface PlanCardProps {
   plan: BillingPlanDetail;
   isCurrent?: boolean;
-  isUpgrade?: boolean;
+  /** The id to check out with, present exactly when this plan is an upgrade. */
+  upgradeTarget?: CheckoutPlanId;
   disabled?: boolean;
-  onSelect?: (planId: string) => void;
+  onSelect?: (planId: CheckoutPlanId) => void;
 }
 
 function PlanCard({
   plan,
   isCurrent = false,
-  isUpgrade = false,
+  upgradeTarget,
   disabled = false,
   onSelect,
 }: PlanCardProps) {
   const { t } = useTranslation(["settings"]);
-  const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
+  const Icon = PLAN_ICONS[plan.id];
   const descKey = PLAN_DESCRIPTION_KEYS[plan.id];
+  const isUpgrade = upgradeTarget !== undefined;
 
   return (
     <button
@@ -37,7 +44,7 @@ function PlanCard({
             ? "border-border bg-card hover:border-primary/50"
             : "border-border bg-card opacity-60",
       )}
-      onClick={isUpgrade && onSelect ? () => onSelect(plan.id) : undefined}
+      onClick={upgradeTarget && onSelect ? () => onSelect(upgradeTarget) : undefined}
       disabled={!isUpgrade || disabled}
     >
       {isCurrent && (
@@ -51,7 +58,7 @@ function PlanCard({
       </div>
 
       <div className="font-semibold">{plan.name}</div>
-      {descKey && <p className="text-muted-foreground mt-0.5 text-xs">{t(descKey)}</p>}
+      <p className="text-muted-foreground mt-0.5 text-xs">{t(descKey)}</p>
 
       <div className="mt-auto flex flex-col gap-0.5 pt-3">
         <span className="text-xl font-bold">
@@ -77,15 +84,16 @@ function PlanCard({
 interface PlanGridProps {
   plans: BillingPlanDetail[];
   currentPlanId?: string;
-  upgradeIds?: Set<string>;
+  /** The ids the org may check out with, from `GET /api/billing`'s `upgrades`. */
+  upgrades?: readonly CheckoutPlanId[];
   disabled?: boolean;
-  onSelect?: (planId: string) => void;
+  onSelect?: (planId: CheckoutPlanId) => void;
 }
 
 export function PlanGrid({
   plans,
   currentPlanId,
-  upgradeIds,
+  upgrades,
   disabled = false,
   onSelect,
 }: PlanGridProps) {
@@ -96,7 +104,7 @@ export function PlanGrid({
           key={plan.id}
           plan={plan}
           isCurrent={plan.id === currentPlanId}
-          isUpgrade={upgradeIds?.has(plan.id) ?? false}
+          upgradeTarget={upgrades?.find((id) => id === plan.id)}
           disabled={disabled}
           onSelect={onSelect}
         />

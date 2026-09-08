@@ -965,7 +965,7 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
     // Field swapped; content mention left intact (exact-value match, not blind replace).
     expect(json.choices[0].message.content).toBe("I am deepseek-chat-SECRET");
 
-    // The ledger keeps the real backing privately (admin/cloud only).
+    // The ledger keeps the real backing privately (admin/billing only).
     const row = await waitForRow(() =>
       db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId)).limit(1),
     );

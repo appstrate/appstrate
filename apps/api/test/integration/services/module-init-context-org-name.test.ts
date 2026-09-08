@@ -6,7 +6,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 
 /**
- * `ctx.getOrgName` is the DI seam modules (e.g. @appstrate/cloud) use to label
+ * `ctx.getOrgName` is the DI seam modules (e.g. @appstrate/module-ee) use to label
  * org-scoped emails with the organization concerned. It must resolve the real
  * display name and return null — never a placeholder — for a missing org.
  */

@@ -723,8 +723,8 @@ export const llmUsage = pgTable(
     // a chat session, never both. NULL-friendly, so a detached row (both NULL)
     // still passes.
     check("llm_usage_context_single", sql`run_id IS NULL OR chat_session_id IS NULL`),
-    // Money floor. This ledger is what billing reads (the cloud sweeper debits
-    // credits off it by serial-id cursor), and the runner upsert advances a row
+    // Money floor. This ledger is what billing reads (the ee module's sweeper
+    // debits credits off it by serial-id cursor), and the runner upsert advances a row
     // MONOTONICALLY on cost — a negative value would both credit an org for
     // spending and pin the row below every later advance. Enforced in the column
     // rather than only in `recordLlmUsage`, which is a single code path away from

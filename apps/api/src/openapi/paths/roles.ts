@@ -44,7 +44,7 @@ const WRITE_FORBIDDEN = {
             title: "Feature Unavailable",
             status: 403,
             detail:
-              "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/cloud` module).",
+              "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
             instance: "urn:appstrate:request:req_2f1c6d84",
             code: "feature_unavailable",
             requestId: "req_2f1c6d84",

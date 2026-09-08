@@ -96,10 +96,13 @@ tree, no `__drizzle_migrations_<id>` table.
    module, use a hook (`beforeUsage`) or an event — never a direct import. A
    module reads another module's data via the platform API/events, never a
    cross-module SQL join.
-4. **Need a separate tenant?** A module that must own a physically isolated
-   database (e.g. the proprietary `@appstrate/cloud` module) runs its own
-   database and migrations, and reads platform data through `ctx.services`
-   (e.g. `services.usage.list`), never a cross-DB join.
+4. **Need tables the Apache-2.0 core schema must not carry?** A module in that
+   position (the `@appstrate/module-ee` module, in-tree under `packages/module-ee`
+   and source-available) keeps a Drizzle tree of its own and self-migrates it
+   into the platform database at `init()`, under a migration journal of its own
+   (`drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`).
+   It still reads platform data through `ctx.services`
+   (e.g. `services.usage.list`), never a SQL join across the licence boundary.
 
 ## Permissions
 
@@ -483,21 +486,21 @@ Modules that expose HTTP routes should also provide `openApiPaths()` (path items
 
 Because discovery is filesystem-based, adding a new endpoint only requires touching the module's own `openapi/` directory — no central list to update.
 
-## Idempotency — in-tree modules can opt in, out-of-tree modules cannot
+## Idempotency — built-in dir modules can opt in, package modules cannot
 
 The platform mounts `idempotencyGuard` (`apps/api/src/middleware/idempotency-guard.ts`) globally, **before** `registerModuleRoutes(app)`. Every mutating route a module registers is therefore subject to it: a request carrying `Idempotency-Key` on an unsafe method (`POST`/`PUT`/`PATCH`/`DELETE`) is refused with `400 idempotency_not_supported` unless the matched route mounts `idempotency()`.
 
 **Built-in dir modules opt in by relative import**, and two already do — `webhooks/routes.ts` (`POST /api/webhooks`) and `oidc/routes.ts` (`POST /api/oauth/clients`) both mount `idempotency()` from `../../middleware/idempotency.ts` and declare `$ref: "#/components/parameters/IdempotencyKey"` on that operation in their own `openapi/paths.ts`. Copy that pair — mount **and** declare — if a built-in route needs de-duplication.
 
-**Out-of-tree modules cannot.** `idempotency()` lives in `apps/api/src/middleware/` and is exported from no package — not `@appstrate/core`, not anywhere an npm module can import (unlike `services.http.rateLimit()`, which the same routes get through `PlatformServices`). So `@appstrate/module-chat`, `@appstrate/module-claude-code`, `@appstrate/module-codex`, `@appstrate/cloud` and any operator-installed module are permanently in "refuse" mode on every mutating route they expose. Nothing breaks today — none of them advertises the header — but the asymmetry is real: they are held to a policy they have no way to satisfy.
+**Package modules cannot** — the line is the package boundary, not the repo boundary. `idempotency()` lives in `apps/api/src/middleware/` and is exported from no package — not `@appstrate/core`, not anywhere an importer outside `apps/api` can reach (unlike `services.http.rateLimit()`, which the same routes get through `PlatformServices`). So `@appstrate/module-chat`, `@appstrate/module-claude-code`, `@appstrate/module-codex`, `@appstrate/module-ee` — in-tree workspace packages, all four — and any operator-installed module are permanently in "refuse" mode on every mutating route they expose. Nothing breaks today: none of them advertises the header, and `@appstrate/module-ee` de-duplicates Stripe deliveries in its own `ee_stripe_events` table rather than through the platform's. But the asymmetry is real: they are held to a policy they have no way to satisfy.
 
-Until that changes, for an out-of-tree module:
+Until that changes, for a package module:
 
 - **Do not declare an `Idempotency-Key` parameter in your `openApiPaths()`.** It would be a promise the runtime refuses; the drift test (`apps/api/test/integration/middleware/idempotency-contract.test.ts`) matches the parameter by name — inline or `$ref` — and fails on a declaration with no mount. (`openapi/paths/llm-proxy.ts` carried exactly that false promise for three operations.)
 - **Do not tell clients to stamp the header on your routes.** They will get a `400`.
-- If you genuinely need request de-duplication, implement it in your own handler under your own header/body field, or open an issue: exposing `idempotency()` on `PlatformServices.http` next to `rateLimit()` is the obvious shape, and it is a deliberate core API-surface decision (a `@appstrate/core` minor + module lockstep), not something to work around locally.
+- If you genuinely need request de-duplication, implement it in your own handler under your own header/body field (`@appstrate/module-ee` does exactly that for Stripe), or open an issue: exposing `idempotency()` on `PlatformServices.http` next to `rateLimit()` is the obvious shape, and it is a deliberate core API-surface decision (a `@appstrate/core` minor, plus lockstep for the out-of-tree modules), not something to work around locally.
 
-Note also that the drift test discovers modules through the test preload (built-ins under `apps/api/src/modules/*` plus workspace `packages/module-*`). An operator-installed out-of-tree module is not in that process and is not checked by it — sound only for as long as such a module has no way to mount `idempotency()`. Exposing the middleware to modules means giving that check a second, module-side home.
+Note also that the drift test discovers modules through the test preload (built-ins under `apps/api/src/modules/*` plus workspace `packages/module-*`, which now includes `module-ee`). An operator-installed out-of-tree module is not in that process and is not checked by it — sound only for as long as such a module has no way to mount `idempotency()`. Exposing the middleware to modules means giving that check a second, module-side home.
 
 ## Disabling a module
 

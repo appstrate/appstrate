@@ -162,11 +162,6 @@ export const agentProxyKeys = {
     ["agent-proxy", orgId, spaceId, packageId] as const,
 };
 
-/** Cloud billing summary (org-scoped). */
-export const billingKeys = {
-  forOrg: (orgId: Id) => ["billing", orgId] as const,
-};
-
 /** Organization list (preserved across org switch). */
 export const orgKeys = {
   all: ["orgs"] as const,

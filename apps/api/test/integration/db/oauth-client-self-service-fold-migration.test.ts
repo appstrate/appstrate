@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `scripts/migration/0010-oauth-clients-self-service-fold.sql` against seeded rows.
+ * `scripts/migration/0011-oauth-clients-self-service-fold.sql` against seeded rows.
  *
  * `0057_oauth_provider_1_7_3` adds `oauth_clients.self_service` and lands it
  * `false` on every row; `metadata` survives that file, so the fold is this
@@ -30,12 +30,12 @@ import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
 
 const SCRIPT = new URL(
-  "../../../../../scripts/migration/0010-oauth-clients-self-service-fold.sql",
+  "../../../../../scripts/migration/0011-oauth-clients-self-service-fold.sql",
   import.meta.url,
 ).pathname;
 
-const FOLDED = "cli_0010_selfservice";
-const UNPARSEABLE = "cli_0010_unparseable";
+const FOLDED = "cli_0011_selfservice";
+const UNPARSEABLE = "cli_0011_unparseable";
 const UNPARSEABLE_METADATA = "not json";
 
 /**
@@ -104,7 +104,7 @@ async function clientRow(clientId: string): Promise<{ self_service: boolean; met
   return rows[0]!;
 }
 
-describe("scripts/migration/0010 — `self_service` folded out of the metadata JSON", () => {
+describe("scripts/migration/0011 — `self_service` folded out of the metadata JSON", () => {
   beforeEach(async () => {
     await removeSeed();
     await seed();

@@ -3,3 +3,7 @@ Copyright 2025-2026 Appstrate
 
 This product includes software developed at
 Appstrate (https://appstrate.dev).
+
+This product is licensed under the Apache License, Version 2.0, with one
+exception: packages/module-ee/ is source-available under the Appstrate
+Commercial License found in that directory.

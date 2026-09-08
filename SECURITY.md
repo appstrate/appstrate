@@ -494,8 +494,8 @@ it — and a route outside a space context sees org-level strings only, which is
 why a space-level guard can never be satisfied on an org route.
 
 A module may add org-level strings to `orgPermissions` for ONE named principal
-rather than for a role (`principalPermissions`, RBAC spec §4.2 — cloud's billing
-managers): each module declares up front what it may ever grant, anything else
+rather than for a role (`principalPermissions`, RBAC spec §4.2 — the ee module's
+billing managers): each module declares up front what it may ever grant, anything else
 its resolver returns is dropped, the strings may never be API-key- or
 end-user-grantable, and the surface is evaluated for session-shaped callers
 only, so no delegated credential can carry such a grant. The answers are cached

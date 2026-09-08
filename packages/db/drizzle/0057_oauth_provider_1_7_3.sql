@@ -28,7 +28,7 @@
 -- `type` on every client it inserts (`services/oauth-admin.ts`,
 -- `services/ensure-cli-client.ts`), so its inserts fail with 42703 the moment
 -- the columns are gone. Roll forward; do not leave both builds live. Then run
--- `scripts/migration/0010-oauth-clients-self-service-fold.sql`, which sets the
+-- `scripts/migration/0011-oauth-clients-self-service-fold.sql`, which sets the
 -- column section E adds — every row reads `false` until it does.
 --
 -- FENCES, same instrument as 0039/0047/0055/0056. Everything here is catalog-only
@@ -204,7 +204,7 @@ ALTER TABLE "oauth_clients" DROP COLUMN IF EXISTS "type";--> statement-breakpoin
 -- `metadata` survives this file, so setting the column from its `selfService`
 -- key is ordinary data repair rather than a fold this migration may carry
 -- (`docs/NO_TRANSITIONAL_CODE.md` §2): it is
--- `scripts/migration/0010-oauth-clients-self-service-fold.sql`, run once this
+-- `scripts/migration/0011-oauth-clients-self-service-fold.sql`, run once this
 -- batch is applied. Until it runs, an already-registered self-service client
 -- reads as operator-provisioned and its tokens are not confined.
 ALTER TABLE "oauth_clients" ADD COLUMN IF NOT EXISTS "self_service" boolean DEFAULT false NOT NULL;--> statement-breakpoint

@@ -8,8 +8,8 @@
  * SPA's own i18n singleton so the locale under test is the locale the
  * assertions use.
  *
- * The storage entitlement is always on the wire: `@appstrate/cloud` declares
- * `file_storage_bytes` required on `CloudBillingPlan` and sets it on every plan
+ * The storage entitlement is always on the wire: `@appstrate/module-ee` declares
+ * `file_storage_bytes` required on `EeBillingPlan` and sets it on every plan
  * definition, so the card renders the line unconditionally — including for a
  * plan that grants zero, which is a real entitlement and not a missing one.
  */

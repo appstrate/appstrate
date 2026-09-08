@@ -2,7 +2,7 @@
 
 /**
  * Extra org-level permissions for ONE user in ONE org, without an org role — an org
- * role named `billing` would put cloud vocabulary in an Apache-2.0 enum.
+ * role named `billing` would put billing vocabulary in an Apache-2.0 enum.
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4.2, §10
  */
 

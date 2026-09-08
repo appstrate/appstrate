@@ -435,6 +435,11 @@ export const envSchema = z
     // personal subscription powering a product is an operator-owned grey-zone
     // (see docs/architecture/SUBSCRIPTION_COMPLIANCE.md), so the OSS default
     // ships neither. Append them to enable subscription providers.
+    // `@appstrate/module-ee` — the commercial module (Stripe billing, credit
+    // quotas, custom space roles) — is OPT-IN for a different reason: it is
+    // source-available, not Apache-2.0, and it needs PostgreSQL (it keeps its
+    // `ee_*` tables in the platform database) plus the `STRIPE_*` variables,
+    // which it reads straight from `process.env` (see docs/ENV.md).
     // `MODULES=none` boots with zero modules (the only sentinel — `""`
     // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
     // pattern).
@@ -654,7 +659,7 @@ export const envSchema = z
     // Per-org durable-storage quota in bytes. Checked synchronously against
     // `organizations.files_bytes_used` before a file write (403
     // `storage_limit_exceeded` on over-cap). Absent ⇒ unlimited (OSS default);
-    // Cloud sets a plan value in the same column.
+    // the ee module (`@appstrate/module-ee`) sets a plan value in the same column.
     ORG_STORAGE_QUOTA_BYTES: z.coerce.number().int().positive().optional(),
 
     // Ceiling on the total bytes of files a single run may publish as
@@ -687,8 +692,8 @@ export const envSchema = z
     // isolation), so untrusted script can never reach the app's session even if
     // the sandbox is somehow defeated. Absent ⇒ previews are served same-origin
     // on `APP_URL` (still hardened: opaque-sandbox iframe + strict CSP + injected
-    // meta CSP), which is defensible for render-only content. Cloud always sets
-    // it. No trailing slash required — it is trimmed when the URL is built.
+    // meta CSP), which is defensible for render-only content. Appstrate Cloud
+    // always sets it. No trailing slash required — it is trimmed when the URL is built.
     //
     // ENFORCED (boot fails, loudly): an absolute URL whose HOST differs from
     // `APP_URL`'s — plus https:// in production, the same rule `APP_URL`

@@ -2,7 +2,7 @@
 
 /**
  * Contract test: every terminal run status must emit `onRunStatusChange`
- * so downstream modules (webhooks, cloud billing, …) observe the
+ * so downstream modules (webhooks, ee billing, …) observe the
  * transition. Source-based smoke test aimed at catching regressions
  * where a code path stops emitting the event silently.
  *

@@ -8,6 +8,13 @@
 # The positive instance uses the real Docker socket and must be healthy. The
 # negative instance points the same image at a missing socket; boot completes
 # in degraded mode and the image healthcheck must mark the container unhealthy.
+#
+# HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
+# enabled and adds the "EE module" phase below (loaded, sweeping). The "EE
+# tables" and "Billing route" phases run in both modes and assert the opposite
+# outcome in each. That mode is the
+# `ee-container-e2e` job in .github/workflows/test.yml; it replaces the
+# release-time `verify` the cloud repo used to run against its own second image.
 
 set -euo pipefail
 
@@ -15,6 +22,7 @@ readonly E2E_IMAGE="${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
 readonly E2E_PROJECT="${HEALTH_E2E_PROJECT:-appstrate-health-e2e}"
 readonly E2E_PORT="${HEALTH_E2E_PORT:-3317}"
 readonly COMPOSE_FILE="test/setup/docker-compose.health-e2e.yml"
+readonly E2E_EE="${HEALTH_E2E_EE:-0}"
 
 export HEALTH_E2E_IMAGE="$E2E_IMAGE"
 export POSTGRES_USER=e2e
@@ -28,6 +36,28 @@ export RUN_TOKEN_SECRET=e2e-run-token-secret
 export CONNECT_SESSION_SECRET=e2e-connect-session-secret
 export APP_URL="http://127.0.0.1:${E2E_PORT}"
 export PORT="$E2E_PORT"
+
+if [ "$E2E_EE" = "1" ]; then
+  # Derived from the schema, never restated: pinning the other members here
+  # would leave this job booting yesterday's module set the day one is added
+  # (#513, one level down — the same reason the compose file pins no MODULES).
+  default_modules=$(bun -e '
+    import { envSchema } from "./packages/env/src/index.ts";
+    console.log(envSchema.shape.MODULES.parse(undefined));
+  ')
+  export MODULES="${default_modules},@appstrate/module-ee"
+  # `Module loaded` and `billing sweeper started` are info-level.
+  export HEALTH_E2E_LOG_LEVEL=info
+  # No database variable of its own: the module reads DATABASE_URL, which
+  # docker-compose.yml already points at the platform database.
+
+  # Never called — nothing in this e2e reaches Stripe. They exist because the
+  # module's own Zod schema refuses to initialize without them.
+  export STRIPE_SECRET_KEY=sk_test_health_e2e
+  export STRIPE_WEBHOOK_SECRET=whsec_test_health_e2e
+  export STRIPE_PRICE_ID_STARTER=price_test_starter
+  export STRIPE_PRICE_ID_PRO=price_test_pro
+fi
 
 compose() {
   docker compose \
@@ -115,6 +145,77 @@ wait_for_docker_health "$positive_id" healthy
 echo "$positive_body" | jq -c '{status, checks}'
 echo "docker_health=healthy"
 
+if [ "$E2E_EE" = "1" ]; then
+  # A healthy /health says nothing about the module: an image that silently
+  # never loaded it is healthy too. Only a loaded, initialized module prints
+  # these two lines, and the first must carry the module id on the same line.
+  echo "==> EE module"
+  positive_logs=$(compose logs --no-color appstrate)
+  # Two greps over a variable rather than one pipeline, for the SIGPIPE reason
+  # spelled out at the negative-phase grep below.
+  module_lines=$(grep -F 'Module loaded' <<<"$positive_logs" || true)
+  if ! grep -q '"id":"ee"' <<<"$module_lines"; then
+    echo 'No `Module loaded` line with "id":"ee" — the EE module never loaded' >&2
+    exit 1
+  fi
+  if ! grep -q 'billing sweeper started' <<<"$positive_logs"; then
+    echo 'EE module loaded but its billing sweeper never started' >&2
+    exit 1
+  fi
+  echo "ee_module=loaded"
+fi
+
+# Where the module put its tables, read from the platform database rather than
+# from a log line. The module migrates its seven `ee_*` tables into the database
+# DATABASE_URL names, under a journal of its own — `drizzle.ee_migrations` —
+# leaving the platform's `drizzle.__drizzle_migrations` alone. Asserted in BOTH
+# modes off ONE image, so the measurement discriminates: with EE on the journal
+# exists and carries the whole chain; with EE off the platform database holds no
+# `ee_` table at all. `appstrate` is the POSTGRES_DB of docker-compose.yml.
+echo "==> EE tables"
+if [ "$E2E_EE" = "1" ]; then
+  ee_journal=$(compose exec -T appstrate-postgres \
+    psql -U "$POSTGRES_USER" -d appstrate -tAc \
+    "select count(*) from drizzle.ee_migrations")
+  if ! [[ "$ee_journal" =~ ^[0-9]+$ ]] || [ "$ee_journal" -lt 6 ]; then
+    echo "drizzle.ee_migrations holds '$ee_journal' rows, expected at least 6 — the module did not migrate the platform database" >&2
+    exit 1
+  fi
+  echo "ee_migrations=$ee_journal"
+else
+  ee_tables=$(compose exec -T appstrate-postgres \
+    psql -U "$POSTGRES_USER" -d appstrate -tAc \
+    "select count(*) from pg_tables where tablename like 'ee\_%'")
+  if [ "$ee_tables" != "0" ]; then
+    echo "The platform database holds $ee_tables ee_ table(s) with the module absent" >&2
+    exit 1
+  fi
+  echo "ee_tables=$ee_tables"
+fi
+
+# The log lines above prove init ran; only a request proves the module's routers
+# are mounted. This probe runs in BOTH modes off ONE image, which is what makes
+# it a zero-footprint measurement rather than a claim: the module declares
+# `/api/billing/webhooks` a public path, so with EE on the auth pipeline steps
+# aside and the route rejects the missing `stripe-signature` with 400 (unsigned,
+# so Stripe is never reached); with EE off nothing declares it public, the
+# platform's `/api/*` auth guard answers 401 for the unauthenticated request and
+# the route never exists. Either status appearing in the other mode is the
+# regression.
+echo "==> Billing route"
+if [ "$E2E_EE" = "1" ]; then
+  expected_webhook_status=400
+else
+  expected_webhook_status=401
+fi
+webhook_status=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "http://127.0.0.1:${E2E_PORT}/api/billing/webhooks")
+if [ "$webhook_status" != "$expected_webhook_status" ]; then
+  echo "POST /api/billing/webhooks returned $webhook_status, expected $expected_webhook_status (EE=$E2E_EE)" >&2
+  exit 1
+fi
+echo "billing_webhook_status=$webhook_status"
+
 compose down --volumes --remove-orphans >/dev/null
 
 echo "==> Unavailable orchestrator"
@@ -141,7 +242,13 @@ if [ "$early_health" = "healthy" ]; then
 fi
 
 wait_for_docker_health "$negative_id" unhealthy
-compose logs --no-color appstrate | grep -q 'Could not initialize container orchestrator'
+# Read the log into a variable first, then match. Piping straight into `grep -q`
+# makes the pipeline's exit status a race: grep leaves on its first match, and
+# under `pipefail` the SIGPIPE that kills `docker compose logs` mid-write fails
+# the whole script. Invisible while the container logged at `warn` (too little
+# output to still be writing), fatal the moment EE mode raised it to `info`.
+negative_logs=$(compose logs --no-color appstrate)
+grep -q 'Could not initialize container orchestrator' <<<"$negative_logs"
 echo "$negative_body" | jq -c '{status, checks}'
 echo "docker_health=unhealthy"
 

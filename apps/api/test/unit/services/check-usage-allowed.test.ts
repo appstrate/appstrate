@@ -19,7 +19,7 @@
  *     owns) is `"org"` whatever its preset resolves to, and is dispatched like
  *     any other — it runs inline in the platform's own process.
  *
- * These are the exact facts a metering module (cloud) quotes against, so a
+ * These are the exact facts a metering module (the ee module) quotes against, so a
  * regression that stopped reporting one — or resurrected the old "skip the hook
  * for an org model" short-circuit — surfaces here rather than as a billing
  * incident.

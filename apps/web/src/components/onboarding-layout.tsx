@@ -28,8 +28,8 @@ const ALL_STEPS: (StepDef & { showWhen?: "billing" })[] = [
 
 /**
  * Returns the active onboarding steps filtered by feature flags.
- * OSS: create → model → members → complete
- * Cloud: create → plan → members → complete
+ * Without billing: create → model → members → complete
+ * With billing (`@appstrate/module-ee`): create → plan → members → complete
  */
 function useOnboardingSteps(): StepDef[] {
   const { features } = useAppConfig();

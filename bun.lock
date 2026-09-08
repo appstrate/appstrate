@@ -54,6 +54,7 @@
         "@appstrate/module-chat": "workspace:*",
         "@appstrate/module-claude-code": "workspace:*",
         "@appstrate/module-codex": "workspace:*",
+        "@appstrate/module-ee": "workspace:*",
         "@appstrate/module-observability": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
@@ -345,6 +346,22 @@
         "@appstrate/core": "workspace:*",
       },
     },
+    "packages/module-ee": {
+      "name": "@appstrate/module-ee",
+      "version": "0.0.0",
+      "dependencies": {
+        "@appstrate/core": "workspace:*",
+        "drizzle-orm": "^0.45.2",
+        "hono": "^4.12.33",
+        "ioredis": "^6.0.0",
+        "postgres": "^3.4.9",
+        "stripe": "^18.1.0",
+        "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "drizzle-kit": "^0.31.10",
+      },
+    },
     "packages/module-observability": {
       "name": "@appstrate/module-observability",
       "version": "0.0.0",
@@ -528,6 +545,8 @@
     "@appstrate/module-claude-code": ["@appstrate/module-claude-code@workspace:packages/module-claude-code"],
 
     "@appstrate/module-codex": ["@appstrate/module-codex@workspace:packages/module-codex"],
+
+    "@appstrate/module-ee": ["@appstrate/module-ee@workspace:packages/module-ee"],
 
     "@appstrate/module-observability": ["@appstrate/module-observability@workspace:packages/module-observability"],
 
@@ -2536,6 +2555,8 @@
     "strip-ansi": ["strip-ansi@7.2.0", "", { "dependencies": { "ansi-regex": "^6.2.2" } }, "sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w=="],
 
     "strip-json-comments": ["strip-json-comments@5.0.3", "", {}, "sha512-1tB5mhVo7U+ETBKNf92xT4hrQa3pm0MZ0PQvuDnWgAAGHDsfp4lPSpiS6psrSiet87wyGPh9ft6wmhOMQ0hDiw=="],
+
+    "stripe": ["stripe@18.5.0", "", { "dependencies": { "qs": "^6.11.0" }, "peerDependencies": { "@types/node": ">=12.x.x" }, "optionalPeers": ["@types/node"] }, "sha512-Hp+wFiEQtCB0LlNgcFh5uVyKznpDjzyUZ+CNVEf+I3fhlYvh7rZruIg+jOwzJRCpy0ZTPMjlzm7J2/M2N6d+DA=="],
 
     "strtok3": ["strtok3@10.3.5", "", { "dependencies": { "@tokenizer/token": "^0.3.0" } }, "sha512-ki4hZQfh5rX0QDLLkOCj+h+CVNkqmp/CMf8v8kZpkNVK6jGQooMytqzLZYUVYIZcFZ6yDB70EfD8POcFXiF5oA=="],
 

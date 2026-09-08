@@ -147,7 +147,7 @@ retired env name is in `RETIRED_ENV_RENAMES` and FAILS rather than falls back;
 find config keys read under two names; find module-contract branches keyed on a
 version or capability that every module now has.
 
-**Agent F — Cross-repo & tests.** `cloud/`, `connect-helper/`, `github-action/`,
+**Agent F — Cross-repo & tests.** `connect-helper/`, `github-action/`,
 plus `test/` fixtures across the workspace.
 
 **Agent G — Retirement machinery (the inverse sweep).** A–F look for

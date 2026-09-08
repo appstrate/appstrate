@@ -1,4 +1,4 @@
--- 0010 — set `oauth_clients.self_service` from the `metadata` JSON key
+-- 0011 — set `oauth_clients.self_service` from the `metadata` JSON key
 -- `selfService`.
 --
 -- Run AFTER the drizzle batch that carries

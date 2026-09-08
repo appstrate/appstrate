@@ -58,7 +58,8 @@ export const organizations = pgTable(
     // (the org falls back to the global env quota). Resolution order the write path
     // enforces (see `effectiveOrgStorageLimit` in files.ts):
     //   organizations.files_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
-    // Pilotable per-org by the out-of-repo cloud module via the narrow
+    // Pilotable per-org by a billing module — the ee module
+    // (`@appstrate/module-ee`) — via the narrow
     // `PlatformServices.setFileStorageLimit` capability. The core stays
     // billing-neutral: this is a technical byte ceiling, never a plan or price.
     // bigint (mode: number) — mirrors `files_bytes_used` above.
@@ -290,7 +291,7 @@ export const modelProviderCredentials = pgTable(
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh
     // failure and read by nothing: no route, no DTO, no OpenAPI field, no
-    // `cloud` consumer, no predicate. Its only readers were the integration
+    // module consumer, no predicate. Its only readers were the integration
     // tests asserting the write happened. `refresh_failure_count` is the
     // column that drives the reconnect escalation; the timestamp was never
     // part of that predicate. Dropped by `0044_finish_file_rename`. If "when
@@ -386,7 +387,7 @@ export const modelProviderPairings = pgTable(
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     // NOTE — there is deliberately no `consumed_from_ip` here. There was one,
     // written by `consumePairing` (`services/model-providers/pairings.ts`) and
-    // read by nothing: no route, no DTO, no OpenAPI field, no `cloud` consumer.
+    // read by nothing: no route, no DTO, no OpenAPI field, no module consumer.
     // Its "for audit" justification did not survive two facts:
     // `cleanupExpiredPairings` DELETEs the row an hour after expiry, and the
     // audit entry `handlePairRedeem` writes at redeem time omits the IP — so

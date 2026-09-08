@@ -4,7 +4,7 @@
  * Drift guard for `@appstrate/core`'s PUBLISHED export surface.
  *
  * This package's CHANGELOG is the only contract its out-of-tree consumers read
- * (`cloud`, `connect-helper`, third-party modules). Nothing checked it, and it
+ * (`connect-helper`, third-party modules). Nothing checked it, and it
  * drifted: preparing 8.0.0 it removed six exports it never mentioned, added a
  * required member to a published interface without a word, and carried three
  * statements that the code contradicted — including one it contradicted
@@ -20,8 +20,8 @@
  *
  * `published-export-baseline.json` is the export set of the version currently
  * ON NPM, unpacked from the tarball — not from the workspace, and not from a
- * git tag. `cloud/node_modules/@appstrate/core` is a symlink into this
- * monorepo, so a green local typecheck says nothing about what consumers can
+ * git tag. `connect-helper/node_modules/@appstrate/core` is a symlink into
+ * this monorepo, so a green local typecheck says nothing about what consumers can
  * actually resolve; the tarball is the only source that does.
  *
  * REGENERATE IT AS THE LAST STEP OF A RELEASE, after `core@X.Y.Z` is published:
