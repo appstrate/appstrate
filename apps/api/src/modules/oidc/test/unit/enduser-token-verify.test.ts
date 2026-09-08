@@ -53,8 +53,8 @@ async function startJwksServer() {
 
 async function mintToken(payload: Record<string, unknown>, audience?: string) {
   const env = process.env.APP_URL ?? "http://127.0.0.1";
-  // Default to the platform APP_URL which matches `validAudiences` in
-  // `auth/plugins.ts` — the production verifier now enforces `aud`.
+  // Default to the platform APP_URL — one of `getEndUserVerifyAudiences()`
+  // (`lib/audiences.ts`), which the production verifier enforces as `aud`.
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: "ES256", kid })
     .setIssuer(`${env}/api/auth`)
@@ -130,7 +130,7 @@ describe("verifyEndUserAccessToken", () => {
     expect(await verifyEndUserAccessToken(expired, { jwks: localJwks })).toBeNull();
   });
 
-  // C1 — audience must match `validAudiences` from `auth/plugins.ts`.
+  // C1 — audience must be one of `getEndUserVerifyAudiences()`.
   // Before the fix the verifier only checked `iss`, so a token minted for a
   // different audience (e.g. a rogue plugin update) would slip through.
   it("returns null when the audience does not match APP_URL", async () => {

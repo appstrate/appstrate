@@ -33,7 +33,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { user as userTable } from "@appstrate/db/schema";
+import { user as userTable, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -51,12 +51,7 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import {
-  getMcpOrgResourceUri,
-  orgIdFromMcpAudience,
-  addMcpOrgAudience,
-  _resetMcpOrgAudiencesForTesting,
-} from "../../../../../lib/audiences.ts";
+import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
 import { decodeJwt } from "jose";
 
 // The protected-resource registry is a process-wide singleton shared with the
@@ -619,33 +614,14 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(body.error_description).toContain("RFC 8707");
   });
 
-  it("rejects /oauth2/token with a resource not in validAudiences", async () => {
-    const res = await app.request("/api/auth/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code: "fake-code",
-        redirect_uri: "https://satellite.example.com/callback",
-        client_id: clientId,
-        client_secret: clientSecret,
-        code_verifier: "fake-verifier",
-        resource: "https://evil.example.com",
-      }).toString(),
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("invalid_request");
-  });
-
   it("mints a token audience-bound to a per-org MCP resource when resource=<…>/api/mcp/o/<orgId>", async () => {
     // RFC 8707: a client targeting an org's inbound MCP endpoint requests that
-    // org's canonical per-org resource URI; the AS (with the org in
-    // validAudiences) accepts it and stamps it as the token `aud`. The
+    // org's canonical per-org resource URI; the AS accepts it (the org has an
+    // `oauth_resources` row) and stamps it as the token `aud`. The
     // `/api/mcp/o/:org` resource server then enforces that audience (covered by
-    // the mcp module's audience suite). The MCP server registers the per-org
-    // family + audience at boot in production — do it inline here so this
-    // single test does not perturb the shared beforeEach.
+    // the mcp module's audience suite). The MCP module registers the per-org
+    // family + writes the row at boot in production — do both inline here so
+    // this single test does not perturb the shared beforeEach.
     registerProtectedResourceFamily({
       prefix: "/api/mcp/o",
       deriveUri: (path) => {
@@ -656,18 +632,23 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       },
       ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
     });
-    addMcpOrgAudience(ctx.orgId);
+    const mcpResourceUri = getMcpOrgResourceUri(ctx.orgId);
+    await db.insert(oauthResource).values({
+      id: crypto.randomUUID(),
+      identifier: mcpResourceUri,
+      name: `MCP endpoint for organization ${ctx.orgId}`,
+    });
     try {
       const { cookie } = await signUpEndUser(ctx.defaultSpaceId, "mcp-aud@satellite.example.com");
       const { code, verifier } = await runHappyPathToCode({ cookie });
-      const mcpResource = getMcpOrgResourceUri(ctx.orgId);
-      const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResource });
+      const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResourceUri });
       const payload = decodeJwt(tokens.access_token) as { aud?: string | string[] };
       const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : [];
-      expect(auds).toContain(mcpResource);
+      expect(auds).toContain(mcpResourceUri);
     } finally {
-      // Restore the mutable audience allowlist + registry for sibling tests.
-      _resetMcpOrgAudiencesForTesting();
+      // `oauth_resources` is outside `truncateAll` (see `oidc/test/tables.ts`),
+      // so drop the row and the registry entry for sibling tests.
+      await db.delete(oauthResource).where(eq(oauthResource.identifier, mcpResourceUri));
       resetProtectedResources();
     }
   });

@@ -1,54 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RFC 8707 audience set for the inbound MCP server, org-aware.
+ * RFC 8707 audience vocabulary for the inbound MCP server, org-aware.
  *
  * Platform-level, not module-level, because BOTH built-ins need it and neither
- * owns it: the OIDC authorization server mints against this allowlist
- * (`auth/plugins.ts`, `services/enduser-token.ts`, `auth/strategy.ts`) and the
- * MCP module keeps it in sync with the org set. It lived under `modules/mcp/`
- * and was reached into from three `oidc` files — the cross-module import the
- * isolation gate exists to refuse, recorded as accepted rather than fixed
- * because "audience parsing is platform vocabulary that landed in the mcp
- * module". This is that fix.
- *
- * `@appstrate/core` was the destination the acceptance named, and it is the
- * wrong one: the array below is MUTABLE PROCESS STATE shared by reference, and
- * a published package is no place for it. `apps/api/src/lib/` is where two
- * in-process built-ins can share without either importing the other.
+ * owns it: the OIDC token verifier reads it (`services/enduser-token.ts`,
+ * `auth/strategy.ts`) and the MCP module keeps it in sync with the org set. It
+ * lived under `modules/mcp/` and was reached into from three `oidc` files — the
+ * cross-module import the isolation gate exists to refuse, recorded as accepted
+ * rather than fixed because "audience parsing is platform vocabulary that landed
+ * in the mcp module". This is that fix.
  *
  * Each organization exposes its own MCP endpoint (`/api/mcp/o/:org`) whose
- * canonical resource URI a client requests as the RFC 8707 `resource`. The
- * authorization server only mints a token bound to a resource that is in its
- * `validAudiences` allowlist — but orgs are dynamic, so the allowlist cannot be
- * a static boot-time array.
+ * canonical resource URI a client requests as the RFC 8707 `resource`.
  *
- * This module owns ONE mutable array (`mcpValidAudiences`) that is passed by
- * reference into both the oauth-provider and the OIDC guards plugin. Both read
- * it live on every `/oauth2/token` call (the library's `checkResource` reads
- * `opts.validAudiences` per call; the guard reads it per request), so mutating
- * this array in place — seeding from the `organizations` table at boot and
- * keeping it in sync via the `onOrgCreate` / `onOrgDelete` events — makes a
- * freshly-created org's audience immediately mintable without a restart.
+ * MINTING IS NOT DECIDED HERE. The authorization server resolves a requested
+ * `resource` against the persisted `oauth_resources` table and answers
+ * `invalid_target` for an identifier it has no row for
+ * (`@better-auth/oauth-provider` ≥ 1.7.3). The mcp module writes one row per org
+ * (`modules/mcp/index.ts`); that table is shared by every replica, so there is
+ * no per-process mint allowlist to keep in sync any more.
  *
- * The array is mutated IN PLACE (never reassigned) so the reference handed to
- * the plugins stays valid for the process lifetime.
+ * What remains here is the VERIFIER half: `getEndUserVerifyAudiences()` is the
+ * `aud` allowlist jose checks a PRESENTED token against on every `Bearer ey…`.
+ * That one IS per-process in-memory state (a DB read on the hot auth path is
+ * not worth it), so the mcp module still seeds it at boot, updates it on
+ * `onOrgCreate` / `onOrgDelete`, and re-seeds periodically to converge replicas.
  */
 
 import { getEnv } from "@appstrate/env";
 
-/** The live allowlist passed (by reference) to the AS + guards plugin. */
-export const mcpValidAudiences: string[] = [];
-
-let staticBase: readonly string[] = [];
+/** Org ids whose per-org MCP resource URI the token VERIFIER accepts. */
 const orgIds = new Set<string>();
 
 /**
  * Cached end-user-token verifier audience list, keyed on the `APP_URL` it was
- * built from. Invalidated on every `rebuild()` (org set changed) AND whenever
- * `APP_URL` changes (the base URIs derive from it — fixed per process in prod,
- * but swapped by tests that re-init `getEnv`), so the cache can never serve a
- * stale base.
+ * built from. Invalidated whenever the org set changes AND whenever `APP_URL`
+ * changes (the base URIs derive from it — fixed per process in prod, but
+ * swapped by tests that re-init `getEnv`), so the cache can never serve a stale
+ * base.
  */
 let verifyAudiencesCache: { appBase: string; audiences: string[] } | null = null;
 
@@ -99,57 +89,43 @@ export function extractOrgIdFromAudiences(audiences: readonly unknown[]): string
   return undefined;
 }
 
-function rebuild(): void {
-  mcpValidAudiences.length = 0;
-  mcpValidAudiences.push(...staticBase, ...[...orgIds].map(getMcpOrgResourceUri));
-  // Drop the verifier cache so the next `getEndUserVerifyAudiences()` rebuilds
-  // it against the new org set — keeps the verifier in lockstep with the mint
-  // allowlist without recomputing on every verify.
+/** Replace the verifier's org set (boot seed / periodic re-seed from the DB). */
+export function setMcpOrgVerifyAudiences(ids: readonly string[]): void {
+  orgIds.clear();
+  for (const id of ids) orgIds.add(id);
+  verifyAudiencesCache = null;
+}
+
+/** Accept one org's audience at verify time (on org creation). Idempotent. */
+export function addMcpOrgVerifyAudience(orgId: string): void {
+  if (orgIds.has(orgId)) return;
+  orgIds.add(orgId);
+  verifyAudiencesCache = null;
+}
+
+/** Stop accepting one org's audience (on org deletion). Idempotent. */
+export function removeMcpOrgVerifyAudience(orgId: string): void {
+  if (!orgIds.delete(orgId)) return;
   verifyAudiencesCache = null;
 }
 
 /**
- * Set the static (non-org) audiences — the platform + AS URIs and the generic
- * MCP resource. Called once from `plugins.ts` at construction. Org audiences
- * are layered on top and survive re-init.
- */
-export function initMcpValidAudiences(base: readonly string[]): void {
-  staticBase = [...base];
-  rebuild();
-}
-
-/** Replace the org audience set (boot seed from the organizations table). */
-export function seedMcpOrgAudiences(ids: readonly string[]): void {
-  orgIds.clear();
-  for (const id of ids) orgIds.add(id);
-  rebuild();
-}
-
-/** Add one org's audience (on org creation). Idempotent. */
-export function addMcpOrgAudience(orgId: string): void {
-  if (orgIds.has(orgId)) return;
-  orgIds.add(orgId);
-  rebuild();
-}
-
-/** Remove one org's audience (on org deletion). Idempotent. */
-export function removeMcpOrgAudience(orgId: string): void {
-  if (!orgIds.delete(orgId)) return;
-  rebuild();
-}
-
-/**
  * Audience allowlist for the end-user token VERIFIER (`enduser-token.ts`): the
- * platform + AS base URIs plus one per-org MCP resource URI each — exactly the
- * set the AS mints against. The base is computed locally from `APP_URL` (NOT
- * read from `mcpValidAudiences`), so verification works in any context,
- * independent of the AS plugin having run `initMcpValidAudiences` at boot (e.g.
- * unit tests that never construct the plugin).
+ * platform + AS base URIs plus one per-org MCP resource URI each — the same set
+ * the AS has `oauth_resources` rows for. The base is computed locally from
+ * `APP_URL`, so verification works in any context, independent of the AS plugin
+ * having been constructed (e.g. unit tests that never build it).
  *
- * Cached and invalidated on every `rebuild()` (org create / delete / seed), so
- * the hot auth path — every `Bearer ey…` verify, MCP-bound or not — pays O(1)
- * array reuse instead of rebuilding O(orgs) strings per request. jose treats the
- * `audience` argument as read-only, so returning the shared array is safe.
+ * jose treats `audience` as "the token must carry at least one of these", so a
+ * token whose `aud` also carries the implicit `${baseURL}/oauth2/userinfo`
+ * identifier (stamped by the AS whenever `openid` is in scope) still matches on
+ * its real resource — and a token carrying ONLY that identifier is rejected,
+ * which is the fail-closed direction.
+ *
+ * Cached and invalidated whenever the org set changes, so the hot auth path —
+ * every `Bearer ey…` verify, MCP-bound or not — pays O(1) array reuse instead of
+ * rebuilding O(orgs) strings per request. jose treats the `audience` argument as
+ * read-only, so returning the shared array is safe.
  */
 export function getEndUserVerifyAudiences(): string[] {
   const appBase = getEnv().APP_URL;
@@ -163,7 +139,7 @@ export function getEndUserVerifyAudiences(): string[] {
 }
 
 /** Test-only — drop org audiences between fixtures. */
-export function _resetMcpOrgAudiencesForTesting(): void {
+export function _resetMcpOrgVerifyAudiencesForTesting(): void {
   orgIds.clear();
-  rebuild();
+  verifyAudiencesCache = null;
 }

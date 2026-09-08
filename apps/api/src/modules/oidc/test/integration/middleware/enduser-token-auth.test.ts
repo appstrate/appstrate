@@ -54,7 +54,7 @@ async function mintToken(payload: Record<string, unknown>) {
   // basePath is `/api/auth`. The production verifier in `enduser-token.ts`
   // matches against that shape; the test harness must mint tokens with the
   // same `iss` claim or it will exercise the wrong code path. Audience must
-  // also be in `validAudiences` (APP_URL or APP_URL/api/auth) — C1 added
+  // also be one the verifier accepts (APP_URL or APP_URL/api/auth) — C1 added
   // explicit `aud` verification for defense-in-depth.
   const issuer = `${process.env.APP_URL!}/api/auth`;
   return new jose.SignJWT(payload)

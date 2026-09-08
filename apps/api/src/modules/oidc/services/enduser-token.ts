@@ -170,20 +170,19 @@ export async function verifyEndUserAccessToken(
   // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
   // alone rejects every real token.
   const issuer = `${env.APP_URL}/api/auth`;
-  // Audience validation matches `validAudiences` in `auth/plugins.ts` —
-  // RFC 8707 enforcement already happens at the token endpoint via
-  // `oidcGuardsPlugin`, but the local verifier adds defense-in-depth so
-  // a future plugin update that mints tokens with an unexpected `aud`
-  // cannot slip through unchecked.
+  // Audience validation mirrors what the AS will mint (its `oauth_resources`
+  // rows) — RFC 8707 enforcement already happens at the token endpoint, but the
+  // local verifier adds defense-in-depth so a future plugin update that mints
+  // tokens with an unexpected `aud` cannot slip through unchecked.
   //
   // The platform + AS base audiences plus one per-org MCP resource URI each
-  // (`…/api/mcp/o/:org`, the same set the AS mints against), so an RFC 8707
-  // audience-bound MCP token (`resource=<…>/api/mcp/o/<id>` → `aud:
-  // <…>/api/mcp/o/<id>`) verifies here. The list is owned + cached by the
-  // audiences module (base computed locally, not from `mcpValidAudiences`, so
-  // verification never depends on the AS plugin having run; cache rebuilt only
-  // when the org set changes, so this hot path stays O(1)). jose passes when the
-  // token's `aud` intersects the list; the per-org MCP resource server then
+  // (`…/api/mcp/o/:org`), so an RFC 8707 audience-bound MCP token
+  // (`resource=<…>/api/mcp/o/<id>` → `aud: <…>/api/mcp/o/<id>`) verifies here.
+  // The list is owned + cached by the audiences module (base computed locally,
+  // so verification never depends on the AS plugin having run; cache rebuilt
+  // only when the org set changes, so this hot path stays O(1)). jose passes
+  // when the token's `aud` intersects the list; the per-org MCP resource server
+  // then
   // additionally requires ITS exact URI in `aud` (RFC 8707 MUST), confining the
   // token to that one org, and an MCP-scoped token reaching other routes is
   // contained by the outbound audience guard + RBAC.

@@ -264,8 +264,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // The advertised `resource` MUST be the canonical APP_URL-derived per-org URI
   // (`getMcpOrgResourceUri(:org)`), NOT the request origin: it is the exact
   // string the client echoes back as the RFC 8707 `resource` at the token
-  // endpoint, where it must match the AS `validAudiences` (also APP_URL-derived)
-  // and the resource-server audience check. Behind a reverse proxy where the
+  // endpoint, where it must match the org's `oauth_resources` row (also
+  // APP_URL-derived) and the resource-server audience check. Behind a reverse proxy where the
   // public origin differs from an internal request host, an origin-derived value
   // would silently break audience binding. Doc URLs derive from the same
   // APP_URL base so discovery stays consistent.

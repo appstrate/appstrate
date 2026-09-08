@@ -392,7 +392,7 @@ For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenan
 
 Before exposing the module to external satellites:
 
-- **`APP_URL` must match the public issuer**: `validAudiences` is derived from `env.APP_URL` (accepts both `APP_URL` and `APP_URL/api/auth`). Satellites will use one of these as their `resource=` value — a mismatch causes `invalid_request` at token exchange.
+- **`APP_URL` must match the public issuer**: the seeded `oauth_resources` identifiers derive from `env.APP_URL` (both `APP_URL` and `APP_URL/api/auth`). Satellites will use one of these as their `resource=` value — a mismatch causes `invalid_target` at token exchange.
 - **Rate-limit backend must be Redis** in multi-instance deployments: the guards plugin uses `getRateLimiterFactory()` which falls back to in-memory when `REDIS_URL` is unset. In-memory limits are per-instance and trivially bypassed by round-robin.
 - **Audit log shipping**: the consent POST handler emits `logger.info("oidc: consent decision", { audit: true, ... })` on every accept/deny. Route `module=oidc audit=true` log lines to your SIEM / compliance storage for the full decision trail (RGPD proof-of-consent).
 - **JWKS rotation**: Better Auth's `jwt` plugin auto-rotates the ES256 keypair every 90 days with a 7-day grace window. Satellites that cache JWKS for longer WILL see transient `invalid_signature` errors. Document a 7-day cache ceiling in your satellite integration guide.
@@ -444,8 +444,8 @@ const authorizeUrl =
 //    to issue a JWT access token (RFC 8707 resource indicator). Without
 //    it, `@better-auth/oauth-provider` mints an opaque token that the
 //    module's `Bearer ey…` auth strategy cannot match — all scoped
-//    requests would 401. The module's `validAudiences` config accepts
-//    both `APPSTRATE_URL` and `APPSTRATE_URL/api/auth`.
+//    requests would 401. The AS is seeded with both `APPSTRATE_URL` and
+//    `APPSTRATE_URL/api/auth` as protected resources.
 const body = new URLSearchParams({
   grant_type: "authorization_code",
   code, // from ?code= on the callback URL

@@ -14,46 +14,68 @@
  *
  * A token is RFC 8707 audience-bound to one org's resource URI
  * (`${APP_URL}/api/mcp/o/<orgId>`), confining it to that organization. The AS
- * only mints such a token if the URI is in its `validAudiences` allowlist, so
- * this module owns an org-aware allowlist (`./audiences.ts`) that is seeded from
- * the `organizations` table at boot and kept live via the `onOrgCreate` /
- * `onOrgDelete` events below.
+ * only mints such a token when that URI has an `oauth_resources` row, so this
+ * module owns one row per org — reconciled from the `organizations` table at
+ * boot and written / deleted on the `onOrgCreate` / `onOrgDelete` events below,
+ * alongside the in-process verifier set in `lib/audiences.ts`.
  *
  * Consumers: external MCP clients (Claude Code, Cursor) via OAuth, the
  * first-party chat app (BFF reuses its OIDC token), and Appstrate agents.
  */
 
 import type { AppstrateModule } from "@appstrate/core/module";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizations } from "@appstrate/db/schema";
+import { organizations, oauthResource } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import { createMcpRouter } from "./router.ts";
 import { mcpPaths } from "./openapi/paths.ts";
 import {
-  seedMcpOrgAudiences,
-  addMcpOrgAudience,
-  removeMcpOrgAudience,
+  getMcpOrgResourceUri,
+  setMcpOrgVerifyAudiences,
+  addMcpOrgVerifyAudience,
+  removeMcpOrgVerifyAudience,
 } from "../../lib/audiences.ts";
 
-// Cross-replica convergence interval for the org-aware audience allowlist. The
-// `onOrgCreate` / `onOrgDelete` events are in-process broadcasts, so a replica
-// that did not handle an org mutation would never learn it; a periodic re-seed
-// from the DB bounds that staleness. The window is fail-closed in BOTH
-// directions: on a lagging replica an unseeded org's mint 400s AND an
-// already-minted per-org token 401s at verify (its `aud` is not yet in that
-// replica's `getEndUserVerifyAudiences()` list) — never the reverse, so
-// staleness can only reject legitimate traffic, never accept illegitimate. Both
-// self-heal at the next re-seed. Mirrors the per-process TTL the OAuth client
-// cache uses (`oauth-admin.ts`). 60s is well under any human "I created an org,
-// why can't my second replica mint?" threshold.
+// Cross-replica convergence interval. MINTING no longer needs it: the AS
+// resolves a requested `resource` against the shared `oauth_resources` table on
+// every token call, so a row inserted by one replica is mintable from all of
+// them at once. What still needs it is the VERIFIER set, which is per-process
+// in-memory (`lib/audiences.ts`): a replica that missed an `onOrgCreate`
+// broadcast would 401 an already-minted per-org token because its `aud` is not
+// yet in that replica's `getEndUserVerifyAudiences()` list. That window is
+// fail-closed — staleness can only reject legitimate traffic, never accept
+// illegitimate — and self-heals at the next tick. The tick reuses the SAME
+// reconcile as `init()`, so a row insert dropped by a transient DB error on the
+// event path also self-heals instead of waiting for a restart. Mirrors the
+// per-process TTL the OAuth client cache uses (`oauth-admin.ts`); 60s is well
+// under any human "I created an org, why does my second replica 401?" threshold.
 const MCP_AUDIENCE_RESEED_INTERVAL_MS = 60_000;
 let reseedTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Replace the org audience set with the current `organizations` roster. */
-async function reseedMcpOrgAudiences(): Promise<void> {
+/** The `oauth_resources` row backing one org's per-org MCP endpoint. */
+function mcpOrgResourceRow(orgId: string) {
+  return {
+    id: crypto.randomUUID(),
+    identifier: getMcpOrgResourceUri(orgId),
+    name: `MCP endpoint for organization ${orgId}`,
+  };
+}
+
+/**
+ * Reconcile both halves of the per-org RFC 8707 audience model with the current
+ * `organizations` roster: the durable, cross-replica MINT rows and this
+ * process's VERIFIER set. Idempotent.
+ */
+async function reconcileMcpOrgAudiences(): Promise<void> {
   const rows = await db.select({ id: organizations.id }).from(organizations);
-  seedMcpOrgAudiences(rows.map((r) => r.id));
+  setMcpOrgVerifyAudiences(rows.map((r) => r.id));
+  if (rows.length === 0) return;
+  await db
+    .insert(oauthResource)
+    .values(rows.map((r) => mcpOrgResourceRow(r.id)))
+    .onConflictDoNothing({ target: oauthResource.identifier });
 }
 
 // Register `mcp` as a module-owned RBAC resource. Declaration merging on
@@ -68,21 +90,20 @@ declare module "@appstrate/core/permissions" {
 const mcpModule: AppstrateModule = {
   manifest: { id: "mcp", name: "MCP Server", version: "1.0.0" },
 
-  // Seed the org-aware RFC 8707 audience allowlist from the organizations
-  // table so every existing org's per-org MCP resource URI is mintable
-  // immediately at boot (no restart needed when an org pre-dates this module).
-  // The set is then kept live locally by the `onOrgCreate` / `onOrgDelete`
-  // events and converged across replicas by a periodic re-seed. The operation
-  // catalog is built lazily on first request (after all modules have
-  // contributed their paths).
+  // Reconcile the per-org RFC 8707 audience model with the organizations table
+  // so every existing org's per-org MCP resource URI is mintable immediately at
+  // boot (no restart needed when an org pre-dates this module). It is then kept
+  // live by the `onOrgCreate` / `onOrgDelete` events and converged across
+  // replicas by the periodic tick. The operation catalog is built lazily on
+  // first request (after all modules have contributed their paths).
   async init() {
-    await reseedMcpOrgAudiences();
+    await reconcileMcpOrgAudiences();
     // Singleton timer (the module object is a process-wide singleton, but
     // `init()` may run more than once under the test harness) — unref'd so it
     // never keeps the process alive at shutdown / between test runs.
     if (!reseedTimer) {
       reseedTimer = setInterval(() => {
-        reseedMcpOrgAudiences().catch((err) => {
+        reconcileMcpOrgAudiences().catch((err) => {
           logger.warn("mcp: periodic audience re-seed failed", {
             module: "mcp",
             error: getErrorMessage(err),
@@ -146,21 +167,29 @@ const mcpModule: AppstrateModule = {
     },
   ],
 
-  // Keep the org-aware RFC 8707 audience allowlist live without a restart. A
-  // new org's per-org MCP resource URI must be mintable by the AS the moment the
-  // org exists. `onOrgDelete` is hygiene, NOT the confinement boundary: it stops
-  // re-minting a deleted org's URI and trims the verifier list, but a still-live
+  // Keep the per-org RFC 8707 audience model live without a restart. A new org's
+  // per-org MCP resource URI must be mintable by the AS the moment the org
+  // exists. `onOrgDelete` is hygiene, NOT the confinement boundary: it stops
+  // re-minting a deleted org's URI and trims the verifier set, but a still-live
   // token for a deleted org is already inert — the live membership join in
   // org-context (org delete cascades the member rows) 403s it with zero
-  // staleness, independent of this allowlist. The boot seed in `init()` covers
-  // orgs that pre-date a restart; these events cover orgs created/deleted while
-  // running. Both calls are idempotent.
+  // staleness, independent of these rows. The boot reconcile covers orgs that
+  // pre-date a restart; these events cover orgs created/deleted while running.
+  // Every call is idempotent. `emitEvent` awaits and logs a throw here rather
+  // than failing the org mutation, and the periodic reconcile repairs it.
   events: {
-    onOrgCreate: (orgId: string) => {
-      addMcpOrgAudience(orgId);
+    onOrgCreate: async (orgId: string) => {
+      addMcpOrgVerifyAudience(orgId);
+      await db
+        .insert(oauthResource)
+        .values(mcpOrgResourceRow(orgId))
+        .onConflictDoNothing({ target: oauthResource.identifier });
     },
-    onOrgDelete: (orgId: string) => {
-      removeMcpOrgAudience(orgId);
+    onOrgDelete: async (orgId: string) => {
+      removeMcpOrgVerifyAudience(orgId);
+      await db
+        .delete(oauthResource)
+        .where(eq(oauthResource.identifier, getMcpOrgResourceUri(orgId)));
     },
   },
 };

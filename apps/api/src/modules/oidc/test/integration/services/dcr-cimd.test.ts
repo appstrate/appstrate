@@ -30,12 +30,7 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import {
-  getMcpOrgResourceUri,
-  orgIdFromMcpAudience,
-  addMcpOrgAudience,
-  _resetMcpOrgAudiencesForTesting,
-} from "../../../../../lib/audiences.ts";
+import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
 import { getEnv } from "@appstrate/env";
 import { OIDC_IDENTITY_SCOPES } from "../../../auth/scopes.ts";
 import oidcModule from "../../../index.ts";
@@ -352,9 +347,8 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
     // register it directly so the token-endpoint guard
     // (`enforceSelfServiceResourceRestriction` → `isProtectedResourceUri`) has a
     // protected resource to compare against without loading the full mcp
-    // dispatch surface. ALSO add this org to the AS `validAudiences` allowlist
-    // so the library's own `checkResource` accepts the per-org URI — both gates
-    // must pass for a mint.
+    // dispatch surface. This suite asserts only that guard: it stops at the
+    // before-hook verdict, so the org needs no `oauth_resources` row.
     resetProtectedResources();
     registerProtectedResourceFamily({
       prefix: "/api/mcp/o",
@@ -366,14 +360,6 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
       },
       ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
     });
-    _resetMcpOrgAudiencesForTesting();
-    addMcpOrgAudience(ORG_ID);
-  });
-
-  afterEach(() => {
-    // Drop the org audience so the mutable allowlist does not leak into other
-    // suites sharing the process.
-    _resetMcpOrgAudiencesForTesting();
   });
 
   async function registerSelfServiceClient(): Promise<string> {
@@ -384,6 +370,10 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
       response_types: ["code"],
       token_endpoint_auth_method: "none",
       scope: "openid profile email offline_access",
+      // A loopback http callback is only registrable by a NATIVE client (OIDC
+      // Dynamic Registration §2) — which is what an MCP client on a loopback
+      // port is. A `web` client would be refused `invalid_redirect_uri`.
+      application_type: "native",
     });
     expect([200, 201]).toContain(status);
     return String(json.client_id);
@@ -428,9 +418,9 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
   it("allows a self-service client to request a per-org MCP protected-resource audience", async () => {
     const clientId = await registerSelfServiceClient();
     const { status, json } = await tokenWithResource(clientId, getMcpOrgResourceUri(ORG_ID));
-    // The resource gate passes for the per-org MCP audience (registered family +
-    // added to validAudiences); the request still fails downstream on the bogus
-    // code — but NOT with our `invalid_target`.
+    // The self-service gate passes for the per-org MCP audience (registered
+    // family); the request still fails downstream on the bogus code — but NOT
+    // with our `invalid_target`.
     expect(String(json.error ?? "")).not.toBe("invalid_target");
     if (status === 400) expect(String(json.error)).not.toBe("invalid_target");
   });

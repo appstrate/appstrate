@@ -31,7 +31,7 @@
 
 import { randomInt, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { oauthProvider } from "@better-auth/oauth-provider";
+import { oauthProvider, type OAuthOptions, type Scope } from "@better-auth/oauth-provider";
 import { cimd } from "@better-auth/cimd";
 import { bearer, jwt } from "better-auth/plugins";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
@@ -62,7 +62,6 @@ import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
 import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
-import { mcpValidAudiences, initMcpValidAudiences } from "../../../lib/audiences.ts";
 
 interface ClientMetadata {
   level?: "org" | "space" | "instance";
@@ -141,34 +140,6 @@ interface OidcBetterAuthPluginsOptions {
 
 export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): unknown[] {
   const env = getEnv();
-  // The AS accepts these as RFC 8707 `resource` values and stamps the matching
-  // one as the token `aud`. The inbound MCP server is exposed per organization
-  // (`/api/mcp/o/:org`), so its protected resources are NOT static URIs — there
-  // is one canonical URI per org, layered onto this allowlist at runtime.
-  //
-  // Org-aware, mutable allowlist: the static platform + AS audiences plus one
-  // per-org MCP resource URI each, kept in sync via `lib/audiences.ts` (seeded
-  // from the `organizations` table at boot, updated on `onOrgCreate` /
-  // `onOrgDelete`). Passed BY REFERENCE to both plugins below; both read it live
-  // per request (the library's `checkResource` reads `opts.validAudiences` on
-  // every mint, the guard reads it per request), so a freshly-created org's
-  // resource becomes mintable without a restart. Never reassign — mutate in
-  // place through the audiences module. The generic `/api/mcp/o/:org` URIs are
-  // per-org; there is no bare `/api/mcp` resource.
-  //
-  // LIBRARY CONTRACT (verified ≤ @better-auth/oauth-provider 1.7.0-beta.4):
-  // `oauth-provider` must read `opts.validAudiences` LIVE on every
-  // `/oauth2/token` call — its `checkResource` rebuilds a Set from
-  // `opts.validAudiences.filter(...)` per call, and `opts` holds this array by
-  // reference (a spread of the options object, not a clone). If a future version
-  // snapshots `validAudiences` into a Set at plugin construction, per-org minting
-  // silently breaks for orgs created after boot. The regression guard is
-  // `oidc/test/integration/services/mcp-org-audience-liveread.test.ts` (add an
-  // org audience at runtime → mint accepts it). Keep `mcpValidAudiences` a plain
-  // array — the library calls `.filter` on it.
-  initMcpValidAudiences([env.APP_URL, `${env.APP_URL}/api/auth`]);
-  const validAudiences = mcpValidAudiences;
-
   // Scopes a self-service (DCR / CIMD) client may request: identity scopes +
   // module-contributed end-user-grantable scopes (currently mcp:read/invoke).
   // Deliberately EXCLUDES core action scopes (agents:run, llm-proxy:call, …) —
@@ -180,7 +151,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       ? new Set(opts.cachedTrustedClientIds)
       : undefined;
   return [
-    oidcGuardsPlugin({ validAudiences }),
+    oidcGuardsPlugin(),
     socialOverridePlugin(),
     jwt({
       jwks: { keyPairConfig: { alg: "ES256" } },
@@ -230,24 +201,48 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // `oidcGuardsPlugin.hooks.before` on `/device/approve`.
       validateClient: validateDeviceFlowClient,
     }),
+    // `satisfies` is load-bearing, not decoration. `oauthProvider` is declared
+    // `<O extends OAuthOptions<Scope[]>>(options: O)` — a NAKED type parameter,
+    // so TypeScript infers `O` as this literal's own type and performs no
+    // excess-property check at all. A retired or misspelled option (the 1.7.3
+    // removals `validAudiences` / `silenceWarnings`, say) would compile clean
+    // and be silently ignored at runtime. Checking the literal against the
+    // interface first restores TS2353. Do not remove.
     oauthProvider({
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
-      // basePath is `/api/auth` (not `/`), so BA advises ensuring the
-      // discovery doc at `/.well-known/oauth-authorization-server/api/auth` is
-      // served. BA itself only exposes the suffix form
-      // (`/api/auth/.well-known/...`); the RFC 8414 path-inserted form at the
-      // origin root is served by this module's router (see `routes.ts` OIDC
-      // discovery). The warning is purely advisory for the non-root basePath;
-      // clear it via the documented flag.
-      silenceWarnings: { oauthAuthServerConfig: true },
       // OIDC scope vocabulary (identity scopes + OIDC_ALLOWED_SCOPES). Owned
       // wholly by this module — there is no cross-module scope contribution
       // point, so load ordering is irrelevant. Advertised in discovery
       // `scopes_supported` and enforced by the oauth-provider plugin's own
       // scope filter.
       scopes: [...getAppstrateScopes()],
-      validAudiences,
+      // RFC 8707 protected resources, PERSISTED as `oauth_resources` rows. The
+      // AS resolves a requested `resource` against that table on every token
+      // call and answers `invalid_target` for an identifier it has no row for.
+      // Seeded here are the two STATIC platform identifiers; the inbound MCP
+      // server is exposed per organization (`/api/mcp/o/:org`), so its resources
+      // are NOT static — the mcp module writes one row per org
+      // (`modules/mcp/index.ts`). There is no bare `/api/mcp` resource.
+      //
+      // `resourceSeedMode` is left at its `insertOnly` default: a row an
+      // operator edited must survive a restart. `cachedResources` is
+      // deliberately NOT passed — an identifier outside that set is read from
+      // the DB per request, which is exactly what makes an org row inserted at
+      // runtime mintable immediately, including from another replica. The
+      // implicit `${baseURL}/oauth2/userinfo` identifier is accepted without a
+      // row and must never get one.
+      resources: [env.APP_URL, `${env.APP_URL}/api/auth`],
+      // Upstream defaults this to TRUE, which would require an
+      // `oauth_client_resources` row per (client, resource) pair before any
+      // mint. Appstrate does not model per-client resource linkage: any client
+      // may request any configured resource, and the confinement that actually
+      // holds is (a) the self-service rule in `guards.ts` — exactly one
+      // protected resource, never the platform audience — and (b) the
+      // downstream org-membership check on every request. `false` preserves
+      // that behaviour byte for byte. Tightening it is a product decision, not
+      // a dependency-bump side effect.
+      enforcePerClientResources: false,
       cachedTrustedClients,
       // Dynamic Client Registration (RFC 7591) — the fallback discovery path
       // for MCP clients that can't host a CIMD document. Unauthenticated
@@ -316,7 +311,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
         }
         return withVerified;
       },
-    }),
+    } satisfies OAuthOptions<Scope[]>),
     // Client ID Metadata Documents (CIMD, SEP-991) — the MCP-spec-preferred
     // discovery path: a client identifies by an HTTPS URL whose document the AS
     // fetches, validates, and caches. Must come AFTER oauthProvider — its

@@ -13,12 +13,16 @@
  * dispatches to the oauth-provider endpoints:
  *
  * 1. **Resource enforcement (RFC 8707)** — `/oauth2/token` grants
- *    `authorization_code` and `refresh_token` MUST carry a `resource` param
- *    matching one of `validAudiences`. Without it, `createUserTokens`
+ *    `authorization_code` and `refresh_token` MUST carry a `resource` param.
+ *    Whether a given resource EXISTS is the oauth-provider's own call (it
+ *    resolves each one against `oauth_resources` and answers `invalid_target`);
+ *    what it does not do is REQUIRE one. Without a `resource`, `createUserTokens`
  *    silently falls back to opaque tokens that our `Bearer ey...` strategy
  *    cannot match — every subsequent scoped request 401s with no hint.
  *    We reject up-front with a clear `invalid_request` so satellites get
- *    a diagnosable error instead of a silent-fail cascade.
+ *    a diagnosable error instead of a silent-fail cascade. On top of that we
+ *    confine self-service (DCR / CIMD) clients to exactly one protected
+ *    resource — a rule with no upstream equivalent.
  *
  * 2. **IP rate limiting** — `/oauth2/token`, `/oauth2/authorize`,
  *    `/oauth2/introspect`, `/oauth2/revoke` are all unauthenticated and
@@ -227,11 +231,6 @@ async function enforceRateLimit(
       { "Retry-After": String(retry), "X-RateLimit-Scope": "ip" },
     );
   }
-}
-
-interface OidcGuardsOptions {
-  /** Audiences accepted as the RFC 8707 `resource` parameter. */
-  validAudiences: readonly string[];
 }
 
 interface TokenRequestBody {
@@ -706,11 +705,7 @@ async function isSelfServiceClient(clientId: string): Promise<boolean> {
   }
 }
 
-export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
-  // Read `opts.validAudiences` LIVE on every request — it is the org-aware
-  // mutable allowlist (see `lib/audiences.ts`), so a snapshot taken here would
-  // miss orgs created after boot and reject their per-org MCP resource.
-
+export function oidcGuardsPlugin() {
   return {
     id: "oidc-guards",
     hooks: {
@@ -793,25 +788,22 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
               grantType === "refresh_token" ||
               grantType === "client_credentials"
             ) {
-              // Validate EVERY requested resource, not just the first. The
-              // oauth-provider's `checkResource` accepts `resource` as an array
-              // and stamps the FULL list into `aud`, so validating only
-              // `resource[0]` would let a caller smuggle extra audiences past
-              // this gate (e.g. `resource=[<mcp/o/A>, APP_URL]`).
+              // `resource` may arrive repeated (RFC 8707 §2); the whole list
+              // is kept because the self-service rule below counts it. Each
+              // value's existence is checked by the oauth-provider itself —
+              // an unknown or disabled identifier gets `invalid_target` there.
               const resources = Array.isArray(body.resource)
                 ? body.resource
                 : body.resource
                   ? [body.resource]
                   : [];
-              if (
-                resources.length === 0 ||
-                resources.some((r) => !opts.validAudiences.includes(r))
-              ) {
+              if (resources.length === 0) {
                 throw new APIError("BAD_REQUEST", {
                   error: "invalid_request",
                   error_description:
-                    `The 'resource' parameter is required (RFC 8707) and every value must be one of: ${opts.validAudiences.join(", ")}. ` +
-                    `Without it, the plugin issues opaque access tokens that the Appstrate Bearer auth strategy cannot verify.`,
+                    "The 'resource' parameter is required (RFC 8707) — use the resource URI " +
+                    "advertised by the endpoint you are calling. Without it, the plugin issues " +
+                    "opaque access tokens that the Appstrate Bearer auth strategy cannot verify.",
                 });
               }
               // Self-service (DCR / CIMD) clients carry the connecting user's
