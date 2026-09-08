@@ -7,7 +7,7 @@
 # self-contained executable; the runner just provides libc + TLS
 # trust and runs it.
 
-ARG RUNTIME_IMAGE=alpine:3.21.3
+ARG RUNTIME_IMAGE=alpine:3.22.4
 FROM ${RUNTIME_IMAGE} AS runtime
 
 ARG BUILD_VERSION=unknown
