@@ -26,11 +26,20 @@ export function prefixedId(prefix: string): string {
 export const SPACE_ID_RE = /^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
+ * Whether `id` is a canonical space id. The predicate half of
+ * {@link assertSpaceId}, for the body fields validated by Zod
+ * (`spaceAssignmentSchema.space_id`) rather than by a throw.
+ */
+export function isSpaceId(id: string): boolean {
+  return SPACE_ID_RE.test(id);
+}
+
+/**
  * Throw unless `id` is a canonical space id. `param` names the field the id
  * arrived on so the 400 points at it (`X-Space-Id`, `space_id`, …).
  */
 export function assertSpaceId(id: string, param = "space_id"): void {
-  if (SPACE_ID_RE.test(id)) return;
+  if (isSpaceId(id)) return;
   throw invalidRequest(
     `Malformed space id '${id}'. Expected \`spc_\` followed by a canonical UUID.`,
     param,

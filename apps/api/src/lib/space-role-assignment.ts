@@ -9,7 +9,7 @@ import { z } from "zod";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceRoleAssignment } from "../services/space-members.ts";
-import { isSpaceRoleId } from "./ids.ts";
+import { isSpaceId, isSpaceRoleId } from "./ids.ts";
 
 /** `.refine()` returns a wrapper nothing can `.extend()`, so shape and rule ship apart. */
 export const spaceRoleAssignmentShape = {
@@ -45,5 +45,13 @@ export function toAssignment(data: {
 }
 
 export const spaceAssignmentSchema = exactlyOneRole(
-  z.object({ space_id: z.string().min(1), ...spaceRoleAssignmentShape }),
+  z.object({
+    // Shape-checked like the `custom_role_id` beside it: a retired `app_` id
+    // resolves to no space, and without this it reports that as "space not
+    // found" — the same silence `SPACE_ID_RE` exists to end.
+    space_id: z.string().refine(isSpaceId, {
+      message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+    }),
+    ...spaceRoleAssignmentShape,
+  }),
 );
