@@ -158,6 +158,7 @@ export function buildModuleInitContext(): ModuleInitContext {
     getSendMail: async () => {
       // Lazy import to break circular dep: email.ts -> app-config.ts -> modules
       const { sendMail } = await import("../../services/email.ts");
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises -- `ModuleInitContext.getSendMail` (packages/core/src/module.ts) declares the mailer as `(to, subject, html) => void`; the platform's `sendMail` returns `Promise<void>`, so no module can await delivery. Reconciling the two is a published-core contract change (a module supplying its own mailer would break), so it is not made here.
       return sendMail;
     },
     getOrgOwnerEmails,

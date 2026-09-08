@@ -317,6 +317,10 @@ export function ChatPage({
                   onClick={() => setMobileOpen(false)}
                   aria-hidden
                 />
+                {/* Delegation only: the drawer closes AFTER a real <button>
+                    inside it was activated, and that button is the keyboard
+                    path. Nothing here acts on its own. */}
+                {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
                 <aside
                   className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
                   // Bubble phase, NOT capture: a capture handler would flush

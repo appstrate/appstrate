@@ -3,6 +3,7 @@ import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import react from "eslint-plugin-react";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
@@ -696,10 +697,167 @@ export default tseslint.config(
     },
   },
   {
+    // Accessibility over every file that can hold JSX. The SPA is a dashboard
+    // people keep open all day and NOTHING checked that a control had an
+    // accessible name, that a click handler sat on something focusable, or
+    // that a label reached its input.
+    //
+    // `**\/*.tsx` rather than the three trees that hold JSX today
+    // (`apps/web/src`, `packages/ui/src`, `packages/module-chat/src/ui` — all
+    // 288 tracked `.tsx`, `git ls-files`, 2026-09-08): TypeScript refuses JSX
+    // in a `.ts` file, so the extension IS the population, and a superset
+    // covers the next package that ships a frontend. The `.tsx` restriction is
+    // not a cost decision — these rules read the JSX AST only, no type program.
+    //
+    // 6.10.2 declares `peerDependencies: {eslint: "^3 || … || ^9"}` and this
+    // repo runs eslint 10, so `bun add` warns. Exercised rather than assumed,
+    // 2026-09-08: rules report, options are honoured, and eslint's
+    // unused-disable-directive accounting sees the plugin's rule ids (a
+    // directive for a rule with no violation goes red). It is the newest
+    // release; there is no eslint-10 line to move to.
+    //
+    // ─── What the first run found ───────────────────────────────────────
+    //
+    // `recommended` names 34 rules: 31 at `error` and 3 it ships `off`. All of
+    // them were measured over those 288 files, 2026-09-08 — the 3 included, so
+    // that promoting one or leaving it off is a call made on data — bar
+    // `label-has-for`, deprecated upstream. Each rule at its documented
+    // options. 49 findings across 29 files:
+    //
+    //     18  no-autofocus                            turned off, below
+    //      9  click-events-have-key-events            3 fixed, 6 exempted at site
+    //      9  label-has-associated-control            all 9: `depth`, below
+    //      7  no-static-element-interactions          3 fixed, 4 exempted at site
+    //      3  no-noninteractive-tabindex              3 exempted at site
+    //      1  interactive-supports-focus              exempted at site
+    //      1  no-noninteractive-element-interactions  exempted at site
+    //      1  heading-has-content                     fixed
+    //      0  the other 25 measured rules
+    //
+    // Small enough to FIX rather than baseline, and that mattered: eslint has
+    // no native accepted-violations file, so a baseline here would have meant
+    // inventing a mechanism — a seeded list plus its own liveness check, the
+    // way `lint-migrations.ts` does — to carry findings a day's work removes.
+    // Every hit is now either fixed in this commit or carries a directive
+    // naming the reason at the site, and those directives are
+    // self-cleaning: eslint's
+    // `reportUnusedDisableDirectives` defaults to "warn" and `scripts/lint.ts`
+    // runs `--max-warnings 0`, so a directive that stops matching a real
+    // violation FAILS the gate rather than rotting in place.
+    //
+    // ─── Rules deliberately not enabled ─────────────────────────────────
+    //
+    //  - `no-autofocus` (in `recommended`, turned OFF here). 16 of its 18 hits
+    //    are focus moved in RESPONSE to a user action, which is the opposite
+    //    of the hazard the rule names: 9 are the first field of a dialog the
+    //    user just opened, 5 are an inline-edit affordance that swaps a label
+    //    for an input on click, 1 is the chat composer, 1 is
+    //    `schema-form/templates.tsx` forwarding RJSF's own `autofocus` field
+    //    option. Deleting those props would leave focus BEHIND the dialog that
+    //    just opened, and the rule has no option that separates the two cases.
+    //    The other 2 — `welcome.tsx` and the org-name field in
+    //    `onboarding/create-step.tsx` — autofocus on page load, which IS the
+    //    case the rule is about; left in place because whether onboarding
+    //    should grab focus is a product call, not a lint fix.
+    //
+    //  - `anchor-ambiguous-text` (already `off`, left off). Its check is a word
+    //    list — "click here", "here", "link", "learn more". This UI is French
+    //    (i18next), and every anchor's text is a `t()` call, so the rule has
+    //    nothing to read: 0 hits, and it would still be 0 with the mistake
+    //    present. A rule that cannot go red is not a gate.
+    //
+    //  - `label-has-for` is deprecated upstream in favour of
+    //    `label-has-associated-control`; `recommended` ships it `off`.
+    //
+    // ─── Two rules configured ───────────────────────────────────────────
+    //
+    // `control-has-associated-label` is the one rule PROMOTED out of the `off`
+    // set: nothing else in the set says "this control has no accessible name".
+    // Measured against seeded controls, 2026-09-08: `<button />` RED,
+    // `<button><svg/></button>` RED, `<button><ShieldCheck/></button>` GREEN —
+    // a capitalised child could render text, so the rule lets it pass. That
+    // last shape is how this SPA writes every icon button (lucide-react inside
+    // `<Button size="icon">`), so the rule's real reach here is narrow — kept
+    // because narrow is more than none, and it costs nothing.
+    //
+    // Its options are spelled out below because they are load-bearing —
+    // `recommended` ships this rule as `["off", {…defaults}]`, and flat config
+    // replaces a rule entry whole, so writing `"error"` on its own SILENTLY
+    // discards `ignoreElements`/`ignoreRoles`/`includeRoles`. Measured
+    // 2026-09-08 over the 288 files: with the defaults restored, 0 hits; with
+    // them dropped, 14 — every one of those 14 an `<input>`/`<textarea>` the
+    // default `ignoreElements` exists to skip, because this rule reads only
+    // the control's own subtree and cannot see a `<label htmlFor>` SIBLING
+    // (clearest at `packages/ui/src/schema-form/widgets.tsx:64`, where the
+    // matching label sits four lines below the input it labels).
+    //
+    // `label-has-associated-control` default `depth: 2` produced all 9 of its
+    // hits, and every one was a real label whose text sits under a Tailwind
+    // layout wrapper (`<label><Checkbox/><span><span>{t(…)}</span></span>`).
+    // Measured 2026-09-08 over the 288 files: depth 2 -> 9 hits, depth 3 -> 0,
+    // depth 25 -> 0. `depth` only bounds the search for label TEXT, and a
+    // label with no text has none at any depth, so raising it to the schema's
+    // maximum costs no detection — it just stops the rule failing the next
+    // time someone adds a wrapper. Verified against a seeded `<label />`: red
+    // at depth 25.
+    //
+    // `controlComponents` was tried and dropped: measured, adding
+    // `["Checkbox"]` changed the hit count by 0 in either direction, so it
+    // would have been configuration that documents an intent the rule never
+    // acts on. `assert: "both"` was tried and dropped too — it reports 22
+    // labels that DO nest a native `<input type="checkbox">` (e.g.
+    // `oauth-client-form-modal.tsx:311`), i.e. it is unsound in 6.10.2.
+    //
+    // ─── What this cannot see ───────────────────────────────────────────
+    //
+    // jsx-a11y reads one JSX element at a time and cannot cross a component
+    // boundary, which in a Radix/shadcn codebase is most of the interesting
+    // surface. It does not know that `<Checkbox>` renders a `role="checkbox"`
+    // button, that `<TooltipTrigger asChild>` clones ARIA onto its child, or
+    // that `<DialogContent>` already manages focus — so it produces both
+    // false positives (every at-site directive in this commit traces to one)
+    // and blind spots — `<Button size="icon"><Trash2/></Button>` with no
+    // `aria-label` is the SPA's commonest icon control and no rule here can
+    // see it. It also never reads `apps/web/index.html`, so `html-has-lang`
+    // is enabled and structurally dead. This is a floor on hand-written JSX, not an
+    // accessibility audit; naming icon-only design-system buttons needs either
+    // a rule that resolves components or a runtime pass (axe).
+    files: ["**/*.tsx"],
+    plugins: { "jsx-a11y": jsxA11y },
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      "jsx-a11y/no-autofocus": "off",
+      "jsx-a11y/label-has-associated-control": ["error", { depth: 25 }],
+      "jsx-a11y/control-has-associated-label": [
+        "error",
+        {
+          // The plugin's documented defaults, restated because `"error"` alone
+          // drops them (see above). `input`/`textarea` are skipped by the rule
+          // itself — `label-has-associated-control` is what covers those.
+          ignoreElements: ["audio", "canvas", "embed", "input", "textarea", "tr", "video"],
+          ignoreRoles: [
+            "grid",
+            "listbox",
+            "menu",
+            "menubar",
+            "radiogroup",
+            "row",
+            "tablist",
+            "toolbar",
+            "tree",
+            "treegrid",
+          ],
+          includeRoles: ["alert", "dialog"],
+        },
+      ],
+    },
+  },
+  {
     // Type-aware guard (web only): flag `x as T` assertions that don't change
     // the type — these are pure noise that also hide where a value's real type
-    // silently drifted from what the cast claims. Scoped to the SPA so the
-    // type-checked program stays cheap. Only this one type-aware rule is on.
+    // silently drifted from what the cast claims. This rule is web-only because
+    // it is a cast-hygiene rule and the SPA is where the casts are; the backend
+    // gets a different set of type-aware rules in the block below.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {
@@ -709,6 +867,96 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/no-unnecessary-type-assertion": "error",
+    },
+  },
+  {
+    // Type-aware async correctness (backend). Three rules, and each one names a
+    // failure this codebase can actually have:
+    //
+    //  - `no-floating-promises`  an un-awaited promise in a run orchestrator is
+    //    a run reported finished before its work is done, and a rejection that
+    //    reaches the process as an unhandled rejection rather than a log line.
+    //  - `no-misused-promises`   an `async` function handed to something that
+    //    expects a void return (Hono middleware, a Redis/BullMQ listener, an
+    //    event handler) has its rejection dropped on the floor by the caller.
+    //  - `await-thenable`        an `await` on a non-promise is almost always a
+    //    missing call or a type that changed under the caller.
+    //
+    // Nothing else in the repo covers this: `bun test` executes tests without
+    // typechecking them, and `tsc` does not model promise handling. The first
+    // run found 18 violations in product code — 14 under `apps/api/src`, 4
+    // under `packages/*/src` — and four were defects rather than style:
+    // `findAvailablePort` returned a port whose probe server was still bound
+    // (the EADDRINUSE-at-sidecar-boot it exists to prevent); `writer.write()`
+    // was un-awaited in core's streaming upload, dropping both backpressure and
+    // the rollback path; core's MCP bun-probe guarded an async pipe write with
+    // a sync `try`; and the local queue's own catch block could take the
+    // process down with an unhandled rejection.
+    //
+    // ─── Scope, and what it costs ────────────────────────────────────────
+    //
+    // `bun scripts/lint.ts`, wall clock, this machine, 2026-09-08. The three
+    // scopes first, cold (`.eslintcache` deleted before every run), 3 runs each:
+    //
+    //                                       cold                    warm
+    //   no type-aware backend rules   23.5 / 23.5 / 24.2 s         ~2.1 s
+    //   + apps/api/src                35.2 / 38.5 / 41.1 s         ~2.1 s
+    //   + packages/*/src (this block) 51.9 / 54.5 / 54.8 s         ~2.1 s
+    //
+    // then re-measured PAIRED — one baseline-config run and one this-config run
+    // back to back, both cold. That is the only comparison that survives a
+    // machine whose background load moved between the table above and these:
+    //
+    //   pair 1   28.7 s  ->  69.2 s
+    //   pair 2   25.4 s  ->  59.0 s
+    //
+    // So: a cold lint costs about 2.3x, +30 to +40 s, and a warm one is
+    // unchanged — `--cache --cache-strategy content` rebuilds the type program
+    // only for the files that actually changed. Cold is CI and a fresh clone;
+    // the pre-push path is warm, and CI's `check` job budget is
+    // `timeout-minutes: 10`.
+    //
+    // `packages/*/src` is in scope rather than `apps/api/src` alone because the
+    // second half of that cost bought four more findings, two of them
+    // unhandled-rejection paths in `@appstrate/core` — which is PUBLISHED, so a
+    // dropped rejection there ships to every consumer. `packages/*/src` is a
+    // discovered superset (a new package is covered the day it lands), not a
+    // roster of the packages that happened to look async today.
+    //
+    // ─── Why test code is excluded ───────────────────────────────────────
+    //
+    // Not a cost decision — `await-thenable` is UNSOUND over `bun:test`.
+    // `bun-types/test.d.ts` declares `rejects: Matchers<unknown>` (line 929)
+    // whose matchers return `void` (`toThrow(expected?: unknown): void`, line
+    // 1415), while at runtime `expect(p).rejects.toThrow()` returns a promise
+    // that MUST be awaited or the assertion floats and the test passes
+    // regardless. Measured 2026-09-08 with the test trees in scope: 77
+    // `await-thenable` hits, 75 of them exactly that shape — every one a
+    // correct `await` the rule would have had us delete.
+    //
+    // The other two rules could run over tests, and were left off: the whole
+    // population there was six `server.stop(true)` / cache-invalidation calls
+    // in `afterAll` teardown, which is not worth a second block whose only
+    // difference is which of the three rules it carries.
+    //
+    // `**/test/**` is the repo's test glob (see the two blocks above);
+    // `**/*.test.ts` catches the one test file that does not live under one —
+    // `packages/core/src/model-generation.test.ts`.
+    //
+    // If this ever needs to get cheaper, narrow `files` before dropping a rule:
+    // the cost is the type program, not the rule count.
+    files: ["apps/api/src/**/*.ts", "packages/*/src/**/*.ts"],
+    ignores: ["**/test/**", "**/*.test.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/await-thenable": "error",
     },
   },
   eslintConfigPrettier,

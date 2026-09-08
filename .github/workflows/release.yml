@@ -26,9 +26,13 @@ env:
 permissions:
   contents: write
   packages: write
-  # SLSA build provenance via `actions/attest-build-provenance` runs on
-  # the CLI binaries in `sign-cli` — keeps the supply-chain attestation
-  # attached to the release alongside the minisign-signed checksums.
+  # SLSA build provenance via `actions/attest-build-provenance`, in two
+  # places: the CLI binaries in `sign-cli` (alongside the minisign-signed
+  # checksums) and every pushed image in `build-and-push`. The image
+  # attestation also needs the `packages: write` above, because it stores
+  # its bundle as an OCI referrer next to the image.
+  # `scan-images` overrides this block with a read-only one plus
+  # `security-events: write` — it neither signs nor publishes anything.
   id-token: write
   attestations: write
 
@@ -76,6 +80,13 @@ jobs:
   build-and-push:
     needs: verify-version
     runs-on: ubuntu-latest
+    outputs:
+      # Matrix size, so `scan-images` can assert it scanned EVERY image this job
+      # pushed instead of however many digest artifacts happened to arrive. Every
+      # leg writes the same value, so the usual "a matrix job's outputs clobber
+      # each other" hazard is harmless here — that is why it is `strategy.job-total`
+      # and not something derived from `matrix.name`.
+      image-count: ${{ steps.matrix-size.outputs.total }}
     # 90, not 30. These are multi-arch builds (`linux/amd64,linux/arm64`) whose
     # `linux/arm64` half runs under QEMU emulation on an amd64 runner, and the
     # only thing that normally keeps them short is the `type=gha` layer cache.
@@ -198,12 +209,34 @@ jobs:
             type=sha,prefix=sha-
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
+          # One SBOM per platform, attached to the pushed index as an extra
+          # attestation manifest. BuildKit's native SBOM rather than a syft step
+          # because syft would have to scan ONE image — a multi-arch manifest has
+          # no filesystem to walk — so it would describe linux/amd64 while being
+          # published as the SBOM of a two-platform release. `sbom: true` runs the
+          # scanner once per platform inside the build, which is the only shape
+          # that is actually true of what ships.
+          #
+          # `provenance:` is deliberately left unset rather than turned on.
+          # MEASURED 2026-09-08 against the shipped 1.0.0-beta.57 index:
+          #   docker buildx imagetools inspect \
+          #     ghcr.io/appstrate/appstrate:1.0.0-beta.57 --format '{{ json .Provenance }}'
+          # already prints a full SLSA statement carrying
+          # `runDetails.metadata.buildkit_metadata` (the mode=max marker — public
+          # repos get mode=max by default) and `resolvedDependencies` naming the
+          # base image `pkg:docker/oven/bun@1.3.14-alpine`. The same command's
+          # `.SBOM` printed `{}`. So provenance metadata was never the gap; a
+          # SIGNED provenance statement was, and that is the next step — the
+          # BuildKit attestation is unsigned build metadata that nothing binds to
+          # this repository and `gh attestation verify` cannot read.
+          sbom: true
           # Stamp the deployed build identity into the image. Only the main
           # Dockerfile declares these ARGs; other matrix images ignore them.
           #
@@ -221,6 +254,343 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Signed SLSA provenance over the pushed image, from the SAME action the
+      # CLI binaries get in `sign-cli` — so "how do I verify what Appstrate
+      # shipped" has one answer for a binary and an image instead of two.
+      #
+      # `subject-digest` is the INDEX digest that `build-push-action` returns, so
+      # a single attestation covers linux/amd64 + linux/arm64 + the SBOM
+      # attestation manifests above. Attesting per-platform digests instead would
+      # produce two statements neither of which describes the thing a consumer
+      # actually pulls (the tag resolves to the index).
+      - name: Attest image provenance (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          # Also store the bundle as an OCI referrer beside the image, so
+          # `gh attestation verify --bundle-from-oci` works for anyone who can
+          # pull from GHCR without hitting this repo's attestation API. The GHCR
+          # login above supplies the credentials; no extra secret.
+          push-to-registry: true
+
+      # ── Hand the scan job the exact bytes this leg pushed ──────────────────
+      #
+      # The scan job derives WHICH images to scan from these files instead of
+      # carrying a third hand-maintained copy of the matrix above (this file and
+      # preview.yml already keep two in lockstep by hand, and the header says
+      # loudly what that costs). Digest-pinned, not tag-pinned: the scan then
+      # reads the bytes this build produced rather than whatever the tag resolves
+      # to by the time the scan runs.
+      #
+      # `if-no-files-found: error` is the load-bearing half — it is what makes
+      # "pushed" imply "has a digest file", so an image cannot reach GHCR and
+      # skip the scan.
+      - name: Record pushed digest
+        run: |
+          set -euo pipefail
+          printf '%s@%s\n' \
+            "${REGISTRY}/${{ github.repository_owner }}/${{ matrix.name }}" \
+            "${{ steps.build.outputs.digest }}" > "${{ matrix.name }}.ref"
+          cat "${{ matrix.name }}.ref"
+
+      - name: Publish matrix size
+        id: matrix-size
+        run: echo "total=${{ strategy.job-total }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload pushed digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # NOT named `appstrate-*`: `sign-cli` and `release` download that
+          # pattern, and both carry a comment recording that stray artifacts in
+          # it flake the blob download.
+          name: image-digest-${{ matrix.name }}
+          path: ${{ matrix.name }}.ref
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─── Vulnerability scan of the eight published images ─────────────────────
+  #
+  # Until this job existed the supply-chain work in this workflow covered the CLI
+  # binaries only (`sign-cli`: minisign + SLSA attestation) while the images —
+  # the artifacts that actually run customer workloads — were published unscanned.
+  #
+  # ─── Why a separate job, after the push ──────────────────────────────
+  #
+  # Not inside `build-and-push`: that job's `timeout-minutes: 90` exists because a
+  # cold multi-arch build already blew past 30 minutes and burnt v1.0.0-beta.43
+  # (see its comment). Anything added to its per-leg steps is drawn from the
+  # budget of the one job in this workflow with a history of exceeding it. Here
+  # the scans run in a job with its own clock, and the whole eight-image sweep is
+  # bounded by `timeout-minutes: 20`.
+  #
+  # The cost of that shape, stated plainly: the images are already in GHCR when
+  # the scan runs, `:latest` included. This job cannot un-publish them. What it
+  # gates is the `release` job — the GitHub Release, the signed CLI bundle and
+  # the Firecracker manifest, i.e. everything `bootstrap.sh` and
+  # `appstrate runner install` read. Scanning BEFORE the push would mean building
+  # each image twice (a loadable single-platform build, then the multi-arch push)
+  # inside exactly the job that must not grow. Recovering from a red scan is a
+  # base-image bump and a new tag, the same price as any other release failure
+  # here.
+  #
+  # ─── Fail vs report ──────────────────────────────────────────────────
+  #
+  # Split, and NOT the same split `scripts/audit-dependencies.ts` makes. That gate
+  # runs on `pull_request`, where a false red costs a push and an allowlist entry
+  # can be added in the same PR. This one runs on a tag, in a workflow with no
+  # `workflow_dispatch`, where a false red costs a version bump and an allowlist
+  # entry would ALSO cost a version bump — so an allowlist buys nothing here and
+  # there deliberately is none. No `.trivyignore`: an allowlist nobody can check
+  # in both directions rots into the museum of old fixes that
+  # `audit-dependencies.ts` was built to avoid being.
+  #
+  #   - FAIL on OS-package CRITICALs that have a fixed version.
+  #   - REPORT everything else — both package types, every severity, fixed and
+  #     unfixed — as SARIF in the Security tab beside CodeQL and Scorecard.
+  #
+  # `--pkg-types os` on the failing arm is the load-bearing narrowing, and it comes
+  # from a MEASUREMENT, not from taste. trivy 0.74.0 against all eight published
+  # 1.0.0-beta.57 images, 2026-09-08 — os-pkg findings / of those, CRITICAL with a
+  # fix / CRITICALs anywhere in the image:
+  #
+  #   appstrate                     50 / 0 / 5     appstrate-mcp-runner-node    50 / 2 / 2
+  #   appstrate-pi                  50 / 0 / 1     appstrate-mcp-runner-python  50 / 2 / 2
+  #   appstrate-sidecar             12 / 0 / 0     appstrate-mcp-runner-binary  50 / 2 / 2
+  #   appstrate-mcp-runner-bun      20 / 0 / 0     appstrate-mcp-runner-uv       6 / 0 / 0
+  #
+  # Read the two columns against each other. Every CRITICAL in `appstrate` and
+  # `appstrate-pi` is in the LANGUAGE layer — protobufjs and shell-quote from
+  # `node_modules`, plus CVE-2024-24790 / CVE-2025-68121 in the Go stdlib
+  # statically linked into the prebuilt `@esbuild/linux-*` binaries. Failing on
+  # those would make this gate red on findings whose remedy is not in this repo,
+  # which is the shape phase 1 explicitly refused ("a gate red from its first run
+  # is a gate people learn to ignore"). They are not dropped: the npm half is what
+  # `audit-dependencies.ts` already gates on every PR, with the dated allowlist
+  # this workflow cannot have, and the SARIF below carries all of it either way.
+  #
+  # The three runner images are the other case, and they are why the failing set is
+  # not empty theatre. Their 2 criticals each are ONE advisory — CVE-2026-31789,
+  # libcrypto3/libssl3 3.3.3-r0 with a fix in 3.3.7-r0 — because
+  # `runtime-pi/runners/{node,python,binary}/Dockerfile` still pin
+  # `ARG RUNTIME_IMAGE=alpine:3.21.3` while everything else moved to alpine 3.22.4.
+  # A base-image pin left behind, a critical openssl CVE riding on it, and a
+  # one-line remedy per file: exactly what this arm exists to stop, found on the
+  # first real run.
+  #
+  # THIS GATE IS THEREFORE RED UNTIL THOSE THREE PINS ARE BUMPED. That is the
+  # intended behaviour and not an allowlist candidate — it is five minutes of work,
+  # not a backlog. Delete this paragraph once they are bumped.
+  #
+  # `--ignore-unfixed` is the other half of not being the 2am hazard: a freshly
+  # published critical with no upstream patch cannot be acted on by anyone, and
+  # blocking every release until a third party ships is not a security control.
+  #
+  # ─── What it does not see ────────────────────────────────────────────
+  #
+  # ONE PLATFORM. Given a multi-arch index, trivy resolves the manifest matching
+  # the host it runs on — `linux/amd64` here (measured on an arm64 host, where the
+  # same command resolved the arm64 half). `--platform linux/arm64` would cover
+  # the other, at roughly double the sweep, and it is not set: the failing arm is
+  # OS packages, and both halves come from the same `oven/bun:*-alpine` tag with
+  # the same apk versions. What the arm64 half can hold that amd64 does not is a
+  # different vendored binary (`@esbuild/linux-arm64`), which is in the reported
+  # set, never the failing one. If the failing set ever widens past OS packages,
+  # this decision has to be revisited with it.
+  #
+  # ─── Can this silently not run? ──────────────────────────────────────
+  #
+  # Three ways it could, and what catches each:
+  #   1. An image pushed with no digest file — `if-no-files-found: error` on the
+  #      upload above fails the build leg, which fails `build-and-push`, which
+  #      `release` is gated on.
+  #   2. Fewer digest files than images built — the count assertion below compares
+  #      against `needs.build-and-push.outputs.image-count` (the matrix size).
+  #   3. Trivy erroring and being read as "clean" — the failing arm runs with
+  #      `--exit-code 2`, so findings (2) and tool errors (1) are distinguishable,
+  #      and any other code aborts the job. The report arm runs under `set -e`
+  #      with `--exit-code 0`, so a tool error there is a step failure too.
+  scan-images:
+    name: Scan published images
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # MEASURED 2026-09-08: trivy 0.74.0 over all eight published 1.0.0-beta.57
+    # images, sequentially, cold cache — 630s wall clock. Per image: 25, 13, 283,
+    # 7, 5, 287, 7, 3 seconds. The two five-minute entries are `appstrate-sidecar`
+    # and `appstrate-mcp-runner-bun`, and they are PULL time, not scan time: they
+    # were the two whose `oven/bun` base layers were not already in the local
+    # cache, over a domestic link. A GitHub runner pulling GHCR is not that link,
+    # so treat 630s as a pessimistic ceiling rather than an estimate. 20 minutes
+    # holds even at that pessimistic rate, with room for a cold advisory DB.
+    timeout-minutes: 20
+    permissions:
+      # Narrower than the workflow-level block, which grants `contents: write`,
+      # `packages: write` and `attestations: write` to every job that does not say
+      # otherwise. This job reads the repo, pulls the images it scans, and writes
+      # code-scanning alerts — nothing else.
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      # upload-sarif resolves the commit it annotates from the checked-out repo;
+      # `persist-credentials: false` mirrors scorecard.yml — nothing here pushes.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download pushed image digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: image-digest-*
+          path: refs
+          # Safe to flatten: each artifact holds exactly one `<image>.ref`, and
+          # the image names are unique by construction (they are GHCR repo names).
+          merge-multiple: true
+
+      # Trivy also reads `~/.docker/config.json` for its own advisory DB, which
+      # lives at ghcr.io/aquasecurity/trivy-db — anonymous pulls of it are rate
+      # limited per IP on shared runners. Logging in covers both the DB and the
+      # images.
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pinned release tarball + checksum rather than `aquasecurity/trivy-action`.
+      # The action runs one scan per invocation and an action cannot be called in
+      # a loop, so using it would mean re-listing the eight images as a matrix —
+      # a THIRD copy of the block this file's own header warns about keeping in
+      # lockstep. The version+digest pin gives the same "exactly these bytes"
+      # property the SHA pins elsewhere give, and mirrors how security.yml
+      # installs gitleaks.
+      - name: Install Trivy
+        env:
+          TRIVY_VERSION: "0.74.0"
+          # sha256 of trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz, taken from that
+          # release's own checksums.txt. Bump both lines together — a version bump
+          # alone fails the `sha256sum -c` below, which is the intended behaviour.
+          TRIVY_SHA256: "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
+        run: |
+          set -euo pipefail
+          curl -sSfL -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -
+          tar xzf trivy.tar.gz trivy
+          sudo mv trivy /usr/local/bin/trivy
+          rm -f trivy.tar.gz
+          trivy --version
+
+      - name: Scan every pushed image
+        id: scan
+        env:
+          EXPECTED: ${{ needs.build-and-push.outputs.image-count }}
+        run: |
+          set -euo pipefail
+          mkdir -p sarif
+          : > fixable-critical.txt
+
+          # Counted by globbing, not `ls | wc -l` (SC2012): an unmatched glob
+          # stays literal, so the `-e` test is what makes "no artifacts at all"
+          # count 0 instead of 1. Written as a full `if` rather than
+          # `[ -e … ] && FOUND=…` because under `set -e` the short form exits the
+          # script when the test is false — failing, but with no message.
+          FOUND=0
+          for ref_file in refs/*.ref; do
+            if [ -e "$ref_file" ]; then
+              FOUND=$((FOUND + 1))
+            fi
+          done
+          if [ "$FOUND" != "$EXPECTED" ]; then
+            echo "::error::Expected $EXPECTED image digest(s) from build-and-push, found $FOUND."
+            echo "::error::Every matrix leg uploads one 'image-digest-<name>' artifact holding"
+            echo "::error::'<name>.ref'. A missing one means an image was published unscanned —"
+            echo "::error::check the 'Record pushed digest' / 'Upload pushed digest' steps."
+            exit 1
+          fi
+
+          for ref_file in refs/*.ref; do
+            name="$(basename "$ref_file" .ref)"
+            ref="$(cat "$ref_file")"
+            echo "── $name → $ref"
+
+            # Report arm. Every severity, fixed and unfixed. `--exit-code 0` means
+            # findings do not stop the loop; a trivy ERROR still exits non-zero
+            # and `set -e` fails the step, so a scan that did not happen cannot
+            # look like a scan that found nothing.
+            trivy image --quiet --scanners vuln \
+              --format sarif --output "sarif/${name}.sarif" --exit-code 0 "$ref"
+            if [ ! -s "sarif/${name}.sarif" ]; then
+              echo "::error::Trivy produced no SARIF for $name ($ref)."
+              exit 1
+            fi
+            # GitHub keys a code-scanning analysis on `runs[].automationDetails.id`
+            # (the trailing slash is its "no further sub-category" convention), so
+            # this is what keeps eight images from collapsing into one "Trivy"
+            # analysis. Belt and braces if it collapses anyway: Trivy already
+            # stamps `runs[].properties.imageName` + `repoDigests`, and every
+            # result's `artifactLocation.uri` is the image repo path — verified
+            # 2026-09-08 on real Trivy 0.74.0 SARIF output.
+            jq --arg id "trivy-image/${name}/" \
+              '.runs[].automationDetails = {id: $id}' \
+              "sarif/${name}.sarif" > "sarif/${name}.sarif.tmp"
+            mv "sarif/${name}.sarif.tmp" "sarif/${name}.sarif"
+
+            # Failing arm — see the "Fail vs report" block above for why it is
+            # `--pkg-types os` and CRITICAL-only. `--exit-code 2`, not 1, so
+            # "found something" (2) is distinguishable from "trivy failed" (1):
+            # with 1 the two are the same code, and a broken scanner then reads as
+            # a vulnerable image — or, once someone "fixes" that by ignoring the
+            # code, a vulnerable image reads as a broken scanner.
+            rc=0
+            trivy image --quiet --scanners vuln \
+              --pkg-types os --severity CRITICAL --ignore-unfixed \
+              --format table --exit-code 2 "$ref" || rc=$?
+            case "$rc" in
+              0) ;;
+              2) echo "$name $ref" >> fixable-critical.txt ;;
+              *)
+                echo "::error::Trivy exited $rc scanning $ref — tool failure, not a finding."
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "Scanned $FOUND image(s); $(wc -l < fixable-critical.txt | tr -d ' ') with fixable CRITICAL findings."
+
+      # Before the verdict step, and without `if: always()`: the report arm cannot
+      # fail on findings, so reaching here means every image was scanned. Findings
+      # must land in the Security tab whether or not they block the release.
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          # A directory: codeql-action uploads every *.sarif in it as one
+          # submission, one run per image, kept apart by the automationDetails id
+          # stamped above.
+          sarif_file: sarif
+
+      - name: Block the release on fixable CRITICAL findings
+        run: |
+          set -euo pipefail
+          if [ ! -f fixable-critical.txt ]; then
+            echo "::error::fixable-critical.txt is missing — the scan step did not run to completion."
+            exit 1
+          fi
+          if [ -s fixable-critical.txt ]; then
+            echo "::error::CRITICAL OS-package vulnerabilities with an available fix, in images"
+            echo "::error::this run already pushed to GHCR:"
+            while read -r line; do echo "::error::  $line"; done < fixable-critical.txt
+            echo "::error::The 'Scan every pushed image' step log lists the packages and their"
+            echo "::error::fixed versions. Bump the base image in the Dockerfile named by the"
+            echo "::error::matrix row, then cut a new tag — this workflow has no re-run path."
+            echo "::error::Everything else Trivy found (HIGH/MEDIUM, unfixed, and the node/python"
+            echo "::error::layer) is in the repo Security tab and does not block a release."
+            exit 1
+          fi
+          echo "No CRITICAL OS-package findings with an available fix."
 
   # ─── CLI single-binary builds (per-target, native runners) ────────────────
   #
@@ -694,10 +1064,17 @@ jobs:
     # results). A release published without runner assets is handled on the
     # consumer side: `appstrate runner install` gives an actionable 404 error
     # (apps/cli/src/lib/runner/download.ts) pointing at a version that has them.
-    needs: [build-and-push, build-cli, sign-cli, firecracker-artifacts, build-runner-daemon]
+    #
+    # `scan-images` IS a hard gate, unlike those two: the images are already in
+    # GHCR by the time it runs, so refusing to publish the GH Release is the only
+    # lever left on a release carrying a fixable critical. It is cheap (~3 min)
+    # and it is decided by this repo's own inputs, not by a third party's build.
+    needs:
+      [build-and-push, scan-images, build-cli, sign-cli, firecracker-artifacts, build-runner-daemon]
     if: >-
       always() &&
       needs.build-and-push.result == 'success' &&
+      needs.scan-images.result == 'success' &&
       needs.build-cli.result == 'success' &&
       needs.sign-cli.result == 'success'
     runs-on: ubuntu-latest

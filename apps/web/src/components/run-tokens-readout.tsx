@@ -41,6 +41,7 @@ export function RunTokensReadout({ usage }: { usage: TokenUsage | null | undefin
         {/* Focusable trigger: the readout is otherwise plain text, so keyboard
             users would have no way to reach the breakdown. */}
         <TooltipTrigger asChild>
+          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the tabIndex IS the accessibility fix here (see above), not a stray one */}
           <span tabIndex={0} className="cursor-default tabular-nums underline decoration-dotted">
             {total.toLocaleString()}
           </span>

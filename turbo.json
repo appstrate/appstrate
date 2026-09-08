@@ -238,40 +238,102 @@
     // one unavoidable copy — turbo reads JSON and cannot import it — so when
     // the extension list changes, change it in both places.
     //
-    // `apps/web/tsconfig.json` is listed because eslint READS it on every run
-    // and no glob above reaches a `.json`: the `no-unnecessary-type-assertion`
-    // block scopes itself to `apps/web/src/**` with `parserOptions.projectService`,
-    // and projectService resolves the nearest tsconfig for those files — that
-    // one, which sets `target`, `lib`, `jsx` and `paths`. Without this entry a
-    // PR editing it left this task's hash unmoved, turbo replayed the cached
-    // logs, and the one type-AWARE rule in the config never re-derived a single
-    // verdict — and `.github/workflows/check.yml` keys the restored
+    // The tsconfigs are listed because eslint READS them on every run and no
+    // glob above reaches a `.json`: every `parserOptions.projectService` block
+    // in the config resolves the nearest tsconfig for the files it covers, and
+    // those tsconfigs set `target`, `lib`, `jsx`, `paths` and `allowJs`.
+    // Without an entry, a PR editing one left this task's hash unmoved, turbo
+    // replayed the cached logs, and the type-AWARE rules never re-derived a
+    // single verdict — and `.github/workflows/check.yml` keys the restored
     // `.turbo/cache` on `bun.lock, eslint.config.mjs, .prettierrc, turbo.json,
     // tsconfig.base.json`, so via `restore-keys` that stale replay survived
-    // across CI runs too. `//#verify:type-coverage` below already lists the same
-    // file in its own `inputs` for the same reason. `tsconfig.base.json`, which
-    // that tsconfig extends, and `bun.lock`, which decides which eslint plugin
-    // code runs, are both in `globalDependencies`.
-    // `apps/web/src/**/*.json` is the other half of the same
-    // `apps/web/tsconfig.json` story. That tsconfig sets `resolveJsonModule`,
-    // and 8 files under `apps/web/src` import `../../locales/<lng>/<ns>.json`,
-    // so those JSON files are MEMBERS of the type-aware program the
-    // `no-unnecessary-type-assertion` block runs over — while no glob above
-    // reaches a `.json`. Measured 2026-08-25: adding a key to
-    // `apps/web/src/locales/fr/agents.json` left this task's hash at
-    // `02fd25ac952d7956`, unmoved, so the one type-aware rule in the config
-    // replayed its cached verdict over a program whose contents had changed.
-    // Scoped to `apps/web/src` rather than `**/*.json` on purpose: a repo-wide
-    // JSON glob would put every `package.json`, every fixture and every
-    // generated artefact in the lint cache key.
+    // across CI runs too. `//#verify:type-coverage` below already lists
+    // `apps/web/tsconfig.json` in its own `inputs` for the same reason.
+    // `apps/*/src/**/*.json` is the other half of the same tsconfig story. The
+    // SPA's tsconfig sets `resolveJsonModule`, and 8 files under `apps/web/src`
+    // import `../../locales/<lng>/<ns>.json`, so those JSON files are MEMBERS
+    // of the type-aware program — while no glob above reaches a `.json`.
+    // Measured 2026-08-25: adding a key to `apps/web/src/locales/fr/agents.json`
+    // left this task's hash at `02fd25ac952d7956`, unmoved, so the one
+    // type-aware rule in the config replayed its cached verdict over a program
+    // whose contents had changed. Scoped to `apps/*/src` rather than
+    // `**/*.json` on purpose: a repo-wide JSON glob would put every
+    // `package.json`, every fixture and every generated artefact in the lint
+    // cache key. 27 files today (17 api, 10 web).
+    //
+    // ─── The backend type-aware block (eslint.config.mjs) ────────────────
+    //
+    // `apps/api/src/**` and `packages/*/src/**` now carry three type-aware
+    // rules (no-floating-promises, no-misused-promises, await-thenable), so
+    // their programs are read on every run too, and the four entries below were
+    // added for that. Each was PROVEN missing first — probe on 2026-09-08, on
+    // the config as it stood, `turbo run '//#lint' --dry=json`, base hash
+    // `ec64d50a6e1e20ab`, editing one file's CONTENT per row:
+    //
+    //   apps/api/tsconfig.json               ec64d50a6e1e20ab  UNMOVED
+    //   packages/core/tsconfig.json          ec64d50a6e1e20ab  UNMOVED
+    //   apps/api/src/data/featured-models.json  ec64d50a6e1e20ab  UNMOVED
+    //   packages/core/schema/agent.schema.json  72a27df96ec0efbb  moved
+    //
+    // The last row is the interesting one, and it is why `packages/*/schema`
+    // is listed anyway. It moved through `hashOfInternalDependencies`, not
+    // through any glob here: the ROOT `package.json` depends on
+    // `@appstrate/core` as `workspace:*`, and turbo hashes an internal
+    // dependency by its publishable file set — core's `"files"` is
+    // `["src", "schema", "LICENSE", "NOTICE"]`. That coverage is a
+    // coincidence of two unrelated fields, it holds for only the five
+    // packages the root happens to depend on, and `packages/core/tsconfig.json`
+    // (same package, not in `files`) sits one row above showing it does NOT
+    // generalise. Stated explicitly here instead of inherited.
+    //
+    // Same probe, same day, with the entries below in place — base hash
+    // `cf20f4ec31c085ad`, and every row moves, including the two that already
+    // worked:
+    //
+    //   apps/api/tsconfig.json                  77234cfc9d60ecfd
+    //   packages/core/tsconfig.json             e21f6d8ca13a85fa
+    //   apps/api/src/data/featured-models.json  369727613c425b9b
+    //   packages/core/schema/agent.schema.json  574544fed5958af4
+    //   apps/web/tsconfig.json                  bfac4ab8c5e96c95
+    //   apps/web/src/locales/fr/agents.json     204f82518306970f
+    //
+    // (restoring every file returned the hash to `cf20f4ec31c085ad`).
+    //
+    // `apps/web/tsconfig.json` widened to `apps/*/tsconfig.json` and
+    // `apps/web/src/**/*.json` to `apps/*/src/**/*.json` for the same reason
+    // the eslint `files` roster was widened to a superset: the next app to get
+    // a type-aware rule would otherwise get one real run and a cache hit
+    // forever. Three app tsconfigs, sixteen package tsconfigs, four schema
+    // JSONs today — all discovered by the glob, none listed.
+    //
+    // `tsconfig.base.json`, which every one of those extends, and `bun.lock`,
+    // which decides which eslint plugin and which `bun-types` run, are both in
+    // `globalDependencies`.
     "//#lint": {
       "inputs": [
         "**/*.{ts,tsx,js,jsx,mjs,cjs}",
         "!**/node_modules/**",
         "!**/dist/**",
         "package.json",
-        "apps/web/tsconfig.json",
-        "apps/web/src/**/*.json"
+        "apps/*/tsconfig.json",
+        "apps/*/src/**/*.json",
+        "packages/*/tsconfig.json",
+        "packages/*/schema/**/*.json",
+        // The workspace manifests, for the same reason the tsconfigs above are
+        // here: `exports`, `types` and `typesVersions` decide which `.d.ts` a
+        // cross-workspace import resolves to, so editing one CAN change a
+        // type-aware verdict while moving no `.ts` file. Unlike the four
+        // entries above this was NOT reached through a measured false green —
+        // it is a hole nobody probed, listed because an over-broad input costs
+        // one extra invalidation and an under-broad one is a silent pass. The
+        // same manifests are already inputs to `//#verify:type-coverage` below,
+        // which measures the same programs.
+        //
+        // Probed 2026-09-08 with these two lines in place, appending a newline
+        // to `packages/core/package.json` (content, not `touch`):
+        //   base b5ff99806eeedafa → after c28441226f51236b → restored b5ff99806eeedafa
+        "apps/*/package.json",
+        "packages/*/package.json"
       ]
     },
     // No `inputs` on purpose. The root `format:check` script is now a bare
@@ -440,6 +502,123 @@
       "cache": false
     },
     "//#verify:no-migration-dml": {
+      "cache": false
+    },
+    // Caches, and the input list below is the whole of why. This verdict is a
+    // pure function of three file sets — the drizzle schema modules, the
+    // committed migration directory, and the drizzle-kit pin — with no git ref,
+    // no clock and no network in it, which is the condition
+    // `//#verify:type-coverage` and `//#verify:env-docs` already satisfy.
+    //
+    // `packages/*/src/**` rather than `packages/db/src/schema/**`, because the
+    // schema files import ACROSS workspace packages: `@appstrate/core/module`,
+    // `@appstrate/core/model-generation` and `@appstrate/afps-shared/token-usage`
+    // are all imported from `packages/db/src/schema/*.ts`, and drizzle-kit
+    // resolves them. A list stopping at the db package would replay a cached
+    // "no drift" over a core change that moved the generated SQL — the exact
+    // false GREEN this gate exists to prevent.
+    //
+    // Probed 2026-09-08 with `turbo run '//#verify:migration-drift' --dry=json`
+    // (hash read from `.tasks[0].hash`), EDITING each file rather than
+    // `touch`ing it — turbo hashes content, so a `touch` moves nothing and reads
+    // as a false negative:
+    //
+    //   baseline                                       f86160cc3dc51ab3
+    //   + a column in packages/db/src/schema/spaces.ts  3ef34eae3377693a
+    //   + a line in packages/core/src/module.ts         d80c3d4447c1b6b4
+    //   + a new packages/db/drizzle/zz_probe.sql        a6df660083081e73
+    //
+    // and reverting each edit returned the hash to f86160cc3dc51ab3 exactly.
+    //
+    "//#verify:migration-drift": {
+      "inputs": [
+        "packages/*/src/**",
+        "packages/*/package.json",
+        "packages/db/drizzle/**",
+        "scripts/verify-migration-drift.ts",
+        "package.json"
+      ]
+    },
+    // Caches, same reasoning as its neighbour above: the verdict is squawk's
+    // opinion of a fixed set of `.sql` files, plus the `BASELINE` inside the
+    // script, plus the pinned squawk version. `bun.lock` is listed because the
+    // version pin in `package.json` is only half of what decides which binary
+    // runs; a lockfile change that moved `squawk-cli` must re-run the lint.
+    //
+    // Probed 2026-09-08, same method as above:
+    //
+    //   baseline                                        9d3747fc27f39c91
+    //   + a new packages/db/drizzle/zz_probe.sql         eab2b13cc871eeca
+    //   + a line in scripts/lint-migrations.ts           382126dde93034f7
+    //
+    // and reverting each edit returned the hash to 9d3747fc27f39c91 exactly.
+    // The new-file case is worth naming: turbo hashes untracked-but-unignored
+    // files too, so a migration a developer has written and not yet `git
+    // add`-ed still invalidates this task.
+    //
+    "//#lint:migrations": {
+      "inputs": [
+        "packages/db/drizzle/*.sql",
+        "scripts/lint-migrations.ts",
+        "scripts/lib/tracked-files.ts",
+        "package.json",
+        "bun.lock"
+      ]
+    },
+    // Caches, and this is the third `verify:*` task that can: the verdict is a
+    // pure function of the repo's TypeScript sources plus the `exports` maps
+    // that decide where a `@appstrate/…` specifier lands — no git ref, no
+    // clock, no network. Turbo's cost to hash that set is not the reason to
+    // avoid it: measured 2026-09-08, `--dry=json` over this list ran in 117 ms
+    // against a 157 ms baseline for a `cache: false` sibling, i.e. inside the
+    // noise of turbo's own startup, while the gate itself takes 267 ms.
+    //
+    // The globs are deliberately a SUPERSET of the population the script
+    // narrows to (`apps/<w>/src`, `packages/<w>/src`, `runtime-pi`) rather than
+    // a restatement of it. A restatement is a second roster that has to be
+    // widened in lockstep with `IN_SCOPE`, and the failure of forgetting is a
+    // silent green: a new source root the script starts scanning whose files
+    // move no hash here. `**/package.json` is in for the same reason — every
+    // workspace `exports` map feeds `resolveSpecifier`, and turbo's `**` DOES
+    // match at zero depth (measured for `//#verify:env-docs` above), so the
+    // root manifest is covered too.
+    //
+    // Probed 2026-09-08 with `turbo run '//#verify:import-cycles' --dry=json`
+    // (hash from `.tasks[0].hash`), EDITING each file rather than `touch`ing it
+    // — turbo hashes content, so a `touch` moves nothing and reads as a false
+    // negative:
+    //
+    //   baseline (2 337 inputs)                           8f29e95b02fcd7e0
+    //   + a line in apps/api/src/services/spaces.ts        a818789047c197a5
+    //   + a line in runtime-pi/mcp/direct.ts               754b43f9894058da
+    //   + an exports entry in packages/core/package.json   517ce872a953f363
+    //
+    // and reverting each edit returned the hash to 8f29e95b02fcd7e0 exactly.
+    // The third row is the one worth having: an `exports` remap changes where a
+    // `@appstrate/…` specifier resolves, and therefore which cycles exist, while
+    // touching no `.ts` file at all.
+    "//#verify:import-cycles": {
+      "inputs": ["**/*.ts", "**/*.tsx", "**/package.json", "!**/node_modules/**", "!**/dist/**"]
+    },
+    // `cache: false`, and NOT because the verdict is impure — it is a pure
+    // function of `apps/web/dist`. The reason is that the only correct input
+    // list for this task is the OUTPUT directory of the task it depends on, and
+    // whether turbo hashes a dependency's outputs before or after that
+    // dependency has produced them is not a property this file should be built
+    // on. The measured stake is small: the gate walks all 310 emitted files and
+    // gzips the 90 on the critical path in 57 ms (2026-09-08).
+    //
+    // `dependsOn` rather than a CI job. `bun run check` did not build the SPA
+    // before this, and the pre-push hook runs `bun run check`, so the question
+    // was whether developers would pay a build per push. Measured 2026-09-08:
+    // a FORCED cold `turbo build --filter=@appstrate/web` is 2.7 s wall
+    // (vite/rolldown, 5 798 modules), and a warm one is 25 ms — `>>> FULL
+    // TURBO`, with all 310 files restored from cache into a deleted `dist/`
+    // in 83 ms. A gate a developer sees before pushing beats one they see in
+    // CI, and 2.7 s once per source change is not the "large regression in
+    // developer time" a slow build would have been.
+    "//#verify:bundle-size": {
+      "dependsOn": ["@appstrate/web#build"],
       "cache": false
     },
     "//#verify:module-contract": {

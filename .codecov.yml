@@ -5,21 +5,43 @@ coverage:
   status:
     project:
       default:
+        # Blocking. `informational: true` sat here through the cold start,
+        # with a flip condition — "once `main` has a post-merge `integration`
+        # upload, i.e. a real combined baseline exists to carry forward". That
+        # condition is met, and this is what was checked rather than reasoned
+        # about, on 2026-09-08:
+        #
+        #   - The `integration` job runs and succeeds on every recent push to
+        #     `main` (runs 34203535367, 34197578478, 34160220667, 34158633812).
+        #   - Its upload is real, not a silent no-op under
+        #     `fail_ci_if_error: false` — which is the failure this repo has
+        #     already had once, on a `report.lcov` path that never existed. The
+        #     job log for run 34203535367 (commit dd58ca62) ends:
+        #       `./codecov upload-coverage … --file coverage/lcov.info --flag integration`
+        #       `Found 1 coverage files to report`
+        #       `Sending upload (497686 bytes) to storage`
+        #       `Upload queued for processing complete`
+        #   - Codecov agrees it has the flag:
+        #     `GET /api/v2/github/appstrate/repos/appstrate/flags/` →
+        #     `{"flag_name":"integration","coverage":76.11585}`, alongside
+        #     `unit` 54.44, `public-origin` 54.44 and `cli` 56.35.
+        #
+        # The 75% target is UNCHANGED and was re-derived against the combined
+        # number rather than assumed: `main` at dd58ca62 reports 75.47%
+        # (101 471 / 134 447 lines, 4 sessions), and the five preceding
+        # `main` commits sit at 76.09–76.21%. So the target has ~0.5–1.2 points
+        # of live headroom on top of the 2% threshold below.
+        #
+        # What the removed line ALSO covered, and where that now stands: fork
+        # PRs cannot read CODECOV_TOKEN, so a failed tokenless upload would
+        # leave them with a project status they cannot clear. That is now an
+        # advisory red rather than a block — checked 2026-09-08, the `Protect
+        # main` ruleset carries only `pull_request` and `non_fast_forward`, and
+        # `required_status_checks` is absent, so no Codecov status gates a
+        # merge. If required checks are ever added, exclude this one for forks
+        # before adding it.
         target: 75%
         threshold: 2%
-        # informational = report the status but never set a failing/blocking
-        # check. Required during cold-start: `main` has NO integration
-        # carryforward baseline yet, so on a normal PR only the `unit` job runs
-        # and the project total is computed from the always-on unit + focused
-        # public-origin uploads (still dominated by ~0%-unit-covered backend
-        # files) → a red project status nobody can fix. It also keeps the
-        # project gate non-blocking for FORK PRs, which
-        # cannot read CODECOV_TOKEN (uploads no-op) and otherwise could not
-        # clear a required status. FLIP to blocking (remove this line) once
-        # `main` has a post-merge `integration` upload, i.e. a real combined
-        # baseline exists to carry forward. The 75% target is unchanged — only
-        # blocking-ness is relaxed during cold-start.
-        informational: true
     # NOTE: PRs that add code exercised only by the integration suite
     # (orchestrator, run-state, credential paths) should carry the
     # `integration` label so this `patch` gate and the `component_management`

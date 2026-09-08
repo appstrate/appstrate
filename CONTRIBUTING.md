@@ -91,6 +91,7 @@ stamps disagree.
 | `bun run build`                | Build frontend + shared packages                               |
 | `bun run db:migrate`           | Apply database migrations                                      |
 | `bun run verify:openapi`       | OpenAPI spec validation                                        |
+| `bun run audit:deps`           | Known-CVE scan of `bun.lock` — CI job, not part of `check`     |
 
 **Working on the Firecracker execution backend?** It's an opt-in built-in module (`apps/api/src/modules/firecracker/`, not in the default `MODULES`). The privileged engine runs as the `appstrate-runner` daemon (`bun run firecracker:runner`) and needs a Linux KVM host (`/dev/kvm`) — on macOS, run it inside a Lima VM with nested virtualization. Guest artifacts build via `bun run firecracker:build:{kernel,rootfs}`. Architecture + dev workflow: [`docs/architecture/FIRECRACKER.md`](./docs/architecture/FIRECRACKER.md).
 
@@ -142,6 +143,74 @@ git config commit.gpgsign true
 4. Open a PR against `main` with a clear description
 5. Wait for CI checks and code review
 6. Squash and merge after approval
+
+### Required Checks (maintainers)
+
+Step 5 above says "wait for CI checks", and today nothing enforces it: the `main` ruleset
+(id `14614228`) carries only the `pull_request` and `non_fast_forward` rules and **no**
+`required_status_checks`, so every gate in this repo is mergeable red. Applying the rule below is a
+repository-settings change and needs admin rights.
+
+These checks run unconditionally on every pull request and are the ones expected to be required.
+The names are the GitHub check-run names, verbatim
+(`gh api repos/appstrate/appstrate/commits/main/check-runs --jq '.check_runs[].name'`):
+
+| Check                                                   | Workflow       |
+| ------------------------------------------------------- | -------------- |
+| `check`                                                 | `check.yml`    |
+| `Package resolves for consumers (packages/core)`        | `check.yml`    |
+| `Package resolves for consumers (packages/afps-shared)` | `check.yml`    |
+| `Unit tests`                                            | `test.yml`     |
+| `Platform container health e2e`                         | `test.yml`     |
+| `Secret Scanning`                                       | `security.yml` |
+| `Dependency Audit`                                      | `security.yml` |
+| `Analyze`                                               | `codeql.yml`   |
+
+Deliberately **not** required, because a required check that does not report blocks the PR forever:
+`Integration tests`, `Runtime container e2e` and `E2E tests` are label-gated
+(`if: contains(github.event.pull_request.labels.*.name, …) || github.ref == 'refs/heads/main'`), so
+they are absent from an unlabelled PR; `Scorecard Analysis` has no `pull_request` trigger at all.
+
+Applying it — a ruleset `PUT` **replaces** the whole ruleset, so read the live one and merge into it
+rather than writing a body from scratch:
+
+```sh
+gh api repos/appstrate/appstrate/rulesets/14614228 > /tmp/main-ruleset.json
+
+jq '.rules += [{
+      type: "required_status_checks",
+      parameters: {
+        strict_required_status_checks_policy: false,
+        do_not_enforce_on_create: false,
+        required_status_checks: [
+          { context: "check" },
+          { context: "Package resolves for consumers (packages/core)" },
+          { context: "Package resolves for consumers (packages/afps-shared)" },
+          { context: "Unit tests" },
+          { context: "Platform container health e2e" },
+          { context: "Secret Scanning" },
+          { context: "Dependency Audit" },
+          { context: "Analyze" }
+        ]
+      }
+    }]
+  | del(.id, .source_type, .source, .node_id, .created_at, .updated_at, ._links,
+        .current_user_can_bypass)' \
+  /tmp/main-ruleset.json > /tmp/main-ruleset-update.json
+
+gh api --method PUT repos/appstrate/appstrate/rulesets/14614228 --input /tmp/main-ruleset-update.json
+```
+
+`del(...)` rather than a `{name, target, …}` whitelist: the whitelist form emits `bypass_actors: null`
+when the live ruleset has none, and picking the fields to keep is the version of this edit that
+silently drops whatever GitHub adds to the payload next.
+`strict_required_status_checks_policy: false` means a PR does not have to be rebased onto the newest
+`main` before merging; set it to `true` only if stale-base merges become a real problem, since it
+makes every merge to `main` invalidate every open PR's status.
+
+`Dependency Audit` is the one name in the table that is not yet in the `check-runs` listing above —
+it is added by this change and appears once `security.yml` has run. It triggers on `pull_request`
+like `Secret Scanning`, so it reports on every PR from then on.
 
 ### Review Criteria
 

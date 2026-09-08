@@ -248,7 +248,12 @@ function SourceGroupCard({
   const { t } = useTranslation(["settings", "common"]);
   return (
     <div className="border-border bg-card rounded-lg border p-5">
-      <div className="flex cursor-pointer items-center justify-between" onClick={onToggle}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        className="flex w-full cursor-pointer items-center justify-between text-left"
+        onClick={onToggle}
+      >
         <div className="flex items-center gap-3">
           {group.logo && (
             <img
@@ -277,7 +282,7 @@ function SourceGroupCard({
         >
           &#9654;
         </span>
-      </div>
+      </button>
 
       {expanded && (
         <div className="border-border mt-3 flex flex-col gap-2 border-t pt-3">

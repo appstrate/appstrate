@@ -16,6 +16,11 @@ This document records why that risk is bounded today, the controls in place,
 and the concrete plan for substituting a forked/vendored SDK in an emergency.
 It is intended to double as the rationale for a future ADR.
 
+Its scope is that one **source dependency**. For the other half of the supply
+chain — what the released images and binaries carry (signed provenance, SBOM,
+vulnerability scan) and how a consumer verifies them — see
+[`RELEASE_ARTIFACT_TRUST.md`](./RELEASE_ARTIFACT_TRUST.md).
+
 ## 1. Isolation wall — the coupling is shallow
 
 The Pi SDK is **not** a cross-cutting dependency. It is confined to the agent
