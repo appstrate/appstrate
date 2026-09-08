@@ -31,7 +31,7 @@
  *     gets no such exemption. See `functionBodies`.
  *
  * Two migration trees are scanned, listed in `SCANS`: the platform's, and the
- * one `packages/module-ee/` keeps for its own database. Each carries its own
+ * one `packages/module-ee/` keeps for its `ee_*` tables. Each carries its own
  * grandfather list.
  *
  * Only NEW files are gated. Every migration already in a directory has run
@@ -92,8 +92,8 @@ export const GRANDFATHERED: readonly string[] = [
 ];
 
 /**
- * `packages/module-ee/` runs its own database and therefore its own migration
- * tree — the only second one in the repo, and subject to the same §2 rule. Its
+ * `packages/module-ee/` keeps a migration tree of its own for its `ee_*`
+ * tables — the only second one in the repo, and subject to the same §2 rule. Its
  * two entries predate the gate for the same reason the platform's eight do:
  * `0001_cursor_billing` re-keys usage records and backfills `cost_usd`,
  * `0003_normalize_free_subscription_status` rewrites legacy free-tier rows.

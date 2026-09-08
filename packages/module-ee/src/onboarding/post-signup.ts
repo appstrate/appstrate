@@ -145,8 +145,8 @@ export async function onOrgDelete(orgId: string): Promise<void> {
     }
   }
 
-  // EE runs its own database — there is no FK cascade from the OSS
-  // `organizations` table. Delete the org's EE-owned rows explicitly.
+  // No EE table carries an FK to the OSS `organizations` table, so nothing
+  // cascades. Delete the org's EE-owned rows explicitly.
   // (`ee_billed_llm_usage` is keyed by ledger id, not org; its rows are
   // harmless billed-markers and are left in place. `ee_billing_cursor` is a
   // global singleton, never per-org.)

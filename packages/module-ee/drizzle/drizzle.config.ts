@@ -2,17 +2,18 @@
 
 import { defineConfig } from "drizzle-kit";
 
-// This module owns its OWN database. `DATABASE_URL` is the PLATFORM database:
-// generating or applying these migrations against it would create the `ee_*`
-// tables in the wrong place.
-const url = process.env.EE_DATABASE_URL;
-if (!url) throw new Error("EE_DATABASE_URL is required to run this module's drizzle-kit commands");
+// This module's tables live in the PLATFORM database, under their own journal
+// (`drizzle.ee_migrations`) so drizzle-kit never reads or writes the platform's
+// `drizzle.__drizzle_migrations`. Both must match `migrateEeDb` in `src/db.ts`.
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is required to run this module's drizzle-kit commands");
 
 export default defineConfig({
   schema: "./schema.ts",
   out: "./migrations",
   dialect: "postgresql",
   dbCredentials: { url },
+  migrations: { table: "ee_migrations", schema: "drizzle" },
   tablesFilter: [
     "ee_billing_accounts",
     "ee_usage_records",

@@ -2,9 +2,9 @@
 
 /**
  * Test double for the two organization queries EE narrows its init context
- * with (`src/platform-org-queries.ts`). EE runs its own database and has no
- * access to the platform's members table, so tests seed an in-memory org
- * directory instead of a platform DB — the same posture as `mock-platform.ts`
+ * with (`src/platform-org-queries.ts`). EE reaches the platform's members
+ * through those queries rather than through SQL, so tests seed an in-memory org
+ * directory instead of platform rows — the same posture as `mock-platform.ts`
  * for the usage ledger.
  */
 

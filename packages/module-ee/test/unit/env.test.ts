@@ -96,7 +96,7 @@ describe("env", () => {
 describe("describeEnvIssues()", () => {
   it("names every rejected variable and its reason", () => {
     const saved = { ...process.env };
-    delete process.env.EE_DATABASE_URL;
+    delete process.env.STRIPE_WEBHOOK_SECRET;
     delete process.env.STRIPE_SECRET_KEY;
     _resetEeEnvForTests();
     try {
@@ -107,11 +107,11 @@ describe("describeEnvIssues()", () => {
         message = describeEnvIssues(err);
       }
       // An operator reading a boot crash needs the variable, not "misconfigured".
-      expect(message).toContain("EE_DATABASE_URL");
+      expect(message).toContain("STRIPE_WEBHOOK_SECRET");
       expect(message).toContain("STRIPE_SECRET_KEY");
       expect(message).not.toContain("STRIPE_PRICE_ID_PRO");
     } finally {
-      process.env.EE_DATABASE_URL = saved.EE_DATABASE_URL;
+      process.env.STRIPE_WEBHOOK_SECRET = saved.STRIPE_WEBHOOK_SECRET;
       process.env.STRIPE_SECRET_KEY = saved.STRIPE_SECRET_KEY;
       _resetEeEnvForTests();
     }

@@ -15,6 +15,7 @@ import { describe, it, expect } from "bun:test";
 import {
   latestSnapshotName,
   declaredIndexes,
+  declaredTables,
   runCheck,
   type DrizzleJournal,
   type DrizzleSnapshot,
@@ -55,12 +56,16 @@ const journal = (idxs: number[]): DrizzleJournal => ({
   })),
 });
 
-/** `runCheck` with the healthy defaults filled in; every case overrides what it is about. */
+/**
+ * `runCheck` with the healthy defaults filled in; every case overrides what it
+ * is about. `actual` is `[index, table]` because the diff is restricted to the
+ * tables the snapshot declares.
+ */
 const check = (over: {
   journal?: DrizzleJournal;
   trackingTableExists?: boolean;
   watermark?: number | null;
-  actual?: string[];
+  actual?: [string, string][];
   constraintBacked?: string[];
   snapshots?: Record<string, DrizzleSnapshot>;
 }) =>
@@ -68,7 +73,7 @@ const check = (over: {
     journal: over.journal ?? journal([0, 1]),
     trackingTableExists: over.trackingTableExists ?? true,
     watermark: over.watermark === undefined ? whenOf(1) : over.watermark,
-    actual: new Set(over.actual ?? []),
+    actual: (over.actual ?? []).map(([indexname, tablename]) => ({ indexname, tablename })),
     constraintBacked: new Set(over.constraintBacked ?? []),
     loadSnapshot: async (name) => {
       const found = (over.snapshots ?? { "0001_snapshot.json": snapshot({}) })[name];
@@ -86,7 +91,10 @@ describe("runCheck — drift", () => {
           account: ["account_user_id_idx"],
         }),
       },
-      actual: ["account_user_id_idx", "runs_pkey"],
+      actual: [
+        ["account_user_id_idx", "account"],
+        ["runs_pkey", "runs"],
+      ],
       constraintBacked: ["runs_pkey"],
     });
 
@@ -98,7 +106,7 @@ describe("runCheck — drift", () => {
   it("exits 0 and says definitions are not compared when nothing is missing", async () => {
     const { exitCode, lines } = await check({
       snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
-      actual: ["idx_runs_schedule_id"],
+      actual: [["idx_runs_schedule_id", "runs"]],
     });
 
     expect(exitCode).toBe(0);
@@ -112,7 +120,10 @@ describe("runCheck — undeclared indexes never fail the run", () => {
   it("counts a constraint-backed extra without naming it", async () => {
     const { exitCode, lines } = await check({
       snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
-      actual: ["idx_runs_schedule_id", "runs_pkey"],
+      actual: [
+        ["idx_runs_schedule_id", "runs"],
+        ["runs_pkey", "runs"],
+      ],
       constraintBacked: ["runs_pkey"],
     });
 
@@ -126,12 +137,32 @@ describe("runCheck — undeclared indexes never fail the run", () => {
     // without a forward DROP INDEX, so pre-squash production still carries it.
     const { exitCode, lines } = await check({
       snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
-      actual: ["idx_runs_schedule_id", "idx_runs_legacy"],
+      actual: [
+        ["idx_runs_schedule_id", "runs"],
+        ["idx_runs_legacy", "runs"],
+      ],
       constraintBacked: [],
     });
 
     expect(exitCode).toBe(0);
     expect(lines.join("\n")).toContain("possible reverse drift  idx_runs_legacy");
+  });
+
+  it("ignores an index on a table the snapshot does not declare", async () => {
+    // `@appstrate/module-ee` migrates its `ee_*` tables under a journal of its
+    // own, so its five indexes are in no platform snapshot. Comparing all of
+    // `public` reported every one of them as reverse drift.
+    const { exitCode, lines } = await check({
+      snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
+      actual: [
+        ["idx_runs_schedule_id", "runs"],
+        ["idx_ee_usage_records_org_id", "ee_usage_records"],
+      ],
+    });
+
+    expect(exitCode).toBe(0);
+    expect(lines.join("\n")).not.toContain("idx_ee_usage_records_org_id");
+    expect(lines.join("\n")).toContain("all 1 indexes declared");
   });
 });
 
@@ -143,7 +174,7 @@ describe("runCheck — snapshot selection", () => {
       journal: journal([38, 39, 40, 41]),
       watermark: whenOf(38),
       snapshots: { "0038_snapshot.json": snapshot({ runs: ["idx_old"] }) },
-      actual: ["idx_old"],
+      actual: [["idx_old", "runs"]],
     });
 
     expect(exitCode).toBe(0);
@@ -213,6 +244,19 @@ describe("declaredIndexes", () => {
       },
     });
     expect([...declared]).toEqual(["idx_runs_schedule_id"]);
+  });
+});
+
+describe("declaredTables", () => {
+  it("strips the schema prefix and drops tables outside the public schema", () => {
+    const tables = declaredTables({
+      tables: {
+        "public.runs": table(["idx_runs_schedule_id"]),
+        "public.account": table(null),
+        "audit.events": table(["idx_audit_events_at"], "audit"),
+      },
+    });
+    expect([...tables].sort()).toEqual(["account", "runs"]);
   });
 });
 

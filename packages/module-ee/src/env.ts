@@ -8,12 +8,6 @@ const eeEnvSchema = z.object({
   STRIPE_PRICE_ID_STARTER: z.string().min(1),
   STRIPE_PRICE_ID_PRO: z.string().min(1),
 
-  // EE runs its OWN database, fully separate from the platform's. Billing
-  // data never shares a database with OSS tables; the platform's `llm_usage`
-  // ledger is read through the `services.usage` cursor, not a cross-DB join.
-  // Required when the EE module is loaded.
-  EE_DATABASE_URL: z.string().min(1),
-
   // Billing sweeper — the EE metering consumer. Each tick advances a
   // serial-`id` watermark through the platform's append-only `llm_usage`
   // ledger, claims platform-provided rows into `ee_billed_llm_usage`, and
@@ -90,7 +84,7 @@ export function getEeEnv(): EeEnv {
 
 /**
  * One line naming every environment variable {@link getEeEnv} rejected, and why
- * — `EE_DATABASE_URL (Required), STRIPE_SECRET_KEY (…)`. A boot crash has to
+ * — `STRIPE_SECRET_KEY (Required), STRIPE_PRICE_ID_PRO (…)`. A boot crash has to
  * say WHICH of the module's variables is wrong; "not configured" sends an
  * operator to read the schema.
  */

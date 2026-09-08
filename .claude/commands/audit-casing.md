@@ -231,7 +231,7 @@ Mission: verify every Drizzle pgTable uses camelCase TS / snake_case SQL pattern
 Scope:
 - packages/db/src/schema/*.ts (every schema file — this is the WHOLE platform schema;
   modules own no tables, so there is no `apps/api/src/modules/*/schema.ts` to scan)
-- packages/module-ee/drizzle/schema.ts (the one module running its own database)
+- packages/module-ee/drizzle/schema.ts (the one module with a Drizzle schema of its own)
 
 For each pgTable:
 - Every TS field property name MUST be camelCase

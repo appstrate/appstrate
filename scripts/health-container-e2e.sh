@@ -10,8 +10,9 @@
 # in degraded mode and the image healthcheck must mark the container unhealthy.
 #
 # HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
-# enabled and adds the "EE module" phase below (loaded, sweeping). The "Billing
-# route" phase runs in both modes and asserts the opposite status in each. That mode is the
+# enabled and adds the "EE module" phase below (loaded, sweeping). The "EE
+# tables" and "Billing route" phases run in both modes and assert the opposite
+# outcome in each. That mode is the
 # `ee-container-e2e` job in .github/workflows/test.yml; it replaces the
 # release-time `verify` the cloud repo used to run against its own second image.
 
@@ -47,9 +48,9 @@ if [ "$E2E_EE" = "1" ]; then
   export MODULES="${default_modules},@appstrate/module-ee"
   # `Module loaded` and `billing sweeper started` are info-level.
   export HEALTH_E2E_LOG_LEVEL=info
-  # The module creates this database itself at boot, via the server's `postgres`
-  # maintenance database and these same credentials.
-  export EE_DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate_ee"
+  # No database variable of its own: the module reads DATABASE_URL, which
+  # docker-compose.yml already points at the platform database.
+
   # Never called — nothing in this e2e reaches Stripe. They exist because the
   # module's own Zod schema refuses to initialize without them.
   export STRIPE_SECRET_KEY=sk_test_health_e2e
@@ -162,6 +163,34 @@ if [ "$E2E_EE" = "1" ]; then
     exit 1
   fi
   echo "ee_module=loaded"
+fi
+
+# Where the module put its tables, read from the platform database rather than
+# from a log line. The module migrates its seven `ee_*` tables into the database
+# DATABASE_URL names, under a journal of its own — `drizzle.ee_migrations` —
+# leaving the platform's `drizzle.__drizzle_migrations` alone. Asserted in BOTH
+# modes off ONE image, so the measurement discriminates: with EE on the journal
+# exists and carries the whole chain; with EE off the platform database holds no
+# `ee_` table at all. `appstrate` is the POSTGRES_DB of docker-compose.yml.
+echo "==> EE tables"
+if [ "$E2E_EE" = "1" ]; then
+  ee_journal=$(compose exec -T appstrate-postgres \
+    psql -U "$POSTGRES_USER" -d appstrate -tAc \
+    "select count(*) from drizzle.ee_migrations")
+  if ! [[ "$ee_journal" =~ ^[0-9]+$ ]] || [ "$ee_journal" -lt 6 ]; then
+    echo "drizzle.ee_migrations holds '$ee_journal' rows, expected at least 6 — the module did not migrate the platform database" >&2
+    exit 1
+  fi
+  echo "ee_migrations=$ee_journal"
+else
+  ee_tables=$(compose exec -T appstrate-postgres \
+    psql -U "$POSTGRES_USER" -d appstrate -tAc \
+    "select count(*) from pg_tables where tablename like 'ee\_%'")
+  if [ "$ee_tables" != "0" ]; then
+    echo "The platform database holds $ee_tables ee_ table(s) with the module absent" >&2
+    exit 1
+  fi
+  echo "ee_tables=$ee_tables"
 fi
 
 # The log lines above prove init ran; only a request proves the module's routers

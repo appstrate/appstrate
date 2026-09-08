@@ -29,6 +29,7 @@ import { resolveBillingRecipients } from "./emails/recipients.ts";
 import { BILLING_MANAGER_PERMISSIONS, isBillingManager } from "./billing/managers.ts";
 import { billingContactPatchSchema } from "./billing/contact.ts";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 
 // Register `billing` as a module-owned RBAC resource. The declaration
 // merging on `ModuleResources` feeds the typed `Resource` union consumed
@@ -69,33 +70,55 @@ const eeModule: AppstrateModule = {
   // method on the contract, so the narrowing is accepted — and it puts EE's
   // requirement in the signature instead of in a comment.
   async init(ctx: EeInitContext) {
-    // Fail-fast: validate all EE env vars (incl. EE_DATABASE_URL) first. The
-    // rethrow names the offending variables — an operator reading a boot crash
-    // needs to know WHICH of the module's env vars is wrong, not that one is.
-    let eeEnv;
+    // Fail-fast: validate all EE env vars first. The rethrow names the offending
+    // variables — an operator reading a boot crash needs to know WHICH of the
+    // module's env vars is wrong, not that one is.
     try {
-      eeEnv = getEeEnv();
+      getEeEnv();
     } catch (cause) {
       throw new Error(`Invalid ee module environment: ${describeEnvIssues(cause)}`, { cause });
+    }
+
+    // The module's tables live in the platform database, so it reads the
+    // platform's own URL. `ModuleInitContext` carries no database handle or URL
+    // — a module that needs one reads it, and under tier 0 (PGlite) there is
+    // none to read. The loader turns this throw into a fatal boot, which is the
+    // whole of the refusal.
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error(
+        "The ee module requires PostgreSQL: set DATABASE_URL (the module stores its tables in the platform database)",
+      );
     }
 
     setAppUrl(ctx.appUrl);
     // Capture the platform handle — EE's ONLY platform reads are the
     // append-only `llm_usage` ledger cursor (`services.usage.list` /
-    // `services.usage.settledFrontier`), never a cross-DB join.
+    // `services.usage.settledFrontier`), never a SQL join against a platform table.
     setPlatformServices(ctx.services);
-    // The org queries answer what EE's own database cannot: who owns this
+    // The org queries answer what EE's own tables cannot: who owns this
     // org, and whether a user id is a member of it. Read directly — the
     // workspace `ModuleInitContext` type is what guarantees they exist, and
     // `tsc` is what checks it.
     setOrgQueries(ctx);
 
-    // EE owns its database: connect + self-migrate against EE_DATABASE_URL.
-    // `ModuleInitContext` exposes no platform database at all — a separate-tenant
-    // module reads platform data through `ctx.services`, never through a
-    // connection of its own.
-    initEeDb(eeEnv.EE_DATABASE_URL);
-    await migrateEeDb(eeEnv.EE_DATABASE_URL);
+    // Connect + self-migrate. The `ee_*` tables land beside the platform's own
+    // under a separate journal (`drizzle.ee_migrations`, see `db.ts`); platform
+    // ROWS are still read through `ctx.services`, not through this pool.
+    initEeDb(databaseUrl);
+    await migrateEeDb(databaseUrl);
+
+    // An empty accounts table is the one signal that separates a fresh install
+    // from a deployment whose billing rows were left behind in the database the
+    // module used to run on. Reads only this module's own table.
+    const [row] = await getEeDb().execute<{ accounts: number }>(
+      sql`SELECT count(*)::int AS accounts FROM ee_billing_accounts`,
+    );
+    if (row?.accounts === 0) {
+      logger.warn(
+        "no billing account exists — a fresh install, or an existing deployment whose billing tables were not copied (scripts/migration/0010)",
+      );
+    }
 
     if (ctx.redisUrl) {
       initEeRedis(ctx.redisUrl);

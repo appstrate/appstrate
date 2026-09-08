@@ -15,10 +15,14 @@ but production use needs a written agreement. Every `.ts` file carries
   the module is never imported and contributes nothing — no routes, no
   `billing:*` permission strings, no Stripe code loaded. It ships inert in the
   platform image, exactly like the other opt-in modules.
-- **Its own database.** `EE_DATABASE_URL`, separate from the platform's, created
-  automatically at first boot when the role has `CREATEDB`. Plus the four
-  `STRIPE_*` variables; all five are validated by this module's own Zod schema
-  (`src/env.ts`) and documented in `docs/ENV.md`.
+- **Its tables live in the platform database.** The module reads `DATABASE_URL`,
+  opens a `postgres` pool of its own on it and migrates its seven `ee_*` tables
+  there at `init()`, under a migration journal of its own —
+  `drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`.
+  It needs PostgreSQL, so it refuses to start on the tier-0 PGlite adapter.
+  Its variables are the four `STRIPE_*` and the three `EE_RECONCILIATION_*`,
+  validated by this module's own Zod schema (`src/env.ts`) and documented in
+  `docs/ENV.md`.
 - **Tests** run under the repository's harness — see "Testing" at the bottom.
 - **No lockstep.** `@appstrate/core` is a `workspace:*` dependency, so there is
   no npm publish, no version gate and no peer range to keep in step.
@@ -59,9 +63,9 @@ periodic sweeper reads `services.usage.list({ afterId })`, bills the settled
 frontier, and advances the watermark. `beforeUsage` is only the read-only
 admission (quota) gate — it turns the platform's neutral execution facts into a
 credit **quote** and gates on the amount — and it fails **CLOSED**: when the
-EE DB is unreachable the hook returns `status: 500`, which blocks the
+billing tables cannot be read the hook returns `status: 500`, which blocks the
 run/chat rather than admitting unmetered usage. That is a conscious availability
-coupling (billing DB down ⇒ new usage paused).
+coupling (billing unreadable ⇒ new usage paused).
 
 **What the cursor does and does not guarantee.** Double-billing is impossible by
 construction: a row is claimed exactly once (`ee_billed_llm_usage` PK +
@@ -107,7 +111,7 @@ construction plus two explicit repairs":
 
 ### EE-owned tables
 
-This module runs its **own** database (`EE_DATABASE_URL`, separate from the platform DB). `migrateEeDb` creates that database at boot when it is missing (through the server's `postgres` maintenance database, same credentials), so a dev box running only the OSS `docker-compose.dev.yml` needs no manual `createdb`; a role without `CREATEDB` gets an error naming the one-time command. All billing data lives in tables created by EE's own migrations — there is no FK to OSS tables, and the platform `llm_usage` ledger is read via the `ctx.services.usage` cursor (`list` / `settledFrontier`), never a cross-DB join:
+These seven tables live in the **platform** database (`DATABASE_URL`). `migrateEeDb` applies `drizzle/migrations` there at boot and records what it applied in `drizzle.ee_migrations`, a journal of this module's own: two journals in one database, and the Apache-2.0 schema in `packages/db` still declares no `ee_*` table. A dev box running the OSS `docker-compose.dev.yml` needs no extra step — the database is already there. There is no FK between an `ee_*` table and an OSS one, and the platform `llm_usage` ledger is read through the `ctx.services.usage` cursor (`list` / `settledFrontier`), never a SQL join across the licence boundary:
 
 - `ee_billing_accounts` — plan, credits (used/quota), Stripe subscription status, customer/subscription IDs
 - `ee_usage_records` — per-context cost records keyed `(context_type, context_id)` — a run, a chat session, or the org's durable `(unattributed, orgId)` bucket. Carries both cumulative `cost_usd` (`numeric(24,12)`, the delta-billing basis) and the debited `cost_credits` (integer); the sweep bills `dollarsToCredits(cost_usd) − cost_credits` so sub-credit remainders carry forward instead of flooring to 0 each pass. `numeric`, not `double precision`: the `unattributed` bucket is one row per org that grows forever, and the sweep reconstructs the pre-pass cumulative as `cost_usd − delta` — both the accumulation and that reconstruction must be exact. Customer accounting data: never purged
@@ -169,7 +173,7 @@ packages/module-ee/
 │   ├── types.ts              # Types mirrored from the platform (EE depends on neither @appstrate/db nor shared-types)
 │   ├── platform.ts           # Holder for the PlatformServices handle injected at init(ctx)
 │   ├── http-errors.ts        # ApiError → RFC 9457 problem+json, the envelope core routes emit
-│   ├── db.ts                 # Drizzle client (lazy init, own EE_DATABASE_URL)
+│   ├── db.ts                 # Drizzle client + migrator (lazy init on DATABASE_URL, ee_migrations journal)
 │   ├── redis.ts              # ioredis client (lazy init, ee: prefix)
 │   ├── logger.ts             # Creates and exports a pino logger instance via @appstrate/core/logger createLogger()
 │   ├── middleware.ts          # Rate limiting + admin guard for EE routes
@@ -354,8 +358,8 @@ and saves it, so two concurrent saves resolve to one of the two lists rather
 than to a merge neither chose) and refuses two things with a 400:
 
 - a user id that is **not a member of the org** — checked through
-  `ctx.getOrgMembers`, never a cross-DB join, because EE has no access to the
-  platform's membership table;
+  `ctx.getOrgMembers`, never a SQL join, because EE imports no platform schema
+  and reads platform data only through `ctx.services`;
 - an **owner or admin**, who already holds both strings by role. Accepting it
   would write a row that grants nothing and, worse, leave a list the org reads
   as "these people can act on billing" while the people who actually can are the
@@ -428,11 +432,35 @@ The sum is the only way to apply that debt: the orphaned ledger rows were claime
 and the watermark advanced past them in the same committed transaction that
 recorded them, so no future sweep can ever read them again.
 
+### Moving an existing deployment
+
+A deployment whose billing tables sit in a database of their own moves them with
+`scripts/migration/0010-ee-tables-into-platform-db.ts` at the repository root:
+`EE_SOURCE_DATABASE_URL` names the database holding them, `DATABASE_URL` the
+platform one. Without `--apply` it counts both sides and writes nothing.
+
+The source prefix is DETECTED, not assumed. The expected one is `cloud_*` at
+migration level `0003`: this package and the move into the platform database
+ship in the same release, so no deployment ever ran `0004` (billing managers,
+`billing_email`, `billing_cc`) or `0005` (the rename to `ee_*`) against a
+database of its own. The copy therefore takes the columns the two sides share —
+a target-only column takes its default, a source table the target's schema
+predates copies nothing — and every check runs BEFORE the target is migrated.
+
+It refuses, exit `1` and nothing written, a source that mixes both prefixes, an
+`ee_`/`cloud_` table it does not move, a source column the target does not
+declare (that one would lose data) and a target already holding `ee_*` rows — so
+a second `--apply` refuses rather than double-counting. A missing variable exits
+`2`. Otherwise `--apply` migrates the target, copies every table in one
+transaction, prints the source and target count of each and exits non-zero on
+any mismatch. Run it with the platform stopped, and rehearse it on a restored
+copy first — the CHANGELOG entry carries the full order.
+
 ### One-off data repair
 
 `drizzle/migrations/*.sql` describes the **schema** and is replayed on every
-EE database forever. A one-off rewrite of row **contents** is not schema — it
-goes in `scripts/migration/<NNNN>-<slug>.{sql,ts}` and is run deliberately by an
+platform database this module is enabled on, forever. A one-off rewrite of row
+**contents** is not schema — it goes in `scripts/migration/<NNNN>-<slug>.{sql,ts}` and is run deliberately by an
 operator (see that directory's README; `docs/NO_TRANSITIONAL_CODE.md` §2 at the
 repository root is the authority). The root `bun run verify:no-migration-dml`
 scans this directory alongside the platform's and fails a new migration that
@@ -450,13 +478,14 @@ cd packages/module-ee && bun test        # same thing, same root preload
 
 The root preload (`test/setup/preload.ts`) discovers this package like any other
 `packages/module-*`, applies the env in `test/requirements.ts`, and runs the real
-`init(ctx)` against the platform's test PostgreSQL — the module migrates its own
-`appstrate_test_ee` database on the way. Two consequences worth knowing:
+`init(ctx)` against the platform's test PostgreSQL — the module migrates its
+`ee_*` tables into that same database on the way. Two consequences worth
+knowing:
 
 - `test/requirements.ts` declares `{ postgres: true }`, so under `TEST_TIER=0`
   (`bun run test:tier0`) the module is not imported, not initialized, and its
-  test files are not collected. It needs `CREATE DATABASE` and `postgres.js`,
-  neither of which the tier-0 PGlite adapter offers. The runner prints the skip.
+  test files are not collected. It needs PostgreSQL and `postgres.js`, neither
+  of which the tier-0 PGlite adapter offers. The runner prints the skip.
 - the same file sets `EE_RECONCILIATION_INTERVAL_SECONDS=0` so `init()` arms
   no periodic sweep — a timer firing mid-suite would bill rows a test seeded.
   The sweep functions are driven directly by
@@ -467,6 +496,5 @@ in-memory `llm_usage` ledger (`mock-platform.ts`) in place of the real
 `services.usage`, and the in-memory org directory (`org-queries.ts`) in place of
 the platform's member lookups. Both are plain setters, not mocks. Every
 integration test file calls `useEeTestSeams()` at the top; it is idempotent.
-`test/tables.ts` is empty on purpose — this module's tables are in another
-database, so `truncateAll()` has nothing of its to clear (`test/helpers/db.ts`
-clears them instead).
+`test/tables.ts` lists the seven `ee_*` tables, so the root `truncateAll()`
+clears them between tests along with every platform table.

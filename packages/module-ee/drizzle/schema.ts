@@ -15,9 +15,11 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-// All EE tables are prefixed with "ee_" to avoid collisions with OSS tables.
-// EE migrations NEVER modify OSS tables — they only create/alter ee_* tables
-// and add FK references to OSS tables via raw SQL.
+// All EE tables are prefixed with "ee_" to avoid collisions with the platform's
+// own, which share the database. EE migrations touch `ee_*` objects and nothing
+// else: a reference to a platform table would cross the licence boundary AND
+// break `onOrgDelete`'s explicit-delete contract, which is what deletes an
+// org's billing rows.
 
 export const billingAccounts = pgTable(
   "ee_billing_accounts",
@@ -183,9 +185,9 @@ export const billingCursor = pgTable(
  *
  * `user_id` / `added_by` are `text`, matching the platform's `user.id` (Better
  * Auth ids are text, not uuid); `org_id` is `uuid` like every other EE
- * table. As everywhere in EE, there is no FK to a platform-owned table —
- * EE runs its own database. Consequence: a row can outlive the user it
- * names. That is harmless because the resolver only ever answers "is THIS
+ * table. As everywhere in EE, there is no FK to a platform-owned table: EE
+ * declares no reference across the licence boundary. Consequence: a row can
+ * outlive the user it names. That is harmless because the resolver only ever answers "is THIS
  * caller a manager", and a caller the platform no longer authenticates never
  * reaches it.
  */

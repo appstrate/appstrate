@@ -6,7 +6,6 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as schema from "../drizzle/schema.ts";
-import { logger } from "./logger.ts";
 
 export type EeDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -25,6 +24,13 @@ export function getEeDb(): EeDb {
   return eeDb;
 }
 
+/**
+ * Open this module's pool on the PLATFORM database (`DATABASE_URL`). The `ee_*`
+ * tables sit beside the platform's own, under their own journal — see
+ * {@link migrateEeDb}. It is still a pool of its own rather than the platform's:
+ * the module reads platform rows through `ctx.services`, and sharing the handle
+ * (for an atomic org deletion, say) is a contract change, not a connection one.
+ */
 export function initEeDb(databaseUrl: string): void {
   eeSql = postgres(databaseUrl);
   eeDb = drizzle(eeSql, { schema });
@@ -49,102 +55,52 @@ export async function closeEeDb(): Promise<void> {
  */
 const MIGRATION_ADVISORY_LOCK_KEY = 4827392010;
 
-const PG_INSUFFICIENT_PRIVILEGE = "42501";
-
-/** Serializes the existence check + `CREATE DATABASE` across replicas booting at once. */
-const DATABASE_CREATE_ADVISORY_LOCK_KEY = 4827392011;
-
-function pgErrorCode(err: unknown): string | undefined {
-  return typeof err === "object" && err !== null && "code" in err && typeof err.code === "string"
-    ? err.code
-    : undefined;
-}
-
 /**
- * Create the database `databaseUrl` names when it does not exist. Nothing else
- * knows EE needs it: the OSS compose files provision only the platform
- * database, so a dev box boots against a server where `appstrate_ee` was
- * never created. `CREATE DATABASE` cannot target the session's own database,
- * so this goes through the server's `postgres` maintenance database with the
- * same credentials.
+ * Apply EE's own migrations against the platform database.
  *
- * The existence check runs first so every boot after the first needs no
- * privilege beyond connecting; only a missing database reaches `CREATE
- * DATABASE`, and a role without `CREATEDB` gets an error naming the one-time
- * command. The check and the create sit under a session advisory lock because
- * two replicas creating concurrently do not get `duplicate_database` — the
- * loser hits a `unique_violation` on `pg_database` while the winner is still
- * in flight.
- */
-async function ensureEeDatabase(databaseUrl: string): Promise<void> {
-  const url = new URL(databaseUrl);
-  const name = decodeURIComponent(url.pathname.replace(/^\//, ""));
-  if (!name) throw new Error("EE_DATABASE_URL names no database (empty path)");
-
-  const maintenanceUrl = new URL(url);
-  maintenanceUrl.pathname = "/postgres";
-  const sql = postgres(maintenanceUrl.toString(), { max: 1 });
-  try {
-    await sql`SELECT pg_advisory_lock(${DATABASE_CREATE_ADVISORY_LOCK_KEY})`;
-    const [existing] = await sql`SELECT 1 FROM pg_database WHERE datname = ${name}`;
-    if (existing) return;
-    try {
-      await sql`CREATE DATABASE ${sql(name)}`;
-      logger.warn(
-        "Created the EE database — it did not exist. On a deployment that already had billing data, " +
-          "EE_DATABASE_URL names the WRONG database: every organization starts over on an empty free " +
-          "plan while Stripe keeps charging.",
-        { database: name },
-      );
-    } catch (err) {
-      if (pgErrorCode(err) === PG_INSUFFICIENT_PRIVILEGE) {
-        throw new Error(
-          `EE database "${name}" does not exist and role "${decodeURIComponent(url.username)}" ` +
-            `lacks CREATEDB. Create it once with: createdb ${name}`,
-          { cause: err },
-        );
-      }
-      throw err;
-    }
-  } finally {
-    // Closing the session releases the advisory lock.
-    await sql.end();
-  }
-}
-
-/**
- * Apply EE's own migrations against `EE_DATABASE_URL`, creating the
- * database first when it does not exist yet (`ensureEeDatabase`). EE owns
- * its database, so it runs its own migrator (a dedicated `postgres.js`
- * connection with `max: 1`). The module contract offers no migration hook — the
- * platform's boot pipeline migrates the platform schema only — so this is the
- * whole of EE's schema management. Idempotent: the drizzle journal skips
- * already-applied migrations.
+ * Two journals, one database: both `migrationsSchema` and `migrationsTable` are
+ * stated below, and `drizzle/drizzle.config.ts` states the same pair, so the two
+ * are literally comparable. The schema is the one the platform's own migrator
+ * writes to, so the TABLE name is what keeps the chains apart —
+ * `drizzle.ee_migrations` here, `drizzle.__drizzle_migrations` there. The module
+ * contract offers no migration hook (the platform's boot pipeline migrates the
+ * platform schema only), so this is the whole of EE's schema management.
+ * Idempotent: the journal skips already-applied migrations.
  *
  * Wrapped in a session-level `pg_advisory_lock` so concurrent boots (rolling /
  * multi-replica deploys) serialize: the first replica migrates while the others
  * block, then each acquires the lock and finds the journal already applied (a
- * no-op). Without the lock, two replicas could run migration `0000`
- * simultaneously and one would crash at boot ("relation already exists").
+ * no-op). Drizzle's migrator takes no lock of its own — it reads the journal
+ * BEFORE opening its transaction — so without this, two replicas would both
+ * read an empty journal and one would crash at boot ("relation already exists").
+ * The lock does NOT serialize this migrator against the PLATFORM's, which runs
+ * unserialised in the same database: the two are safe only because their object
+ * sets are disjoint, `CREATE SCHEMA IF NOT EXISTS drizzle` being the one
+ * statement they share and the core migrator committing it first.
  */
 export async function migrateEeDb(databaseUrl: string): Promise<void> {
-  await ensureEeDatabase(databaseUrl);
   const migrationsFolder = resolve(
     dirname(fileURLToPath(import.meta.url)),
     "../drizzle/migrations",
   );
   // max: 1 — the lock and the migration must run on the SAME connection for the
   // session-level advisory lock to guard the migration.
-  const sql = postgres(databaseUrl, { max: 1 });
+  // `onnotice`: postgres.js prints server notices to stdout by default, and the
+  // migrator's `CREATE SCHEMA IF NOT EXISTS` raises one on every boot.
+  const sqlClient = postgres(databaseUrl, { max: 1, onnotice: () => {} });
   try {
-    await sql`SELECT pg_advisory_lock(${MIGRATION_ADVISORY_LOCK_KEY})`;
+    await sqlClient`SELECT pg_advisory_lock(${MIGRATION_ADVISORY_LOCK_KEY})`;
     try {
-      await migrate(drizzle(sql, { schema }), { migrationsFolder });
+      await migrate(drizzle(sqlClient, { schema }), {
+        migrationsFolder,
+        migrationsTable: "ee_migrations",
+        migrationsSchema: "drizzle",
+      });
     } finally {
-      await sql`SELECT pg_advisory_unlock(${MIGRATION_ADVISORY_LOCK_KEY})`.catch(() => {});
+      await sqlClient`SELECT pg_advisory_unlock(${MIGRATION_ADVISORY_LOCK_KEY})`.catch(() => {});
     }
   } finally {
     // Closing the session also releases any still-held advisory lock.
-    await sql.end();
+    await sqlClient.end();
   }
 }

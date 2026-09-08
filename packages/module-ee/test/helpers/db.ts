@@ -14,9 +14,10 @@ import { resetLlmUsageIdSeq } from "./seed.ts";
 
 export { getEeDb };
 
-// EE-owned tables only — EE runs its own database and never touches OSS
-// tables. The platform `llm_usage` ledger is read through the mock
-// `PlatformServices` (see `mock-platform.ts`), reset alongside the DB.
+// EE-owned tables only — the module writes nothing else, even though its
+// tables now share the platform database. The platform `llm_usage` ledger is
+// read through the mock `PlatformServices` (see `mock-platform.ts`), reset
+// alongside the rows.
 const EE_TABLES = [
   "ee_usage_records",
   "ee_billed_llm_usage",

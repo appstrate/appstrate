@@ -119,6 +119,25 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **The commercial module stores its tables in the platform database.**
+  `@appstrate/module-ee` does not run a PostgreSQL database of its own: it reads
+  `DATABASE_URL`, opens its own pool on it and migrates its seven `ee_*` tables
+  there at `init()`. Two
+  journals in one database — it records what it applied in
+  `drizzle.ee_migrations` and never writes the platform's
+  `drizzle.__drizzle_migrations`, so the Apache-2.0 schema in `packages/db`
+  still declares no `ee_*` table and the licence boundary has not moved. One URL
+  to back up and one to restore, and no auto-created database whose failure mode
+  was a wrong name silently starting every organization on an empty free plan
+  while Stripe kept charging them. The module needs PostgreSQL outright: under
+  tier 0 (PGlite, no `DATABASE_URL`) it refuses to start, naming `DATABASE_URL`.
+  Its remaining variables are the four `STRIPE_*` and the three
+  `EE_RECONCILIATION_*`.
+
+  **OPERATOR ACTIONS.** None of its own: this entry and the in-tree move below
+  ship together, so a deployment coming from `@appstrate/cloud` has ONE upgrade
+  path and it is written out under that entry. A new deployment needs nothing.
+
 - **The commercial module moved into this repository as `packages/module-ee`,
   under its own licence.** The `appstrate/cloud` repo no longer holds code: the
   Stripe billing, credit quotas, usage metering and billing managers now live in
@@ -128,26 +147,43 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   specifier is now `@appstrate/module-ee` — and it ships inside the single
   `ghcr.io/appstrate/appstrate` image, so there is no second image, no separate
   release, and no `@appstrate/core` peer range to keep in lockstep
-  (`workspace:*`). Its environment is renamed with it: `CLOUD_DATABASE_URL` →
-  `EE_DATABASE_URL`, and `CLOUD_RECONCILIATION_{INTERVAL_SECONDS,REPLAY_WINDOW,BATCH_SIZE}`
-  → `EE_RECONCILIATION_*`. Its seven tables are renamed by the module's own
-  migration `0005_rename_ee_tables`, in one transaction, with every index and
-  constraint Postgres had named after them: `cloud_billing_accounts`,
-  `cloud_billing_cursor`, `cloud_billing_managers`, `cloud_billed_llm_usage`,
-  `cloud_free_tier_claims`, `cloud_usage_records` and `cloud_stripe_events`
-  become `ee_*`.
+  (`workspace:*`). `CLOUD_DATABASE_URL` disappears rather than being renamed —
+  the module reads `DATABASE_URL` (the entry above) — while
+  `CLOUD_RECONCILIATION_{INTERVAL_SECONDS,REPLAY_WINDOW,BATCH_SIZE}` become
+  `EE_RECONCILIATION_*`. The module's own migration `0005_rename_ee_tables`
+  renames its seven tables off the `cloud_` prefix for a database that runs the
+  chain — a fresh install — with every index and constraint Postgres had named
+  after them; an existing deployment's rows reach the `ee_*` names through the
+  move below instead, which is why that move accepts a `cloud_*` source.
 
-  **OPERATOR ACTIONS.** Replace `@appstrate/cloud` with `@appstrate/module-ee`
-  in `MODULES`. Set `EE_DATABASE_URL` to the EXACT value `CLOUD_DATABASE_URL`
-  held: the module CREATES a database it does not find, so a different name does
-  not fail — it silently starts every organization on an empty free plan while
-  Stripe keeps charging them (the boot log warns when it creates one). If any of
-  the three `CLOUD_RECONCILIATION_*` keys were set, re-spell them
-  `EE_RECONCILIATION_*` or they silently revert to the defaults (`300`, `200`,
-  `100`). Then delete the old keys — a retired name is not read, and leaving it
-  in `.env` only makes the next reader think it is. Migration `0005` renames the
-  tables in one transaction and needs no data step; the rollback is the reverse
-  rename.
+  **OPERATOR ACTIONS.** One path, for a deployment coming from
+  `@appstrate/cloud`; a new one needs none of it. Rehearse all of it on a
+  restored copy of both databases and note the per-table counts. In `MODULES`,
+  replace `@appstrate/cloud` with `@appstrate/module-ee`. Stop the platform (let
+  the running runs drain) and `pg_dump` the billing database as the safety net.
+  Move its rows into the platform database with
+  `bun scripts/migration/0010-ee-tables-into-platform-db.ts --apply`,
+  `EE_SOURCE_DATABASE_URL` = the EXACT value `CLOUD_DATABASE_URL` held and
+  `DATABASE_URL` = the platform database; without `--apply` it only counts, and
+  a dry run first is the point. A `cloud_*` source at migration level `0003` is
+  the expected shape — it detects the prefix, copies the columns both sides
+  share (`billing_email` and `billing_cc` take their defaults, `ee_billing_managers`
+  copies nothing), migrates the target and copies in one transaction, then
+  prints a per-table source/target count that must be the rehearsal's. It
+  refuses (exit `1`, nothing written) a source mixing both prefixes, an
+  `ee_`/`cloud_` table it does not move, a source column the target does not
+  declare, or a target already holding `ee_*` rows — so a second `--apply`
+  refuses rather than double-counting; a missing variable exits `2`. Then delete
+  `CLOUD_DATABASE_URL` and, if they were set, re-spell the three
+  `CLOUD_RECONCILIATION_*` keys `EE_RECONCILIATION_*` or they silently revert to
+  the defaults (`300`, `200`, `100`); the four `STRIPE_*` keys are unchanged.
+  `EE_DATABASE_URL` never existed in a release — do not set it, nothing reads
+  it. Deploy, then check the boot log for `Module loaded` with `"id":"ee"`,
+  `billing sweeper started` and NO `no billing account exists` warning, and
+  `select count(*) from drizzle.ee_migrations` on the platform database. Keep
+  the old database read-only (`REVOKE`) for a week, then `DROP DATABASE`; until
+  that drop the rollback is the previous image with `CLOUD_DATABASE_URL`
+  restored, losing only writes made on the platform copy after the cutover.
 
 - **A key is renamed through its edit dialog only.** The inline click-to-edit
   label in the credentials table is gone (`InlineEditableLabel` deleted).
