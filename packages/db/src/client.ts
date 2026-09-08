@@ -3,6 +3,7 @@
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getEnv } from "@appstrate/env";
 import * as schema from "./schema/index.ts";
+import { createListenClient, type ListenClient } from "./listen-client.ts";
 
 const env = getEnv();
 
@@ -13,9 +14,7 @@ export const isEmbeddedDb = !env.DATABASE_URL;
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 /** Postgres.js listen client or PGlite notification handler. */
-export interface ListenClient {
-  listen(channel: string, handler: (payload: string) => void): Promise<void>;
-}
+export type { ListenClient };
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -74,24 +73,7 @@ async function initPostgres(): Promise<Db> {
     await queryClient.end();
     await listenConn.end();
   };
-  _listenClient = {
-    listen: async (channel, handler) => {
-      try {
-        await listenConn.listen(channel, handler);
-      } catch (err) {
-        // postgres.js 3.4.9 registers the channel BEFORE awaiting the LISTEN
-        // acknowledgement (src/index.js:165-195) and keeps the memoised rejected
-        // promise, so a retry would push a second handler onto that dead entry and
-        // re-await the same rejection. Drop it so the retry re-issues LISTEN with
-        // exactly one handler. (The `unlisten` postgres.js returns is only handed
-        // back on success, so it cannot clean this up.)
-        const channels = (listenConn.listen as unknown as { channels?: Record<string, unknown> })
-          .channels;
-        if (channels && channel in channels) delete channels[channel];
-        throw err;
-      }
-    },
-  };
+  _listenClient = createListenClient(listenConn);
 
   return drizzle(queryClient, { schema }) as unknown as Db;
 }
