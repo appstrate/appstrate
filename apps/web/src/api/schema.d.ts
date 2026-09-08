@@ -535,7 +535,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke (soft-delete) an API key. The key will immediately stop working. `api-keys:revoke` is required in the KEY's own space, not in the space the request carries; a key whose space the caller cannot reach answers 404.
+         * @description Revoke (soft-delete) an API key. The key will immediately stop working. `api-keys:revoke` is required in the KEY's own space, not in the space the request carries. A caller who cannot reach that space gets the space's own wall: 404 when it is `private` (its existence must not leak through the id of a key inside it), 403 `not_a_space_member` when it is `open` or `closed`. An API-key caller reaching for a key of another space always answers 404 — a key delegates authority in exactly one space.
          */
         delete: operations["revokeApiKey"];
         options?: never;
@@ -5418,6 +5418,11 @@ export interface components {
             slug?: string;
             /** Format: date-time */
             createdAt?: string;
+            /**
+             * Format: date-time
+             * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
+             */
+            deleting_at?: string | null;
             /** @description Durable-file storage consumption for this organization. `used_bytes` is the running total of stored file bytes; `limit_bytes` is the raw per-org limit override (`files_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
             storage?: {
                 /** @description Bytes of durable files stored. */
@@ -5589,6 +5594,11 @@ export interface components {
              * @description Creation timestamp
              */
             createdAt: string;
+            /**
+             * Format: date-time
+             * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
+             */
+            deleting_at: string | null;
         };
         PackageFileEntry: {
             /** @description Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`) */
@@ -14981,7 +14991,8 @@ export interface operations {
                      *             "org:update",
                      *             "members:invite"
                      *           ],
-                     *           "createdAt": "2026-01-10T08:00:00Z"
+                     *           "createdAt": "2026-01-10T08:00:00Z",
+                     *           "deleting_at": null
                      *         }
                      *       ]
                      *     }
@@ -22402,7 +22413,8 @@ export interface operations {
                      *         "org:read",
                      *         "spaces:read"
                      *       ],
-                     *       "createdAt": "2026-01-10T08:00:00Z"
+                     *       "createdAt": "2026-01-10T08:00:00Z",
+                     *       "deleting_at": null
                      *     }
                      */
                     "application/json": components["schemas"]["Organization"];

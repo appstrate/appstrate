@@ -203,6 +203,47 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("completes a DELETE that finds the reservation already standing", async () => {
+    // The reservation is never lifted, so the retry of an interrupted DELETE
+    // finds it in place. That is the recovery path, and it must be a no-op for
+    // the reservation and a completion for the deletion.
+    const ctx = await createTestContext({ orgName: "Already Reserved Org" });
+    await reserveOrgDeletion(ctx.orgId);
+    const reservedAt = await deletingAt(ctx.orgId);
+    expect(reservedAt).not.toBeNull();
+
+    const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+      method: "DELETE",
+      headers: { Cookie: ctx.cookie },
+    });
+
+    expect(res.status).toBe(204);
+    expect(await orgExists(ctx.orgId)).toBe(false);
+  });
+
+  it("shows the standing reservation on the organization resource", async () => {
+    // A reservation nothing surfaces is a state an operator cannot see. It is
+    // on the detail read and the listing, null everywhere else.
+    const ctx = await createTestContext({ orgName: "Visible Reservation Org" });
+
+    const before = (await (
+      await app.request(`/api/orgs/${ctx.orgId}`, { headers: { Cookie: ctx.cookie } })
+    ).json()) as { deleting_at: string | null };
+    expect(before.deleting_at).toBeNull();
+
+    await reserveOrgDeletion(ctx.orgId);
+
+    const after = (await (
+      await app.request(`/api/orgs/${ctx.orgId}`, { headers: { Cookie: ctx.cookie } })
+    ).json()) as { deleting_at: string | null };
+    expect(after.deleting_at).toBe((await deletingAt(ctx.orgId))!.toISOString());
+
+    const listed = (await (
+      await app.request("/api/orgs", { headers: { Cookie: ctx.cookie } })
+    ).json()) as { data: { id: string; deleting_at: string | null }[] };
+    expect(listed.data.find((o) => o.id === ctx.orgId)?.deleting_at).toBe(after.deleting_at);
+  });
+
   it("refuses the reservation while a run admitted earlier is still in progress", async () => {
     const ctx = await createTestContext({ orgName: "Busy Org" });
     await seedRunInOrg(ctx, "running");

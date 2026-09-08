@@ -141,6 +141,12 @@ export async function drainAudits(
  * spaceId derivation is a safe superset for org routes (both are unset
  * there).
  *
+ * `spaceIdOverride` is its twin for a route that acts on a resource living in a
+ * space OTHER than the one the request entered — a cross-space API-key
+ * revocation is the case. The audit row must name the space the resource
+ * belongs to, not the space the caller happened to be in, or the trail points at
+ * the wrong place.
+ *
  * Under a role preview the persona goes into `after.view_as`; the actor stays
  * the administrator, which is who they were.
  */
@@ -149,9 +155,9 @@ export async function recordAuditFromContext(
   input: Omit<
     RecordAuditInput,
     "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
-  > & { orgIdOverride?: string },
+  > & { orgIdOverride?: string; spaceIdOverride?: string },
 ): Promise<void> {
-  const { orgIdOverride, ...auditInput } = input;
+  const { orgIdOverride, spaceIdOverride, ...auditInput } = input;
   const orgId = orgIdOverride ?? c.get("orgId");
   if (!orgId) return;
 
@@ -177,7 +183,7 @@ export async function recordAuditFromContext(
     ...auditInput,
     ...(persona ? { after: { ...(auditInput.after ?? {}), view_as: viewAsWire(persona) } } : {}),
     orgId,
-    spaceId: c.get("spaceId") ?? null,
+    spaceId: spaceIdOverride ?? c.get("spaceId") ?? null,
     actorType,
     actorId,
     ip: getClientIpFromRequest(c.req.raw),

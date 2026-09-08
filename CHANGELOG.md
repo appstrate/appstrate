@@ -538,17 +538,38 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   check and a `organizations.deleting_at` stamp now commit together under the
   per-org advisory key run admission takes, and `createRun` refuses a reserved
   organization (409 `org_deleting`), so the decision cannot be invalidated
-  behind the modules' back. A DELETE that fails after the reservation leaves it
+  behind the modules' back. Chat admission and `/api/llm-proxy` refuse a reserved
+  organization with the same 409, because a chat turn is not a `runs` row and
+  the deletability count never saw it — usage admitted there would be
+  cascade-deleted unbilled. A DELETE that fails after the reservation leaves it
   standing and can simply be retried; module `onOrgDelete` handlers must
-  therefore tolerate a second call for the same organization. The migration is
-  one nullable column and rewrites no row.
+  therefore tolerate a second call for the same organization. The reservation is
+  visible: `deleting_at` is on the organization wire object (`GET
+/api/orgs/{orgId}` and the listing), null on every organization not being
+  deleted. The migration is one nullable column and rewrites no row.
+
+  **OPERATOR ACTIONS.** None, unless a DELETE was abandoned. The platform never
+  lifts a reservation — retrying the DELETE is the recovery, and it is the only
+  one, because module handlers that already ran cannot be undone. An operator
+  who decides to abandon a deletion instead can clear the stamp with
+  `UPDATE organizations SET deleting_at = NULL WHERE id = '<org-uuid>';`. That
+  is safe ONLY when no `onOrgDelete` handler ran — i.e. the DELETE failed at the
+  reservation itself, which answers `400 delete_failed` with `runs are in
+progress` and emits nothing. Once a handler has run the organization is
+  already gutted (the subscription is cancelled, the billing rows are gone) and
+  clearing the stamp returns a broken organization to service; finish the
+  deletion instead.
 
 - **Revoking an API key requires `api-keys:revoke` in the key's own space.**
   The guard answered for the space the request carried and the service then
   updated org-wide, so a delegated administrator of one space could revoke a
   key of a private sibling space, given only its id. A key whose space the
   caller cannot reach now answers with that space's own wall (404 for a private
-  one). An API key still revokes only inside the space it is pinned to.
+  one, 403 `not_a_space_member` otherwise). An API key still revokes only inside
+  the space it is pinned to, and a caller with no organization role — an OIDC
+  end-user token, whose fixed allowlist cannot be re-resolved for another space
+  — gets the same 404. The audit row names the KEY's space, not the space the
+  request entered from.
 
 - **Integration OAuth clients are `integrations:configure`, not
   `integrations:install`.** Registering, rotating, deleting a BYO OAuth client

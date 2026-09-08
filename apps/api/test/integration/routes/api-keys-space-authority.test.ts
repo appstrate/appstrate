@@ -7,8 +7,10 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
 import {
   createTestContext,
   createTestUser,
@@ -180,6 +182,76 @@ describe("API keys carry their creator's authority in the key's space", () => {
       });
       const allowed = await app.request(`/api/api-keys/${inA.id}`, { method: "DELETE", headers });
       expect(allowed.status).toBe(204);
+    });
+
+    it("answers an API-KEY caller with 404, whatever its own space grants", async () => {
+      // A key delegates authority in exactly ONE space (spec §7.1), so there is
+      // no second space to authorize it against — the reach stops at the wall
+      // regardless of the target space's visibility.
+      const a = await seedSpace({ orgId: owner.orgId, visibility: "open" });
+      const b = await seedSpace({ orgId: owner.orgId, visibility: "open" });
+      const callerKey = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: a.id,
+        createdBy: owner.user.id,
+        scopes: ["api-keys:revoke"],
+      });
+      const inB = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: b.id,
+        createdBy: owner.user.id,
+        scopes: ["agents:read"],
+      });
+
+      const denied = await app.request(`/api/api-keys/${inB.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${callerKey.rawKey}` },
+      });
+      expect(denied.status).toBe(404);
+
+      // Still live: the 404 is a refusal, not a revocation that answered oddly.
+      const listed = await app.request("/api/api-keys", {
+        headers: authHeaders(owner, { "X-Space-Id": b.id }),
+      });
+      expect(((await listed.json()) as { data: { id: string }[] }).data).toHaveLength(1);
+
+      // Control: the same key, the same permission, a key of its OWN space.
+      const inA = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: a.id,
+        createdBy: owner.user.id,
+        scopes: ["agents:read"],
+      });
+      const allowed = await app.request(`/api/api-keys/${inA.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${callerKey.rawKey}` },
+      });
+      expect(allowed.status).toBe(204);
+    });
+
+    it("files the audit row against the KEY's space, not the request's", async () => {
+      const a = await seedSpace({ orgId: owner.orgId, visibility: "private" });
+      const b = await seedSpace({ orgId: owner.orgId, visibility: "private" });
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: b.id,
+        createdBy: owner.user.id,
+        scopes: ["agents:read"],
+      });
+
+      const res = await app.request(`/api/api-keys/${key.id}`, {
+        method: "DELETE",
+        headers: authHeaders(owner, { "X-Space-Id": a.id }),
+      });
+      expect(res.status).toBe(204);
+
+      // The route awaits the audit insert before answering, so the row is
+      // already there.
+      const [row] = await db
+        .select({ spaceId: auditEvents.spaceId })
+        .from(auditEvents)
+        .where(eq(auditEvents.resourceId, key.id));
+      expect(row?.spaceId).toBe(b.id);
     });
 
     it("lets an owner revoke across spaces — admin of every space", async () => {

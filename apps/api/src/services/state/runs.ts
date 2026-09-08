@@ -489,28 +489,50 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<vo
 }
 
 /**
- * Refuse admission into an organization whose deletion is reserved.
+ * Is this organization's deletion reserved?
  *
- * Read under the per-org admission lock, beside the concurrency count and for
- * the same reason: `reserveOrgDeletion` sets `deleting_at` while holding this
- * key, so a run is admitted strictly before the reservation or refused by it —
- * never in between, which is where the deletion used to lose its guarantee
- * after modules had already torn down what they own.
+ * `reserveOrgDeletion` stamps `deleting_at` while holding the per-org admission
+ * lock, so a caller that reads this under the same key sees the reservation or
+ * commits strictly before it — never in between, which is the window where the
+ * modules' teardown outruns the work still being admitted.
  */
-async function refuseReservedForDeletion(tx: DbTx, orgId: string): Promise<void> {
-  const [org] = await tx
+export async function isOrgDeletionReserved(
+  executor: DbTx | typeof db,
+  orgId: string,
+): Promise<boolean> {
+  const [org] = await executor
     .select({ deletingAt: organizations.deletingAt })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
-  if (org?.deletingAt) {
-    throw new ApiError({
-      status: 409,
-      code: "org_deleting",
-      title: "Organization Is Being Deleted",
-      detail: "This organization is being deleted; no new run can be started.",
-    });
-  }
+  return org?.deletingAt != null;
+}
+
+/** The refusal every admission seam answers a reserved organization with. */
+export function orgDeletingError(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "org_deleting",
+    title: "Organization Is Being Deleted",
+    detail: "This organization is being deleted; no new work can be admitted.",
+  });
+}
+
+/**
+ * Refuse admission into an organization whose deletion is reserved.
+ *
+ * Every seam that admits billable work calls this: run creation (below, under
+ * the admission lock, beside the concurrency count) and the proxy admission
+ * gate. A row admitted after the reservation is cascade-deleted with the org,
+ * and any `llm_usage` it wrote disappears with it — including rows a metering
+ * module has already advanced its cursor past, which is revenue that can never
+ * be billed.
+ */
+export async function refuseReservedForDeletion(
+  executor: DbTx | typeof db,
+  orgId: string,
+): Promise<void> {
+  if (await isOrgDeletionReserved(executor, orgId)) throw orgDeletingError();
 }
 
 interface CreateRunParams {

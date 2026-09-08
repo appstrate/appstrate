@@ -332,7 +332,7 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "role", "permissions", "createdAt"],
+    required: ["id", "name", "slug", "role", "permissions", "createdAt", "deleting_at"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
@@ -345,6 +345,12 @@ export const schemas = {
           "The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces.",
       },
       createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
+      deleting_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.",
+      },
     },
   },
   OrgMember: {
@@ -397,6 +403,12 @@ export const schemas = {
       name: { type: "string" },
       slug: { type: "string" },
       createdAt: { type: "string", format: "date-time" },
+      deleting_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.",
+      },
       storage: {
         type: "object",
         description:

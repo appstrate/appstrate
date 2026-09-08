@@ -30,9 +30,11 @@ import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
+import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
+import { db } from "@appstrate/db/client";
 
 /**
  * Resolve the chosen chat model preset to its real upstream binding for one
@@ -237,7 +239,9 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     inline in the platform's process, so the platform funds its compute and a
  *     module gating on subscription status must be able to refuse it.
  *
- * Returns null when no module provides the hook (OSS mode allows everything).
+ * Returns null when no module provides the hook (OSS mode allows everything) —
+ * except for a reserved deletion, which refuses the turn whatever the
+ * deployment loads.
  */
 export async function checkUsageAllowed(args: {
   orgId: string;
@@ -245,6 +249,16 @@ export async function checkUsageAllowed(args: {
   sessionId: string | null;
   subscription: boolean;
 }): Promise<UsageRejection | null> {
+  // An organization whose deletion is reserved admits no new work. Same refusal
+  // as `createRun` and the proxy admission gate, in the shape this seam speaks:
+  // the chat module renders a rejection as an RFC 9457 problem response, so
+  // throwing here would surface as a 500 instead of the 409 the other two give.
+  // A turn admitted after the reservation writes an `llm_usage` row the org's
+  // cascade deletes, and a metering module that has read past it can never bill
+  // it. Ahead of the hook check: the reservation is a platform fact.
+  const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
+  if (err) return { code: err.code, message: err.message, status: err.status };
+
   if (!hasHook("beforeUsage")) return null;
   // Fail-closed on a caller that omits `subscription` — the flag became
   // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built

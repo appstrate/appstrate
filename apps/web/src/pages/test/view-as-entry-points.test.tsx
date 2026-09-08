@@ -93,6 +93,7 @@ function seed(orgRole: OrgRole, options: SeedOptions = {}): QueryClient {
     name: "Acme",
     slug: "acme",
     role: orgRole,
+    deleting_at: null,
     permissions: [
       "roles:read",
       "members:read",

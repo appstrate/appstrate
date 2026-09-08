@@ -2,7 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
-import { toISORequired } from "../lib/date-helpers.ts";
+import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import {
   organizations,
   organizationMembers,
@@ -53,6 +53,15 @@ interface OrgResult {
    * detail endpoint can report the raw override alongside the effective limit.
    */
   filesBytesLimit: number | null;
+  /**
+   * When this organization's deletion was reserved (`organizations.deleting_at`),
+   * or null. A reservation is one-way: `reserveOrgDeletion` stamps it and the
+   * row disappears when the deletion completes, so a non-null value on a row
+   * that still exists means a DELETE was interrupted between the reservation and
+   * the end. Surfaced so that state is visible instead of silent — the recovery
+   * is to repeat the DELETE.
+   */
+  deletingAt: string | null;
 }
 
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
@@ -65,6 +74,7 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     updatedAt: toISORequired(row.updatedAt),
     filesBytesUsed: row.filesBytesUsed,
     filesBytesLimit: row.filesBytesLimit,
+    deletingAt: toISO(row.deletingAt),
   };
 }
 

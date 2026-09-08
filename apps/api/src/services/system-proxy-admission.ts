@@ -29,9 +29,10 @@
  */
 
 import type { ResolvedModel } from "./org-models.ts";
-import { getRunningRunCountForOrg } from "./state/runs.ts";
+import { getRunningRunCountForOrg, refuseReservedForDeletion } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
+import { db } from "@appstrate/db/client";
 
 type SystemProxyUsageContext =
   | {
@@ -54,6 +55,15 @@ export async function enforceSystemProxyAdmission(args: {
   resolved: ResolvedModel;
   usageContext: SystemProxyUsageContext;
 }): Promise<void> {
+  // An organization whose deletion is reserved admits no new work — the same
+  // refusal `createRun` makes, from the same function, because this seam is the
+  // OTHER way billable work enters. A proxy call admitted after the reservation
+  // writes an `llm_usage` row that the org's cascade deletes, and a metering
+  // module that has already read past it can never bill it. Refused ahead of
+  // the hook check: the reservation is a platform fact, true with or without a
+  // metering module.
+  await refuseReservedForDeletion(db, args.orgId);
+
   // OSS deployments may intentionally expose system presets without a metering
   // module. No hook → nothing to admit and no context requirement to enforce
   // (the 400 below exists to protect the quota gates a module provides).

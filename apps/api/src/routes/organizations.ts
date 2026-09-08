@@ -135,6 +135,7 @@ router.get("/", async (c) => {
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,
+            deleting_at: o.deletingAt,
           };
         }),
       ),
@@ -240,6 +241,10 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     name: org.name,
     slug: org.slug,
     createdAt: org.createdAt,
+    // Non-null while a DELETE that reserved this organization has not finished.
+    // The reservation is never lifted by the platform — repeating the DELETE is
+    // the recovery — so surfacing it is what keeps the state from being silent.
+    deleting_at: org.deletingAt,
     storage: {
       used_bytes: org.filesBytesUsed,
       limit_bytes: org.filesBytesLimit ?? null,

@@ -138,6 +138,15 @@ export function createApiKeysRouter() {
       if (c.get("authMethod") === "api_key") {
         throw notFound("API key not found or already revoked");
       }
+      // A caller with no org role (an OIDC end-user token) carries its
+      // strategy's fixed allowlist, which `applySpacePermissions` returns
+      // without re-resolving — so `assertPermission` below would judge the key's
+      // space against the set the REQUEST's space produced. There is no
+      // authority to resolve in the other space, so the key is simply out of
+      // reach: same wall a private space gives.
+      if (!c.get("orgRole")) {
+        throw notFound("API key not found or already revoked");
+      }
       const keySpace = await validateSpaceInOrg(keySpaceId, orgScope.orgId);
       if (!keySpace) {
         throw notFound("API key not found or already revoked");
@@ -155,6 +164,9 @@ export function createApiKeysRouter() {
         action: "api_key.revoked",
         resourceType: "api_key",
         resourceId: keyId,
+        // The KEY's space, not the request's — a cross-space revocation
+        // otherwise files the row against the space the caller entered from.
+        spaceIdOverride: keySpaceId,
       });
       return c.body(null, 204);
     } catch (err) {
