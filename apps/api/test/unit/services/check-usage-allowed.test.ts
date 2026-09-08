@@ -47,7 +47,8 @@ function fakeInitCtx(): ModuleInitContext {
     redisUrl: null,
     appUrl: "http://localhost:3000",
     getSendMail: async () => () => {},
-    getOrgAdminEmails: async () => [],
+    getOrgOwnerEmails: async () => [],
+    getOrgMembers: async () => [],
     getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };

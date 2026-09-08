@@ -16,14 +16,13 @@ export const libraryPaths = {
     get: {
       operationId: "getLibrary",
       tags: ["Library"],
-      summary: "List all packages visible to the org with per-space install state",
+      summary: "List readable packages with accessible-space install state",
       description:
-        "Returns every package available to the caller's organization (org-owned + system) " +
-        "grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an " +
-        "`installed_in` array of space ids — the spaces belonging to the caller's " +
-        "org where the package is currently installed. Ephemeral packages are excluded.\n\n" +
-        "The response also includes the org's spaces (id, name, isDefault) so the UI " +
-        "can render a single grid keyed by space without an additional `/api/spaces` call.",
+        "Returns packages readable in an accessible space, plus readable system packages, grouped by type. " +
+        "Organization owners and admins also see uninstalled organization packages with their read permissions. " +
+        "Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. " +
+        "The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings " +
+        "also require the package type's read permission in that space.",
       parameters: [
         // `/api/library` is org-scoped, not space-scoped — no X-Space-Id.
         { $ref: "#/components/parameters/XOrgId" },
@@ -42,7 +41,7 @@ export const libraryPaths = {
                   spaces: {
                     type: "array",
                     description:
-                      "Spaces belonging to the caller's organization. The default " +
+                      "Accessible spaces in the caller's organization, restricted to an API key's space. The default " +
                       "space (if any) is listed first.",
                     items: {
                       type: "object",

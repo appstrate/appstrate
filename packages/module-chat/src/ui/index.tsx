@@ -58,6 +58,9 @@ import {
   loadHistory,
   markSessionRead,
   mintSessionId,
+  sessionQueryKey,
+  sessionsQueryKey,
+  spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
   type SessionSummary,
@@ -215,7 +218,10 @@ export function ChatPage({
   // server-computed (read-state lives in `chat_sessions`, shared across
   // devices); the list stays fresh via the `chat_session_update` SSE signal.
   // There is no toast — the pill is the only notification.
-  const sessions = useSessions();
+  const sessions = useSessions(getHeaders);
+  // The host's current space, off the same headers every request carries. Every
+  // chat query is keyed by it (see `sessions.ts`).
+  const pageSpaceId = spaceIdFromHeaders(getHeaders);
   const queryClient = useQueryClient();
   const visible = useSyncExternalStore(subscribeVisibility, getVisible, getVisible);
 
@@ -232,11 +238,11 @@ export function ChatPage({
     if (!visible) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
-    queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) =>
+    queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(pageSpaceId), (prev) =>
       prev?.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
     );
     void markSessionRead(getHeaders, activeId).catch(() => {});
-  }, [sessions.data, activeId, getHeaders, queryClient, visible]);
+  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible]);
 
   const unreadIds = useMemo(() => {
     const list = sessions.data ?? [];
@@ -408,10 +414,13 @@ const Conversation = memo(function Conversation({
   // streaming turn. A conversation that started new stays "load-free" for its
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
+  const spaceId = spaceIdFromHeaders(getHeaders);
   const history = useQuery({
-    queryKey: ["chat", "session", id],
+    queryKey: sessionQueryKey(spaceId, id),
     queryFn: () => loadHistory(getHeaders, id),
-    enabled: persistedAtMount,
+    // `GET /api/chat/sessions/:id` requires `X-Space-Id`; without one the
+    // request is a guaranteed 400, so wait for the host's space instead.
+    enabled: persistedAtMount && !!spaceId,
     staleTime: Infinity,
     gcTime: 0,
   });
@@ -446,6 +455,7 @@ function ConversationInner({
   serverUpdatedAt,
 }: ConversationProps & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
+  const spaceId = spaceIdFromHeaders(getHeaders);
 
   // Header builder invoked by the transport at request/reconnect time. It reads
   // the model from the external store, NOT from React state: `useChat` recreates
@@ -496,7 +506,9 @@ function ConversationInner({
     // is a guaranteed 204. Spending a request on that answer competes for
     // connections with the model list and the session list at exactly the
     // moment the composer is trying to become usable.
-    resume: isPersisted,
+    // …and on the space being known: the resume GET is space-scoped like every
+    // other session read, so without one it would 400 rather than 204.
+    resume: isPersisted && !!spaceId,
     // One React commit per animation frame (16 ms) instead of one per stream
     // chunk. The SDK applies this to the `messages` subscription only
     // (`useChat` passes it to `~registerMessagesCallback`); `status` is a
@@ -540,7 +552,7 @@ function ConversationInner({
     let cancelled = false;
     void queryClient
       .fetchQuery({
-        queryKey: ["chat", "session", id],
+        queryKey: sessionQueryKey(spaceId, id),
         queryFn: () => loadHistory(getHeaders, id),
         // The mounted history query pins `staleTime: Infinity`; force the GET.
         staleTime: 0,
@@ -563,6 +575,7 @@ function ConversationInner({
     setMessages,
     queryClient,
     getHeaders,
+    spaceId,
     id,
   ]);
 
@@ -584,7 +597,7 @@ function ConversationInner({
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {
-      queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) => {
+      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) => {
         const list = prev ?? [];
         const existing = list.find((s) => s.id === id);
         const row: SessionSummary = {
@@ -595,13 +608,13 @@ function ConversationInner({
         return [row, ...list.filter((s) => s.id !== id)];
       });
     } else if (wasGenerating.current) {
-      queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) =>
+      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) =>
         prev?.map((s) => (s.id === id ? { ...s, generating: false } : s)),
       );
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }
     wasGenerating.current = generating;
-  }, [generating, id, queryClient]);
+  }, [generating, id, spaceId, queryClient]);
 
   // On the first message of a brand-new conversation, lazily adopt its id into
   // the URL (the server creates the session on that same POST). `id` is stable

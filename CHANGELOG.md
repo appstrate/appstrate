@@ -8,6 +8,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Two-layer RBAC — an org role, and a role per space.** Organization roles
+  gain **`guest`**: an org identity with no implicit reach into any space, for
+  outside collaborators. Every space now carries a **visibility** (`open`,
+  `closed`, `private`) and a default role, and membership in it is a row of its
+  own: a member holds one of four presets (`admin`, `builder`, `operator`,
+  `viewer`) or an organization-defined **custom role** — a named bundle of
+  space-level permissions, assignable anywhere in the org. An invitation carries
+  its **space assignments** with it, so an invitee lands with the access they
+  were invited for; an email may hold at most one pending invitation per
+  organization, and a second is refused rather than silently replacing the
+  first. Every permission is org-level or space-level, so a space-level grant
+  can never be satisfied outside a space. Grants hold when they change, not only
+  when they are read: a scheduled run rechecks its actor's `agents:run` in the
+  space at every fire and disables itself once it is gone, an invitation is
+  consumed with the role and assignments current at its atomic claim, and a
+  space grant serializes with the removal or promotion of the same member.
+
+- **Role preview — see the product as a role before you assign it.** An owner or
+  administrator can have every request answered as a lesser persona (an org role,
+  optionally with a role in one space) from Org settings → Roles or Space
+  settings → Members. It is enforced by the server, not hidden in the UI: what
+  the previewed role cannot reach, the previewing administrator cannot reach
+  either, on the API, on the realtime streams and inside a chat turn's tool
+  calls. A permanent banner names the persona and carries the only exit, the
+  audit trail keeps the real actor beside the persona, and the preview is
+  dropped rather than silently ignored the moment it stops being valid.
+
 - **`anthropic-compatible` model provider** — a second custom-endpoint entry in
   `core-providers` next to `openai-compatible`, for any self-hosted or
   third-party endpoint speaking the Anthropic Messages API (LiteLLM proxy, …).
@@ -334,7 +361,7 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   the reverse order would answer "does this agent exist?" for a caller not
   allowed to read agents at all.
 
-  **No dashboard user loses anything.** Every org role down to `viewer` already
+  **No dashboard user loses anything.** Every org role down to `guest` already
   holds `agents:read` and `spaces:read` (`apps/api/src/lib/permissions.ts`), so
   the SPA is unaffected. What changes is an ALREADY-MINTED API key scoped
   without the matching permission: it reached these five reads through org
@@ -496,6 +523,49 @@ skills sync is running` and kept the stale plugin. The lock is now
   of building a URL from it.
 
 ### Removed
+
+- **BREAKING (operators): the organization role `viewer` is retired; `guest`
+  replaces it, and moving the rows is a two-file deploy in ONE maintenance
+  window.** A `viewer` was read-only everywhere; that is a space concern now, so
+  a former viewer becomes an org `guest` plus an explicit `viewer` role in every
+  space that exists at migration time — the same reach, and it does not widen
+  onto spaces created later. Mapping them to `member` instead would have handed
+  them every open space's default preset, which is `operator`: write access they
+  never had.
+
+  **The two files, in this order.** `packages/db/drizzle/0056_space_roles.sql`
+  applies at boot with the rest of the pending batch; then
+  `scripts/migration/0008-org-viewer-to-guest.sql` runs BY HAND, before the new
+  version serves traffic. Between them a row still reading `viewer` resolves no
+  permission set at all and every request from that user fails, so the window
+  covers both — this is not two deploys. **Rollback is one-way from `0056`**:
+  it promotes `chat_sessions.space_id` to NOT NULL and the previous build
+  inserts without it. Roll forward.
+
+  `0008` is idempotent, runs in one transaction, and verifies by coverage
+  rather than by a count that reads the same whether it worked or not: it
+  aborts unless every pre-flip (user, space) pair carries a `space_members` row
+  and every pending invitation carries its space snapshot.
+
+  **A third file can be needed first.** `0056` also creates the partial unique
+  index behind "one pending invitation per (organization, email)", and a
+  duplicate pair left by a race under earlier code fails that statement and
+  rolls the whole migration back. Count the pairs before the deploy and run
+  `scripts/migration/0009-org-invitations-dedupe-pending.sql` if there are any.
+  **The runbook, including that query, is `scripts/migration/README.md` → RBAC
+  rollout**; rehearse the whole sequence against a restored `pg_dump` copy first,
+  since the row counts are unmeasured until you do.
+
+  Two more consequences an operator should know about. **An API key pinned to a
+  space cannot mutate a package installed in more than one space**, whatever its
+  scopes: a package's draft, versions and identity are shared across its
+  installations, so a mutation needs authority in every one of them, and a key
+  delegates authority in exactly one. Re-run such a mutation from a session, or
+  uninstall the package from the spaces the key does not cover. And the audience
+  of billing mail moved: `ModuleInitContext.getOrgAdminEmails` is gone from the
+  module contract, replaced by `getOrgOwnerEmails` and `getOrgMembers` (see
+  `packages/core/CHANGELOG.md`), so an unset billing contact now falls back to
+  the org's OWNERS rather than fanning out to every administrator.
 
 - **BREAKING (operators): migration `0055` drops `org_invitations.accepted_by`
   and `accepted_at` — and THE RELEASE CARRYING IT CANNOT BE ROLLED BACK.**

@@ -49,7 +49,12 @@ function toContent(message: UIMessage): Record<string, unknown> {
  * window (a row with zero messages) and lets the stream route be the single
  * writer of record.
  */
-export async function ensureSession(id: string, orgId: string, userId: string): Promise<void> {
+export async function ensureSession(
+  id: string,
+  orgId: string,
+  userId: string,
+  spaceId: string,
+): Promise<void> {
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -71,14 +76,23 @@ export async function ensureSession(id: string, orgId: string, userId: string): 
   // 404, not 403, so we don't reveal that the id exists for someone else.
   const [row] = await db
     .insert(chatSessions)
-    .values({ id, orgId, userId, title: null })
+    .values({ id, orgId, userId, spaceId, title: null })
     .onConflictDoUpdate({
       target: chatSessions.id,
       set: { id: sql`${chatSessions.id}` },
-      setWhere: and(eq(chatSessions.orgId, orgId), eq(chatSessions.userId, userId)),
+      setWhere: and(
+        eq(chatSessions.orgId, orgId),
+        eq(chatSessions.userId, userId),
+        eq(chatSessions.spaceId, spaceId),
+      ),
     })
-    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-  if (!row || row.orgId !== orgId || row.userId !== userId) {
+    .returning({
+      id: chatSessions.id,
+      orgId: chatSessions.orgId,
+      userId: chatSessions.userId,
+      spaceId: chatSessions.spaceId,
+    });
+  if (!row || row.orgId !== orgId || row.userId !== userId || row.spaceId !== spaceId) {
     throw notFound("Chat session not found");
   }
 }

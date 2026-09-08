@@ -86,6 +86,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
     await db.insert(chatSessions).values({
       id: "chs_ledger_1",
       orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const id = await recordLlmUsage({
@@ -141,6 +142,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
     await db.insert(chatSessions).values({
       id: "chs_ledger_both",
       orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
 

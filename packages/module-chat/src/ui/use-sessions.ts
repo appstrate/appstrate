@@ -13,11 +13,17 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
-import { fetchSessions, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessions.ts";
+import {
+  fetchSessions,
+  sessionsQueryKey,
+  spaceIdFromHeaders,
+  type SessionSummary,
+} from "./sessions.ts";
 
-// Re-exported for the app shell: the SSE dispatcher invalidates this key on
-// `chat_session_update` frames, and this module's `"./unread"` entry is the
-// shell's single import surface into the chat UI.
+// Re-exported for the app shell: the SSE dispatcher invalidates this PREFIX on
+// `chat_session_update` frames (the live keys carry the space id after it), and
+// this module's `"./unread"` entry is the shell's single import surface into
+// the chat UI.
 export { SESSIONS_QUERY_KEY } from "./sessions.ts";
 
 /** Reconciliation-only refetch — SSE is the primary freshness signal. */
@@ -47,11 +53,19 @@ export function sessionsRefetchInterval(query: {
     : SAFETY_NET_REFETCH_MS;
 }
 
-export function useSessions() {
-  const getHeaders = useChatHeaders();
+export function useSessions(headers?: GetHeaders) {
+  const contextHeaders = useChatHeaders();
+  // ChatPage owns the provider below its render, so its own observer receives
+  // the host headers directly. Descendants read the same headers from context.
+  const getHeaders = headers ?? contextHeaders;
+  const spaceId = spaceIdFromHeaders(getHeaders);
   return useQuery({
-    queryKey: SESSIONS_QUERY_KEY,
+    queryKey: sessionsQueryKey(spaceId),
     queryFn: () => fetchSessions(getHeaders),
+    // The route requires `X-Space-Id`. Firing before the host's space store
+    // resolves (first login, org switch) would be a guaranteed 400; the key
+    // carries the space, so it refetches the moment one arrives.
+    enabled: !!spaceId,
     refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
   });
@@ -66,12 +80,15 @@ export function useSessions() {
  * when the chat feature is off.
  */
 export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): number {
+  const spaceId = spaceIdFromHeaders(getHeaders);
   const { data } = useQuery({
-    queryKey: SESSIONS_QUERY_KEY,
+    queryKey: sessionsQueryKey(spaceId),
     queryFn: () => fetchSessions(getHeaders),
     refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
-    enabled,
+    // The badge is mounted on every page, including before a space is picked.
+    // Same gate as the list — and the same key, so both share one request.
+    enabled: enabled && !!spaceId,
   });
   return useMemo(() => (data ?? []).filter((s) => s.unread).length, [data]);
 }

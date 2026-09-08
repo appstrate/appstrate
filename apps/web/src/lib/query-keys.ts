@@ -172,6 +172,15 @@ export const orgKeys = {
   all: ["orgs"] as const,
 };
 
+/**
+ * Drop every cached row that was answered under the previous authority — an
+ * org switch, and entering or leaving a role preview. `["orgs"]` is spared
+ * because `OrgGate` blocks on it, and removing it flashes the boot screen.
+ */
+export function removeOrgScopedQueries(qc: QueryClient) {
+  qc.removeQueries({ predicate: (q) => q.queryKey[0] !== orgKeys.all[0] });
+}
+
 /** Per-actor agent persistence (memories + pinned slots). */
 export const persistenceKeys = {
   all: ["agent-persistence"] as const,

@@ -33,6 +33,22 @@ const stubStrategy: AuthStrategy = {
   id: "stub-test-strategy",
   async authenticate({ headers }) {
     const token = headers.get("x-test-strategy");
+    if (token === "deferred") {
+      // The shape the OIDC instance token has: the full user, no org pinned,
+      // no ceiling — the CLI acting as the person. The pipeline treats it like
+      // a session, which is what makes it eligible for a role preview.
+      if (!currentCtx) throw new Error("currentCtx not seeded — test setup bug");
+      return {
+        user: {
+          id: currentCtx.user.id,
+          email: currentCtx.user.email,
+          name: currentCtx.user.name,
+        },
+        authMethod: "stub-deferred",
+        permissions: [],
+        deferOrgResolution: true,
+      };
+    }
     if (token !== "valid" && token !== "admin") return null;
     if (!currentCtx) {
       throw new Error("currentCtx not seeded — test setup bug");
@@ -132,5 +148,85 @@ describe("module auth strategy pipeline", () => {
       },
     });
     expect(res.status).toBe(200);
+  });
+
+  // ── /api/orgs/* must not re-derive permissions for a ceiling-limited token ──
+  //
+  // `/api/orgs/*` skips `requireOrgContext`, so `middleware/org-path-context.ts`
+  // resolves the caller's permissions from the path org's membership row. That
+  // derivation must apply to session auth ONLY (plus `deferOrgResolution`
+  // strategies, which the pipeline itself resolves the same way): a strategy
+  // that already wrote a narrow `permissions` set has a ceiling, and replacing
+  // it with the subject's full role set hands a `runs:read` bearer the owner's
+  // `org:delete`.
+  //
+  // The stub subject IS the org owner (createTestContext), so the membership
+  // row would grant every org permission — which is exactly what makes this a
+  // discriminating test rather than a tautology.
+  describe("org-path permission derivation respects the strategy's ceiling", () => {
+    it("403s DELETE /api/orgs/:orgId — the strategy's scopes lack org:delete", async () => {
+      const res = await app.request(`/api/orgs/${currentCtx!.orgId}`, {
+        method: "DELETE",
+        headers: { "X-Test-Strategy": "valid" },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("403s PUT /api/orgs/:orgId/settings and POST /api/orgs/:orgId/members too", async () => {
+      const settings = await app.request(`/api/orgs/${currentCtx!.orgId}/settings`, {
+        method: "PUT",
+        headers: { "X-Test-Strategy": "valid", "Content-Type": "application/json" },
+        body: JSON.stringify({ dashboard_sso_enabled: true }),
+      });
+      expect(settings.status).toBe(403);
+
+      const invite = await app.request(`/api/orgs/${currentCtx!.orgId}/members`, {
+        method: "POST",
+        headers: { "X-Test-Strategy": "valid", "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "escalated@test.com", role: "member" }),
+      });
+      expect(invite.status).toBe(403);
+    });
+
+    it("a deferOrgResolution strategy may carry a role preview, an inline one may not", async () => {
+      // Eligibility is "did this credential authenticate the person" — a cookie
+      // session or the CLI/instance token — not "is it a cookie".
+      const previewed = await app.request("/api/spaces", {
+        headers: {
+          "X-Test-Strategy": "deferred",
+          "X-Org-Id": currentCtx!.orgId,
+          "X-View-As": `org_role=member; space=${currentCtx!.defaultSpaceId}; role=preset:viewer`,
+        },
+      });
+      expect(previewed.status, await previewed.clone().text()).toBe(200);
+      expect(previewed.headers.get("X-View-As-Active")).toBe("1");
+      const listed = (await previewed.json()) as {
+        data: Array<{ role: { key: string }; permissions: string[] }>;
+      };
+      expect(listed.data[0]?.role.key).toBe("viewer");
+      expect(listed.data[0]?.permissions).not.toContain("agents:write");
+
+      // The same strategy WITHOUT `deferOrgResolution` resolves its own org and
+      // ceiling inline, so it carries no session to narrow.
+      const refused = await app.request("/api/spaces", {
+        headers: {
+          "X-Test-Strategy": "valid",
+          "X-View-As": "org_role=member",
+        },
+      });
+      expect(refused.status).toBe(400);
+      expect(((await refused.json()) as { code: string }).code).toBe("view_as_unsupported");
+    });
+
+    it("the same owner over a cookie session CAN update the org (control)", async () => {
+      // Proves the refusals above come from the strategy's ceiling, not from
+      // the org routes being closed or the subject lacking the role.
+      const res = await app.request(`/api/orgs/${currentCtx!.orgId}`, {
+        method: "PUT",
+        headers: { Cookie: currentCtx!.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Renamed By Owner" }),
+      });
+      expect(res.status).toBe(200);
+    });
   });
 });

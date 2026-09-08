@@ -36,7 +36,9 @@ interface OAuthClientsTabProps {
 
 export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const { data, isLoading, error } = useOAuthClients(level);
+  const canWrite = can("oauth-clients:write");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editClient, setEditClient] = useState<OAuthClient | null>(null);
@@ -64,16 +66,20 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
               : "settings:oauthClients.introOrg",
           )}
         </p>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
-        </Button>
+        {canWrite && (
+          <Button size="sm" onClick={openCreate}>
+            <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
+          </Button>
+        )}
       </div>
 
       {data.length === 0 ? (
         <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
-          </Button>
+          {canWrite && (
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <ul className="space-y-3">
@@ -95,7 +101,9 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
 
 function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
+  const canWrite = can("oauth-clients:write");
+  const canDelete = can("oauth-clients:delete");
   const updateMutation = useUpdateOAuthClient();
   const deleteMutation = useDeleteOAuthClient();
   const rotateMutation = useRotateOAuthClientSecret();
@@ -167,10 +175,12 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button size="sm" variant="outline" onClick={onEdit} title={t("common:btn.edit")}>
-            <Pencil className="h-4 w-4" />
-          </Button>
-          {isAdmin && (
+          {canWrite && (
+            <Button size="sm" variant="outline" onClick={onEdit} title={t("common:btn.edit")}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+          )}
+          {canWrite && (
             <Button
               size="sm"
               variant={client.isFirstParty ? "default" : "outline"}
@@ -197,37 +207,43 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
               <ShieldCheck className="h-4 w-4" />
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleToggleDisabled}
-            disabled={updateMutation.isPending}
-            title={
-              client.disabled
-                ? t("settings:oauthClients.enable")
-                : t("settings:oauthClients.disable")
-            }
-          >
-            <Power className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setRotateConfirmOpen(true)}
-            disabled={rotateMutation.isPending}
-            title={t("settings:oauthClients.rotate")}
-          >
-            <RotateCcw className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={() => setDeleteConfirmOpen(true)}
-            disabled={deleteMutation.isPending}
-            title={t("common:btn.delete")}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {canWrite && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleToggleDisabled}
+                disabled={updateMutation.isPending}
+                title={
+                  client.disabled
+                    ? t("settings:oauthClients.enable")
+                    : t("settings:oauthClients.disable")
+                }
+              >
+                <Power className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setRotateConfirmOpen(true)}
+                disabled={rotateMutation.isPending}
+                title={t("settings:oauthClients.rotate")}
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          {canDelete && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => setDeleteConfirmOpen(true)}
+              disabled={deleteMutation.isPending}
+              title={t("common:btn.delete")}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
 

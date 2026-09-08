@@ -45,7 +45,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Package import** — Import agents, skills, MCP servers, and integrations from ZIP/AFPS files
 - **Skills & MCP servers** — Extend agent capabilities with SKILL.md instructions and packaged MCP Bundles (`server.type ∈ node | python | binary | uv`)
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
-- **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
+- **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member/guest), per-space membership and space roles
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
 - **OpenAPI documentation** — every endpoint documented at `/api/openapi.json` + Swagger UI at `/api/docs` (coverage enforced by `bun run verify:openapi`)
 - **Connection profiles** — Share connection sets across agents

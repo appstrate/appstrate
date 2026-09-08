@@ -4,8 +4,9 @@ import { i18nReady } from "./i18n";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./app";
+import { queryClient } from "./lib/query-client";
 import { startAuthBootstrap } from "./hooks/use-auth";
 import { primeOrgList } from "./hooks/use-org";
 import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reload";
@@ -39,16 +40,6 @@ window.addEventListener("vite:preloadError", (event) => {
     // Reload underway — swallow the rejection so no error UI flashes.
     event.preventDefault();
   }
-});
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
 });
 
 // The first screen needs three server reads that share no data with each

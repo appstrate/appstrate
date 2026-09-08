@@ -5,14 +5,16 @@
  * the existing `integrations.test.ts` (happy-path + CRUD) and the
  * service-level suites do NOT exercise:
  *
- *   1. block_user_connections workflow — admin PATCH /settings flips the gate;
- *      a non-admin MEMBER hitting connect/fields gets 403 with detail
- *      `connection_blocked_by_admin`; an ADMIN is exempt.
+ *   1. block_user_connections workflow — an `integrations:configure` holder
+ *      PATCHes /settings to flip the gate; a plain MEMBER hitting
+ *      connect/fields gets 403 with detail `connection_blocked_by_admin`; an
+ *      owner SESSION is exempt, an owner-minted API KEY is not.
  *   2. PATCH /:packageId/connections/:connectionId metadata authorization —
  *      owner edit (200), admin toggling sharedWithOrg on a row they don't own
  *      (403, owner-consent rule), unrelated member (403), foreign-space row (404).
- *   3. assertOrgAdmin defense-in-depth on admin writes — documents the
- *      reachable behavior of the role/scope intersection model.
+ *   3. `integrations:configure` is session-only — the governance mutations
+ *      (settings gate, agent pins, org default) refuse every API key,
+ *      whatever its creator's role.
  *   4. connect/oauth2 reconnect scope-union (incremental consent) — the
  *      returned authorize URL never shrinks below the connection's
  *      previously-granted scopes.
@@ -32,6 +34,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedApiKey, seedSpace } from "../../helpers/seed.ts";
+import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections, spacePackages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -189,9 +192,10 @@ describe("block_user_connections workflow", () => {
       body: JSON.stringify({ block_user_connections: true }),
     });
 
-    // ctx.user is the org owner (admin-equivalent) — `assertConnectionCreationAllowed`
-    // returns early for owner/admin, so the connect succeeds even with the
-    // gate on (this is how the admin creates the shared connection).
+    // ctx.user is the org owner — `assertConnectionCreationAllowed` returns
+    // early for a holder of `integrations:configure`, so the connect succeeds
+    // even with the gate on (this is how the admin creates the shared
+    // connection).
     const res = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -206,6 +210,46 @@ describe("block_user_connections workflow", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
     expect(rows).toHaveLength(1);
+  });
+
+  it("does not exempt an owner-minted API KEY — configure is session-only", async () => {
+    // The exemption is a PERMISSION, not a role. `integrations:configure` is
+    // absent from the API-key allowlist, so no key can hold it, and the gate
+    // applies to an owner's key exactly as it does to a member's.
+    await app.request("/api/integrations/@myorg/gmail/settings", {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: true }),
+    });
+
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id, // owner
+      scopes: ["integrations:connect"],
+    });
+
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBe("connection_blocked_by_admin");
+
+    // Discriminating control: the same key connects fine once the gate is off,
+    // so the 403 is the gate, not the key lacking `integrations:connect`.
+    await app.request("/api/integrations/@myorg/gmail/settings", {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: false }),
+    });
+    const after = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
+    });
+    expect(after.status).toBe(200);
   });
 
   it("does NOT block a member when the gate is off (default)", async () => {
@@ -403,7 +447,9 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     });
     expect(res.status).toBe(403);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/connection owner or an org admin/i);
+    expect(body.detail ?? "").toMatch(
+      /connection owner or a principal with integrations:configure/i,
+    );
   });
 
   it("404s a connection that belongs to a different space", async () => {
@@ -423,10 +469,10 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// 3. assertOrgAdmin defense-in-depth on pin/default writes
+// 3. integrations:configure is session-only on the governance mutations
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", () => {
+describe("integrations:configure is never grantable to an API key", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -453,12 +499,13 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
     return row!.id;
   }
 
-  it("admin-created api key WITH integrations:install passes both requirePermission and assertOrgAdmin", async () => {
-    // The only way an api key can hold `integrations:install` is to be minted
-    // by an admin/owner (resolveApiKeyPermissions intersects the requested
-    // scopes with the creator's role grants). Such a key's `orgRole` is the
-    // creator's admin role, so assertOrgAdmin lets it through. This pins the
-    // positive path the defense-in-depth guard deliberately allows.
+  it("refuses an owner-minted key holding integrations:install on PUT /default", async () => {
+    // `integrations:install` is the broadest install-tier scope a key can
+    // carry, and only an owner/admin creator can pass it through
+    // the pipeline's scopes ∩ authority intersection. The governance mutation
+    // still 403s because
+    // it now requires `integrations:configure`, which is absent from the
+    // API-key allowlist and therefore unreachable for any key.
     const connId = await seedSharedConn();
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -472,18 +519,45 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ connection_id: connId }),
     });
+    expect(res.status).toBe(403);
+  });
+
+  it("an owner session still performs the same mutation", async () => {
+    // The discriminating half: the route is not simply closed — the same
+    // request over a cookie session, which does hold `integrations:configure`,
+    // succeeds.
+    const connId = await seedSharedConn();
+    const res = await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_id: connId }),
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { connection_id: string };
     expect(body.connection_id).toBe(connId);
   });
 
-  it("member-created api key requesting integrations:install is stripped to 403 at requirePermission", async () => {
-    // Mint the key on a MEMBER creator while requesting `integrations:install`.
-    // resolveApiKeyPermissions intersects with member grants (which lack
-    // install), so the effective permission set never contains it — the
-    // request 403s at requirePermission, never reaching assertOrgAdmin. This
-    // is why the assertOrgAdmin guard is genuinely defense-in-depth: there is
-    // no reachable state where the install scope is held by a non-admin.
+  it("validateScopes refuses integrations:configure at mint time, for an owner", async () => {
+    // An owner's effective set in a space is everything, so the refusal cannot
+    // be the creator ceiling narrowing — it is the allowlist.
+    const ownerEverything = new Set<string>([
+      ...orgPermissions("owner"),
+      ...presetPermissions("admin"),
+    ]);
+    expect(() => validateScopes(["integrations:configure"], ownerEverything)).toThrow(
+      /non-grantable API key scope/,
+    );
+    // Same call with a grantable scope proves the throw is about the scope,
+    // not about the helper refusing everything.
+    expect(validateScopes(["integrations:install"], ownerEverything)).toEqual([
+      "integrations:install",
+    ]);
+  });
+
+  it("member-created api key requesting integrations:install is stripped to 403", async () => {
+    // The pipeline intersects the key's scopes with the creator's effective
+    // set in the key's space (a member holds the `operator` preset, which
+    // lacks `install`), so the effective set never contains it.
     const connId = await seedSharedConn();
     const member = await createTestUser({ email: "member-key@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");

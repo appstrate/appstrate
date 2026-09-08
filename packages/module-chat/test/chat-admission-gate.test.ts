@@ -85,6 +85,8 @@ function fakeContext(opts: {
   const vars: Record<string, unknown> = {
     orgId: opts.orgId,
     user: opts.user,
+    // What `enterSpaceContext` writes on every `/api/chat/*` route.
+    space: { id: opts.spaceId },
     orgRole: "member",
     permissions: [],
   };

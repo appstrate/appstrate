@@ -12,6 +12,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
+import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -56,9 +57,14 @@ export function ChatModulePage() {
   // The same namespace's `t` is injected into the module, so the shell AROUND
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
+  // The persona is read reactively and threaded through so this callback's
+  // identity changes when the preview starts or ends. The module's SSE effects
+  // depend on `getHeaders`, and a stream reads its URL once — without this they
+  // would keep tailing under the authority the preview replaced.
+  const viewAs = useViewAsHeader();
   const getHeaders = useCallback(
-    () => ({ ...buildScopingHeaders(), "X-Chat-Locale": i18n.language }),
-    [i18n],
+    () => ({ ...buildScopingHeaders(viewAs), "X-Chat-Locale": i18n.language }),
+    [i18n, viewAs],
   );
   const translate = useCallback(
     (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),

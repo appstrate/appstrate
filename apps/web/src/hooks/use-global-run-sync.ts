@@ -9,6 +9,9 @@ import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
+import { withViewAsParam } from "../lib/scoping-headers";
+import { endPreviewIfRefused } from "../lib/view-as-refusal";
+import { useViewAsHeader } from "../stores/view-as-store";
 import {
   runKeys,
   runsKeys,
@@ -307,6 +310,9 @@ export function useGlobalRunSync() {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  // Same reason as the org/space ids beside it: this stream is opened once and
+  // would otherwise keep filling the cache with the other authority's rows.
+  const viewAs = useViewAsHeader();
   const qcRef = useRef(qc);
   qcRef.current = qc;
 
@@ -344,6 +350,11 @@ export function useGlobalRunSync() {
         controller.signal.addEventListener("abort", onAbort, { once: true });
       });
 
+    // A persona this route refuses is not a transient outage: retrying it would
+    // loop an idle tab forever against a preview the server has already
+    // rejected, while the banner still claimed one.
+    let previewRefused = false;
+
     // One connection attempt. Returns when the stream ends or errors; throws
     // only for a non-OK response (handled by the reconnect loop).
     const connectOnce = async () => {
@@ -354,13 +365,17 @@ export function useGlobalRunSync() {
         // loop to drop it — and admins/owners got the `debug` level too.
         // `verbose` is deliberately absent: it only affects `run_log`, which
         // we no longer subscribe to.
-        `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=run_update,connection_update,chat_session_update`,
+        withViewAsParam(
+          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=run_update,connection_update,chat_session_update`,
+          viewAs,
+        ),
         {
           credentials: "include",
           signal: controller.signal,
         },
       );
       if (!res.ok || !res.body) {
+        previewRefused = await endPreviewIfRefused(res);
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
@@ -426,7 +441,7 @@ export function useGlobalRunSync() {
         } catch {
           // Failed to connect — fall through to the backoff below.
         }
-        if (controller.signal.aborted) break;
+        if (controller.signal.aborted || previewRefused) break;
         // Jitter — de-synchronize reconnect stampedes (every tab reconnects
         // at once after a redeploy).
         const delay =
@@ -440,5 +455,5 @@ export function useGlobalRunSync() {
       controller.abort();
       broad.dispose();
     };
-  }, [orgId, spaceId]);
+  }, [orgId, spaceId, viewAs]);
 }

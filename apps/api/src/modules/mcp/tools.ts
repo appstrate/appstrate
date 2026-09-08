@@ -55,6 +55,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -122,6 +123,7 @@ export interface McpToolContext {
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
+  authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -165,6 +167,10 @@ export const FORWARDED_AUTH_HEADERS = [
   "x-space-id",
   "appstrate-user",
   "appstrate-version",
+  // A role preview narrows what the caller reaches; a dispatch that dropped it
+  // would answer the model with the caller's REAL authority after the catalogue
+  // had already been filtered by the persona.
+  VIEW_AS_HEADER.toLowerCase(),
 ] as const;
 // Headers the caller may NOT set via the `headers` arg: the auth context is
 // forwarded from the inbound MCP request and must not be reshaped by the

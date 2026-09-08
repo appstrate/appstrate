@@ -34,6 +34,7 @@ import {
   createTestContext,
   createTestUser,
   addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -373,7 +374,12 @@ describe("files service + routes", () => {
     // container is the chat session, so runId is NULL — it would be missed by a
     // plain `files.run_id = run` filter).
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const upA = await stageUpload(scope, ctx.user.id, "in.txt", new TextEncoder().encode("input"));
     const docA = await createFileFromUpload(scope, userActor, upA, {
       chatSessionId: sessionId,
@@ -402,7 +408,12 @@ describe("files service + routes", () => {
 
   it("run_id filter finds file refs nested in objects and arrays", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const upA = await stageUpload(scope, ctx.user.id, "n.txt", new TextEncoder().encode("nested"));
     const docA = await createFileFromUpload(scope, userActor, upA, {
       chatSessionId: sessionId,
@@ -451,7 +462,12 @@ describe("files service + routes", () => {
 
   it("lists the complete private chat context without parsing messages", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
 
     const directUpload = await stageUpload(
       scope,
@@ -492,11 +508,48 @@ describe("files service + routes", () => {
     );
   });
 
+  it("does not reveal a conversation's context from another space", async () => {
+    // Sessions are space-scoped rows (RBAC spec §5), so the space is part of
+    // ownership: the SAME user asking from another space resolves nothing.
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
+    const upload = await stageUpload(
+      scope,
+      ctx.user.id,
+      "scoped.txt",
+      new TextEncoder().encode("scoped"),
+    );
+    const file = await createFileFromUpload(scope, userActor, upload, {
+      chatSessionId: sessionId,
+    });
+
+    const own = await listFilesForActor(scope, userActor, { contextChatSessionId: sessionId });
+    expect(own.data.map((d) => d.id)).toEqual([file.id]);
+
+    const otherSpace = await seedSpace({ orgId: ctx.orgId });
+    const fromOther = await listFilesForActor(
+      { orgId: ctx.orgId, spaceId: otherSpace.id },
+      userActor,
+      { contextChatSessionId: sessionId },
+    );
+    expect(fromOther.data).toEqual([]);
+  });
+
   it("does not reveal another member's conversation context", async () => {
     const other = await createTestUser({ email: "other-chat-owner@docs.test" });
     await addOrgMember(ctx.orgId, other.id, "member");
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: other.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: other.id,
+    });
     const runId = await seedRunRow(scope, { chatSessionId: sessionId });
     await publishStream(scope, runId, "private-context.txt", "context");
 
@@ -508,20 +561,22 @@ describe("files service + routes", () => {
 
   it("DELETE allowed for creator and for admin, forbidden otherwise", async () => {
     // A member (no files:delete) who creates a file.
-    const member = await createTestUser({ email: "member@docs.test" });
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const memberActor: Actor = { type: "user", id: member.id };
-    const memberHeaders = authHeaders({ ...ctx, cookie: member.cookie });
+    const member = await memberContext(ctx, "member");
+    const memberActor: Actor = { type: "user", id: member.user.id };
+    const memberHeaders = authHeaders(member);
 
     // A second member who is neither the creator nor an admin.
-    const stranger = await createTestUser({ email: "stranger@docs.test" });
-    await addOrgMember(ctx.orgId, stranger.id, "member");
-    const strangerHeaders = authHeaders({ ...ctx, cookie: stranger.cookie });
+    const strangerHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
 
     const makeDoc = async () => {
-      const up = await stageUpload(scope, member.id, "m.txt", new TextEncoder().encode("member"));
+      const up = await stageUpload(
+        scope,
+        member.user.id,
+        "m.txt",
+        new TextEncoder().encode("member"),
+      );
       return createFileFromUpload(scope, memberActor, up, { runId });
     };
 
@@ -579,21 +634,23 @@ describe("files service + routes", () => {
 
   it("POST /:id/keep clears the expiry for creator and admin, forbidden otherwise", async () => {
     // A member (no files:delete) who creates a file.
-    const member = await createTestUser({ email: "keeper@docs.test" });
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const memberActor: Actor = { type: "user", id: member.id };
-    const memberHeaders = authHeaders({ ...ctx, cookie: member.cookie });
+    const member = await memberContext(ctx, "member");
+    const memberActor: Actor = { type: "user", id: member.user.id };
+    const memberHeaders = authHeaders(member);
 
     // A second member who is neither the creator nor an admin.
-    const stranger = await createTestUser({ email: "keepstranger@docs.test" });
-    await addOrgMember(ctx.orgId, stranger.id, "member");
-    const strangerHeaders = authHeaders({ ...ctx, cookie: stranger.cookie });
+    const strangerHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
     const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
     const makeExpiringDoc = async () => {
-      const up = await stageUpload(scope, member.id, "k.txt", new TextEncoder().encode("keepme"));
+      const up = await stageUpload(
+        scope,
+        member.user.id,
+        "k.txt",
+        new TextEncoder().encode("keepme"),
+      );
       const doc = await createFileFromUpload(scope, memberActor, up, { runId });
       await db.update(files).set({ expiresAt: soon }).where(eq(files.id, doc.id));
       return doc;
@@ -779,7 +836,12 @@ describe("files service + routes", () => {
 
     // Member B's CHAT-contained file (private to B's session).
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: memberB.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: memberB.id,
+    });
     const upChat = await stageUpload(
       scope,
       memberB.id,
@@ -950,17 +1012,14 @@ describe("files service + routes", () => {
   it("GET /content: 403 for a member who is not the upload's creator, 200 for an agent_output", async () => {
     // Member A uploads on a run; member B (a second org member) can read the
     // metadata via the container ACL but the bytes are creator-only (D2/S1).
-    const memberA = await createTestUser({ email: "a2@docs.test" });
-    await addOrgMember(ctx.orgId, memberA.id, "member");
-    const actorA: Actor = { type: "user", id: memberA.id };
-    const memberB = await createTestUser({ email: "b2@docs.test" });
-    await addOrgMember(ctx.orgId, memberB.id, "member");
-    const bHeaders = authHeaders({ ...ctx, cookie: memberB.cookie });
+    const memberA = await memberContext(ctx, "member");
+    const actorA: Actor = { type: "user", id: memberA.user.id };
+    const bHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
     const up = await stageUpload(
       scope,
-      memberA.id,
+      memberA.user.id,
       "priv.txt",
       new TextEncoder().encode("A private"),
     );
@@ -1025,17 +1084,14 @@ describe("files service + routes", () => {
   });
 
   it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {
-    const creator = await createTestUser({ email: "c3@docs.test" });
-    await addOrgMember(ctx.orgId, creator.id, "member");
-    const creatorActor: Actor = { type: "user", id: creator.id };
-    const reader = await createTestUser({ email: "r3@docs.test" });
-    await addOrgMember(ctx.orgId, reader.id, "member");
-    const readerHeaders = authHeaders({ ...ctx, cookie: reader.cookie });
+    const creator = await memberContext(ctx, "member");
+    const creatorActor: Actor = { type: "user", id: creator.user.id };
+    const readerHeaders = authHeaders(await memberContext(ctx, "member"));
 
     const runId = await seedRunRow(scope);
     const up = await stageUpload(
       scope,
-      creator.id,
+      creator.user.id,
       "secret-notes.txt",
       new TextEncoder().encode("x"),
     );
@@ -1068,7 +1124,7 @@ describe("files service + routes", () => {
     expect(content.status).toBe(403);
 
     // The creator, by contrast, sees the real name + a minted preview token.
-    const creatorHeaders = authHeaders({ ...ctx, cookie: creator.cookie });
+    const creatorHeaders = authHeaders(creator);
     const own = await app.request(`/api/files/${upload.id}`, { headers: creatorHeaders });
     const ownDto = (await own.json()) as { name: string; preview_url: string | null };
     expect(ownDto.name).toBe("secret-notes.txt");
@@ -1427,7 +1483,12 @@ describe("files service + routes", () => {
     // A chat-session user_upload consumed by a run (link row). Deleting the
     // session detaches the doc (kept) rather than cascade-deleting it.
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const up = await stageUpload(scope, ctx.user.id, "att.txt", new TextEncoder().encode("attach"));
     const doc = await createFileFromUpload(scope, userActor, up, { chatSessionId: sessionId });
     const runB = await seedRunRow(scope);
@@ -1464,7 +1525,12 @@ describe("files service + routes", () => {
 
   it("deletes an unconsumed chat-session file when the session is deleted", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     const up = await stageUpload(scope, ctx.user.id, "solo.txt", new TextEncoder().encode("solo"));
     const doc = await createFileFromUpload(scope, userActor, up, { chatSessionId: sessionId });
 
@@ -1478,7 +1544,12 @@ describe("files service + routes", () => {
   it("rejects a file with both containers set (chk_files_single_container)", async () => {
     const runId = await seedRunRow(scope);
     const sessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
     await expect(
       (async () =>
         db.insert(files).values({

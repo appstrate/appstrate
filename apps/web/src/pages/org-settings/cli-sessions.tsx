@@ -10,6 +10,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
+import { usePermissions } from "../../hooks/use-permissions";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
 
 interface AdminCliSession extends CliSessionDisplay {
@@ -25,6 +26,7 @@ function memberLabel(s: AdminCliSession): string {
 export function OrgSettingsCliSessionsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
@@ -78,7 +80,8 @@ export function OrgSettingsCliSessionsPage() {
               session={s}
               meta={<span className="text-muted-foreground text-xs">· {memberLabel(s)}</span>}
               revokeDisabled={
-                revoke.isPending && revoke.variables?.params.path.familyId === s.familyId
+                !can("cli-sessions:delete") ||
+                (revoke.isPending && revoke.variables?.params.path.familyId === s.familyId)
               }
               onRevoke={() => setPendingRevoke(s)}
             />

@@ -2,6 +2,7 @@
 
 /** File-backed package validation/import and MCP runtime discovery tools. */
 
+import { PACKAGE_WRITE_PERMISSIONS } from "../../lib/package-access.ts";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
@@ -24,6 +25,12 @@ interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
   actor: Actor;
   scope: SpaceScope;
+  /**
+   * Package-level authorisation for the bundle about to be read. Required:
+   * the preflight and the import both hand it every package they found,
+   * and a context without it would install unauthorised ones.
+   */
+  authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
 }
 
 interface PackageFileBytes {
@@ -36,8 +43,11 @@ interface PackageFileBytes {
 type PackageFileImportContext = Pick<PackageFileToolContext, "permissions" | "actor">;
 
 function packageFileImportAccessError(ctx: PackageFileImportContext): string | undefined {
-  if (!ctx.permissions.has("mcp:invoke") || !ctx.permissions.has("agents:write")) {
-    return "Permissions 'mcp:invoke' and 'agents:write' are required to import packages.";
+  if (
+    !ctx.permissions.has("mcp:invoke") ||
+    !PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
+  ) {
+    return "Permissions 'mcp:invoke' and a package write permission are required to import packages.";
   }
   if (ctx.actor.type !== "user") return "Only organization users can import packages.";
   return undefined;
@@ -141,7 +151,11 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
     try {
       const file = await readPackageFileBytes(ctx, uri);
-      const { bundle, conflicts } = await preflightBundleImport(file.bytes, ctx.scope);
+      const { bundle, conflicts } = await preflightBundleImport(
+        file.bytes,
+        ctx.scope,
+        ctx.authorizeBundle,
+      );
       return textResult({
         valid: true,
         importable: conflicts.length === 0,
@@ -193,7 +207,12 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
     try {
       const file = await readPackageFileBytes(ctx, uri);
-      const result = await handleImportBundle(file.bytes, ctx.scope, ctx.actor.id);
+      const result = await handleImportBundle(
+        file.bytes,
+        ctx.scope,
+        ctx.actor.id,
+        ctx.authorizeBundle,
+      );
       for (const audit of bundleImportAuditRecords(result, {
         via: "import:file",
         fileId: file.fileId,

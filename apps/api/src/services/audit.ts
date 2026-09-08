@@ -19,6 +19,7 @@ import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
+import { viewAsWire } from "../lib/view-as.ts";
 
 type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
 
@@ -137,6 +138,9 @@ export async function drainAudits(
  * orgId explicitly instead of reading it from context. The end_user /
  * spaceId derivation is a safe superset for org routes (both are unset
  * there).
+ *
+ * Under a role preview the persona goes into `after.view_as`; the actor stays
+ * the administrator, which is who they were.
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
@@ -166,8 +170,10 @@ export async function recordAuditFromContext(
     actorId = user.id;
   }
 
+  const persona = c.get("viewAs");
   await recordAudit({
     ...auditInput,
+    ...(persona ? { after: { ...(auditInput.after ?? {}), view_as: viewAsWire(persona) } } : {}),
     orgId,
     spaceId: c.get("spaceId") ?? null,
     actorType,

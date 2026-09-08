@@ -19,6 +19,7 @@ import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
 
 export const organizations = pgTable(
   "organizations",
@@ -132,6 +133,16 @@ export const orgInvitations = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     role: orgRoleEnum("role").notNull(),
+    /**
+     * Space memberships applied when the invitation is accepted (RBAC spec
+     * §5). Wire-shaped (snake_case keys) because it is written straight from
+     * the validated invite body and read straight back onto it:
+     * `[{ space_id, preset_role } | { space_id, custom_role_id }]`.
+     */
+    spaceAssignments: jsonb("space_assignments")
+      .$type<ReadonlyArray<SpaceAssignment>>()
+      .notNull()
+      .default([]),
     status: invitationStatusEnum("status").notNull().default("pending"),
     invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -144,6 +155,15 @@ export const orgInvitations = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_org_invitations_invited_by").on(table.invitedBy),
+    // One pending invitation per (org, email): a second invite for the same
+    // address must extend or edit the existing one, never silently replace it
+    // and invalidate a link already shared (0056). `email` is stored
+    // lower-cased and trimmed by `createInvitation`, so the index needs no
+    // expression. Concurrent creates race on this index; the service maps
+    // the unique violation to `invitation_already_pending`.
+    uniqueIndex("uq_org_invitations_pending")
+      .on(table.orgId, table.email)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 

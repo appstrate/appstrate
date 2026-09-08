@@ -47,7 +47,7 @@ describe("invitation email", () => {
     inviteUrl: "https://app.example.com/invite/tok123/accept",
     orgName: "Acme Corp",
     inviterName: "Alice",
-    role: "admin",
+    role: "member",
   } as const;
 
   it("renders French invitation email", () => {
@@ -56,13 +56,14 @@ describe("invitation email", () => {
     expect(result.html).toContain("https://app.example.com/invite/tok123/accept");
     expect(result.html).toContain("Acme Corp");
     expect(result.html).toContain("Alice");
-    expect(result.html).toContain("admin");
+    expect(result.html).toContain("avec le rôle « utilisateur standard ».");
   });
 
   it("renders English invitation email", () => {
     const result = renderEmail("invitation", { ...baseProps, locale: "en" });
     expect(result.subject).toBe("Invitation to join Acme Corp");
     expect(result.html).toContain("Accept the invitation");
+    expect(result.html).toContain("with the role standard user.");
   });
 
   it("escapes HTML in user-provided values", () => {

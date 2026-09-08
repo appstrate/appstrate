@@ -10,6 +10,8 @@
  *
  * Middleware injects platform context and normalizes errors:
  * - `X-Org-Id` / `X-Space-Id` headers injected from the org/space stores
+ * - a non-2xx answer to a request that carried a role preview ends the preview
+ *   when the persona itself was refused (`lib/view-as-refusal.ts`)
  * - non-2xx responses throw `ApiError` (RFC 9457 problem details), so React
  *   Query errors are `instanceof ApiError` with `code`/`status`/`requestId`.
  *   Note: because errors are thrown, the `{ error }` branch of direct
@@ -20,6 +22,7 @@ import createReactQueryClient from "openapi-react-query";
 import type { components, paths } from "./schema";
 import { ApiError } from "./errors";
 import { buildScopingHeaders } from "../lib/scoping-headers";
+import { noteViewAsRefusal } from "../lib/view-as-refusal";
 
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
@@ -111,8 +114,11 @@ export async function toApiError(response: Response): Promise<Error> {
 }
 
 const problemDetailErrors: Middleware = {
-  async onResponse({ response }) {
+  async onResponse({ request, response }) {
     if (response.ok) return response;
+    // Before the throw, and for every route: a refused role preview must end
+    // the preview wherever it is noticed, not only on the org listing.
+    await noteViewAsRefusal(request.headers, response);
     throw await toApiError(response);
   },
 };

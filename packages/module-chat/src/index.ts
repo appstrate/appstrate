@@ -179,16 +179,24 @@ const chatModule: AppstrateModule = {
 
   features: { chat: true },
 
-  // Chat sessions are personal (scoped org + user) — every org member can
-  // read/write their own. Not API-key-grantable for now (the dashboard and
-  // embedded panels authenticate with the user session); end-user chat via
-  // OIDC tokens is a follow-up (flip `endUserGrantable` when the embedded
-  // B2B2C chat ships).
+  // Chat sessions are personal (scoped org + user) — everyone with access to
+  // the space can read/write their own. Read reaches `viewer` too: a
+  // read-only preset that cannot open a chat transcript is a preset with a
+  // hole. Not API-key-grantable for now (the dashboard and embedded panels
+  // authenticate with the user session); end-user chat via OIDC tokens is a
+  // follow-up (flip `endUserGrantable` when the embedded B2B2C chat ships).
   permissionsContribution: () => [
     {
       resource: "chat",
-      actions: ["read", "write"],
-      grantTo: ["owner", "admin", "member"],
+      actions: ["read"],
+      level: "space",
+      presets: ["admin", "builder", "operator", "viewer"],
+    },
+    {
+      resource: "chat",
+      actions: ["write"],
+      level: "space",
+      presets: ["admin", "builder", "operator"],
     },
   ],
 

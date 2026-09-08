@@ -70,6 +70,13 @@ interface LoopbackIdentity {
 
 interface LoopbackClaims extends LoopbackIdentity {
   exp: number;
+  /**
+   * Role preview in force on the minting request, verbatim; opaque here, the
+   * platform owns its shape. In the SIGNED claims rather than a header because
+   * the in-process MCP re-entry builds its own request — without it the hop
+   * would run with the caller's REAL authority while a preview is on screen.
+   */
+  viewAs?: unknown;
   /** Exact permission set this token resolves to (no role re-derivation). */
   permissions: string[];
   /** Whether the token grants the first-party-loopback capability. */
@@ -93,6 +100,7 @@ function mint(
   firstPartyLoopback: boolean,
   ttlMs: number,
   chatSessionId?: string | null,
+  viewAs?: unknown,
 ): string {
   const payload = Buffer.from(
     JSON.stringify({
@@ -101,6 +109,7 @@ function mint(
       permissions: [...permissions],
       firstPartyLoopback,
       ...(chatSessionId ? { chatSessionId } : {}),
+      ...(viewAs !== undefined ? { viewAs } : {}),
     } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
@@ -151,11 +160,11 @@ export function mintLoopbackToken(
  * callers pass a `ttlMs` that spans the whole turn.
  */
 export function mintMcpLoopbackToken(
-  identity: LoopbackIdentity & { permissions: readonly string[] },
+  identity: LoopbackIdentity & { permissions: readonly string[]; viewAs?: unknown },
   opts?: { ttlMs?: number },
 ): string {
-  const { permissions, ...rest } = identity;
-  return mint(rest, permissions, false, opts?.ttlMs ?? TOKEN_TTL_MS);
+  const { permissions, viewAs, ...rest } = identity;
+  return mint(rest, permissions, false, opts?.ttlMs ?? TOKEN_TTL_MS, null, viewAs);
 }
 
 export const chatLoopbackStrategy: AuthStrategy = {
@@ -199,11 +208,18 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // is server-minted from a process-local secret (see top-of-file rationale).
       firstPartyLoopback: claims.firstPartyLoopback === true,
       permissions,
-      // Surface the signed chat-session attribution as opaque strategy metadata
-      // (→ `c.get("authExtra")`). The llm-proxy stamps it on the usage row; only
-      // present on the inference bearer for a persisted turn.
-      ...(typeof claims.chatSessionId === "string"
-        ? { extra: { chatSessionId: claims.chatSessionId } }
+      // Opaque strategy metadata (→ `c.get("authExtra")`, and `adoptViewAs` for
+      // the preview). `chatSessionId` is stamped on the usage row by the
+      // llm-proxy; `viewAs` is re-published before any permission is resolved.
+      ...(claims.chatSessionId !== undefined || claims.viewAs !== undefined
+        ? {
+            extra: {
+              ...(typeof claims.chatSessionId === "string"
+                ? { chatSessionId: claims.chatSessionId }
+                : {}),
+              ...(claims.viewAs !== undefined ? { viewAs: claims.viewAs } : {}),
+            },
+          }
         : {}),
     };
   },

@@ -7,6 +7,7 @@ import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
+import { spaceRoleLabel } from "../hooks/use-roles";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,14 +42,14 @@ function OrgAvatar({ name, className }: { name: string; className?: string }) {
 }
 
 export function OrgSwitcher() {
-  const { t } = useTranslation();
+  const { t } = useTranslation(["common", "settings"]);
   const navigate = useNavigate();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const { isMobile } = useSidebar();
   const { data: spaces } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
@@ -132,19 +133,38 @@ export function OrgSwitcher() {
                   </DropdownMenuLabel>
                   {(spaces ?? []).map((space) => {
                     const isActive = space.id === currentSpaceId;
+                    // `private` spaces never reach the client; `closed` ones do,
+                    // listed but not enterable (`access: "none"`).
+                    const enterable = space.access === "member";
                     return (
                       <DropdownMenuItem
                         key={space.id}
                         data-testid={`space-item-${space.id}`}
                         className="flex items-center justify-between gap-2"
+                        disabled={!enterable}
+                        title={
+                          enterable ? undefined : t("spaces.requestAccess", { ns: "settings" })
+                        }
                         onSelect={() => {
-                          if (!isActive) switchSpace(space.id);
+                          if (enterable && !isActive) switchSpace(space.id);
                         }}
                       >
-                        <span className="flex items-center gap-1.5 truncate">
-                          {space.name}
-                          {space.isDefault && (
-                            <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="flex items-center gap-1.5 truncate">
+                            {space.name}
+                            {space.isDefault && (
+                              <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
+                            )}
+                          </span>
+                          {enterable && space.role && (
+                            <span className="text-muted-foreground truncate text-xs">
+                              {spaceRoleLabel(space.role, t)}
+                            </span>
+                          )}
+                          {!enterable && (
+                            <span className="text-muted-foreground truncate text-xs">
+                              {t("spaces.requestAccess", { ns: "settings" })}
+                            </span>
                           )}
                         </span>
                         {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}
@@ -164,7 +184,7 @@ export function OrgSwitcher() {
                 {t("switcher.createOrg")}
               </Link>
             </DropdownMenuItem>
-            {isAdmin && (
+            {can("spaces:read") && (
               <DropdownMenuItem asChild>
                 <Link to="/library" className="text-primary flex items-center gap-2">
                   <Library size={14} />

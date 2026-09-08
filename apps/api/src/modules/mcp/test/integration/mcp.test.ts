@@ -184,6 +184,39 @@ describe("mcp discovery + auth gate", () => {
     expect(challenge!).toContain("resource_metadata=");
   });
 
+  it("403s a guest with no space row and serves the same caller once a row exists", async () => {
+    // RBAC spec §7.3: the per-org endpoint pins an org, resolves the ORG'S
+    // DEFAULT SPACE, and reads the caller's role there. `mcp` is a space-level
+    // resource, so a `guest` — implicit in no space — cannot pass its guard.
+    // A session caller is used because it takes the same `resolveMcpSpaceRow` →
+    // `applySpacePermissions` path a per-org bearer does; only the credential
+    // that resolved the org role differs.
+    const { createTestUser, addOrgMember } = await import("../../../../../test/helpers/auth.ts");
+    const { seedSpaceMember } = await import("../../../../../test/helpers/seed.ts");
+    const owner = await createTestContext();
+    const guest = await createTestUser();
+    await addOrgMember(owner.orgId, guest.id, "guest");
+    const headers = { Cookie: guest.cookie, "X-Org-Id": owner.orgId };
+
+    const denied = await app.request(mcpPath(headers), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    });
+    expect(denied.status).toBe(403);
+
+    // The control: one `operator` row in the default space, same caller, same
+    // request — and now the tool list is served.
+    await seedSpaceMember({
+      spaceId: owner.defaultSpaceId,
+      userId: guest.id,
+      presetRole: "operator",
+    });
+    const listed = await rpc(headers, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    expect(listed.status).toBe(200);
+    expect((listed.envelope.result?.tools as unknown[]).length).toBeGreaterThan(0);
+  });
+
   it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
     // Stateless transport (no session id, JSON response mode) does not serve a
     // standalone SSE stream, so GET is Method Not Allowed. This is the

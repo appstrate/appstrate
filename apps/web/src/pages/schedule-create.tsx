@@ -12,7 +12,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 
 export function ScheduleCreatePage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const navigate = useNavigate();
 
   const { data: agents, isLoading: agentsLoading } = useAgents();
@@ -22,7 +22,7 @@ export function ScheduleCreatePage() {
   const { deps, error: depsError } = useScheduleFormDeps(effectiveAgentId || undefined);
   const createSchedule = useCreateSchedule(effectiveAgentId);
 
-  if (!isAdmin) return null;
+  if (!can("schedules:write")) return null;
   if (agentsLoading) return <LoadingState />;
   // Same reason as the edit page: `ScheduleForm` seeds its input state once, in
   // a `useState` initialiser, and `key={effectiveAgentId}` gives no remount when

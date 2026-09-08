@@ -393,6 +393,13 @@
       "when": 1787600480000,
       "tag": "0055_schema_integrity_repairs",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787600540000,
+      "tag": "0056_space_roles",
+      "breakpoints": true
     }
   ]
 }

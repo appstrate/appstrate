@@ -25,7 +25,7 @@ function isExpired(expiresAt: string | null | undefined): boolean {
 
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const spaceId = useCurrentSpaceId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
@@ -33,11 +33,13 @@ export function ApiKeysPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
-  if (!isAdmin) return null;
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
+
+  const canCreate = can("api-keys:create");
+  const canRevoke = can("api-keys:revoke");
 
   const handleRevoke = (key: ApiKeyInfo) => {
     setConfirmState({ id: key.id, label: key.name });
@@ -54,7 +56,9 @@ export function ApiKeysPage() {
         >
           {t("settings:apiKeys.swaggerLink")}
         </a>
-        <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+        {canCreate && (
+          <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+        )}
       </div>
 
       {apiKeys && apiKeys.length > 0 ? (
@@ -118,9 +122,11 @@ export function ApiKeysPage() {
                   )}
                 </div>
                 <div className="border-border mt-3 flex justify-end gap-2 border-t pt-3">
-                  <Button variant="destructive" size="sm" onClick={() => handleRevoke(key)}>
-                    {t("settings:apiKeys.revoke")}
-                  </Button>
+                  {canRevoke && (
+                    <Button variant="destructive" size="sm" onClick={() => handleRevoke(key)}>
+                      {t("settings:apiKeys.revoke")}
+                    </Button>
+                  )}
                 </div>
               </div>
             );
@@ -133,7 +139,9 @@ export function ApiKeysPage() {
           icon={KeyRound}
           compact
         >
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+          {canCreate && (
+            <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+          )}
         </EmptyState>
       )}
 

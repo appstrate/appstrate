@@ -32,7 +32,7 @@ import { db } from "@appstrate/db/client";
 import { endUsers, spaces } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { prefixedId } from "../../../lib/ids.ts";
-import type { SpaceContextRow } from "../../../middleware/space-context.ts";
+import type { SpaceContextRow } from "../../../lib/space-lookup.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
 
@@ -50,6 +50,8 @@ export async function loadSpaceById(spaceId: string): Promise<SpaceContextRow | 
       id: spaces.id,
       orgId: spaces.orgId,
       isDefault: spaces.isDefault,
+      visibility: spaces.visibility,
+      defaultRole: spaces.defaultRole,
     })
     .from(spaces)
     .where(eq(spaces.id, spaceId))

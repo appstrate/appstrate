@@ -109,6 +109,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "SpaceObject ↔ SpaceInfo",
   },
   {
+    specSchemaName: "SpaceMemberObject",
+    sharedTypeName: "SpaceMember",
+    description: "SpaceMemberObject ↔ SpaceMember",
+  },
+  {
     specSchemaName: "SpacePackage",
     sharedTypeName: "InstalledPackage",
     description: "SpacePackage ↔ InstalledPackage",
@@ -168,6 +173,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "OrgInvitationInfo ↔ OrgInvitation",
   },
   {
+    specSchemaName: "SpaceAssignment",
+    sharedTypeName: "SpaceAssignment",
+    description: "SpaceAssignment ↔ SpaceAssignment (org_invitations.space_assignments entry)",
+  },
+  {
     specSchemaName: "OrgMember",
     sharedTypeName: "OrganizationMember",
     description: "OrgMember ↔ OrganizationMember",
@@ -209,6 +219,14 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   UIHintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   // Error + auth/credential wire with no SPA shared-type consumer.
   ProblemDetail: "RFC 9457 error envelope; never read through a shared-type",
+  RoleObject:
+    "space-role listing wire (presets from code + `space_roles` rows projected onto one shape); the roles page consumes the generated spec type",
+  RoleVocabularyGroup:
+    "permission-picker payload derived from the live catalog (`spaceLevelVocabulary`); no persisted row and no shared-type",
+  SpaceMemberAssignment:
+    "bare write acknowledgement of POST/PATCH /spaces/{id}/members echoing the assignment; the page re-reads SpaceMemberObject, which IS registered",
+  SpaceMemberRemoval:
+    "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
   ModelGenerationSettings:
     "embedded request/response value object; canonical runtime type lives in @appstrate/core",

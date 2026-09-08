@@ -11,6 +11,8 @@ import {
 } from "@appstrate/shared-types";
 import { getCurrentOrgId } from "../stores/org-store";
 import { getCurrentSpaceId } from "./use-current-space";
+import { withViewAsParam } from "../lib/scoping-headers";
+import { useViewAsHeader } from "../stores/view-as-store";
 import { patchRunDetail } from "./use-global-run-sync";
 
 // Re-export so existing consumers (run-detail.tsx) keep importing the metric
@@ -41,6 +43,9 @@ function safeJsonParse(text: string): unknown {
  * the global stream writes — closing the gap when that stream missed a frame.
  */
 export function useRunRealtime(runId: string | null | undefined, handlers: RunRealtimeHandlers) {
+  // A dependency, not a convenience: `EventSource` reads its URL once, so
+  // entering or leaving a preview has to close this stream and open a new one.
+  const viewAs = useViewAsHeader();
   const qc = useQueryClient();
   const handlersRef = useRef(handlers);
   useEffect(() => {
@@ -59,7 +64,10 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     // to neither. `verbose=true` is still required — it is what keeps
     // `run_log.data` in the payload.
     const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_update,run_log,run_metric`,
+      withViewAsParam(
+        `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_update,run_log,run_metric`,
+        viewAs,
+      ),
       { withCredentials: true },
     );
 
@@ -81,5 +89,5 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     return () => {
       es.close();
     };
-  }, [runId, qc]);
+  }, [runId, qc, viewAs]);
 }

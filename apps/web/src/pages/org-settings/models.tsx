@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
@@ -60,6 +59,8 @@ function ModelsList({
   onEdit,
   onDelete,
   onSetDefault,
+  canWrite,
+  canDelete,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -68,6 +69,8 @@ function ModelsList({
   onEdit: (m: OrgModelInfo) => void;
   onDelete: (m: OrgModelInfo) => void;
   onSetDefault: (m: OrgModelInfo) => void;
+  canWrite: boolean;
+  canDelete: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
@@ -79,9 +82,11 @@ function ModelsList({
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-end gap-2">
-        <Button onClick={onCreate}>{t("models.add")}</Button>
-      </div>
+      {canWrite && (
+        <div className="mb-4 flex items-center justify-end gap-2">
+          <Button onClick={onCreate}>{t("models.add")}</Button>
+        </div>
+      )}
 
       {models && models.length > 0 ? (
         <div className="overflow-hidden rounded-md border">
@@ -144,6 +149,7 @@ function ModelsList({
                         defaultLabel={t("models.default")}
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}
+                        canSetDefault={canWrite}
                         disabled={m.needs_reconnection}
                         testId={`set-default-model-${m.id}`}
                       />
@@ -158,7 +164,7 @@ function ModelsList({
                             server-side too (400) — this only keeps the UI from
                             offering a button that cannot work. Same posture as
                             the edit button below. */}
-                        {!m.aliased && (
+                        {!m.aliased && canWrite && (
                           <>
                             {testResults[m.id] && (
                               <TestResultSpan
@@ -185,7 +191,7 @@ function ModelsList({
                                 projected modelId is null and would fail
                                 validation. Edit env/API-side; delete still
                                 works (by id). */}
-                            {!m.aliased && (
+                            {!m.aliased && canWrite && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -196,15 +202,17 @@ function ModelsList({
                                 <Pencil size={14} />
                               </Button>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onDelete(m)}
-                              aria-label={t("models.delete")}
-                            >
-                              <Trash2 size={14} className="text-destructive" />
-                            </Button>
+                            {canDelete && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onDelete(m)}
+                                aria-label={t("models.delete")}
+                              >
+                                <Trash2 size={14} className="text-destructive" />
+                              </Button>
+                            )}
                           </>
                         )}
                       </div>
@@ -217,7 +225,7 @@ function ModelsList({
         </div>
       ) : (
         <EmptyState message={t("models.empty")} icon={BrainCircuit} compact>
-          <Button onClick={onCreate}>{t("models.add")}</Button>
+          {canWrite && <Button onClick={onCreate}>{t("models.add")}</Button>}
         </EmptyState>
       )}
     </>
@@ -232,6 +240,8 @@ function CredentialsSection({
   onEdit,
   onDelete,
   onConnectOAuth,
+  canWrite,
+  canDelete,
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
@@ -240,6 +250,8 @@ function CredentialsSection({
   onEdit: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
+  canWrite: boolean;
+  canDelete: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
@@ -252,7 +264,7 @@ function CredentialsSection({
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
   // in-modal provider picker with zero UI footprint here.
-  const addButton = <Button onClick={onCreate}>{t("credentials.add")}</Button>;
+  const addButton = canWrite ? <Button onClick={onCreate}>{t("credentials.add")}</Button> : null;
 
   return (
     <div className="mb-8">
@@ -329,7 +341,7 @@ function CredentialsSection({
                             failedKey="credentials.testFailed"
                           />
                         )}
-                        {!isOauth && pk.source === "custom" && (
+                        {!isOauth && pk.source === "custom" && canWrite && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -342,29 +354,33 @@ function CredentialsSection({
                         )}
                         {pk.source === "custom" && !isOauth && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onEdit(pk)}
-                              aria-label={t("credentials.edit")}
-                            >
-                              <Pencil size={14} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onDelete(pk)}
-                              aria-label={t("credentials.delete")}
-                            >
-                              <Trash2 size={14} className="text-destructive" />
-                            </Button>
+                            {canWrite && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onEdit(pk)}
+                                aria-label={t("credentials.edit")}
+                              >
+                                <Pencil size={14} />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onDelete(pk)}
+                                aria-label={t("credentials.delete")}
+                              >
+                                <Trash2 size={14} className="text-destructive" />
+                              </Button>
+                            )}
                           </>
                         )}
                         {isOauth && (
                           <>
-                            {pk.needs_reconnection && pk.providerId && (
+                            {pk.needs_reconnection && pk.providerId && canWrite && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -374,15 +390,17 @@ function CredentialsSection({
                                 {t("credentials.oauth.reconnect")}
                               </Button>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onDelete(pk)}
-                              aria-label={t("credentials.oauth.disconnect")}
-                            >
-                              <Trash2 size={14} className="text-destructive" />
-                            </Button>
+                            {canDelete && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => onDelete(pk)}
+                                aria-label={t("credentials.oauth.disconnect")}
+                              >
+                                <Trash2 size={14} className="text-destructive" />
+                              </Button>
+                            )}
                           </>
                         )}
                       </div>
@@ -409,7 +427,13 @@ function CredentialsSection({
 
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
+
+  const canWriteModels = can("models:write");
+  const canDeleteModels = can("models:delete");
+  const canReadCredentials = can("model-provider-credentials:read");
+  const canWriteCredentials = can("model-provider-credentials:write");
+  const canDeleteCredentials = can("model-provider-credentials:delete");
 
   const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
@@ -431,11 +455,11 @@ export function OrgSettingsModelsPage() {
   const [pkModalOpen, setPkModalOpen] = useState(false);
   const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
   const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
+  // The credentials tab has its own resource; `models:read` alone does not open it.
+  const activeTab = canReadCredentials ? subTab : "models-list";
   const createPkMutation = useCreateModelProviderCredential();
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
-
-  if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
   // `org_models.credential_id` is ON DELETE RESTRICT (409 `credential_in_use`):
   // the dialog says so before asking the server.
@@ -456,14 +480,16 @@ export function OrgSettingsModelsPage() {
 
   return (
     <>
-      <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
+      <Tabs value={activeTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
         <TabsList className="mb-4">
           <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
-          <TabsTrigger value="credentials">{t("credentials.title")}</TabsTrigger>
+          {canReadCredentials && (
+            <TabsTrigger value="credentials">{t("credentials.title")}</TabsTrigger>
+          )}
         </TabsList>
       </Tabs>
 
-      {subTab === "models-list" && (
+      {activeTab === "models-list" && (
         <ModelsList
           models={models}
           isLoading={modelsLoading}
@@ -478,10 +504,12 @@ export function OrgSettingsModelsPage() {
           }}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
           onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
+          canWrite={canWriteModels}
+          canDelete={canDeleteModels}
         />
       )}
 
-      {subTab === "credentials" && (
+      {activeTab === "credentials" && (
         <CredentialsSection
           credentials={credentials}
           isLoading={pkLoading}
@@ -501,6 +529,8 @@ export function OrgSettingsModelsPage() {
             setEditPk(credential);
             setPkModalOpen(true);
           }}
+          canWrite={canWriteCredentials}
+          canDelete={canDeleteCredentials}
         />
       )}
 

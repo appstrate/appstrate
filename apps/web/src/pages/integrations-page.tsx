@@ -79,7 +79,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummaryWire 
 
 export function IntegrationsPage() {
   const { t } = useTranslation("settings");
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const [tab, setTab] = useState<"active" | "all">("active");
   const [query, setQuery] = useState("");
   const { data: integrations, isLoading, error } = useIntegrations();
@@ -102,7 +102,7 @@ export function IntegrationsPage() {
           { label: t("integrations.title") },
         ]}
         actions={
-          isAdmin ? (
+          can("integrations:write") ? (
             <Link to="/integrations/new">
               <Button>
                 <Plus size={14} />

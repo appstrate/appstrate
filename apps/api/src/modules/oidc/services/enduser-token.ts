@@ -67,7 +67,7 @@ export interface AccessTokenClaims {
   scope?: string;
   /** Org scope for dashboard users and (derived) for end-users. */
   orgId?: string;
-  /** Dashboard flow: `owner` / `admin` / `member` / `viewer`. */
+  /** Dashboard flow: `owner` / `admin` / `member` / `guest`. */
   orgRole?: OrgRole;
   /** End-user flow: owning space id. */
   spaceId?: string;
@@ -238,7 +238,7 @@ export async function verifyEndUserAccessToken(
     (extra.org_role === "owner" ||
       extra.org_role === "admin" ||
       extra.org_role === "member" ||
-      extra.org_role === "viewer")
+      extra.org_role === "guest")
       ? (extra.org_role as OrgRole)
       : undefined;
   return {

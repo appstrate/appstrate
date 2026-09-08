@@ -22,6 +22,7 @@ import { zipSync } from "fflate";
 import { writeBundleToBuffer, BundleError } from "@appstrate/afps-runtime/bundle";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { initRunLimits } from "../../../src/services/run-limits.ts";
 import {
   detectBundleConflicts,
   handleImportBundle,
@@ -36,6 +37,12 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
+
+/** Service-level tests exercise the import itself; route guards are tested at the HTTP layer. */
+const noAuthorize = async () => {};
+
+// `importBundle` reads the platform run limits; the HTTP harness initializes them at boot.
+initRunLimits();
 
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
@@ -369,14 +376,17 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
 
   it("sequential: org B importing a package owned by org A gets a 409 — never a silent graft", async () => {
     // Org A owns the package with version 1.0.0.
-    const first = await handleImportBundle(agentAfps("1.0.0"), scopeA, ctxA.user.id);
+    const first = await handleImportBundle(agentAfps("1.0.0"), scopeA, ctxA.user.id, noAuthorize);
     expect(first.imported[0]!.status).toBe("inserted");
     expect(await packageOwner(PKG)).toBe(ctxA.orgId);
 
     // Route path (preflight): same identity → 409.
-    const viaPreflight = await handleImportBundle(agentAfps("1.0.0"), scopeB, ctxB.user.id).catch(
-      (e: unknown) => e,
-    );
+    const viaPreflight = await handleImportBundle(
+      agentAfps("1.0.0"),
+      scopeB,
+      ctxB.user.id,
+      noAuthorize,
+    ).catch((e: unknown) => e);
     expect(viaPreflight).toBeInstanceOf(ApiError);
     expect((viaPreflight as ApiError).status).toBe(409);
     expect((viaPreflight as ApiError).code).toBe("bundle_conflict");
@@ -403,8 +413,8 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
       const bytes = agentAfps("1.0.0");
 
       const [a, b] = await Promise.allSettled([
-        handleImportBundle(bytes, scopeA, ctxA.user.id),
-        handleImportBundle(bytes, scopeB, ctxB.user.id),
+        handleImportBundle(bytes, scopeA, ctxA.user.id, noAuthorize),
+        handleImportBundle(bytes, scopeB, ctxB.user.id, noAuthorize),
       ]);
 
       const settled = [

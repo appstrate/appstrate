@@ -6,8 +6,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
+import { exitViewAs } from "../stores/view-as-store";
 import { useAutoSelect } from "./use-auto-select";
-import { orgKeys } from "../lib/query-keys";
+import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
 
 // Reactive hook for query key usage — re-renders when org changes
 export function useCurrentOrgId(): string | null {
@@ -58,10 +59,9 @@ export function useOrg() {
   const currentOrgId = useStore(orgStore, (s) => s.id);
 
   const { data: orgs = [], isLoading } = useQuery({
-    // Deliberately kept on the literal ["orgs"] key (not the typed-client
-    // [method, path, init] key): it is the one query NOT wiped on org switch
-    // (see the removeQueries predicate below) and other call sites invalidate
-    // ["orgs"] directly. Only the fetch itself goes through the typed client.
+    // The one query NOT wiped on org switch, and invalidated by name from
+    // several call sites — hence the literal key rather than the typed
+    // client's [method, path, init] one.
     queryKey: orgKeys.all,
     queryFn: orgListQueryFn,
   });
@@ -73,11 +73,12 @@ export function useOrg() {
   const switchOrg = useCallback(
     (orgId: string) => {
       if (orgId === orgStore.getState().id) return;
+      // A persona is validated in ONE organization; carrying it across is not
+      // a preview of anything. No-op unless one is active.
+      exitViewAs();
       orgStore.getState().setId(orgId);
-      // Reset space selection when org changes
       spaceStore.getState().setId(null);
-      // Clear all cached data since it is org-scoped
-      queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "orgs" });
+      removeOrgScopedQueries(queryClient);
     },
     [queryClient],
   );
@@ -89,6 +90,5 @@ export function useOrg() {
     orgs,
     switchOrg,
     loading: isLoading,
-    isOrgOwner: currentOrg?.role === "owner",
   };
 }

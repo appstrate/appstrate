@@ -34,6 +34,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
+import { VIEW_AS_QUERY } from "@appstrate/core/permissions";
 // The correlation rule and the origin check in front of it come from core, not
 // from this module: every connect surface applies the same one, and a copy only
 // this module could import is what let the SPA's connect popup ship with no
@@ -45,6 +46,7 @@ import {
 } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders } from "./runtime-context.ts";
+import { orgSpaceFromHeaders } from "./run-events.ts";
 import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
@@ -60,9 +62,7 @@ function watchConnectionSse(
   onHit: () => void,
 ): () => void {
   if (typeof EventSource === "undefined") return () => {};
-  const headers = getHeaders?.() ?? {};
-  const orgId = headers["X-Org-Id"] ?? headers["x-org-id"];
-  const spaceId = headers["X-Space-Id"] ?? headers["x-space-id"];
+  const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(getHeaders?.() ?? {});
   if (!orgId || !spaceId) return () => {};
 
   let es: EventSource | null = null;
@@ -75,7 +75,14 @@ function watchConnectionSse(
       // `channels` is declared because this opens one org-wide stream PER
       // rendered card, and the listener below reads `connection_update` only.
       // Without it each card would also carry the org's whole run_log traffic.
-      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=connection_update`,
+      // A role preview travels as `view_as`: the realtime routes REFUSE the
+      // header (`EventSource` cannot send one), and a card left header-less
+      // would watch under the authority the preview replaced. The effect that
+      // opens this depends on `getHeaders`, whose identity moves with the
+      // persona, so entering or leaving reconnects.
+      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=connection_update${
+        viewAs ? `&${VIEW_AS_QUERY}=${encodeURIComponent(viewAs)}` : ""
+      }`,
       { withCredentials: true },
     );
     es.addEventListener("connection_update", (ev) => {

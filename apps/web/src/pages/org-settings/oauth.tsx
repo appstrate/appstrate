@@ -2,7 +2,6 @@
 
 import { lazy, Suspense } from "react";
 import { Navigate } from "react-router-dom";
-import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import { LoadingState } from "../../components/page-states";
@@ -14,11 +13,10 @@ const OAuthClientsTab = lazy(() =>
 );
 
 export function OrgSettingsOAuthPage() {
-  const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
   const { data: orgSettings, isLoading } = useOrgSettings();
 
-  if (!isAdmin || !features.oidc) {
+  if (!features.oidc) {
     return <Navigate to="/org-settings/general" replace />;
   }
 

@@ -131,6 +131,7 @@ describe("llm_usage detach-on-delete (migration 0028)", () => {
     await db.insert(chatSessions).values({
       id: "chs_detach_1",
       orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const [row] = await db
