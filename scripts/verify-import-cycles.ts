@@ -291,7 +291,14 @@ export function resolveSpecifier(fromFile: string, spec: string, ctx: ResolveCon
       for (const [prefix, suffix, template] of ctx.workspaceExportPatterns) {
         if (!spec.startsWith(prefix) || !spec.endsWith(suffix)) continue;
         const star = spec.slice(prefix.length, spec.length - suffix.length);
-        base = template.replace("*", star);
+        // `replaceAll`, not `replace`. Node's subpath-pattern rule allows ONE
+        // `*` in the key but substitutes EVERY occurrence in the target, so a
+        // target like `./dist/*/index-*.js` is legal. First-occurrence
+        // replacement would leave the second `*` literal, the path would not
+        // exist, and the edge would fall through to `external` — a silently
+        // unscanned import, which is the one outcome this gate must not have.
+        // Flagged by CodeQL `js/incomplete-sanitization` on PR #1281.
+        base = template.replaceAll("*", star);
         break;
       }
     }

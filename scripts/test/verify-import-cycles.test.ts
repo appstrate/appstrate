@@ -105,6 +105,25 @@ describe("resolveSpecifier", () => {
     ).toEqual({ kind: "unresolved", attempted: "packages/ui/src/components/button.tsx" });
   });
 
+  // Node allows one `*` in a pattern KEY but substitutes every occurrence in
+  // the TARGET, so `./dist/*/index-*.ts` is legal. A first-occurrence
+  // replacement leaves the second star literal, the path does not exist, and
+  // the import falls through to `external` — an unscanned edge the gate would
+  // never mention. Regression control for the `replaceAll` in
+  // `resolveSpecifier`; with `.replace` this expects
+  // `packages/ui/src/button/index-*.ts` and fails.
+  it("substitutes EVERY star in a multi-star exports target", () => {
+    const multi = context({
+      workspaceExportPatterns: [
+        ["@appstrate/ui/deep/", "", "packages/ui/src/*/index-*.ts"] as const,
+      ],
+    });
+    expect(resolveSpecifier("apps/web/src/a.tsx", "@appstrate/ui/deep/button", multi)).toEqual({
+      kind: "unresolved",
+      attempted: "packages/ui/src/button/index-button.ts",
+    });
+  });
+
   it("reports a third-party specifier as external", () => {
     expect(resolveSpecifier("apps/api/src/a.ts", "hono", ctx)).toEqual({ kind: "external" });
     expect(resolveSpecifier("apps/api/src/a.ts", "node:path", ctx)).toEqual({ kind: "external" });
