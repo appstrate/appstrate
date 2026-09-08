@@ -71,6 +71,37 @@ Apply all of it during the same maintenance window with application traffic stop
 
 Deleted spaces/custom roles in OAuth signup assignments require updating the client's configuration before new users can join; signup fails without creating partial org/space memberships. Existing members remain able to authenticate. Invitation acceptance retains its existing skip-and-log behavior for deleted targets.
 
+## OAuth-provider 1.7.3 rollout (drizzle `0057`, script `0010`)
+
+1. **Pre-flight, before any drizzle migration.** `0057` fills a NULL
+   `token_endpoint_auth_method` with `client_secret_basic`, which 1.7.3 then
+   enforces strictly. Count the confidential clients that have no method stored
+   — each one authenticates by putting its secret in the POST body and will be
+   answered `invalid_client`:
+
+   ```sql
+   SELECT count(*) FROM oauth_clients
+   WHERE token_endpoint_auth_method IS NULL AND "public" = false;
+   ```
+
+   Non-zero → decide per client before applying: store `client_secret_post` by
+   hand, or tell the owner to move to `client_secret_basic`.
+
+2. Apply pending Drizzle migrations, including `0057_oauth_provider_1_7_3.sql`.
+   Its section D drops `oauth_clients.public` and `type`; an older build still
+   serving inserts clients with those columns and fails 42703, so roll forward
+   rather than leaving both builds live.
+
+3. Run `0010-oauth-clients-self-service-fold.sql`. `0057` adds
+   `oauth_clients.self_service` as `false` everywhere; this sets it from the
+   `metadata` JSON key `selfService`. Until it runs, every self-registered
+   client reads as operator-provisioned and `/oauth2/token` does not confine its
+   tokens to one protected resource.
+
+4. Check the script's `to_fold_after` prints 0 and `self_service_after` grew by
+   `to_fold_before`. A non-zero `unparseable_metadata` is a manual read of those
+   rows, not a failure.
+
 ## Log
 
 | #    | date        | what                                                                                                                                                                                                                                                                                             | rows                                                                                                                                   |
@@ -83,3 +114,4 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
 | 0007 | not applied | skills: quote the `description:` lines `yaml` cannot parse, so their drafts are savable again under the SKILL.md frontmatter gate — **run after deploying the gate**; `.ts`, dry-run by default, `--apply` to write                                                                              | 17 of 66 skills fixable, 3 need a manual edit (2 `name`, 1 over-long description) — counted on production, NOT rehearsed               |
 | 0008 | not applied | org role `viewer` → `guest` + an explicit `viewer` `space_members` row in every space that exists; pending invitations and legacy OAuth signup clients carry the same current-space snapshot — **run between drizzle `0056` and bringing the new version up**; viewers are locked out in between | unmeasured — the script prints before/after counts and aborts if any survives                                                          |
 | 0009 | not applied | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0056` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                       | unmeasured — prints the duplicate-pair count before/after, after must be 0                                                             |
+| 0010 | not applied | `oauth_clients.self_service` set from the `metadata` JSON key `selfService`, which drizzle `0057` leaves behind when it adds the column — **run after the drizzle batch**; rows whose `metadata` is not valid JSON are skipped, not rewritten                                                    | unmeasured — prints the count it will fold before and after, after must be 0                                                           |

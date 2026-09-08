@@ -1,23 +1,12 @@
 -- Realign the OAuth-provider tables with the schema `@better-auth/oauth-provider`
--- 1.7.3 declares. Four groups, one file because they are one contract:
+-- 1.7.3 declares. Five groups, one file because they are one contract:
 --
 --   A. `oauth_clients` gains nine columns and loses two.
 --   B. The token / consent tables gain the columns the provider writes.
 --   C. Three new tables: protected resources (RFC 8707), the client↔resource
 --      join, and the `private_key_jwt` assertion replay guard.
 --   D. The two folds, then the drops.
---   E. `self_service` moves from the provider-owned `metadata` JSON to a
---      platform-owned column.
---
--- ORDER OF APPLICATION. `applyCoreMigrations()` runs before `createAuth()`
--- inside `bootCritical()` (`apps/api/src/lib/boot.ts`), so a process that serves
--- an auth request has already applied this file. The drizzle adapter's schema
--- check is not what orders it: `introspectDrizzleSchema` reads the TYPESCRIPT
--- drizzle objects through `getTableColumns()` and diffs them against the fields
--- the plugin declares (missing table / missing column / unexpected required
--- column). It never queries Postgres, so it cannot observe this file either way
--- — it runs once at boot, where a failure is only logged, and is awaited on every
--- `/api/auth/**` request, where a failure is rejected and cached until restart.
+--   E. `self_service` becomes a platform-owned column.
 --
 -- WHY `public` AND `type` GO. Upstream's schema declares neither. A public
 -- client IS `token_endpoint_auth_method = 'none'`, which is what the provider
@@ -30,13 +19,17 @@
 -- follows them on the same table (`docs/NO_TRANSITIONAL_CODE.md` §2): the drop
 -- destroys the values, so an operator script run afterwards would have nothing
 -- left to read. Both are bounded to rows where the target is still empty, so a
--- value written deliberately is never overwritten.
+-- value written deliberately is never overwritten. Section E writes nothing:
+-- the column it would read from survives this file, so its fold is the
+-- operator's.
 --
 -- DEPLOY. Section D is one-way, and the risk it carries is an OLD replica still
 -- serving after the `DROP COLUMN`s: the previous build writes `public` and
 -- `type` on every client it inserts (`services/oauth-admin.ts`,
 -- `services/ensure-cli-client.ts`), so its inserts fail with 42703 the moment
--- the columns are gone. Roll forward; do not leave both builds live.
+-- the columns are gone. Roll forward; do not leave both builds live. Then run
+-- `scripts/migration/0010-oauth-clients-self-service-fold.sql`, which sets the
+-- column section E adds — every row reads `false` until it does.
 --
 -- FENCES, same instrument as 0039/0047/0055/0056. Everything here is catalog-only
 -- or a create-on-empty-table except section D, which scans `oauth_clients` — a
@@ -183,10 +176,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_oauth_client_resources_pair" ON "oauth_cli
 --   repo already writes `token_endpoint_auth_method`, so on most databases this
 --   rewrites nothing.
 --
--- OPERATOR PRE-FLIGHT, to run BEFORE this migration. A client registered under
--- beta.4 with no method stored authenticated with its secret in the POST body;
--- under 1.7.3 the stored NULL reads as `client_secret_basic` and that client
--- gets `invalid_client`. Count them first:
+-- OPERATOR PRE-FLIGHT, to run BEFORE this migration. 1.7.3 reads a stored NULL
+-- `token_endpoint_auth_method` as `client_secret_basic` and then enforces it
+-- strictly, so a confidential client that sends its secret in the POST body is
+-- answered `invalid_client` the moment the fold below writes that value in.
+-- Count those rows first:
 --
 --     SELECT count(*) FROM oauth_clients
 --     WHERE token_endpoint_auth_method IS NULL AND "public" = false;
@@ -206,10 +200,13 @@ ALTER TABLE "oauth_clients" DROP COLUMN IF EXISTS "type";--> statement-breakpoin
 -- what the client presented, so a flag kept there is one a client can name.
 -- Nothing reaches this column but the platform.
 --
--- The `UPDATE` folds the JSON key `selfService` into the column in the file
--- that removes its last reader; without it every already-registered
--- self-service client reads as operator-provisioned and loses that confinement.
+-- The column lands `false` on every row, self-registered ones included.
+-- `metadata` survives this file, so setting the column from its `selfService`
+-- key is ordinary data repair rather than a fold this migration may carry
+-- (`docs/NO_TRANSITIONAL_CODE.md` §2): it is
+-- `scripts/migration/0010-oauth-clients-self-service-fold.sql`, run once this
+-- batch is applied. Until it runs, an already-registered self-service client
+-- reads as operator-provisioned and its tokens are not confined.
 ALTER TABLE "oauth_clients" ADD COLUMN IF NOT EXISTS "self_service" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-UPDATE oauth_clients SET self_service = true WHERE metadata IS NOT NULL AND metadata::jsonb ->> 'selfService' = 'true';--> statement-breakpoint
 SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
 SET LOCAL lock_timeout = DEFAULT;
