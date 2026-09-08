@@ -3,9 +3,9 @@
 /**
  * Holder for the `PlatformServices` handle injected at `init(ctx)`.
  *
- * EE runs its own database, so it never reads platform-owned tables
- * directly. The platform reads it needs — the append-only `llm_usage` ledger
- * cursor — go through `services.usage.list` / `services.usage.settledFrontier`.
+ * The platform reads EE needs — the append-only `llm_usage` ledger cursor —
+ * go through `services.usage.list` / `services.usage.settledFrontier`, never
+ * through SQL of EE's own, even though the two schemas share a database.
  *
  * Also holds the platform's public base URL (`ctx.appUrl`). Both are captured
  * once at `init(ctx)` and read from here rather than from `index.ts`, so the

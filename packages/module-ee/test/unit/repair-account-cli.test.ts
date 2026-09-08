@@ -4,7 +4,7 @@
  * `bun run repair:account` is run by an operator against a live deployment, so
  * its argument check must come before it reads the environment or opens a
  * connection. Spawned with the module's env stripped: a script that validated
- * later would fail on the missing `EE_DATABASE_URL` instead of printing usage.
+ * later would fail on the missing `DATABASE_URL` instead of printing usage.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -12,7 +12,7 @@ import { describe, expect, it } from "bun:test";
 const SCRIPT = new URL("../../src/scripts/repair-account.ts", import.meta.url).pathname;
 
 const EE_ENV_KEYS = [
-  "EE_DATABASE_URL",
+  "DATABASE_URL",
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_PRICE_ID_STARTER",

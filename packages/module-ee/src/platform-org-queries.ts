@@ -4,9 +4,9 @@
  * The two organization queries EE needs from the platform, and the holder
  * that keeps the handle captured at `init(ctx)`.
  *
- * EE runs its own database and never joins a platform-owned table, so
- * "who owns this org" and "is this user id one of its members" can only be
- * answered by the platform. Both used to hide behind a single
+ * These are platform reads, and they go through the platform rather than
+ * through SQL of our own: "who owns this org" and "is this user id one of its
+ * members" are answers the platform owns. Both used to hide behind a single
  * `getOrgAdminEmails(orgId)` on `ModuleInitContext` — a fan-out to every admin
  * that answered neither question: it could not name a specific user, and it
  * addressed people who are not the billing contact. It is replaced here by two

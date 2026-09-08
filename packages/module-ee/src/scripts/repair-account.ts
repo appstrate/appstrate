@@ -4,9 +4,9 @@
  * CLI: `bun run repair:account -- <orgId> <ownerEmail>`
  *
  * Repairs an organization the billing sweep reported as
- * "billable usage for an org with no billing account". Standalone: it opens the
- * EE DB from `EE_DATABASE_URL` and never touches the platform, so it can
- * be run against a live deployment without the API process.
+ * "billable usage for an org with no billing account". Standalone: it opens
+ * `DATABASE_URL` and writes only `ee_*` rows, so it can be run against a live
+ * deployment without the API process.
  *
  * The storage entitlement is NOT projected here (that write needs the platform
  * handle, which only exists inside the running module); the periodic
@@ -14,7 +14,6 @@
  */
 
 import { initEeDb, closeEeDb } from "../db.ts";
-import { getEeEnv } from "../env.ts";
 import { repairBillingAccount } from "../billing/repair-account.ts";
 
 const [orgId, ownerEmail] = process.argv.slice(2);
@@ -24,7 +23,13 @@ if (!orgId || !ownerEmail) {
   process.exit(2);
 }
 
-initEeDb(getEeEnv().EE_DATABASE_URL);
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  process.stderr.write("DATABASE_URL is required — it is where the ee_* tables live\n");
+  process.exit(2);
+}
+
+initEeDb(databaseUrl);
 try {
   const outcome = await repairBillingAccount(orgId, ownerEmail);
   if (outcome.status === "already_provisioned") {
