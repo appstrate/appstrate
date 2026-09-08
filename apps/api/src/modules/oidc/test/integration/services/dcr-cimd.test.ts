@@ -515,6 +515,46 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
     expect(String(json.error ?? "")).not.toBe("invalid_target");
     if (status === 400) expect(String(json.error)).not.toBe("invalid_target");
   });
+
+  // `private_key_jwt` carries the client id INSIDE the `client_assertion`, so a
+  // token request may legitimately name no `client_id` anywhere the before-hook
+  // can read. The confinement is held to the unidentified client too — if it
+  // were not, dropping `client_id` would be the way to mint an instance-wide
+  // audience.
+  async function tokenWithAssertion(resource: string) {
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: "irrelevant-code",
+        redirect_uri: "http://localhost:9914/callback",
+        code_verifier: "x".repeat(43),
+        client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        // Shaped like a JWT so the provider takes the assertion path; its
+        // contents never have to verify — the before-hook answers first.
+        client_assertion: "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhbnkifQ.c2ln",
+        resource,
+      }).toString(),
+    });
+    return {
+      status: res.status,
+      json: (await res.json().catch(() => ({}))) as Record<string, unknown>,
+    };
+  }
+
+  it("rejects the broad platform audience when the request names no client_id", async () => {
+    const { status, json } = await tokenWithAssertion(getEnv().APP_URL);
+    expect(status).toBe(400);
+    expect(String(json.error)).toBe("invalid_target");
+  });
+
+  it("lets a per-org MCP audience past the gate when the request names no client_id", async () => {
+    const { json } = await tokenWithAssertion(getMcpOrgResourceUri(ORG_ID));
+    // Past our gate — whatever the provider then says about the unverifiable
+    // assertion, it is not `invalid_target`.
+    expect(String(json.error ?? "")).not.toBe("invalid_target");
+  });
 });
 
 describe("CIMD refresh keeps the platform stamp", () => {

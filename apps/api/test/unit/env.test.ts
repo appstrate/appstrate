@@ -31,6 +31,9 @@ describe("env schema — production HTTPS invariant (H1)", () => {
   it("NODE_ENV=production + APP_URL=https://... → OK", () => {
     process.env.NODE_ENV = "production";
     process.env.APP_URL = "https://prod.example.com";
+    // An https APP_URL means a proxy terminates TLS in front, which the
+    // schema requires TRUST_PROXY to acknowledge.
+    process.env.TRUST_PROXY = "1";
     _resetCacheForTesting();
     const env = getEnv();
     expect(env.NODE_ENV).toBe("production");

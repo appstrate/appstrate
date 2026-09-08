@@ -637,12 +637,11 @@ async function applyCoreMigrations(): Promise<void> {
  * the real client address.
  *
  * We can't detect a real proxy with certainty (network topology is
- * out-of-band). The best we can do is flag the two most common
- * misconfigurations: `TRUST_PROXY=true` in production without an
- * obvious reverse-proxy signal, and the default `false` when the
- * server is apparently behind a proxy (XFF present from a first
- * request — out of scope for this boot-time check; runtime detection
- * in a middleware would be more invasive than warranted for v1).
+ * out-of-band), so this covers one side of the mistake: `TRUST_PROXY`
+ * enabled in production without an obvious reverse-proxy signal. The
+ * other side is a boot failure rather than a warning — `@appstrate/env`
+ * refuses `TRUST_PROXY=false` in production behind a non-loopback
+ * `APP_URL`, where a proxy is present by construction.
  */
 function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
   if (trustProxy === "false") return;
@@ -652,7 +651,8 @@ function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
     `is terminating client connections and writing those headers itself. If the server is ` +
     `directly exposed to the internet, any client can spoof their source IP, bypassing every ` +
     `per-IP rate limit (OIDC /oauth2/token, CLI device-flow, auth endpoints). ` +
-    `Verify the deployment topology or set TRUST_PROXY=false.`;
+    `Verify the deployment topology. TRUST_PROXY=false is the right value only when nothing ` +
+    `proxies this instance, which in production means a plain-http loopback APP_URL.`;
   // In production we emit at `error` severity deliberately — a
   // deployment running `LOG_LEVEL=warn` or `error` is exactly the one
   // most likely to silently ship TRUST_PROXY=true with no front proxy,

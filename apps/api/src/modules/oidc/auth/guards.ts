@@ -213,11 +213,14 @@ interface TokenRequestBody {
 }
 
 /**
- * Extract the `client_id` a token request is acting on, either from the
- * parsed body or from the HTTP Basic auth header (`client_secret_basic`).
- * Returns `null` if neither path yields a value — the self-service audience
- * rule then has no client to resolve and leaves the request to the
- * oauth-provider, which rejects an unidentifiable client itself.
+ * Extract the `client_id` a token request is acting on, from the parsed body
+ * or from the HTTP Basic auth header (`client_secret_basic`).
+ *
+ * `null` means the request named no client in either place, which is a normal
+ * shape rather than a malformed one: `private_key_jwt` carries the id inside
+ * the `client_assertion`, and only the oauth-provider unpacks it. So `null`
+ * identifies nothing, and callers hold it to the STRICTEST rule they enforce —
+ * declining to name a client must never be a way around a confinement.
  */
 function extractClientId(body: TokenRequestBody, request: Request | undefined): string | null {
   if (typeof body.client_id === "string" && body.client_id.length > 0) return body.client_id;
@@ -703,8 +706,14 @@ export function oidcGuardsPlugin() {
               // replayed off its resource. No-op when no protected resource is
               // registered (mcp module disabled) — `isProtectedResourceUri` is
               // false for everything, so a self-service client simply cannot mint.
+              // A request that identifies no client is held to the same rule:
+              // `private_key_jwt` puts the id inside the `client_assertion`
+              // and only the provider unpacks it, so a resolvable id is not
+              // something this hook can require — and if the absence of one
+              // relaxed the rule, omitting `client_id` would be the way past
+              // it. An instance client always names itself here.
               const clientId = extractClientId(body, ctx.request);
-              if (clientId && (await isSelfServiceClient(clientId))) {
+              if (clientId === null || (await isSelfServiceClient(clientId))) {
                 if (resources.length !== 1 || !isProtectedResourceUri(resources[0]!)) {
                   logger.warn(
                     "oidc: self-service client requested a non-resource / multi-resource audience — rejecting",

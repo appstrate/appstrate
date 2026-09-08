@@ -14,6 +14,7 @@
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { BetterAuthRateLimitStorage } from "@appstrate/db/auth";
 import { getRateLimiterFactory } from "../index.ts";
+import type { RateLimiterFactory } from "./interface.ts";
 
 /**
  * Key prefix for every Better Auth bucket. `flushRedis()` clears the whole
@@ -25,11 +26,15 @@ const KEY_PREFIX = "rl:better-auth:";
 /** One limiter per `(window, max)` pair — same shape as the OIDC guards' cache. */
 const limiters = new Map<string, RateLimiterAbstract>();
 
-async function limiterFor(window: number, max: number): Promise<RateLimiterAbstract> {
+async function limiterFor(
+  window: number,
+  max: number,
+  getFactory: () => Promise<RateLimiterFactory>,
+): Promise<RateLimiterAbstract> {
   const cacheKey = `${window}:${max}`;
   let limiter = limiters.get(cacheKey);
   if (!limiter) {
-    const factory = await getRateLimiterFactory();
+    const factory = await getFactory();
     limiter = factory.create(max, window, `${KEY_PREFIX}w${window}m${max}:`);
     limiters.set(cacheKey, limiter);
   }
@@ -41,17 +46,23 @@ export function resetBetterAuthRateLimitStorage(): void {
   limiters.clear();
 }
 
-export function betterAuthRateLimitStorage(): BetterAuthRateLimitStorage {
+export function betterAuthRateLimitStorage(
+  deps: { getFactory?: () => Promise<RateLimiterFactory> } = {},
+): BetterAuthRateLimitStorage {
+  const getFactory = deps.getFactory ?? getRateLimiterFactory;
   return {
     async consume(key, rule) {
-      const limiter = await limiterFor(rule.window, rule.max);
+      const limiter = await limiterFor(rule.window, rule.max, getFactory);
       try {
         await limiter.consume(key, 1);
         return { allowed: true, retryAfter: null };
       } catch (rejection) {
         // `rate-limiter-flexible` rejects with a `RateLimiterRes` when the
-        // budget is spent and with an `Error` when the backend itself failed.
-        // The second must surface rather than read as a clean pass.
+        // budget is spent and with an `Error` when the backend failed. The
+        // Redis factory carries an in-memory insurance limiter, so an `Error`
+        // reaching here means BOTH backends failed: nothing counted the
+        // request, and surfacing it — Better Auth turns it into a 500 — is
+        // the honest answer where reading it as a clean pass is not.
         if (!rejection || typeof rejection !== "object" || !("msBeforeNext" in rejection)) {
           throw rejection;
         }
