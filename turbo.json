@@ -565,6 +565,62 @@
         "bun.lock"
       ]
     },
+    // Caches, and this is the third `verify:*` task that can: the verdict is a
+    // pure function of the repo's TypeScript sources plus the `exports` maps
+    // that decide where a `@appstrate/…` specifier lands — no git ref, no
+    // clock, no network. Turbo's cost to hash that set is not the reason to
+    // avoid it: measured 2026-09-08, `--dry=json` over this list ran in 117 ms
+    // against a 157 ms baseline for a `cache: false` sibling, i.e. inside the
+    // noise of turbo's own startup, while the gate itself takes 267 ms.
+    //
+    // The globs are deliberately a SUPERSET of the population the script
+    // narrows to (`apps/<w>/src`, `packages/<w>/src`, `runtime-pi`) rather than
+    // a restatement of it. A restatement is a second roster that has to be
+    // widened in lockstep with `IN_SCOPE`, and the failure of forgetting is a
+    // silent green: a new source root the script starts scanning whose files
+    // move no hash here. `**/package.json` is in for the same reason — every
+    // workspace `exports` map feeds `resolveSpecifier`, and turbo's `**` DOES
+    // match at zero depth (measured for `//#verify:env-docs` above), so the
+    // root manifest is covered too.
+    //
+    // Probed 2026-09-08 with `turbo run '//#verify:import-cycles' --dry=json`
+    // (hash from `.tasks[0].hash`), EDITING each file rather than `touch`ing it
+    // — turbo hashes content, so a `touch` moves nothing and reads as a false
+    // negative:
+    //
+    //   baseline (2 337 inputs)                           8f29e95b02fcd7e0
+    //   + a line in apps/api/src/services/spaces.ts        a818789047c197a5
+    //   + a line in runtime-pi/mcp/direct.ts               754b43f9894058da
+    //   + an exports entry in packages/core/package.json   517ce872a953f363
+    //
+    // and reverting each edit returned the hash to 8f29e95b02fcd7e0 exactly.
+    // The third row is the one worth having: an `exports` remap changes where a
+    // `@appstrate/…` specifier resolves, and therefore which cycles exist, while
+    // touching no `.ts` file at all.
+    "//#verify:import-cycles": {
+      "inputs": ["**/*.ts", "**/*.tsx", "**/package.json", "!**/node_modules/**", "!**/dist/**"]
+    },
+    // `cache: false`, and NOT because the verdict is impure — it is a pure
+    // function of `apps/web/dist`. The reason is that the only correct input
+    // list for this task is the OUTPUT directory of the task it depends on, and
+    // whether turbo hashes a dependency's outputs before or after that
+    // dependency has produced them is not a property this file should be built
+    // on. The measured stake is small: the gate walks all 310 emitted files and
+    // gzips the 90 on the critical path in 57 ms (2026-09-08).
+    //
+    // `dependsOn` rather than a CI job. `bun run check` did not build the SPA
+    // before this, and the pre-push hook runs `bun run check`, so the question
+    // was whether developers would pay a build per push. Measured 2026-09-08:
+    // a FORCED cold `turbo build --filter=@appstrate/web` is 2.7 s wall
+    // (vite/rolldown, 5 798 modules), and a warm one is 25 ms — `>>> FULL
+    // TURBO`, with all 310 files restored from cache into a deleted `dist/`
+    // in 83 ms. A gate a developer sees before pushing beats one they see in
+    // CI, and 2.7 s once per source change is not the "large regression in
+    // developer time" a slow build would have been.
+    "//#verify:bundle-size": {
+      "dependsOn": ["@appstrate/web#build"],
+      "cache": false
+    },
     "//#verify:module-contract": {
       "cache": false
     },
