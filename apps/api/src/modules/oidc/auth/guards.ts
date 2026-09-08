@@ -643,8 +643,15 @@ async function enforceDeviceApproveRealm(ctx: {
     });
   }
 
+  // Columns, not the `metadata` JSON: that JSON is provider-owned and a
+  // registration body may set it, so a realm derived from it is a realm the
+  // client names.
   const [client] = await db
-    .select({ metadata: oauthClient.metadata, level: oauthClient.level })
+    .select({
+      level: oauthClient.level,
+      referencedOrgId: oauthClient.referencedOrgId,
+      referencedSpaceId: oauthClient.referencedSpaceId,
+    })
     .from(oauthClient)
     .where(eq(oauthClient.clientId, record.clientId))
     .limit(1);
@@ -655,24 +662,11 @@ async function enforceDeviceApproveRealm(ctx: {
     });
   }
 
-  let metadata: ClientAudienceMetadata = { level: client.level as ClientAudienceMetadata["level"] };
-  if (client.metadata) {
-    try {
-      const parsed = JSON.parse(client.metadata) as Partial<ClientAudienceMetadata>;
-      metadata = { ...metadata, ...parsed };
-    } catch (err) {
-      // Corrupt metadata → fall back to column level only.
-      // `expectedRealmForClient` will reject if level is missing or
-      // unknown, which is the safer path. Surface the drift so operators
-      // can repair the row instead of it lingering silently.
-      logger.warn("oidc: oauth_clients.metadata JSON is corrupt — falling back to column level", {
-        module: "oidc",
-        clientId: record.clientId,
-        error: getErrorMessage(err),
-      });
-    }
-  }
-
+  const metadata: ClientAudienceMetadata = {
+    level: client.level,
+    referencedOrgId: client.referencedOrgId ?? undefined,
+    referencedSpaceId: client.referencedSpaceId ?? undefined,
+  };
   const expected = expectedRealmForClient(metadata);
   await assertUserRealm(session.user.id, expected, {
     clientLevel: metadata.level ?? "unknown",
@@ -682,63 +676,49 @@ async function enforceDeviceApproveRealm(ctx: {
 }
 
 /**
- * Whether `clientId` is a self-service (DCR / CIMD) client — stamped
- * `metadata.selfService = true` at registration (`markClientSelfService`).
+ * Whether `clientId` registered itself (DCR / CIMD) — the `self_service` column
+ * `markClientSelfService` stamps.
  *
- * Self-service clients mint instance tokens carrying the connecting user's full
- * authority, so the ONLY safe audience for such a token is a single protected
- * resource (a per-org MCP endpoint) whose own resource-server check + the
- * outbound confinement in `protected-resources.ts` jointly cage it; the
- * `/oauth2/token` guard enforces that at mint time. Reads the client's metadata
- * directly (same authoritative-row pattern as `enforceDeviceApproveRealm`); a
- * missing / corrupt / non-self-service row is treated as not self-service, so
- * admin-provisioned clients (the dashboard SPA / CLI) keep targeting the
- * platform audience and the other gates apply.
+ * Such a client mints instance tokens carrying the connecting user's full
+ * authority, so the only safe audience is a single protected resource (a per-org
+ * MCP endpoint) whose own resource-server check and the outbound confinement in
+ * `protected-resources.ts` jointly cage it; the `/oauth2/token` guard enforces
+ * that at mint time. A missing row reads as not self-service, so
+ * operator-provisioned clients (the dashboard SPA / CLI) keep targeting the
+ * platform audience under the other gates.
  */
 async function isSelfServiceClient(clientId: string): Promise<boolean> {
   const [row] = await db
-    .select({ metadata: oauthClient.metadata })
+    .select({ selfService: oauthClient.selfService })
     .from(oauthClient)
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
-  if (!row?.metadata) return false;
-  try {
-    const parsed = JSON.parse(row.metadata) as { selfService?: unknown };
-    return parsed.selfService === true;
-  } catch {
-    return false; // corrupt metadata → not provably self-service, defer to other gates
-  }
+  return row?.selfService === true;
 }
 
 /**
  * Default an unspecified `application_type` on the DCR path to `native`.
  *
- * The oauth-provider validates every registered redirect URI against the
- * client's application type: a `web` client may only use https on a
- * non-loopback host, a `native` one may use `http://localhost`,
- * `http://127.0.0.1` or `http://[::1]` (RFC 8252 §7.3 / OIDC Dynamic
- * Registration §2). Upstream assumes `web` when a DCR body declares nothing,
- * and `native` for a client-metadata document. Appstrate's DCR endpoint exists
- * for exactly the MCP clients that cannot host a CIMD document — `claude mcp
- * add`, `npx @appstrate/connect-helper` — which listen on an ephemeral loopback
- * port and declare no `application_type`. Assuming `web` for them refuses every
- * registration with `invalid_redirect_uri`.
+ * The provider validates every registered redirect URI against the client's
+ * application type: a `web` client may only use https on a non-loopback host, a
+ * `native` one may use `http://localhost`, `http://127.0.0.1` or `http://[::1]`
+ * (RFC 8252 §7.3 / OIDC Dynamic Registration §2), and it assumes `web` for a DCR
+ * body that declares nothing. The MCP clients this endpoint exists for —
+ * `claude mcp add`, `npx @appstrate/connect-helper` — listen on an ephemeral
+ * loopback port and declare no `application_type`, so `web` would refuse every
+ * one of them with `invalid_redirect_uri`.
  *
- * So the DCR default is aligned on the CIMD one. `native` is strictly more
- * permissive than `web` on exactly one axis (http loopback) and stricter on
- * another (https loopback is refused), and the redirect URI is still matched
- * exactly at authorization time. Only the ABSENT case is filled: a body that
- * declares `application_type` keeps the value it declared, so a client that
- * says `web` is still held to https non-loopback.
- *
- * Placed here rather than upstream because the plugin exposes no option for a
- * registration-time application-type default.
+ * Only the absent case is filled, `null` included: a body that names a type
+ * keeps it, so a client that says `web` is still held to https non-loopback.
+ * The provider exposes no option for this default, hence the hook.
  */
 async function defaultRegistrationToNativeClient(ctx: {
   body?: unknown;
 }): Promise<{ context: { body: Record<string, unknown> } } | undefined> {
   const body = ctx.body;
-  if (!body || typeof body !== "object" || "application_type" in body) return;
+  if (!body || typeof body !== "object") return;
+  const declared = (body as { application_type?: unknown }).application_type;
+  if (declared !== undefined && declared !== null) return;
   return {
     context: { body: { ...(body as Record<string, unknown>), application_type: "native" } },
   };
@@ -795,7 +775,7 @@ export function oidcGuardsPlugin() {
           // probe surface. See `DEVICE_VERIFY_RL_POINTS` above for the
           // rationale. The exact path is `/device` (not `/device/verify`),
           // matching the upstream endpoint registration in
-          // `better-auth@1.6.5/plugins/device-authorization/routes.mjs:285`.
+          // `better-auth/plugins/device-authorization/routes.mjs`.
           matcher: (ctx: { path?: string }) => ctx.path === "/device",
           handler: createAuthMiddleware(async (ctx) => {
             await enforceRateLimit("device-verify", DEVICE_VERIFY_RL_POINTS, ctx.request);
@@ -817,16 +797,10 @@ export function oidcGuardsPlugin() {
             const clientId = extractClientId(body, ctx.request);
             if (clientId) await enforceClientRateLimit(clientId, ctx.request);
 
+            // The two grants the AS supports (`oauthProvider({ grantTypes })`),
+            // both of which mint a user token and may carry a `resource`.
             const grantType = body.grant_type;
-            // Every grant that reaches `createUserTokens` and can carry a
-            // `resource` is gated here — `client_credentials` included, so a
-            // future M2M client cannot mint an un-audience-bound (or
-            // multi-resource self-service) token by switching grant type.
-            if (
-              grantType === "authorization_code" ||
-              grantType === "refresh_token" ||
-              grantType === "client_credentials"
-            ) {
+            if (grantType === "authorization_code" || grantType === "refresh_token") {
               // `resource` may arrive repeated (RFC 8707 §2); the whole list
               // is kept because the self-service rule below counts it. Each
               // value's existence is checked by the oauth-provider itself —

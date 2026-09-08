@@ -24,7 +24,7 @@
  */
 
 import type { AppstrateModule } from "@appstrate/core/module";
-import { eq } from "drizzle-orm";
+import { and, eq, like, notInArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizations, oauthResource } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -38,17 +38,16 @@ import {
   removeMcpOrgVerifyAudience,
 } from "../../lib/audiences.ts";
 
-// Cross-replica convergence interval. MINTING no longer needs it: the AS
+// Cross-replica convergence interval, for the VERIFIER set — the per-process
+// in-memory half (`lib/audiences.ts`). A replica that misses an `onOrgCreate`
+// broadcast 401s an already-minted per-org token because its `aud` is not in
+// that replica's `getEndUserVerifyAudiences()` list. The window is fail-closed
+// — staleness can only reject legitimate traffic, never accept illegitimate —
+// and self-heals at the next tick. Minting does not depend on the tick: the AS
 // resolves a requested `resource` against the shared `oauth_resources` table on
-// every token call, so a row inserted by one replica is mintable from all of
-// them at once. What still needs it is the VERIFIER set, which is per-process
-// in-memory (`lib/audiences.ts`): a replica that missed an `onOrgCreate`
-// broadcast would 401 an already-minted per-org token because its `aud` is not
-// yet in that replica's `getEndUserVerifyAudiences()` list. That window is
-// fail-closed — staleness can only reject legitimate traffic, never accept
-// illegitimate — and self-heals at the next tick. The tick reuses the SAME
-// reconcile as `init()`, so a row insert dropped by a transient DB error on the
-// event path also self-heals instead of waiting for a restart. Mirrors the
+// every token call, so a row written by one replica is mintable from all of
+// them at once. The tick reuses the SAME reconcile as `init()`, so a row write
+// dropped by a transient DB error on the event path self-heals too. Mirrors the
 // per-process TTL the OAuth client cache uses (`oauth-admin.ts`); 60s is well
 // under any human "I created an org, why does my second replica 401?" threshold.
 const MCP_AUDIENCE_RESEED_INTERVAL_MS = 60_000;
@@ -66,11 +65,28 @@ function mcpOrgResourceRow(orgId: string) {
 /**
  * Reconcile both halves of the per-org RFC 8707 audience model with the current
  * `organizations` roster: the durable, cross-replica MINT rows and this
- * process's VERIFIER set. Idempotent.
+ * process's VERIFIER set. Symmetric — one statement per direction, so a lost
+ * `onOrgCreate` and a lost `onOrgDelete` both converge here. Idempotent.
  */
 async function reconcileMcpOrgAudiences(): Promise<void> {
   const rows = await db.select({ id: organizations.id }).from(organizations);
   setMcpOrgVerifyAudiences(rows.map((r) => r.id));
+  const liveUris = rows.map((r) => getMcpOrgResourceUri(r.id));
+  // Only per-org URIs are ours to drop: the two static platform identifiers the
+  // AS seeds sit outside this prefix. `_` and `%` are LIKE wildcards, so an
+  // APP_URL carrying either would over-match — escape them (Postgres' default
+  // LIKE escape is the backslash).
+  const prefixPattern = `${getMcpOrgResourceUri("").replace(/([\\%_])/g, "\\$1")}%`;
+  await db
+    .delete(oauthResource)
+    .where(
+      liveUris.length === 0
+        ? like(oauthResource.identifier, prefixPattern)
+        : and(
+            like(oauthResource.identifier, prefixPattern),
+            notInArray(oauthResource.identifier, liveUris),
+          ),
+    );
   if (rows.length === 0) return;
   await db
     .insert(oauthResource)

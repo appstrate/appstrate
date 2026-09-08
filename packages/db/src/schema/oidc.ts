@@ -141,6 +141,10 @@ export const oauthClient = pgTable(
     // platform partitions on `level` + `referenced_*` below — but the provider
     // writes it, so the column must exist.
     referenceId: text("reference_id"),
+    // Opaque registration metadata, owned by the provider: an RFC 7591 body may
+    // set it, and every registration or refresh rewrites the row from what the
+    // client presented. No Appstrate decision reads it — every platform
+    // discriminator is a column below.
     metadata: text("metadata"),
     // ─── Appstrate polymorphic fields ────────────────────────────────────────
     // Defaults to `instance` so self-registered clients (RFC 7591 DCR /
@@ -157,6 +161,13 @@ export const oauthClient = pgTable(
     referencedSpaceId: text("referenced_space_id").references(() => spaces.id, {
       onDelete: "cascade",
     }),
+    /**
+     * Whether the client registered itself (RFC 7591 DCR or CIMD) rather than
+     * being provisioned by an operator. A self-service client's tokens carry
+     * the connecting user's authority, so `/oauth2/token` confines them to a
+     * single protected resource.
+     */
+    selfService: boolean("self_service").notNull().default(false),
     allowSignup: boolean("allow_signup").default(false).notNull(),
     /** Explicit space grants applied only on the first organization signup. */
     signupSpaceAssignments: jsonb("signup_space_assignments")

@@ -830,4 +830,71 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     });
     expect([400, 401]).toContain(refreshAttempt.status);
   });
+
+  it("refuses a client_secret_basic client that authenticates in the body", async () => {
+    // The provider holds a client to the auth method it registered, so a secret
+    // in the body is `invalid_client` even though the secret itself is correct.
+    // Without that rule a leaked secret could be replayed over a transport the
+    // registration deliberately excluded. A REAL code is required to reach the
+    // check: the grant validates the code first.
+    const { cookie } = await signUpEndUser(ctx.defaultSpaceId, "postauth@satellite.example.com");
+    const { code, verifier } = await runHappyPathToCode({ cookie });
+
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "https://satellite.example.com/callback",
+        client_id: clientId,
+        client_secret: clientSecret,
+        code_verifier: verifier,
+        resource: "http://localhost:3000",
+      }).toString(),
+    });
+    expect((await res.json()) as { error?: string }).toMatchObject({ error: "invalid_client" });
+  });
+});
+
+describe("public clients must carry PKCE", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+  });
+
+  it("refuses an authorization request from a `none` client with no code_challenge", async () => {
+    // `token_endpoint_auth_method: "none"` IS the public/confidential
+    // discriminator: the provider demands PKCE off the back of that value alone,
+    // and a public client without it has no proof of possession at all.
+    const registered = await app.request("/api/auth/oauth2/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Public client without PKCE",
+        redirect_uris: ["http://localhost:9921/callback"],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+    expect([200, 201]).toContain(registered.status);
+    const { client_id: publicClientId } = (await registered.json()) as { client_id: string };
+
+    const res = await app.request(
+      `/api/auth/oauth2/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: publicClientId,
+        redirect_uri: "http://localhost:9921/callback",
+        scope: "openid",
+        state: "no-pkce",
+      })}`,
+    );
+    const location = res.headers.get("location");
+    expect(location).toBeTruthy();
+    expect(new URL(location!, "http://localhost").searchParams.get("error")).toBe(
+      "invalid_request",
+    );
+  });
 });

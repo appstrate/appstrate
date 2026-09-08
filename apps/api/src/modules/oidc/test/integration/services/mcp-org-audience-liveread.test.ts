@@ -63,10 +63,11 @@ async function register() {
  * `/oauth2/authorize` resolves the requested resource BEFORE it looks for a
  * session, so an anonymous GET is enough to read the resource gate's verdict:
  * a rejected resource redirects to `redirect_uri?error=…`, an accepted one
- * carries on to the login page. Returns the `error` code, or `undefined` when
- * the request got past the gate.
+ * carries on to the login page. Returns both halves — a caller asserting the
+ * accepted case must name the destination, or a 500 with no `Location` would
+ * read as "got past the gate".
  */
-async function authorizeErrorFor(clientId: string, resource?: string) {
+async function authorizeFor(clientId: string, resource?: string) {
   const query = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
@@ -79,8 +80,13 @@ async function authorizeErrorFor(clientId: string, resource?: string) {
   if (resource) query.set("resource", resource);
   const res = await app.request(`/api/auth/oauth2/authorize?${query.toString()}`);
   const location = res.headers.get("location");
-  if (!location) return undefined;
-  return new URL(location, REDIRECT_URI).searchParams.get("error") ?? undefined;
+  if (!location) return { status: res.status };
+  const target = new URL(location, REDIRECT_URI);
+  return {
+    status: res.status,
+    pathname: target.pathname,
+    error: target.searchParams.get("error") ?? undefined,
+  };
 }
 
 /** POST `/oauth2/token`. The guard runs in the before-hook, ahead of the grant. */
@@ -148,31 +154,40 @@ describe("RFC 8707 resource gate on the AS", () => {
 
   it("rejects the per-org resource with invalid_target BEFORE its row exists", async () => {
     const clientId = await register();
-    expect(await authorizeErrorFor(clientId, orgUri)).toBe("invalid_target");
+    expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
   });
 
   it("accepts the per-org resource AFTER its row is inserted at runtime", async () => {
     const clientId = await register();
-    expect(await authorizeErrorFor(clientId, orgUri)).toBe("invalid_target");
-    await db.insert(oauthResource).values({
-      id: crypto.randomUUID(),
-      identifier: orgUri,
-      name: `MCP endpoint for organization ${orgId}`,
+    expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
+    await db
+      .insert(oauthResource)
+      .values({
+        id: crypto.randomUUID(),
+        identifier: orgUri,
+        name: `MCP endpoint for organization ${orgId}`,
+      })
+      .onConflictDoNothing({ target: oauthResource.identifier });
+    // Past the resource gate now — the request carries on to the login page.
+    // Naming the destination is what separates it from a 500.
+    expect(await authorizeFor(clientId, orgUri)).toMatchObject({
+      pathname: "/api/oauth/login",
+      error: undefined,
     });
-    // Past the resource gate now — the request carries on to the login page
-    // (no session), which is not a `redirect_uri?error=…` rejection.
-    expect(await authorizeErrorFor(clientId, orgUri)).toBeUndefined();
   });
 
   it("rejects a resource whose row is disabled", async () => {
     const clientId = await register();
-    await db.insert(oauthResource).values({
-      id: crypto.randomUUID(),
-      identifier: orgUri,
-      name: "disabled org endpoint",
-      disabled: true,
-    });
-    expect(await authorizeErrorFor(clientId, orgUri)).toBe("invalid_target");
+    await db
+      .insert(oauthResource)
+      .values({
+        id: crypto.randomUUID(),
+        identifier: orgUri,
+        name: "disabled org endpoint",
+        disabled: true,
+      })
+      .onConflictDoNothing({ target: oauthResource.identifier });
+    expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
   });
 
   it("rejects a token request carrying NO resource (our guard, not the library)", async () => {
@@ -184,5 +199,15 @@ describe("RFC 8707 resource gate on the AS", () => {
     const { status, error } = await tokenErrorFor(clientId);
     expect(status).toBe(400);
     expect(error).toBe("invalid_request");
+  });
+
+  it("rejects a token request for a resource that was never registered", async () => {
+    // A self-service client may bind a token to one registered protected
+    // resource and nothing else, so an arbitrary identifier is `invalid_target`
+    // at the guard, before the AS ever resolves it against `oauth_resources`.
+    const clientId = await register();
+    const { status, error } = await tokenErrorFor(clientId, "https://evil.example.com");
+    expect(status).toBe(400);
+    expect(error).toBe("invalid_target");
   });
 });

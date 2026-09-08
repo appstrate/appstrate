@@ -45,10 +45,8 @@ describe("ensureCliClient()", () => {
     expect(row!.grantTypes).toContain("urn:ietf:params:oauth:grant-type:device_code");
     expect(row!.grantTypes).toContain("refresh_token");
     expect(row!.scopes).toEqual(["openid", "profile", "email", "offline_access"]);
-
-    const metadata = JSON.parse(row!.metadata ?? "{}");
-    expect(metadata.level).toBe("instance");
-    expect(metadata.clientId).toBe("appstrate-cli");
+    // Operator-provisioned: the audience cage is for self-registered clients.
+    expect(row!.selfService).toBe(false);
   });
 
   it("is idempotent — subsequent calls do not insert or modify", async () => {

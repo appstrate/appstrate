@@ -791,7 +791,6 @@ describe("POST /api/auth/cli/revoke", () => {
       postLogoutRedirectUris: [],
       scopes: ["openid"],
       level: "instance",
-      metadata: JSON.stringify({ level: "instance", clientId: attackerClientId }),
       skipConsent: true,
       allowSignup: false,
       signupRole: "member",

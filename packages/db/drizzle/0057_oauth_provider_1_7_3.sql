@@ -1,23 +1,30 @@
 -- Realign the OAuth-provider tables with the schema `@better-auth/oauth-provider`
--- 1.7.3 declares. From 1.7.3 the drizzle adapter registers a SCHEMA CHECK: it
--- introspects the drizzle schema object at boot and again on the first auth
--- request, and every field the provider writes must exist as a column. A missing
--- one is not a latent bug — it makes `SchemaMismatchError` reject the auth
--- requests, so the shape below is a hard requirement, not a nicety.
---
--- Three groups, one file because they are one contract:
+-- 1.7.3 declares. Four groups, one file because they are one contract:
 --
 --   A. `oauth_clients` gains nine columns and loses two.
---   B. The token / consent tables gain the columns 1.7 writes.
+--   B. The token / consent tables gain the columns the provider writes.
 --   C. Three new tables: protected resources (RFC 8707), the client↔resource
 --      join, and the `private_key_jwt` assertion replay guard.
+--   D. The two folds, then the drops.
+--   E. `self_service` moves from the provider-owned `metadata` JSON to a
+--      platform-owned column.
 --
--- WHY `public` AND `type` GO. Upstream removed both. "Public client" is no
--- longer a stored boolean — it IS `token_endpoint_auth_method = 'none'`, which
--- is what the provider reads to demand PKCE — and `type` was renamed
--- `application_type`. Keeping either as an alias would be a second source of
--- truth for a fact the provider derives (`docs/NO_TRANSITIONAL_CODE.md` §1), so
--- they are dropped, and section D folds their values into the survivors first.
+-- ORDER OF APPLICATION. `applyCoreMigrations()` runs before `createAuth()`
+-- inside `bootCritical()` (`apps/api/src/lib/boot.ts`), so a process that serves
+-- an auth request has already applied this file. The drizzle adapter's schema
+-- check is not what orders it: `introspectDrizzleSchema` reads the TYPESCRIPT
+-- drizzle objects through `getTableColumns()` and diffs them against the fields
+-- the plugin declares (missing table / missing column / unexpected required
+-- column). It never queries Postgres, so it cannot observe this file either way
+-- — it runs once at boot, where a failure is only logged, and is awaited on every
+-- `/api/auth/**` request, where a failure is rejected and cached until restart.
+--
+-- WHY `public` AND `type` GO. Upstream's schema declares neither. A public
+-- client IS `token_endpoint_auth_method = 'none'`, which is what the provider
+-- reads to demand PKCE, and the application type is `application_type`. Keeping
+-- either as an alias would be a second source of truth for a fact the provider
+-- derives (`docs/NO_TRANSITIONAL_CODE.md` §1), so they are dropped, and section D
+-- folds their values into the survivors first.
 --
 -- THE TWO `UPDATE`s IN SECTION D ARE FOLDS, licenced by the `DROP COLUMN` that
 -- follows them on the same table (`docs/NO_TRANSITIONAL_CODE.md` §2): the drop
@@ -25,10 +32,11 @@
 -- left to read. Both are bounded to rows where the target is still empty, so a
 -- value written deliberately is never overwritten.
 --
--- ROLLBACK: section D is one-way. The previous build writes `public` and `type`
--- on every client it inserts (`services/oauth-admin.ts`,
--- `services/ensure-cli-client.ts`), so redeploying it after this ran makes every
--- client insert fail on 42703. Roll forward.
+-- DEPLOY. Section D is one-way, and the risk it carries is an OLD replica still
+-- serving after the `DROP COLUMN`s: the previous build writes `public` and
+-- `type` on every client it inserts (`services/oauth-admin.ts`,
+-- `services/ensure-cli-client.ts`), so its inserts fail with 42703 the moment
+-- the columns are gone. Roll forward; do not leave both builds live.
 --
 -- FENCES, same instrument as 0039/0047/0055/0056. Everything here is catalog-only
 -- or a create-on-empty-table except section D, which scans `oauth_clients` — a
@@ -77,9 +85,17 @@ CREATE INDEX IF NOT EXISTS "idx_oauth_refresh_tokens_auth_code" ON "oauth_refres
 
 -- ═══ C. Protected resources, their client links, and the assertion guard ═════
 --
--- The platform configures no resource, so all three tables start empty and stay
--- empty until an operator declares one; they exist because the provider reads
--- them on every token mint.
+-- `oauth_resources` is populated, not empty: the plugin seeds the two platform
+-- identifiers from its `resources:` option at init (`APP_URL` and
+-- `${APP_URL}/api/auth`, `resourceSeedMode` at its `insertOnly` default) and the
+-- mcp module writes one row per organization (`modules/mcp/index.ts`). The
+-- provider resolves every requested RFC 8707 `resource` against this table on
+-- each mint, and the seed runs once per process — truncating the table breaks
+-- every mint until a restart.
+--
+-- `oauth_client_resources` and `oauth_client_assertions` do stay empty:
+-- `enforcePerClientResources` is `false`, so no client needs a linkage row, and
+-- no client authenticates with `private_key_jwt`.
 --
 -- Both foreign keys are NAMED. Drizzle's derived name for the resource one is 64
 -- bytes, one past Postgres' NAMEDATALEN-1 limit: it would be truncated at
@@ -152,15 +168,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_oauth_client_resources_pair" ON "oauth_cli
 -- next to a source that holds the answer — so a second run matches zero rows
 -- and neither statement can overwrite a value someone set on purpose.
 --
--- `public` maps to an AUTH METHOD, not to a copy: `true` is the public client
--- (`none`), `false` is the confidential one the platform creates with a hashed
--- secret (`client_secret_basic`). Every insert path in this repo already writes
--- `token_endpoint_auth_method`, so on a database with no self-registered client
--- this rewrites nothing — it is here for rows the provider's own DCR path
--- inserted under 1.6, which set `public` alone.
+-- Both folds make an IMPLICIT stored value explicit before the source column
+-- disappears; neither changes what the provider does with the row.
+--
+--   `type` → `application_type` is read at registration time only, by
+--   `validateClientRedirectUri`, which is where the provider decides whether a
+--   redirect URI is acceptable for that application type.
+--
+--   `public` → `token_endpoint_auth_method` reproduces the runtime default:
+--   `validateClientCredentials` (`utils-*.mjs`) reads a NULL method as
+--   `client_secret_basic` and then enforces the registered method strictly. The
+--   `WHEN "public" THEN 'none'` branch cannot match a provider-written row — the
+--   provider derived `public` FROM the method — and every insert path in this
+--   repo already writes `token_endpoint_auth_method`, so on most databases this
+--   rewrites nothing.
+--
+-- OPERATOR PRE-FLIGHT, to run BEFORE this migration. A client registered under
+-- beta.4 with no method stored authenticated with its secret in the POST body;
+-- under 1.7.3 the stored NULL reads as `client_secret_basic` and that client
+-- gets `invalid_client`. Count them first:
+--
+--     SELECT count(*) FROM oauth_clients
+--     WHERE token_endpoint_auth_method IS NULL AND "public" = false;
+--
+-- A non-zero count is a decision to take, not a detail: fold those rows to
+-- `client_secret_post` by hand instead, or notify their owners that they must
+-- move to `client_secret_basic`.
 UPDATE oauth_clients SET application_type = "type" WHERE application_type IS NULL AND "type" IS NOT NULL;--> statement-breakpoint
 UPDATE oauth_clients SET token_endpoint_auth_method = CASE WHEN "public" THEN 'none' ELSE 'client_secret_basic' END WHERE token_endpoint_auth_method IS NULL AND "public" IS NOT NULL;--> statement-breakpoint
 ALTER TABLE "oauth_clients" DROP COLUMN IF EXISTS "public";--> statement-breakpoint
 ALTER TABLE "oauth_clients" DROP COLUMN IF EXISTS "type";--> statement-breakpoint
+-- ═══ E. `self_service` becomes a column ══════════════════════════════════════
+--
+-- `/oauth2/token` confines a self-registered client's tokens to one protected
+-- resource, and this column is what it reads. The provider owns the `metadata`
+-- JSON: an RFC 7591 registration body may set it, and the provider persists
+-- what the client presented, so a flag kept there is one a client can name.
+-- Nothing reaches this column but the platform.
+--
+-- The `UPDATE` folds the JSON key `selfService` into the column in the file
+-- that removes its last reader; without it every already-registered
+-- self-service client reads as operator-provisioned and loses that confinement.
+ALTER TABLE "oauth_clients" ADD COLUMN IF NOT EXISTS "self_service" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+UPDATE oauth_clients SET self_service = true WHERE metadata IS NOT NULL AND metadata::jsonb ->> 'selfService' = 'true';--> statement-breakpoint
 SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
 SET LOCAL lock_timeout = DEFAULT;

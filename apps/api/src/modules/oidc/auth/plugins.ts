@@ -15,16 +15,17 @@
  *      scoped to a single space. Tokens carry `actor_type: "end_user"`
  *      + `space_id` + `end_user_id`.
  *
- * `customAccessTokenClaims` reads the parsed `metadata` JSON column for the
- * active OAuth client and dispatches to `buildOrgLevelClaims` or
- * `buildSpaceLevelClaims` accordingly. All claim names are RFC 9068 / OIDC Core
- * snake_case.
+ * The claim builder reaches that level through the `oauth_clients` ROW, and is
+ * registered as a provider claim extension for exactly that reason: an
+ * extension receives the resolved client, while `customAccessTokenClaims`
+ * receives only the provider-owned `metadata` JSON, which a registration body
+ * may set. All claim names are RFC 9068 / OIDC Core snake_case.
  *
- * The JWT plugin is bundled automatically by oauth-provider
- * (disableJwtPlugin defaults to false). The JWKS is served at
- * `/api/auth/jwks`, OIDC discovery at `/api/auth/.well-known/openid-configuration`,
- * and the token / authorize / userinfo / revoke / introspect endpoints at
- * `/api/auth/oauth2/*`.
+ * `jwt()` is listed explicitly below: `getJwtPlugin` throws
+ * `BetterAuthError("jwt_config")` when oauth-provider mints a JWT access token
+ * and no JWT plugin is installed. The JWKS is served at `/api/auth/jwks`, OIDC
+ * discovery at `/api/auth/.well-known/openid-configuration`, and the token /
+ * authorize / userinfo / revoke / introspect endpoints at `/api/auth/oauth2/*`.
  *
  * Client secret storage matches the `oauth-admin` service hash (SHA-256 hex).
  */
@@ -56,27 +57,17 @@ import {
   loadClientSignupPolicy,
   resolveOrCreateOrgMembership,
 } from "../services/orgmember-mapping.ts";
-import { hashSecret } from "../services/oauth-admin.ts";
+import {
+  hashSecret,
+  getClientCached,
+  markClientSelfService,
+  type OAuthClientRecord,
+} from "../services/oauth-admin.ts";
 import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
-import { markClientSelfService } from "../services/oauth-admin.ts";
-
-interface ClientMetadata {
-  level?: "org" | "space" | "instance";
-  referencedOrgId?: string;
-  referencedSpaceId?: string;
-  /**
-   * The OAuth client id — stashed by `createClient` so the
-   * `customAccessTokenClaims` closure can recover the client identity and
-   * look up mutable policy (e.g. `allowSignup` / `signupRole`) via
-   * `loadClientSignupPolicy`. The Better Auth oauth-provider plugin does not
-   * pass `client.clientId` to the closure directly.
-   */
-  clientId?: string;
-}
 
 const SHA256_HEX_LENGTH = 64;
 
@@ -140,19 +131,13 @@ interface OidcBetterAuthPluginsOptions {
 }
 
 /**
- * Platform policy gate for a CIMD `client_id` URL, run by the plugin BEFORE the
- * metadata document is fetched.
- *
- * Deliberately the LITERAL denylist (`@appstrate/core/ssrf`): IP literals,
- * `localhost`, cloud-metadata names and the run network's internal Docker
- * aliases `sidecar` / `agent`, which upstream's own public-routability check
- * lets through because they are ordinary names that resolve nowhere outside a
- * container. Resolving DNS here would re-open the TOCTOU window the pinned
- * transport closes, which is exactly what upstream warns this hook must not do.
- *
- * Fail-closed needs no wrapper: `isBlockedUrl` is total over strings (a
- * malformed URL or an unparseable host reads as blocked), and a throw out of
- * this hook is not caught by the plugin — it aborts client resolution.
+ * Platform policy gate for a CIMD `client_id` URL, run before the document is
+ * fetched. The LITERAL denylist (`@appstrate/core/ssrf`) — IP literals,
+ * `localhost`, cloud-metadata names and the run network's Docker aliases
+ * `sidecar` / `agent`, which upstream's public-routability check lets through
+ * as ordinary names. No DNS here: resolving would re-open the TOCTOU window the
+ * pinned transport closes. `isBlockedUrl` is total over strings, so a malformed
+ * URL reads as blocked.
  *
  * Exported for unit testing — not part of the module's public surface.
  */
@@ -226,10 +211,9 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // `satisfies` is load-bearing, not decoration. `oauthProvider` is declared
     // `<O extends OAuthOptions<Scope[]>>(options: O)` — a NAKED type parameter,
     // so TypeScript infers `O` as this literal's own type and performs no
-    // excess-property check at all. A retired or misspelled option (the 1.7.3
-    // removals `validAudiences` / `silenceWarnings`, say) would compile clean
-    // and be silently ignored at runtime. Checking the literal against the
-    // interface first restores TS2353. Do not remove.
+    // excess-property check at all: a misspelled or non-existent option compiles
+    // clean and is silently ignored. Checking the literal against the interface
+    // first restores TS2353. Do not remove.
     oauthProvider({
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
@@ -273,25 +257,34 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // self-service scope set (identity + module scopes), PKCE is enforced by
       // the plugin, and the /oauth2/register endpoint is rate-limited in
       // routes.ts. The user-consent screen remains the real authorization gate.
-      // Default and ceiling are the same set so a body without `scope` can
-      // still reach `mcp:*` at authorize; it grants nothing the registrant
-      // could not already request explicitly.
+      // Default and ceiling are ONE array, so they cannot drift: the provider
+      // unions them, and a default outside the ceiling would widen it silently.
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
-      clientRegistrationDefaultScopes: getSelfServiceScopes(),
+      clientRegistrationDefaultScopes: selfServiceScopes,
       clientRegistrationAllowedScopes: selfServiceScopes,
+      // The grants the AS actually serves. Upstream's default adds
+      // `client_credentials`, which no Appstrate client registers and no code
+      // path issues — advertising it in discovery invites a request that can
+      // only fail.
+      grantTypes: ["authorization_code", "refresh_token"],
       storeClientSecret: {
         hash: hashSecret,
         verify: sha256HexVerify,
       },
 
-      /**
-       * Polymorphic claim builder. Branches on `metadata.level` (set at
-       * client registration via `services/oauth-admin.ts`) and returns a
-       * snake_case claim payload compatible with RFC 9068 + OIDC Core.
-       */
-      customAccessTokenClaims: async ({ user, metadata }) =>
-        buildClaimsForClient(user ?? null, metadata as ClientMetadata | undefined),
+      extensions: [
+        {
+          claims: {
+            // Polymorphic claim builder. A claim extension is handed the
+            // resolved `oauth_clients` row, so the level dispatch reads a
+            // platform column instead of the provider-owned `metadata` JSON that
+            // `customAccessTokenClaims` would hand it. Re-derived identically at
+            // opaque-token introspection, and a throw here fails the mint.
+            accessToken: ({ user, client }) => buildClaimsForClient(user ?? null, client.clientId),
+          },
+        },
+      ],
 
       /**
        * Surface the same polymorphic claims on /userinfo so satellites can
@@ -347,36 +340,35 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // is left at its default.
     cimd({
       // The metadata-document transport is the AS's SSRF boundary and upstream
-      // makes it the application's responsibility: it must resolve the hostname
-      // EXACTLY ONCE, refuse every non-public-routable answer, connect to that
-      // pinned address (original host kept as HTTP Host, TLS SNI and
-      // certificate identity) and never follow a redirect. Wrapping `fetch`
-      // cannot express that — `fetch` re-resolves after any check, leaving a
-      // DNS-rebind window open however carefully the URL was vetted first.
-      // `@better-auth/cimd/node` is upstream's conforming implementation, so we
-      // use it rather than reimplement it. It reaches for
-      // `node:dns`/`node:https`: the "Bun equivalents, not Node APIs" rule
-      // governs code we write, Bun implements both, and Bun's own APIs expose
-      // no address-pinning seam that would satisfy the contract.
+      // makes it the application's responsibility: resolve the hostname EXACTLY
+      // ONCE, refuse every non-public-routable answer, connect to that pinned
+      // address and never follow a redirect. Wrapping `fetch` cannot express
+      // that — it re-resolves after any check, leaving a DNS-rebind window open.
+      // `@better-auth/cimd/node` is upstream's conforming implementation; it
+      // reaches for `node:dns`/`node:https`, and Bun exposes no address-pinning
+      // seam that would satisfy the contract.
       //
-      // Called through a lambda rather than passed by reference so the module
-      // binding is read per request: the integration suite replaces the
-      // upstream export to serve a document in-process (plugins are built once,
-      // at boot, long before any test file runs).
+      // Called through a lambda so the module binding is read per request: the
+      // integration suite replaces the upstream export to serve a document
+      // in-process, and plugins are built once, at boot.
       fetchClientMetadataResource: (input, init) => fetchClientMetadataResource(input, init),
+      // MCP 2026-07-28 pins CIMD draft-00, which makes `client_name` and
+      // `redirect_uris` mandatory. MCP clients are who this path serves, and a
+      // document missing either cannot complete an authorization anyway.
+      metadataProfile: "mcp-2026-07-28",
       isMetadataDocumentUrlAllowed: isCimdMetadataDocumentUrlAllowed,
       // A CIMD client is written straight to the DB by the plugin with no
-      // platform `level`, so `buildClaimsForClient` would reject its tokens.
-      // Stamp it as a self-service instance client (same model as a DCR
-      // client) so it can mint instance tokens — which the RFC 8707 audience
-      // confinement then restricts to the protected resource it was issued
-      // for. Without this the entire CIMD onboarding path mints nothing.
+      // platform discriminator, so its tokens would be rejected for a missing
+      // level. Stamp it as a self-service instance client (same model as a DCR
+      // client): it mints instance tokens, which the RFC 8707 audience
+      // confinement then restricts to one protected resource.
       onClientCreated: async ({ client }) => {
-        const stamped = await markClientSelfService(client.clientId);
-        // CIMD hands this same object to the authorize request that triggered
-        // the registration. Persisting alone would leave that first request
-        // reading the unstamped metadata.
-        if (stamped) client.metadata = stamped;
+        await markClientSelfService(client.clientId);
+      },
+      // A refresh rewrites the row from the re-fetched document, so re-assert
+      // the stamp on every one. Idempotent.
+      onClientRefreshed: async ({ client }) => {
+        await markClientSelfService(client.clientId);
       },
     }),
   ];
@@ -439,32 +431,30 @@ function strOrNull(value: unknown): string | null {
 }
 
 /**
- * Dispatch on `metadata.level`. Defensive fallback returns `{}` so the
- * plugin still mints a token — at worst the strategy rejects it at verify
- * time because `actor_type` is missing.
+ * Dispatch on the client row's `level` column. The row is read through the
+ * short-TTL client cache; `level` and the `referenced_*` FKs are immutable for
+ * a client's lifetime (`oauth_clients_level_immutable` trigger), so a cached
+ * copy cannot answer a stale level.
  */
 async function buildClaimsForClient(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean } | null,
-  metadata: ClientMetadata | undefined,
+  clientId: string,
 ): Promise<Record<string, unknown>> {
   if (!user) return {};
-  const level = metadata?.level;
-  if (level === "instance") {
-    return buildInstanceLevelClaims(user);
+  const client = await getClientCached(clientId);
+  if (!client) {
+    logger.warn("oidc: token requested for an unknown oauth_client — rejecting", {
+      module: "oidc",
+      userId: user.id,
+      clientId,
+    });
+    throw new APIError("BAD_REQUEST", {
+      message: "Unknown OAuth client — cannot issue token",
+    });
   }
-  if (level === "org") {
-    return buildOrgLevelClaims(user, metadata!);
-  }
-  if (level === "space") {
-    return buildSpaceLevelClaims(user, metadata!);
-  }
-  logger.warn("oidc: oauth_client metadata missing level — rejecting token", {
-    module: "oidc",
-    userId: user.id,
-  });
-  throw new APIError("BAD_REQUEST", {
-    message: "OAuth client metadata missing level — cannot issue token",
-  });
+  if (client.level === "instance") return buildInstanceLevelClaims(user);
+  if (client.level === "org") return buildOrgLevelClaims(user, client);
+  return buildSpaceLevelClaims(user, client);
 }
 
 async function buildInstanceLevelClaims(user: {
@@ -490,9 +480,9 @@ async function buildInstanceLevelClaims(user: {
 
 async function buildOrgLevelClaims(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean },
-  metadata: ClientMetadata,
+  client: OAuthClientRecord,
 ): Promise<Record<string, unknown>> {
-  const orgId = metadata.referencedOrgId;
+  const orgId = client.referencedOrgId;
   if (!orgId) {
     logger.warn("oidc: org-level client missing referencedOrgId — rejecting token", {
       module: "oidc",
@@ -529,7 +519,7 @@ async function buildOrgLevelClaims(
   // back to the "closed" default if the client was deleted/disabled or its
   // metadata drifted — better to reject a legitimate mint than silently
   // auto-join to a wrong role.
-  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const loaded = await loadClientSignupPolicy(client.clientId);
   const policy: Parameters<typeof resolveOrCreateOrgMembership>[2] =
     loaded && loaded.level === "org" && loaded.orgId === orgId
       ? {
@@ -590,9 +580,9 @@ async function buildOrgLevelClaims(
 
 async function buildSpaceLevelClaims(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean },
-  metadata: ClientMetadata,
+  client: OAuthClientRecord,
 ): Promise<Record<string, unknown>> {
-  const spaceId = metadata.referencedSpaceId;
+  const spaceId = client.referencedSpaceId;
   if (!spaceId) {
     logger.warn("oidc: space-level client missing referencedSpaceId — rejecting token", {
       module: "oidc",
@@ -633,7 +623,7 @@ async function buildSpaceLevelClaims(
   });
   // Load the signup policy via the short-TTL cache — closed default on any
   // lookup failure. Same rationale as `buildOrgLevelClaims`.
-  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const loaded = await loadClientSignupPolicy(client.clientId);
   const signupPolicy = {
     allowSignup: loaded?.level === "space" && loaded.spaceId === spaceId && loaded.allowSignup,
   };

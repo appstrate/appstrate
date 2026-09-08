@@ -80,6 +80,9 @@ describe("OIDC discovery — RFC 8414 + OpenID Connect Discovery", () => {
       expect(body.grant_types_supported).toBeDefined();
       expect(body.grant_types_supported).toContain("authorization_code");
       expect(body.grant_types_supported).toContain("refresh_token");
+      // `client_credentials` is upstream's default, not a grant Appstrate serves:
+      // no client registers it and no code path issues an M2M token.
+      expect(body.grant_types_supported).not.toContain("client_credentials");
 
       // OAuth 2.1 requires PKCE S256. `plain` must not be advertised.
       expect(body.code_challenge_methods_supported).toBeDefined();

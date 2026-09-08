@@ -20,7 +20,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, spyOn
 import * as cimdTransport from "@better-auth/cimd/node";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { oauthClient } from "@appstrate/db/schema";
+import { oauthClient, oauthResource } from "@appstrate/db/schema";
+import { _rebuildAuthForTesting } from "@appstrate/db/auth";
+import { decodeJwt } from "jose";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
@@ -170,11 +172,7 @@ describe("CIMD first authorization", () => {
     );
     expect(stored.scopes).not.toContain("agents:run");
     expect(stored.level).toBe("instance");
-    expect(JSON.parse(stored.metadata!)).toMatchObject({
-      level: "instance",
-      clientId,
-      selfService: true,
-    });
+    expect(stored.selfService).toBe(true);
   });
 
   it("grants the ceiling to a document that declares a narrower scope", async () => {
@@ -366,12 +364,9 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
   });
 
   it("stamps a DCR client as a self-service instance client (so token mint does not reject)", async () => {
-    // BLOCKER regression: before this fix the registered client had no
-    // `metadata.level`, so `customAccessTokenClaims → buildClaimsForClient`
-    // threw "missing level — cannot issue token" on EVERY token exchange, and
-    // no test minted a token to catch it. Assert the row is now stamped
-    // `level: "instance"` + `selfService: true` so the instance claim builder
-    // runs instead of throwing.
+    // A registered client with no platform level makes the claim builder throw
+    // "cannot issue token" on EVERY exchange. The register after-hook stamps the
+    // two columns the builder and the audience guard read.
     const { status, json } = await register({
       client_name: "Claude Code (mint-regression)",
       redirect_uris: ["http://localhost:9913/callback"],
@@ -384,15 +379,53 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
     const clientId = String(json.client_id);
 
     const [row] = await db
-      .select({ level: oauthClient.level, metadata: oauthClient.metadata })
+      .select({ level: oauthClient.level, selfService: oauthClient.selfService })
       .from(oauthClient)
       .where(eq(oauthClient.clientId, clientId))
       .limit(1);
     expect(row).toBeDefined();
     expect(row!.level).toBe("instance");
-    const metadata = JSON.parse(row!.metadata ?? "{}") as Record<string, unknown>;
-    expect(metadata.level).toBe("instance");
-    expect(metadata.selfService).toBe(true);
+    expect(row!.selfService).toBe(true);
+  });
+
+  it("takes level and self-service from the columns, never from a body `metadata`", async () => {
+    // The RFC 7591 body schema is loose, so a registrant can post a top-level
+    // `metadata` object and the provider persists it verbatim. Declaring
+    // `selfService: false` there would lift the single-protected-resource cage,
+    // and `level: "org"` would change the claim shape — neither is read.
+    const { status, json } = await register({
+      client_name: "Client that names its own level",
+      redirect_uris: ["http://localhost:9919/callback"],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      metadata: { selfService: false, level: "org", referencedOrgId: crypto.randomUUID() },
+    });
+    expect([200, 201]).toContain(status);
+
+    const [row] = await db
+      .select({ level: oauthClient.level, selfService: oauthClient.selfService })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, String(json.client_id)))
+      .limit(1);
+    expect(row!.level).toBe("instance");
+    expect(row!.selfService).toBe(true);
+  });
+
+  it("fills an `application_type` that is present but null", async () => {
+    // `"application_type" in body` reads an explicit null as declared, leaving
+    // the provider to reject the body — a loopback MCP client that serialises
+    // its absent fields as null could not register at all.
+    const { status, json } = await register({
+      client_name: "Null application type",
+      redirect_uris: ["http://127.0.0.1:9920/callback"],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      application_type: null,
+    });
+    expect([200, 201]).toContain(status);
+    expect(json.application_type).toBe("native");
   });
 });
 
@@ -480,5 +513,281 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
     // with our `invalid_target`.
     expect(String(json.error ?? "")).not.toBe("invalid_target");
     if (status === 400) expect(String(json.error)).not.toBe("invalid_target");
+  });
+});
+
+describe("CIMD refresh keeps the platform stamp", () => {
+  // A CIMD refresh rewrites the client row from the re-fetched document, so the
+  // platform's own discriminators have to be re-asserted on every one —
+  // `onClientRefreshed` is what does that. This suite drives a real
+  // registration, a real refresh and a real mint.
+  const ORG_ID = "00000000-0000-0000-0000-0000000000d1";
+
+  let documentOctet = 100;
+  let clientId: string;
+  let redirectUri: string;
+  let orgUri: string;
+  let fetchDocument: ReturnType<typeof spyOn<typeof cimdTransport, "fetchClientMetadataResource">>;
+
+  function base64url(bytes: Uint8Array): string {
+    let binary = "";
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  async function challengeFor(verifier: string): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    return base64url(new Uint8Array(digest));
+  }
+
+  async function signUpPlatformUser(email: string): Promise<string> {
+    const res = await app.request("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: "Sup3rSecretPass!", name: "Operator" }),
+    });
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    const match = setCookie.match(/better-auth\.session_token=([^;]+)/);
+    if (!match) throw new Error(`no session cookie: ${setCookie}`);
+    return `better-auth.session_token=${match[1]}`;
+  }
+
+  /** Full authorization-code + PKCE exchange, returning the decoded access token. */
+  async function mintAccessToken(cookie: string): Promise<Record<string, unknown>> {
+    const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+    const authorizeQuery = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      scope: "openid profile email",
+      state: "cimd-mint",
+      code_challenge: await challengeFor(verifier),
+      code_challenge_method: "S256",
+      resource: orgUri,
+    });
+    const authorized = await app.request(`/api/auth/oauth2/authorize?${authorizeQuery}`, {
+      headers: { cookie, accept: "text/html" },
+      redirect: "manual",
+    });
+    expect(authorized.status).toBe(302);
+    const authorizeTarget = new URL(authorized.headers.get("location")!, "http://localhost");
+
+    // A stored consent short-circuits the consent screen and the authorization
+    // response comes straight back on the callback.
+    let callback = authorizeTarget;
+    if (authorizeTarget.pathname === "/api/oauth/consent") {
+      const consentPage = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
+        headers: { cookie, accept: "text/html" },
+      });
+      expect(consentPage.status).toBe(200);
+      const csrfCookie = (consentPage.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="))!
+        .split(";")[0]!;
+      const csrfToken = (await consentPage.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+      const consented = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
+        method: "POST",
+        headers: {
+          cookie: `${cookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+          origin: "http://localhost:3000",
+        },
+        body: new URLSearchParams({ _csrf: csrfToken, accept: "true" }).toString(),
+        redirect: "manual",
+      });
+      expect([200, 302]).toContain(consented.status);
+      const location = consented.headers.get("location");
+      callback = location
+        ? new URL(location, redirectUri)
+        : new URL(String(((await consented.json()) as { url?: string }).url));
+    }
+    const code = callback.searchParams.get("code");
+    expect(code).toBeTruthy();
+
+    const token = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: code!,
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+        resource: orgUri,
+      }).toString(),
+    });
+    expect(token.status).toBe(200);
+    const { access_token: accessToken } = (await token.json()) as { access_token: string };
+    return decodeJwt(accessToken) as Record<string, unknown>;
+  }
+
+  async function storedClient() {
+    const [row] = await db
+      .select({ level: oauthClient.level, selfService: oauthClient.selfService })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId));
+    if (!row) throw new Error("CIMD client was not persisted");
+    return row;
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+    // A distinct address per test: the document cache is keyed on client_id and
+    // outlives `truncateAll()`.
+    documentOctet += 1;
+    clientId = `https://93.184.216.${documentOctet}/client.json`;
+    redirectUri = `https://93.184.216.${documentOctet}/callback`;
+    orgUri = getMcpOrgResourceUri(ORG_ID);
+    fetchDocument = spyOn(cimdTransport, "fetchClientMetadataResource").mockImplementation(
+      async () =>
+        Response.json({
+          client_id: clientId,
+          client_name: "Client that names its own level",
+          redirect_uris: [redirectUri],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+        }),
+    );
+    resetProtectedResources();
+    registerProtectedResourceFamily({
+      prefix: "/api/mcp/o",
+      deriveUri: (path) => {
+        const id = path.slice("/api/mcp/o/".length).split("/")[0];
+        return id ? getMcpOrgResourceUri(id) : undefined;
+      },
+      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+    });
+    await db
+      .insert(oauthResource)
+      .values({ id: crypto.randomUUID(), identifier: orgUri, name: "MCP endpoint (cimd suite)" })
+      .onConflictDoNothing({ target: oauthResource.identifier });
+  });
+
+  afterEach(async () => {
+    fetchDocument.mockRestore();
+    await db.delete(oauthResource).where(eq(oauthResource.identifier, orgUri));
+  });
+
+  // The plugin instances (and the CIMD document cache inside them) are rebuilt
+  // here, so restore the harness's own build for the rest of the run.
+  afterAll(() => {
+    _rebuildAuthForTesting();
+  });
+
+  it("keeps the columns, the audience cage and the claim shape across a refresh", async () => {
+    const cookie = await signUpPlatformUser("cimd-level@satellite.example.com");
+
+    const first = await mintAccessToken(cookie);
+    expect(first.actor_type).toBe("user");
+    expect(first.org_id).toBeUndefined();
+    expect((await storedClient()).selfService).toBe(true);
+
+    // Clear the stamp, so the refresh has something to restore. Without
+    // `onClientRefreshed` the row stays cleared and the audience cage lifts.
+    await db
+      .update(oauthClient)
+      .set({ selfService: false })
+      .where(eq(oauthClient.clientId, clientId));
+
+    // Dropping the plugin instances drops the in-process document cache, so the
+    // next resolution re-fetches and takes the provider's UPDATE branch — a real
+    // refresh.
+    _rebuildAuthForTesting();
+    const second = await mintAccessToken(cookie);
+    expect(fetchDocument.mock.calls.length).toBeGreaterThan(1);
+
+    const stored = await storedClient();
+    expect(stored.level).toBe("instance");
+    expect(stored.selfService).toBe(true);
+    expect(second.actor_type).toBe("user");
+    expect(second.org_id).toBeUndefined();
+  });
+
+  it("still refuses the platform audience after a refresh", async () => {
+    await signUpPlatformUser("cimd-cage@satellite.example.com");
+    // Register the client (first document resolution), then refresh it.
+    await app.request(
+      `/api/auth/oauth2/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope: "openid",
+        state: "cage",
+        code_challenge: "a".repeat(43),
+        code_challenge_method: "S256",
+      })}`,
+    );
+    _rebuildAuthForTesting();
+    await app.request(
+      `/api/auth/oauth2/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope: "openid",
+        state: "cage",
+        code_challenge: "a".repeat(43),
+        code_challenge_method: "S256",
+      })}`,
+    );
+
+    const token = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: "irrelevant-code",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_verifier: "a".repeat(43),
+        resource: getEnv().APP_URL,
+      }).toString(),
+    });
+    expect(token.status).toBe(400);
+    expect(await token.json()).toMatchObject({ error: "invalid_target" });
+  });
+});
+
+describe("CIMD client_id URL policy gate", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+  });
+
+  it("refuses a client_id on the run network's Docker alias before fetching it", async () => {
+    // `sidecar` is an ordinary name to upstream's public-routability check — it
+    // is only a name that resolves anywhere inside a run network. The platform
+    // denylist runs as `isMetadataDocumentUrlAllowed`, BEFORE the document is
+    // fetched, so nothing leaves the process.
+    const fetchDocument = spyOn(cimdTransport, "fetchClientMetadataResource");
+    const clientId = "https://sidecar/client.json";
+    const res = await app.request(
+      `/api/auth/oauth2/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: "https://sidecar/callback",
+        scope: "openid",
+        state: "denylist",
+        code_challenge: "a".repeat(43),
+        code_challenge_method: "S256",
+      })}`,
+    );
+    // Refused, and never sent anywhere near the login page.
+    const location = res.headers.get("location");
+    expect(location === null || new URL(location, "http://localhost").pathname).not.toBe(
+      "/api/oauth/login",
+    );
+    expect(fetchDocument).not.toHaveBeenCalled();
+    expect(await db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId))).toEqual(
+      [],
+    );
+    fetchDocument.mockRestore();
   });
 });
