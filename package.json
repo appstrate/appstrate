@@ -139,7 +139,7 @@
     "@electric-sql/pglite": "^0.5.4"
   },
   "overrides": {
-    "zod": "4.4.3",
+    "zod": "4.5.4",
     "ai": "^7.0.48",
     "@ai-sdk/react": "^4.0.51",
     "@ai-sdk/provider-utils": "^5.0.18"

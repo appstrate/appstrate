@@ -74,7 +74,7 @@
         "jose": "^6.2.7",
         "nodemailer": "^9.0.3",
         "rate-limiter-flexible": "^11.2.0",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
       "devDependencies": {
         "@aws-sdk/client-s3": "^3.1101.0",
@@ -148,7 +148,7 @@
         "remark-breaks": "^4.0.0",
         "remark-gfm": "^4.0.1",
         "sonner": "^2.0.7",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
         "zustand": "^5.0.14",
       },
       "devDependencies": {
@@ -181,7 +181,7 @@
         "file-type": "^22.0.1",
         "mustache": "^4.2.0",
         "semver": "^7.8.4",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
       "devDependencies": {
         "@appstrate/core": "workspace:*",
@@ -233,7 +233,7 @@
         "fflate": "^0.8.3",
         "pino": "^10.3.1",
         "semver": "^7.8.4",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
       "devDependencies": {
         "@types/mime-db": "^1.43.6",
@@ -269,7 +269,7 @@
         "drizzle-orm": "^0.45.2",
         "nodemailer": "^9.0.3",
         "postgres": "^3.4.9",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
       "devDependencies": {
         "@types/nodemailer": "^8.0.1",
@@ -288,7 +288,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/core": "workspace:*",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
     },
     "packages/mcp-transport": {
@@ -317,7 +317,7 @@
         "drizzle-orm": "^0.45.2",
         "ioredis": "^6.0.0",
         "remark-gfm": "^4.0.1",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
       "devDependencies": {
         "@appstrate/env": "workspace:*",
@@ -389,7 +389,7 @@
       "dependencies": {
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
     },
     "packages/ui": {
@@ -476,7 +476,7 @@
     "@ai-sdk/provider-utils": "^5.0.18",
     "@ai-sdk/react": "^4.0.51",
     "ai": "^7.0.48",
-    "zod": "4.4.3",
+    "zod": "4.5.4",
   },
   "packages": {
     "@afps-spec/schema": ["@afps-spec/schema@0.7.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.4.3" } }, "sha512-LTj+Ffrysec71ddy6l8HvbVRZxoQS+YrY4OxwB9nWmzZ6oNoMvDUmdizRnyHtmSnhvX6suq0iXIjCfuZy/uzNw=="],
@@ -2705,7 +2705,7 @@
 
     "yocto-queue": ["yocto-queue@1.2.2", "", {}, "sha512-4LCcse/U2MHZ63HAJVE+v71o7yOdIe4cZ70Wpf8D/IyjDKYQLV5GD46B+hSTjJsvV5PztjvHoU580EftxjDZFQ=="],
 
-    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+    "zod": ["zod@4.5.4", "", {}, "sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 

@@ -35,7 +35,7 @@
     "drizzle-orm": "^0.45.2",
     "nodemailer": "^9.0.3",
     "postgres": "^3.4.9",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1",
