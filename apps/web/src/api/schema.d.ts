@@ -5142,10 +5142,10 @@ export interface components {
             /** Format: date-time */
             period_end: string | null;
             /**
-             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` during the period-end grace window, otherwise mirrors Stripe's `subscription.status`.
+             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` while a subscription Stripe still collects on is set to end at the period boundary, otherwise mirrors Stripe's `subscription.status`.
              * @enum {string}
              */
-            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceled" | "canceling";
+            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "incomplete" | "canceled" | "canceling";
             /** @description Plans the org can upgrade into — empty when on the highest plan. */
             upgrades: components["schemas"]["EeBillingUpgradePlan"][];
         };

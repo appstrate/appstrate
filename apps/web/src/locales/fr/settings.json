@@ -678,6 +678,7 @@
   "billing.statusPastDue": "Paiement en attente",
   "billing.statusUnpaid": "Paiement échoué",
   "billing.statusPaused": "Abonnement en pause",
+  "billing.statusIncomplete": "Paiement initial en attente",
   "billing.statusCanceling": "Annulation prévue le {{date}}",
   "billing.statusCanceled": "Abonnement annulé",
   "billing.noSubscription": "Aucun abonnement",

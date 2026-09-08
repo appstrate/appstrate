@@ -325,6 +325,44 @@ describe("post-signup", () => {
       expect(await account()).toBeNull();
     });
 
+    it("keeps the rows on a 400 that merely mentions cancellation", async () => {
+      // Only ONE Stripe 400 means "already canceled". Reading any refusal whose
+      // prose contains the word as success would delete the row holding the
+      // subscription id, leaving a live subscription charging a customer with
+      // nothing left in the system able to name it.
+      await seedBillingAccount({
+        orgId,
+        stripeSubscriptionId: "sub_param_error",
+        subscriptionStatus: "active",
+      });
+      setNextError(400, {
+        error: { type: "invalid_request_error", message: "Invalid cancel_at_period_end parameter" }, // prettier-ignore
+      });
+
+      await onOrgDelete(orgId);
+
+      const row = await account();
+      expect(row?.stripeSubscriptionId).toBe("sub_param_error");
+      expect(row?.cancelRequestedAt).toBeInstanceOf(Date);
+    });
+
+    it("treats Stripe's already-canceled 400 as done", async () => {
+      // Control: the same status, the sentence Stripe actually answers a
+      // cancel-the-already-canceled request with.
+      await seedBillingAccount({
+        orgId,
+        stripeSubscriptionId: "sub_already_canceled",
+        subscriptionStatus: "active",
+      });
+      setNextError(400, {
+        error: { type: "invalid_request_error", message: "A canceled subscription can only update its cancellation_details." }, // prettier-ignore
+      });
+
+      await onOrgDelete(orgId);
+
+      expect(await account()).toBeNull();
+    });
+
     it("is a no-op when called twice", async () => {
       // The platform may retry a deletion that failed further along.
       await seedBillingAccount({

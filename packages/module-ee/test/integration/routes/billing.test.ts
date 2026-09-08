@@ -110,6 +110,24 @@ describe("billing routes", () => {
       expect(body.status).toBe("canceling");
     });
 
+    it("reports the real status when the cancel flag sits on a suspended subscription", async () => {
+      // `canceling` is what routes the dashboard to POST /api/billing/plan,
+      // which refuses anything outside LIVE_SUBSCRIPTION_STATUSES. Projecting
+      // it from the cancel flag alone would send a call this API 409s.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeSubscriptionId: "sub_unpaid_canceling",
+        subscriptionStatus: "unpaid",
+        cancelAtPeriodEnd: true,
+        creditQuota: 20000,
+      });
+
+      const res = await app.request("/api/billing", { headers: headers() });
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.status).toBe("unpaid");
+    });
+
     it("caps usagePercent at 100 when over budget", async () => {
       await seedBillingAccount({
         orgId,

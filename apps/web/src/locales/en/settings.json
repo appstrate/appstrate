@@ -678,6 +678,7 @@
   "billing.statusPastDue": "Payment pending",
   "billing.statusUnpaid": "Payment failed",
   "billing.statusPaused": "Subscription paused",
+  "billing.statusIncomplete": "Initial payment pending",
   "billing.statusCanceling": "Cancellation scheduled on {{date}}",
   "billing.statusCanceled": "Subscription canceled",
   "billing.noSubscription": "No subscription",

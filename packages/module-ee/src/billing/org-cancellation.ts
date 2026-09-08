@@ -28,6 +28,17 @@ import { logger } from "../logger.ts";
 import { deleteBillingManagers } from "./managers.ts";
 
 /**
+ * Stripe's sentence for "this subscription is already canceled", which it
+ * returns as a 400 with no distinguishing `code`. Anchored at the start and
+ * matched whole: any other 400 — a bad parameter, a permission refusal, a
+ * message that merely mentions cancellation — is a real failure, and reading it
+ * as success would delete the rows that hold the subscription id, leaving a
+ * live subscription charging a customer with nothing left to name it.
+ */
+const ALREADY_CANCELED_MESSAGE =
+  /^A canceled subscription can only update its cancellation_details/;
+
+/**
  * Is this failure indistinguishable from success?
  *
  * A subscription Stripe no longer has — deleted out of band, or cancelled by an
@@ -36,15 +47,13 @@ import { deleteBillingManagers } from "./managers.ts";
  * that already happened.
  *
  *   - `resource_missing` / 404: no such subscription;
- *   - a 400 refusing to update a subscription that is already `canceled`. Stripe
- *     expresses this in the message rather than in a code, so the message is
- *     what has to be read — narrowly, and only alongside a 400 from an invalid
- *     request.
+ *   - a 400 carrying {@link ALREADY_CANCELED_MESSAGE}, the one sentence Stripe
+ *     answers a cancel-the-already-canceled request with.
  */
 function isAlreadyCanceled(err: unknown): boolean {
   if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
   if (err.code === "resource_missing" || err.statusCode === 404) return true;
-  return err.statusCode === 400 && /canceled|cancelled/i.test(err.message);
+  return err.statusCode === 400 && ALREADY_CANCELED_MESSAGE.test(err.message);
 }
 
 /**

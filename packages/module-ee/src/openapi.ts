@@ -131,7 +131,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         status: {
           type: "string",
           description:
-            "Effective billing status. `none` when no Stripe subscription is attached, `canceling` during the period-end grace window, otherwise mirrors Stripe's `subscription.status`.",
+            "Effective billing status. `none` when no Stripe subscription is attached, `canceling` while a subscription Stripe still collects on is set to end at the period boundary, otherwise mirrors Stripe's `subscription.status`.",
           enum: [
             "none",
             "active",
@@ -139,6 +139,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
             "past_due",
             "unpaid",
             "paused",
+            "incomplete",
             "canceled",
             "canceling",
           ],

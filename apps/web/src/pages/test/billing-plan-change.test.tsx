@@ -10,8 +10,8 @@
  * and the dashboard must not ask for it. The branch itself is
  * `planSelectionRoute`, pinned directly below — the click that reaches it needs
  * a DOM this runner does not have, and the two halves of the rule (client and
- * `LIVE_SUBSCRIPTION_STATUSES` on the server) have to agree or every click lands
- * on a refusal.
+ * `LIVE_SUBSCRIPTION_STATUSES` / `HELD_SUBSCRIPTION_STATUSES` on the server)
+ * have to agree or every click lands on a refusal.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -85,11 +85,20 @@ describe("planSelectionRoute", () => {
     }
   });
 
-  it("opens a checkout when there is no subscription to move", () => {
-    // `unpaid`, `paused` and `canceled` are the statuses the server does NOT
-    // count as live either, so a checkout there is accepted rather than refused.
-    for (const status of ["none", "canceled", "unpaid", "paused"] as const) {
+  it("opens a checkout only when Stripe holds no subscription", () => {
+    // The two statuses at which the server accepts a checkout: it holds
+    // nothing to duplicate.
+    for (const status of ["none", "canceled"] as const) {
       expect(planSelectionRoute(status)).toBe("checkout");
+    }
+  });
+
+  it("sends a suspended subscription to the portal, where neither other door is open", () => {
+    // Stripe still HOLDS these, so a checkout is refused (409
+    // `subscription_exists`); it no longer collects on them, so a plan change is
+    // refused too (409 `no_active_subscription`).
+    for (const status of ["unpaid", "paused", "incomplete"] as const) {
+      expect(planSelectionRoute(status)).toBe("portal");
     }
   });
 });

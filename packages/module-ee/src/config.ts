@@ -137,13 +137,38 @@ export const DEFAULT_QUOTE_RATES: QuoteRates = {
 };
 
 /**
- * Statuses at which Stripe still holds a subscription for this account — the
- * set that decides CHANGE-IN-PLACE versus CHECKOUT.
+ * Statuses at which Stripe still HOLDS a subscription object for this account.
  *
- * `past_due` belongs here: the subscription exists and Stripe is retrying it, so
- * a second Checkout would create a SECOND subscription beside it and bill the
- * org twice. Anything else (`canceled`, `incomplete_expired`, `null`) leaves
- * nothing to modify, so a new Checkout is the only way back.
+ * This is the set that decides whether a second Checkout would DOUBLE-BILL: a
+ * Checkout only ever creates, so completing one while Stripe still holds a
+ * subscription leaves the first running beside the second. `unpaid` and
+ * `paused` are held — Stripe stopped collecting on them, it did not delete
+ * them, and the way back is the Customer Portal, where the org fixes payment on
+ * the subscription it already has. `incomplete` is held too: its first payment
+ * is still pending, so Stripe may yet activate it.
+ *
+ * Outside this set Stripe holds nothing (`canceled`, `incomplete_expired`) or
+ * the account never had one (`null`), and Checkout is the only way back.
+ */
+export const HELD_SUBSCRIPTION_STATUSES = new Set([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "paused",
+  "incomplete",
+]);
+
+/**
+ * Statuses at which the subscription can be MOVED between plans in place — a
+ * strict subset of {@link HELD_SUBSCRIPTION_STATUSES}.
+ *
+ * `past_due` belongs here: Stripe is still retrying it, so swapping the price
+ * item works and the retry collects the new amount. `unpaid` and `paused` do
+ * not: Stripe has suspended collection, and a plan swap would change what the
+ * org owes without restoring the payment that is actually blocking it.
+ * `incomplete` does not either — its price item is bound to a payment intent
+ * that has not settled.
  */
 export const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
 

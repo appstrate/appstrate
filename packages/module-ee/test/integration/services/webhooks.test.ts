@@ -654,6 +654,120 @@ describe("handleWebhook", () => {
       expect(row.creditQuota).toBe(80000);
     });
 
+    /**
+     * The identity guard pins on the subscription STRIPE holds, not on the id
+     * the row happens to carry. An account whose stored subscription is dead
+     * has nothing to supersede, and dropping its next checkout as "superseded"
+     * left a paying customer with no plan and no quota.
+     */
+    describe("a dead subscription id does not block a new one", () => {
+      async function seedDeadSubscription(status: string) {
+        await seedBillingAccount({
+          orgId,
+          planId: "free",
+          stripeCustomerId: "cus_identity",
+          stripeSubscriptionId: "sub_dead",
+          subscriptionStatus: status,
+          creditQuota: 0,
+        });
+      }
+
+      it("attaches a checkout completion over a `canceled` id", async () => {
+        await seedDeadSubscription("canceled");
+
+        const { body, signature } = signedEvent({
+          id: "evt_dead_checkout_canceled",
+          type: "checkout.session.completed",
+          data: {
+            object: {
+              customer: "cus_identity",
+              subscription: "sub_resubscribed",
+              metadata: { orgId, planId: "starter" },
+            },
+          },
+        });
+
+        await handleWebhook(body, signature);
+
+        const row = await account();
+        expect(row.stripeSubscriptionId).toBe("sub_resubscribed");
+        expect(row.planId).toBe("starter");
+        expect(row.creditQuota).toBe(20000);
+      });
+
+      it("attaches a checkout completion over an `incomplete_expired` id", async () => {
+        await seedDeadSubscription("incomplete_expired");
+
+        const { body, signature } = signedEvent({
+          id: "evt_dead_checkout_expired",
+          type: "checkout.session.completed",
+          data: {
+            object: {
+              customer: "cus_identity",
+              subscription: "sub_after_expiry",
+              metadata: { orgId, planId: "pro" },
+            },
+          },
+        });
+
+        await handleWebhook(body, signature);
+
+        const row = await account();
+        expect(row.stripeSubscriptionId).toBe("sub_after_expiry");
+        expect(row.planId).toBe("pro");
+        expect(row.creditQuota).toBe(80000);
+      });
+
+      it("attaches a `created` over a `canceled` id", async () => {
+        await seedDeadSubscription("canceled");
+
+        const { body, signature } = signedEvent({
+          id: "evt_dead_created",
+          type: "customer.subscription.created",
+          data: {
+            object: {
+              id: "sub_recreated",
+              customer: "cus_identity",
+              status: "active",
+              cancel_at_period_end: false,
+              metadata: { orgId, planId: "starter" },
+              items: { data: [{ id: "si_recreated", price: { id: "price_starter_test" } }] },
+            },
+          },
+        });
+
+        await handleWebhook(body, signature);
+
+        const row = await account();
+        expect(row.stripeSubscriptionId).toBe("sub_recreated");
+        expect(row.planId).toBe("starter");
+      });
+
+      it("still ignores a checkout completion for an account on a HELD subscription", async () => {
+        // Control: `unpaid` is a status Stripe still holds the object at, so
+        // the account is not free to be re-attached.
+        await seedDeadSubscription("unpaid");
+
+        const { body, signature } = signedEvent({
+          id: "evt_held_checkout",
+          type: "checkout.session.completed",
+          data: {
+            object: {
+              customer: "cus_identity",
+              subscription: "sub_second_attempt",
+              metadata: { orgId, planId: "starter" },
+            },
+          },
+        });
+
+        await handleWebhook(body, signature);
+
+        const row = await account();
+        expect(row.stripeSubscriptionId).toBe("sub_dead");
+        expect(row.planId).toBe("free");
+      });
+    });
+
     it("ignores a `created` for a second subscription on an already-linked account", async () => {
       await seedReplacedSubscription();
 

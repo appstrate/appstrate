@@ -33,6 +33,7 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
   past_due: "billing.statusPastDue",
   unpaid: "billing.statusUnpaid",
   paused: "billing.statusPaused",
+  incomplete: "billing.statusIncomplete",
   canceling: "billing.statusCanceling",
   canceled: "billing.statusCanceled",
   active: "billing.statusActive",
@@ -87,17 +88,38 @@ export function OrgSettingsBillingPage() {
     toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
   };
 
+  const handleManage = () => {
+    portalMutation.mutate(
+      {},
+      {
+        onSuccess: ({ url }) => {
+          window.location.href = url;
+        },
+        onError: onMutationError,
+      },
+    );
+  };
+
   /**
-   * Picking a plan does one of two different things.
+   * Picking a plan does one of three different things.
    *
-   * With no live subscription it opens Stripe Checkout. With one, it moves that
-   * subscription onto the new price instead: Checkout only ever creates, so
-   * taking an upgrade through it would leave the old subscription running and
-   * bill the org twice — which the server now refuses outright. The plan itself
-   * lands through the Stripe webhook, so the page refetches rather than assuming.
+   * With no subscription it opens Stripe Checkout. With one Stripe still
+   * collects on, it moves that subscription onto the new price instead:
+   * Checkout only ever creates, so taking an upgrade through it would leave the
+   * old subscription running and bill the org twice — which the server refuses
+   * outright. With one Stripe holds but no longer collects on (`unpaid`,
+   * `paused`, `incomplete`) neither door is open, so the click goes to the
+   * Customer Portal, where the payment blocking the account gets fixed. The plan
+   * itself lands through the Stripe webhook, so the page refetches rather than
+   * assuming.
    */
   const handleSelectPlan = (planId: CheckoutPlanId) => {
-    if (planSelectionRoute(billing.status) === "plan-change") {
+    const route = planSelectionRoute(billing.status);
+    if (route === "portal") {
+      handleManage();
+      return;
+    }
+    if (route === "plan-change") {
       changePlanMutation.mutate(
         { body: { plan_id: planId } },
         {
@@ -113,18 +135,6 @@ export function OrgSettingsBillingPage() {
 
     checkoutMutation.mutate(
       { body: { plan_id: planId, return_url: "/org-settings/billing" } },
-      {
-        onSuccess: ({ url }) => {
-          window.location.href = url;
-        },
-        onError: onMutationError,
-      },
-    );
-  };
-
-  const handleManage = () => {
-    portalMutation.mutate(
-      {},
       {
         onSuccess: ({ url }) => {
           window.location.href = url;

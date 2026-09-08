@@ -4,19 +4,30 @@ import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { and, eq, isNull } from "drizzle-orm";
-import { getPlans, isPlanId, LIVE_SUBSCRIPTION_STATUSES } from "../config.ts";
+import { getPlans, isPlanId, HELD_SUBSCRIPTION_STATUSES } from "../config.ts";
 import { resolvePrimaryBillingEmail } from "../billing/contact.ts";
 import { subscriptionExists } from "../http-errors.ts";
 
 /**
- * Start a Stripe Checkout for an org that has NO subscription.
+ * Start a Stripe Checkout for an org Stripe holds no subscription for.
  *
- * Refuses an org that already has one. Checkout only ever CREATES: it never
- * reads `stripe_subscription_id`, so an upgrade taken through this door left the
- * first subscription running and charged the customer for both. The refusal is
+ * Checkout only ever CREATES: it never reads `stripe_subscription_id`, so
+ * completing one while Stripe still holds a subscription leaves the first
+ * running beside the second and charges the customer for both. The refusal is
  * here rather than in the dashboard because the dashboard's buttons are not what
- * protects a customer from a double charge — changing an existing subscription
- * is `changeSubscriptionPlan`.
+ * protects a customer from a double charge.
+ *
+ * The test is {@link HELD_SUBSCRIPTION_STATUSES}, not the narrower set a plan
+ * change accepts. An `unpaid` or `paused` org has a subscription Stripe is
+ * holding but not collecting on: it cannot be moved between plans, and it must
+ * not be duplicated either. Its way back is the Customer Portal, which the
+ * dashboard offers for every account that carries a subscription.
+ *
+ * Below that set — `canceled`, `incomplete_expired`, or no status at all —
+ * Stripe holds nothing, whatever id the account still carries: a
+ * `customer.subscription.deleted` that never arrived leaves a dead id behind,
+ * and refusing on the id alone would lock the org out of ever subscribing
+ * again. The webhook handlers attach over such an id for the same reason.
  */
 export async function createCheckoutSession(
   orgId: string,
@@ -44,7 +55,7 @@ export async function createCheckoutSession(
   if (
     account.stripeSubscriptionId !== null &&
     account.subscriptionStatus !== null &&
-    LIVE_SUBSCRIPTION_STATUSES.has(account.subscriptionStatus)
+    HELD_SUBSCRIPTION_STATUSES.has(account.subscriptionStatus)
   ) {
     throw subscriptionExists();
   }

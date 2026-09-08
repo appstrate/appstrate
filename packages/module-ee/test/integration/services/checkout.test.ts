@@ -124,6 +124,48 @@ describe("createCheckoutSession", () => {
     expect(body["metadata[planId]"]).toBe("pro");
   });
 
+  /**
+   * Which door a subscribing org goes through is decided by whether STRIPE
+   * still holds a subscription, not by whether the account row carries an id.
+   */
+  describe("an account that already carries a subscription id", () => {
+    it("refuses a checkout while Stripe still holds the subscription", async () => {
+      // `unpaid`: Stripe stopped collecting but the subscription object is
+      // still there, so a second checkout would bill the org twice. The
+      // Customer Portal is the way back.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_held_001",
+        stripeSubscriptionId: "sub_held_001",
+        subscriptionStatus: "unpaid",
+      });
+
+      await expect(createCheckoutSession(orgId, "pro", appUrl)).rejects.toMatchObject({
+        status: 409,
+        code: "subscription_exists",
+      });
+      expect(requests.filter((r) => r.path === "/v1/checkout/sessions")).toHaveLength(0);
+    });
+
+    it("opens a checkout when the id names a subscription Stripe no longer holds", async () => {
+      // Same non-null id, terminal status: only `customer.subscription.deleted`
+      // nulls the column, so a lost or late one leaves this row behind. The org
+      // must still be able to subscribe again.
+      await seedBillingAccount({
+        orgId,
+        planId: "free",
+        stripeCustomerId: "cus_dead_001",
+        stripeSubscriptionId: "sub_dead_001",
+        subscriptionStatus: "canceled",
+      });
+
+      const url = await createCheckoutSession(orgId, "pro", appUrl);
+      expect(url).toBe("https://checkout.stripe.com/test");
+      expect(requests.filter((r) => r.path === "/v1/checkout/sessions")).toHaveLength(1);
+    });
+  });
+
   it("creates checkout for pro plan", async () => {
     await seedBillingAccount({
       orgId,

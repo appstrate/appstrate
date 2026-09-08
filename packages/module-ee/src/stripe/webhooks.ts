@@ -5,9 +5,15 @@ import { z } from "zod";
 import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
-import { and, eq, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, isNull, notInArray, or, type SQL } from "drizzle-orm";
 import { logger } from "../logger.ts";
-import { getPlans, isPlanId, type Plans, type PlanDefinition } from "../config.ts";
+import {
+  getPlans,
+  isPlanId,
+  HELD_SUBSCRIPTION_STATUSES,
+  type Plans,
+  type PlanDefinition,
+} from "../config.ts";
 import { getEeEnv } from "../env.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { billingSettingsUrl } from "../emails/layout.ts";
@@ -92,18 +98,31 @@ function currentSubscription(orgId: string, subscriptionId: string): SQL {
 }
 
 /**
- * Same, widened to an account with NO subscription attached yet — for the two
- * handlers whose job includes ATTACHING one (checkout completion, and the first
- * paid invoice, which must not depend on winning the ordering race against it).
- * An account already carrying a DIFFERENT subscription is still excluded, which
- * is the whole point.
+ * The predicate for the three handlers whose job includes ATTACHING a
+ * subscription: checkout completion, subscription creation, and the first paid
+ * invoice (which must not depend on winning the ordering race against them).
+ *
+ * An account qualifies when it carries no subscription, when it carries THIS
+ * one, or when the id it carries names a subscription Stripe no longer holds
+ * (`HELD_SUBSCRIPTION_STATUSES`). That last arm is what a stale id needs: only
+ * `customer.subscription.deleted` nulls the column, so an org whose account sits
+ * at `canceled` or `incomplete_expired` — or whose `deleted` event was lost —
+ * still carries a dead id, and pinning on the id alone dropped its next paid
+ * checkout as "superseded", leaving it charged with no plan and no quota.
+ *
+ * An account on a different subscription Stripe DOES hold is still excluded,
+ * which is the whole point: that org is being billed for the row it carries, and
+ * a replaced subscription's tail must not rewrite it.
  */
-function currentOrUnattachedSubscription(orgId: string, subscriptionId: string): SQL {
+function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   return and(
     eq(billingAccounts.orgId, orgId),
     or(
       isNull(billingAccounts.stripeSubscriptionId),
       eq(billingAccounts.stripeSubscriptionId, subscriptionId),
+      // `NOT IN` is unknown against NULL, so the null status is its own arm.
+      isNull(billingAccounts.subscriptionStatus),
+      notInArray(billingAccounts.subscriptionStatus, [...HELD_SUBSCRIPTION_STATUSES]),
     ),
   )!;
 }
@@ -249,10 +268,11 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           subscriptionStatus: "active",
           updatedAt: new Date(),
         })
-        // This is the handler that ATTACHES a subscription, so an unattached
-        // account qualifies — but an account already on a different subscription
-        // does not: a stale checkout must not switch a paying org's plan.
-        .where(currentOrUnattachedSubscription(orgId, subscriptionId))
+        // This is the handler that ATTACHES a subscription, so an account with
+        // none — or with a dead id Stripe no longer holds — qualifies. An
+        // account on a different LIVE subscription does not: a stale checkout
+        // must not switch a paying org's plan.
+        .where(attachableSubscription(orgId, subscriptionId))
         .returning({ orgId: billingAccounts.orgId });
 
       if (!linked) {
@@ -310,9 +330,9 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const plan = planForSubscription(subscription, plans);
       const planId = plan?.id ?? subMetadata.planId;
 
-      // Attach ONLY to an account that has no subscription. Read-then-write let
-      // a concurrent handler attach between the two; the condition belongs in
-      // the UPDATE, where the row lock decides it.
+      // Attach only to an account Stripe holds no OTHER subscription for.
+      // Read-then-write let a concurrent handler attach between the two; the
+      // condition belongs in the UPDATE, where the row lock decides it.
       const [linked] = await db
         .update(billingAccounts)
         .set({
@@ -327,7 +347,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           cancelAtPeriodEnd: subscription.cancel_at_period_end,
           updatedAt: new Date(),
         })
-        .where(and(eq(billingAccounts.orgId, orgId), isNull(billingAccounts.stripeSubscriptionId)))
+        .where(attachableSubscription(orgId, subscription.id))
         .returning({ orgId: billingAccounts.orgId });
 
       if (!linked) {
@@ -409,11 +429,12 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // clobber a billing-sweep debit that committed in the read→write gap.
       const resetCredits = invoice.billing_reason === "subscription_cycle";
 
-      // Also (re)establish the Stripe linkage here so allocation no longer
-      // depends on checkout.session.completed winning the ordering race — hence
-      // the widened condition. An account on a DIFFERENT subscription is still
-      // excluded: a late invoice for a replaced subscription would otherwise
-      // re-attach the dead one and reset the live plan's quota.
+      // Also (re)establish the Stripe linkage here, on the shared attach
+      // predicate, so allocation does not depend on checkout.session.completed
+      // winning the ordering race. An account on a different subscription
+      // Stripe still HOLDS is excluded: a late invoice for a replaced
+      // subscription would otherwise re-attach the dead one and reset the live
+      // plan's quota.
       const [allocated] = await db
         .update(billingAccounts)
         .set({
@@ -427,7 +448,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           ...(invoiceCustomerId ? { stripeCustomerId: invoiceCustomerId } : {}),
           updatedAt: new Date(),
         })
-        .where(currentOrUnattachedSubscription(orgId, subscription.id))
+        .where(attachableSubscription(orgId, subscription.id))
         .returning({ orgId: billingAccounts.orgId });
 
       if (!allocated) {

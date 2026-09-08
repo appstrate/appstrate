@@ -10,7 +10,13 @@ import { createCheckoutSession } from "../stripe/checkout.ts";
 import { changeSubscriptionPlan } from "../stripe/plan.ts";
 import { createPortalSession } from "../stripe/portal.ts";
 import { handleWebhook } from "../stripe/webhooks.ts";
-import { CHECKOUT_PLAN_IDS, getPlans, WARNING_STATUSES, type PlanDefinition } from "../config.ts";
+import {
+  CHECKOUT_PLAN_IDS,
+  getPlans,
+  LIVE_SUBSCRIPTION_STATUSES,
+  WARNING_STATUSES,
+  type PlanDefinition,
+} from "../config.ts";
 import { logger } from "../logger.ts";
 import { eeRateLimit } from "../middleware.ts";
 import {
@@ -52,15 +58,38 @@ type EeEnv = {
   };
 };
 
-const KNOWN_STATUSES = new Set([...WARNING_STATUSES, "active", "trialing", "canceled"]);
+const KNOWN_STATUSES = new Set([
+  ...WARNING_STATUSES,
+  "active",
+  "trialing",
+  "incomplete",
+  "canceled",
+]);
 
+/**
+ * The status the dashboard reads, projected from the account row.
+ *
+ * `canceling` is the projection of `cancel_at_period_end`, and it is gated on
+ * the underlying status being one a plan change accepts
+ * (`LIVE_SUBSCRIPTION_STATUSES`). The SPA routes every changeable status to
+ * `POST /api/billing/plan`, so projecting `canceling` over an `unpaid` or
+ * `paused` subscription — Stripe suspends collection but keeps the cancel flag
+ * — would send a call this API answers with 409 `no_active_subscription`. Those
+ * accounts report their real status instead, which routes them to the Customer
+ * Portal where the payment is what actually needs fixing.
+ */
 function getBillingStatus(account: {
   stripeSubscriptionId: string | null;
   subscriptionStatus: string | null;
   cancelAtPeriodEnd: boolean;
 }): string {
   if (!account.stripeSubscriptionId) return "none";
-  if (account.cancelAtPeriodEnd) return "canceling";
+  if (
+    account.cancelAtPeriodEnd &&
+    account.subscriptionStatus &&
+    LIVE_SUBSCRIPTION_STATUSES.has(account.subscriptionStatus)
+  )
+    return "canceling";
   if (account.subscriptionStatus && KNOWN_STATUSES.has(account.subscriptionStatus))
     return account.subscriptionStatus;
   return "none";

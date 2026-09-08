@@ -238,13 +238,19 @@ Each plan has a `tier` (0/1/2) for upgrade ordering and a `name` for display.
 ### Upgrading: checkout creates, `POST /api/billing/plan` moves
 
 Stripe Checkout only ever CREATES a subscription — it never reads
-`stripe_subscription_id`. An org that already subscribed and took an "upgrade"
-through it ended up with the old subscription still running beside the new one,
-billed twice. So the two doors are now separate and the SERVER enforces which
-one an org may use, not the dashboard's buttons:
+`stripe_subscription_id`. Completing one for an org Stripe already holds a
+subscription for leaves both running and bills the customer twice. So the two
+doors are separate and the SERVER enforces which one an org may use, not the
+dashboard's buttons:
 
-- `POST /api/billing/checkout` refuses an account whose subscription is
-  `active`, `trialing` or `past_due` — `409 subscription_exists`;
+- `POST /api/billing/checkout` refuses an account whose subscription status is
+  one Stripe still HOLDS the object at (`HELD_SUBSCRIPTION_STATUSES`: `active`,
+  `trialing`, `past_due`, `unpaid`, `paused`, `incomplete`) — `409
+subscription_exists`. An `unpaid` or `paused` org fixes its payment through
+  the Customer Portal, which the dashboard offers for every account that carries
+  a subscription. Outside that set — `canceled`, `incomplete_expired`, or no
+  status — Stripe holds nothing whatever id the row still carries, and the
+  checkout goes through;
 - `POST /api/billing/plan` (`billing:manage`, 5/min) moves the EXISTING
   subscription's single price item onto the new plan with
   `proration_behavior: "create_prorations"`, and refuses an account with no live
@@ -263,7 +269,7 @@ through the Customer Portal.
 
 Every subscription-scoped webhook writes only to the account that **currently carries that subscription id**. Stripe orders nothing, so an org that replaced `sub_old` with `sub_new` still receives `sub_old`'s tail of events, and `metadata.orgId` is identical on both — it says which org OWNS a subscription, never that the org is still on it. Matching on `orgId` alone let a `customer.subscription.deleted` for the dead subscription downgrade the live one to free with zero credits on an account Stripe was still charging; reversed order and late delivery are the same fault. The `ee_stripe_events` id dedupe does not help: each of those events is new and genuinely from Stripe.
 
-The two handlers whose job includes ATTACHING a subscription — `checkout.session.completed` and `invoice.paid`, which must not depend on winning the race against it — also accept an account with **no** subscription; an account already on a different one is still excluded. `customer.subscription.created` attaches only to an unattached account, and the condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — that is the expected tail of a replacement, not a fault.
+The three handlers whose job includes ATTACHING a subscription — `checkout.session.completed`, `customer.subscription.created` and `invoice.paid` — share one predicate: the account qualifies when it carries no subscription, when it carries THIS one, or when the id it carries names a subscription outside `HELD_SUBSCRIPTION_STATUSES`. That last arm is what a stale id needs — only `customer.subscription.deleted` nulls the column, so a lost or late one leaves a dead id behind, and pinning on the id alone dropped the org's next paid checkout as "superseded", leaving it charged with no plan and no quota. An account on a different subscription Stripe DOES hold is still excluded. The condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — that is the expected tail of a replacement, not a fault.
 
 ### Subscription status sync
 
