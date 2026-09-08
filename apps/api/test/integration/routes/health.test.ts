@@ -2,6 +2,7 @@
 
 import { describe, it, expect, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
+import { initRealtime } from "../../../src/services/realtime.ts";
 import { truncateAll } from "../../helpers/db.ts";
 
 const app = getTestApp();
@@ -83,6 +84,19 @@ describe("GET /health", () => {
     expect(body.checks).toHaveProperty("agents");
     expect(body.checks.agents).toHaveProperty("status");
     expect(["healthy", "degraded"]).toContain(body.checks.agents.status);
+  });
+
+  // The whole test process shares the LISTEN state, so install the channels
+  // here rather than depend on which suite ran first.
+  it("reports realtime healthy once every channel is listening, never answering 503", async () => {
+    await initRealtime();
+    const res = await app.request("/health");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.checks.realtime.status).toBe("healthy");
+    // The rollup is computed over the readiness-gating checks only: `agents` is
+    // degraded here (getTestApp skips boot), realtime is not consulted.
+    expect(body.status).toBe("degraded");
   });
 
   it("returns HTTP 200 when database is reachable", async () => {

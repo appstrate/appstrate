@@ -31,6 +31,7 @@ import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
+import type { EventBuffer } from "../infra/event-buffer/interface.ts";
 import { getEnv } from "@appstrate/env";
 import {
   runWithSpan,
@@ -817,6 +818,19 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       err: getErrorMessage(err),
     });
   });
+
+  // 8. Drop whatever the gap drain in step 1 could not commit. The sink is
+  //    closed, so no drain will ever look at this buffer again and its entries
+  //    would linger until TTL. Best-effort: a failed clear costs memory (or
+  //    Redis keys) for the TTL window, never correctness.
+  await getEventBuffer()
+    .then((buffer) => buffer.clear(run.id))
+    .catch((err) => {
+      logger.warn("finalize: event buffer clear failed (run already terminal)", {
+        runId: run.id,
+        err: getErrorMessage(err),
+      });
+    });
 }
 
 /**
@@ -1138,6 +1152,31 @@ async function bufferEvent(runId: string, sequence: number, event: RunEvent): Pr
   await buffer.put(runId, sequence, event, ttlSeconds);
 }
 
+/**
+ * Drop a spent buffer entry. The Postgres commit is authoritative, so a failed
+ * removal must never throw out of ingestion — it would burn the replay key and
+ * 500 a POST whose event is already persisted. Returns false when the entry
+ * survived: the drain must then stop, since the very same head would be re-read
+ * on the next iteration forever.
+ */
+async function dropBufferedEvent(
+  buffer: EventBuffer,
+  runId: string,
+  sequence: number,
+): Promise<boolean> {
+  try {
+    await buffer.remove(runId, sequence);
+    return true;
+  } catch (err) {
+    logger.warn("drain could not remove a spent buffered event", {
+      runId,
+      sequence,
+      err: getErrorMessage(err),
+    });
+    return false;
+  }
+}
+
 async function drainBufferedEvents(
   run: RunSinkContext,
   opts: { allowGaps?: boolean } = {},
@@ -1149,6 +1188,18 @@ async function drainBufferedEvents(
     if (!head) return;
 
     const next = run.lastEventSequence + 1;
+
+    if (head.sequence < next) {
+      // Committed on a prior drain (its removal failed, or a stale-snapshot
+      // POST re-inserted it); keeping it blocks the whole buffer.
+      logger.warn("drain dropped an already-persisted buffered event", {
+        runId: run.id,
+        sequence: head.sequence,
+        lastEventSequence: run.lastEventSequence,
+      });
+      if (!(await dropBufferedEvent(buffer, run.id, head.sequence))) return;
+      continue;
+    }
 
     if (head.sequence === next) {
       const outcome = await persistEventAndAdvance(run, head.event, head.sequence);
@@ -1162,7 +1213,7 @@ async function drainBufferedEvents(
       // `claimed` persisted the event; `lost_race` means another drainer
       // claimed this exact sequence (its event is persisted) — in both
       // cases the buffered copy is spent.
-      await buffer.remove(run.id, head.sequence);
+      if (!(await dropBufferedEvent(buffer, run.id, head.sequence))) return;
       continue;
     }
 
@@ -1179,7 +1230,7 @@ async function drainBufferedEvents(
         logger.debug("gap drain stopped — sink closed mid-drain", { runId: run.id });
         return;
       }
-      await buffer.remove(run.id, head.sequence);
+      if (!(await dropBufferedEvent(buffer, run.id, head.sequence))) return;
       continue;
     }
 

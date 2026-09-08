@@ -23,6 +23,7 @@ import {
 } from "../lib/query-keys";
 import {
   type EnrichedRun,
+  type RunUpdateEvent,
   TERMINAL_RUN_STATUSES,
   runUpdateEventSchema,
   runUpdateToRunPatch,
@@ -32,12 +33,13 @@ import {
  * Patch caches when an `integration_connections` row changes (INSERT /
  * UPDATE / DELETE) — drives the live "Reconnection required" badge on
  * the connections page, the agent picker verdict, the integration detail
- * connection list, and the agent status cards. Without this they refresh
- * only on window focus and stay stale across tabs.
+ * connection list, and the agent status cards. `refetchOnWindowFocus` is
+ * globally false (`main.tsx`), so these caches move on exactly two things:
+ * a live frame here, and the reconnect reconciliation in `connectOnce`.
  *
  * Server-side actor filter in `services/realtime.ts:connection_update`
- * means we only see our own rows; cross-actor invalidations (e.g.
- * someone else sharing a connection) still rely on a focus refetch,
+ * means we only see our own rows; a cross-actor change (e.g. someone else
+ * sharing a connection) reaches this tab at the next reconnect or mutation,
  * which is acceptable because the run-time resolver gate enforces the
  * server-side truth anyway.
  */
@@ -107,7 +109,7 @@ function readContextChatSessionId(init: unknown): unknown {
  * change (message persisted, read marker advanced on another device, rename,
  * delete, `generating` flip). Signal-only frame → invalidate, the list GET is
  * the single source of the session DTO. Deliberately NOT routed through the
- * debounced broad invalidator: chat emits a handful of frames per turn (not a
+ * throttled broad invalidator: chat emits a handful of frames per turn (not a
  * per-log firehose like runs) and the unread badge / spinner should react
  * instantly. The key is the module's `SESSIONS_QUERY_KEY` (re-exported from
  * `@appstrate/module-chat/unread`, already imported by the nav badge);
@@ -137,19 +139,22 @@ function parseChatSessionId(raw: string): string | undefined {
 }
 
 /**
- * Trailing debounce (~2s) for the BROAD query invalidations triggered by
- * `run_update` events. A running agent emits frequent updates; the run/runs
- * caches are already patched in place (cheap), but invalidating
- * `["agents"]` / `["packages"]` / `["paginated-runs"]` on every event caused
- * a refetch fan-out per SSE message. Collapsing bursts into one trailing
- * flush keeps lists fresh at a fraction of the request volume.
+ * Throttle (~2s) for the BROAD invalidations a `run_update` triggers: the run
+ * caches are patched in place (cheap), a refetch fan-out per SSE message is
+ * not. The trigger's `WHEN` clause (`packages/db/src/notify.ts`) only fires on
+ * a status/timestamp transition, so this collapses bursts, not a firehose.
  */
 interface BroadInvalidator {
   schedule: (key: readonly unknown[]) => void;
   dispose: () => void;
 }
 
-function createBroadInvalidator(
+/**
+ * Exported for its test. The budget this buys: under sustained traffic at most
+ * 4 broad invalidations per `delayMs` per open tab — one per `broadRunKeys`
+ * entry — against zero under the debounce it replaced, which never flushed.
+ */
+export function createBroadInvalidator(
   getQueryClient: () => QueryClient,
   delayMs = 2000,
 ): BroadInvalidator {
@@ -168,8 +173,8 @@ function createBroadInvalidator(
   return {
     schedule(key) {
       pending.set(JSON.stringify(key), key);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(flush, delayMs);
+      // Throttle, not debounce: arm on the first event, let the burst accumulate.
+      if (!timer) timer = setTimeout(flush, delayMs);
     },
     dispose() {
       if (timer) clearTimeout(timer);
@@ -177,6 +182,62 @@ function createBroadInvalidator(
       pending.clear();
     },
   };
+}
+
+/**
+ * Single writer of the run-detail cache from a `run_update` frame; returns the
+ * patch to reuse on the run's list rows, or `null` when the frame is dropped:
+ * a per-connection snapshot can predate a live frame, and status only moves on.
+ */
+export function patchRunDetail(
+  qc: QueryClient,
+  orgId: string,
+  spaceId: string,
+  evt: RunUpdateEvent,
+): Partial<EnrichedRun> | null {
+  const key = runKeys.detail(orgId, spaceId, evt.id);
+  const cached = qc.getQueryData<EnrichedRun>(key);
+  if (
+    cached &&
+    TERMINAL_RUN_STATUSES.has(cached.status) &&
+    !TERMINAL_RUN_STATUSES.has(evt.status)
+  ) {
+    return null;
+  }
+  const patch = runUpdateToRunPatch(evt);
+  qc.setQueryData<EnrichedRun>(key, (prev) => (prev ? { ...prev, ...patch } : prev));
+  return patch;
+}
+
+/**
+ * The list/agent caches a `run_update` moves but cannot patch in place. ONE
+ * list, fed to the per-event throttle AND to the reconnect reconciliation, so
+ * the latter cannot drift into a silent subset of the former. Exported for its
+ * test.
+ */
+export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
+  return [
+    paginatedRunsKeys.all,
+    agentsKeys.inOrg(orgId),
+    // Agent detail caches are keyed ["packages","agents",orgId,spaceId,id], so
+    // the org-scoped prefix is what refreshes an agent's config/model tabs.
+    packageKeys.familyInOrg("agents", orgId),
+    // The chat context sidebar reads this typed collection, not paginated-runs.
+    ["get", "/api/runs"],
+  ];
+}
+
+/**
+ * Refetch the run families after a stream gap. Run LOGS are deliberately absent:
+ * the run-detail page appends live frames into that cache and a refetch would
+ * drop the per-turn breadcrumbs it holds (see `invalidateRunLogs`).
+ */
+function reconcileRunQueries(qc: QueryClient, orgId: string) {
+  // Run detail/list caches are patched in place by live frames, so only a gap
+  // needs them refetched — they are not part of the per-event throttle.
+  for (const queryKey of [runKeys.all, runsKeys.all, ...broadRunKeys(orgId)]) {
+    qc.invalidateQueries({ queryKey });
+  }
 }
 
 function handleSSEMessage(
@@ -196,13 +257,9 @@ function handleSSEMessage(
   if (!parsed.success) return;
   const evt = parsed.data;
   const { id: runId, packageId, status, scheduleId } = evt;
-  // Map the camelCase wire frame onto RunWireDto field names (started_at /
-  // completed_at are snake there) so the spread actually overwrites them.
-  const patch = runUpdateToRunPatch(evt);
-
-  qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, spaceId, runId), (prev) =>
-    prev ? { ...prev, ...patch } : prev,
-  );
+  const patch = patchRunDetail(qc, orgId, spaceId, evt);
+  // Frame dropped as stale — the list rows below must not regress either.
+  if (!patch) return;
 
   // Only the per-agent run list is keyed by packageId (nullable on the wire
   // once a run's package is deleted — ON DELETE SET NULL).
@@ -222,17 +279,9 @@ function handleSSEMessage(
     }
   }
 
-  // Broad invalidations are debounced (trailing ~2s) — the in-place cache
-  // patches above keep the visible run data live in the meantime.
-  broad.schedule(agentsKeys.inOrg(orgId));
-  // Agent detail caches are keyed ["packages","agents",orgId,spaceId,id]
-  // (plural path, spaceId before id) — invalidate by the org-scoped
-  // prefix so a run status change refreshes the agent's config/model tabs.
-  broad.schedule(packageKeys.familyInOrg("agents", orgId));
-  broad.schedule(paginatedRunsKeys.all);
-  // The chat context sidebar uses the typed global collection with a
-  // `chat_session_id` filter rather than the legacy paginated-runs hook.
-  broad.schedule(["get", "/api/runs"]);
+  // Broad invalidations are throttled (~2s) — the in-place cache patches above
+  // keep the visible run data live in the meantime.
+  for (const key of broadRunKeys(orgId)) broad.schedule(key);
 
   // Invalidate schedule-specific caches
   if (scheduleId) {
@@ -242,9 +291,6 @@ function handleSSEMessage(
   }
 
   if (TERMINAL_RUN_STATUSES.has(status)) {
-    // NOTE: ["paginated-runs"] is NOT invalidated here — the debounced
-    // broad invalidation above already covers it for this same event
-    // (it used to be invalidated twice per terminal run).
     invalidateNotificationQueries(qc);
     qc.invalidateQueries({ queryKey: runsKeys.all });
     qc.invalidateQueries({ queryKey: runKeys.all });
@@ -284,6 +330,10 @@ export function useGlobalRunSync() {
     const BASE_DELAY_MS = 1000;
     const MAX_DELAY_MS = 30_000;
     let attempt = 0;
+    // Only a RE-connect has a gap; the first races the mount's own queries.
+    let hasConnectedOnce = false;
+    let lastReconcileAt = 0;
+    const RECONCILE_MIN_INTERVAL_MS = 10_000;
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -339,6 +389,17 @@ export function useGlobalRunSync() {
       // run MISSED while the stream was down is caught here, on reconnect —
       // seconds after connectivity returns, not at the next poll tick.
       invalidateNotificationQueries(qcRef.current);
+      // Same reasoning for the run caches, which are patched frame by frame —
+      // rate-limited because the server writes a frame on every connection, so a
+      // repeatedly dropped stream would reconcile at ~1 Hz and storm itself.
+      const now = Date.now();
+      if (hasConnectedOnce && now - lastReconcileAt >= RECONCILE_MIN_INTERVAL_MS) {
+        lastReconcileAt = now;
+        reconcileRunQueries(qcRef.current, orgId);
+        // `connection_update` frames were missed on the same stream.
+        handleConnectionUpdate(qcRef.current);
+      }
+      hasConnectedOnce = true;
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -381,7 +442,10 @@ export function useGlobalRunSync() {
           // Failed to connect — fall through to the backoff below.
         }
         if (controller.signal.aborted || previewRefused) break;
-        const delay = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
+        // Jitter — de-synchronize reconnect stampedes (every tab reconnects
+        // at once after a redeploy).
+        const delay =
+          Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS) * (0.5 + Math.random() * 0.5);
         attempt++;
         await sleep(delay);
       }

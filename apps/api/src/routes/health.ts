@@ -4,6 +4,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getVersionInfo } from "../lib/version.ts";
+import { realtimeReady } from "../services/realtime.ts";
 import { ApiError } from "../lib/errors.ts";
 
 const startedAt = Date.now();
@@ -89,8 +90,18 @@ healthRouter.get("/health", async (c) => {
     status: agentsHealthy ? "healthy" : "degraded",
   };
 
-  const hasUnhealthy = Object.values(checks).some((c) => c.status === "unhealthy");
-  const allHealthy = Object.values(checks).every((c) => c.status === "healthy");
+  // Advisory, kept OUT of the `status` rollup below: the container HEALTHCHECK
+  // restarts the instance unless `status === "healthy"`, and a silent SSE
+  // fan-out must not restart-loop an API that serves every other route.
+  checks.realtime = {
+    status: realtimeReady() ? "healthy" : "degraded",
+  };
+
+  const gating = Object.entries(checks)
+    .filter(([name]) => name !== "realtime")
+    .map(([, check]) => check);
+  const hasUnhealthy = gating.some((c) => c.status === "unhealthy");
+  const allHealthy = gating.every((c) => c.status === "healthy");
   const status = hasUnhealthy ? "unhealthy" : allHealthy ? "healthy" : "degraded";
   const httpStatus = hasUnhealthy ? 503 : 200;
 
