@@ -26,7 +26,12 @@ export class RedisPubSub implements PubSub {
     }
 
     await new Promise<void>((resolve, reject) => {
-      subscriber.subscribe(channel, (err) => {
+      // `subscribe` returns a promise AS WELL AS taking a callback, and ioredis
+      // (standard-as-callback) already attaches its own `then(_, _)` to that
+      // promise before returning it — so the rejection is consumed there and
+      // the callback below is the single reporting path. `void`, not `await`:
+      // the enclosing `new Promise` is what the caller waits on.
+      void subscriber.subscribe(channel, (err) => {
         if (err) {
           logger.error("Failed to subscribe to channel", { channel, error: err.message });
           reject(err);

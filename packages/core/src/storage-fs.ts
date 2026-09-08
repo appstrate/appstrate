@@ -274,7 +274,13 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          writer.write(value);
+          // AWAITED: `FileSink.write` returns `number | Promise<number>` and
+          // returns the promise exactly when the sink has to drain — which is
+          // what the `highWaterMark` above is for. Not awaiting it dropped the
+          // backpressure this path exists to get, and sent a mid-write failure
+          // out as an unhandled rejection instead of into the catch below that
+          // closes the sink and rolls the destination back.
+          await writer.write(value);
         }
         await writer.end();
       } catch (err) {
