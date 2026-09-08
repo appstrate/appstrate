@@ -79,6 +79,7 @@
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
     "build-runtime": "bun run docker:build:runtime",
     "docker:check": "bash scripts/docker-check.sh",
+    "audit:deps": "bun scripts/audit-dependencies.ts",
     "audit:empty-integrations": "bun scripts/audit-empty-integration-selections.ts",
     "audit:storage-orphans": "bun scripts/storage-orphans.ts",
     "docker:build:runtime": "bun scripts/docker-build-runtime.ts",
