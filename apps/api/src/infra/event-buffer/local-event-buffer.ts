@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { EventBuffer, BufferedEvent } from "./interface.ts";
+import { logger } from "../../lib/logger.ts";
+import { MAX_BUFFER_ENTRIES, type EventBuffer, type BufferedEvent } from "./interface.ts";
 
 interface Entry {
   sequence: number;
@@ -27,20 +28,36 @@ export class LocalEventBuffer implements EventBuffer {
   }
 
   async put(runId: string, sequence: number, event: RunEvent, ttlSeconds: number): Promise<void> {
-    const expiresAt = Date.now() + ttlSeconds * 1000;
-    const entry: Entry = { sequence, event, expiresAt };
-    const existing = this.buffers.get(runId);
-    if (!existing) {
+    const entry: Entry = { sequence, event, expiresAt: Date.now() + ttlSeconds * 1000 };
+    const entries = this.buffers.get(runId);
+    if (!entries) {
       this.buffers.set(runId, [entry]);
       return;
     }
-    // Replace any entry with the same sequence (replay safety), then insert
-    // in sorted order so peekLowest is O(1).
-    const filtered = existing.filter((e) => e.sequence !== sequence);
-    const insertIdx = filtered.findIndex((e) => e.sequence > sequence);
-    if (insertIdx === -1) filtered.push(entry);
-    else filtered.splice(insertIdx, 0, entry);
-    this.buffers.set(runId, filtered);
+    // The array is kept sorted by sequence, so binary-search the insert point:
+    // an entry already at that sequence is replaced in place (replay safety),
+    // anything else is spliced in. Keeps peekLowest O(1).
+    let lo = 0;
+    let hi = entries.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (entries[mid]!.sequence < sequence) lo = mid + 1;
+      else hi = mid;
+    }
+    if (entries[lo]?.sequence === sequence) entries[lo] = entry;
+    else entries.splice(lo, 0, entry);
+
+    // Same overflow policy as the Redis backend's ZREMRANGEBYRANK: drop the
+    // lowest sequences (stale, waiting on a gap the runner never filled).
+    if (entries.length > MAX_BUFFER_ENTRIES) {
+      const trimmed = entries.length - MAX_BUFFER_ENTRIES;
+      entries.splice(0, trimmed);
+      logger.warn("event buffer overflowed — dropped oldest entries", {
+        runId,
+        trimmed,
+        cap: MAX_BUFFER_ENTRIES,
+      });
+    }
   }
 
   async peekLowest(runId: string): Promise<BufferedEvent | null> {
@@ -48,8 +65,11 @@ export class LocalEventBuffer implements EventBuffer {
     if (!entries || entries.length === 0) return null;
     const now = Date.now();
     // Drop expired head entries before peeking.
-    while (entries.length > 0 && entries[0]!.expiresAt <= now) {
-      entries.shift();
+    let dropped = 0;
+    while (dropped < entries.length && entries[dropped]!.expiresAt <= now) dropped++;
+    if (dropped > 0) {
+      entries.splice(0, dropped);
+      this.logExpiredDrop(runId, dropped);
     }
     if (entries.length === 0) {
       this.buffers.delete(runId);
@@ -81,8 +101,15 @@ export class LocalEventBuffer implements EventBuffer {
     const now = Date.now();
     for (const [runId, entries] of this.buffers) {
       const keep = entries.filter((e) => e.expiresAt > now);
+      const dropped = entries.length - keep.length;
+      if (dropped === 0) continue;
       if (keep.length === 0) this.buffers.delete(runId);
-      else if (keep.length !== entries.length) this.buffers.set(runId, keep);
+      else this.buffers.set(runId, keep);
+      this.logExpiredDrop(runId, dropped);
     }
+  }
+
+  private logExpiredDrop(runId: string, dropped: number): void {
+    logger.warn("event buffer dropped expired entries", { runId, dropped });
   }
 }

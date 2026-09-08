@@ -30,6 +30,7 @@ import healthRouter, {
   markServerReady,
   _resetServerReadyForTesting,
 } from "../../../src/routes/health.ts";
+import { initRealtime } from "../../../src/services/realtime.ts";
 import { errorHandler } from "../../../src/middleware/error-handler.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
 
@@ -123,6 +124,9 @@ describe("boot gate", () => {
 
   it("reports healthy once boot and the agents orchestrator are ready", async () => {
     const app = buildGatedApp();
+    // The rollup also reads `checks.realtime`, which boot installs; do the same
+    // here so this asserts the agents dimension it is about.
+    await initRealtime();
     markServerReady({ agentsHealthy: true });
 
     const res = await app.request("/health");

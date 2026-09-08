@@ -3,6 +3,7 @@
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getEnv } from "@appstrate/env";
 import * as schema from "./schema/index.ts";
+import { createListenClient, type ListenClient } from "./listen-client.ts";
 
 const env = getEnv();
 
@@ -13,9 +14,7 @@ export const isEmbeddedDb = !env.DATABASE_URL;
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 /** Postgres.js listen client or PGlite notification handler. */
-export interface ListenClient {
-  listen(channel: string, handler: (payload: string) => void): Promise<void>;
-}
+export type { ListenClient };
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -74,9 +73,7 @@ async function initPostgres(): Promise<Db> {
     await queryClient.end();
     await listenConn.end();
   };
-  _listenClient = {
-    listen: (channel, handler) => listenConn.listen(channel, handler) as unknown as Promise<void>,
-  };
+  _listenClient = createListenClient(listenConn);
 
   return drizzle(queryClient, { schema }) as unknown as Db;
 }

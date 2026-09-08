@@ -50,8 +50,10 @@ import {
   activeRunMetricThrottleCount,
 } from "../../../src/services/run-metric-broadcaster.ts";
 import { getRunFull } from "../../../src/services/state/runs.ts";
+import { getEventBuffer } from "../../../src/infra/index.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { AppstrateModule, ModelCost, RunStatusChangeParams } from "@appstrate/core/module";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
@@ -148,6 +150,11 @@ function buildEnvelope(
     data,
     sequence,
   };
+}
+
+/** The already-decoded shape `drainBufferedEvents` reads back out of the buffer. */
+function bufferedProgress(runId: string, message: string): RunEvent {
+  return { type: "appstrate.progress", runId, timestamp: Date.now(), message };
 }
 
 describe("POST /api/runs/:runId/events — ingestion without Redis-specific coupling", () => {
@@ -413,6 +420,110 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       (l) => typeof l.message === "string" && l.message.startsWith("gap-"),
     );
     expect(gapLogs.length).toBe(10);
+  });
+
+  // Regression for the dead buffer head. `buffer.remove` runs OUTSIDE the
+  // transaction that commits the event, so a committed sequence can survive in
+  // the buffer (failed removal, or a stale-snapshot POST re-inserting it).
+  // The drain used to treat that head as a gap and bail, stranding every later
+  // event — including under `allowGaps`, so finalize could not rescue them.
+  it("drains past a buffered head the run already persisted", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const first = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "head-1", timestamp: Date.now() }, 1),
+    );
+    expect(first.status).toBe(200);
+
+    // seq=1 is committed; plant it back in the buffer, ahead of the seq=2 it strands.
+    const buffer = await getEventBuffer();
+    await buffer.put(runId, 1, bufferedProgress(runId, "dead-head-1"), 60);
+    await buffer.put(runId, 2, bufferedProgress(runId, "stranded-2"), 60);
+
+    const res = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "live-3", timestamp: Date.now() }, 3),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { outcome: string }).outcome).toBe("persisted");
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(3);
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    const messages = logs.map((l) => l.message);
+    expect(messages).toContain("stranded-2");
+    expect(messages).toContain("live-3");
+    expect(await buffer.peekLowest(runId)).toBeNull();
+  });
+
+  it("finalize drains past a buffered head the run already persisted", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const first = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "head-1", timestamp: Date.now() }, 1),
+    );
+    expect(first.status).toBe(200);
+
+    const buffer = await getEventBuffer();
+    await buffer.put(runId, 1, bufferedProgress(runId, "dead-head-1"), 60);
+    await buffer.put(runId, 2, bufferedProgress(runId, "stranded-2"), 60);
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(2);
+    expect(row?.sinkClosedAt).not.toBeNull();
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.map((l) => l.message)).toContain("stranded-2");
+    // Post-CAS cleanup: nothing will ever drain this buffer again.
+    expect(await buffer.peekLowest(runId)).toBeNull();
+  });
+
+  // The Postgres commit is authoritative — a buffer removal that fails after it
+  // must not throw out of ingestion. It used to bubble up to `ingestRunEvent`,
+  // which released the replay key and answered 500 for an event already on disk.
+  it("answers 200 when the buffer removal fails after a committed drain", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "head-1", timestamp: Date.now() }, 1),
+    );
+    const buffered = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "ooo-3", timestamp: Date.now() }, 3),
+    );
+    expect(((await buffered.json()) as { outcome: string }).outcome).toBe("buffered");
+
+    const buffer = await getEventBuffer();
+    const remove = buffer.remove.bind(buffer);
+    buffer.remove = () => Promise.reject(new Error("buffer backend unavailable"));
+    try {
+      const res = await postEvent(
+        runId,
+        buildEnvelope(runId, "appstrate.progress", { message: "fill-2", timestamp: Date.now() }, 2),
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      buffer.remove = remove;
+      await buffer.clear(runId);
+    }
+
+    // Both the fast-path event and the drained one committed.
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(3);
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.map((l) => l.message)).toContain("ooo-3");
   });
 
   // Regression for the HttpSink off-by-one: the first event emitted by

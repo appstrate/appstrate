@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for `LocalQueue.shutdown()` and its interaction with retry backoff.
+ * Tests for `LocalQueue` retry backoff — a backing-off job is DELAYED, not
+ * active — and for how `shutdown()` treats one.
  *
- * A job sleeping between attempts counts as active — its `run()` awaits the
- * retry timer — so shutdown has to decide what to do with it. Both halves of
- * that decision are load-bearing:
+ * A job between attempts holds no worker slot (BullMQ semantics: backoff moves
+ * the job to `delayed` and frees the worker, and the attempt rejoins the wait
+ * list at the tail when it comes due). It is still work the process owes, so
+ * shutdown has to decide what to do with it. Both halves of that decision are
+ * load-bearing:
  *
  *  - A retry due INSIDE the shutdown budget is work that would have completed.
  *    `llm-usage-retry` puts billable `llm_usage` rows on this queue precisely
@@ -68,9 +71,9 @@ function recordingLogger(): RecordingLogger {
 
 /**
  * The line the queue emits when it parks a failed job on its retry timer. It is
- * written on the same synchronous run as the `sleepingRetries` registration, so
- * seeing it is exactly "the sleeper exists and `shutdown()` can find it" — the
- * readiness these tests need before they call `shutdown()`.
+ * written on the same synchronous run as the `delayed` registration, so seeing
+ * it is exactly "the parked attempt exists and `shutdown()` can find it" — the
+ * readiness these tests need before they act on it.
  */
 const RETRY_SCHEDULED = "job failed, retrying in";
 
@@ -89,6 +92,93 @@ function signal(): { fired: Promise<void>; fire: () => void } {
 }
 
 const tick = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Poll until the queue reports empty. `count()` spans pending + active +
+ * delayed, so reaching 0 also proves no parked attempt was leaked.
+ */
+async function drained(q: { count(): Promise<number> }): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while ((await q.count()) > 0) {
+    if (Date.now() > deadline) throw new Error("queue did not drain within 5s");
+    await tick(10);
+  }
+}
+
+describe("LocalQueue — backoff does not hold a worker slot", () => {
+  it("runs the next queued job while a failed one waits out its backoff", async () => {
+    const { logger, emitted } = recordingLogger();
+    const q = new LocalQueue<{ v: string }>("test-delayed", undefined, logger);
+    const order: string[] = [];
+
+    q.process(
+      async (job: QueueJob<{ v: string }>) => {
+        order.push(`${job.data.v}#${job.attemptsMade}`);
+        if (job.data.v === "bad" && job.attemptsMade === 0) throw new Error("transient");
+      },
+      { concurrency: 1, backoffStrategy: () => 200 },
+    );
+
+    await q.add("job", { v: "bad" }, { attempts: 2 });
+    await emitted(RETRY_SCHEDULED);
+    await q.add("job", { v: "healthy" });
+
+    await drained(q);
+
+    // CONTROL: while the sleeping retry held the only slot, the healthy job
+    // could not start until the backoff elapsed — `["bad#0", "bad#1",
+    // "healthy#0"]`. The retry now rejoins at the TAIL, behind the newcomer.
+    expect(order).toEqual(["bad#0", "healthy#0", "bad#1"]);
+  });
+
+  it("counts a parked attempt once, and releases it when it runs", async () => {
+    const { logger, emitted } = recordingLogger();
+    const q = new LocalQueue<{ v: string }>("test-delayed-count", undefined, logger);
+    const attempts: number[] = [];
+
+    q.process(
+      async (job: QueueJob<{ v: string }>) => {
+        attempts.push(job.attemptsMade);
+        if (job.attemptsMade === 0) throw new Error("transient");
+      },
+      { concurrency: 1, backoffStrategy: () => 400 },
+    );
+
+    await q.add("job", { v: "x" }, { attempts: 2 });
+    await emitted(RETRY_SCHEDULED);
+    await tick(50); // the slot is released a microtask later; 350ms of backoff left
+
+    // Delayed, not active, and counted exactly once — a double count, or an
+    // entry left in the set after the timer fires, keeps `drained` from ever
+    // seeing 0 below.
+    expect(await q.count()).toBe(1);
+
+    await drained(q);
+    expect(attempts).toEqual([0, 1]);
+  });
+
+  it("carries per-job `attempts` across the backoff, over the queue default", async () => {
+    const { logger } = recordingLogger();
+    const q = new LocalQueue<{ v: string }>("test-delayed-attempts", { attempts: 1 }, logger);
+    const attempts: number[] = [];
+
+    q.process(
+      async (job: QueueJob<{ v: string }>) => {
+        attempts.push(job.attemptsMade);
+        throw new Error("transient");
+      },
+      { backoffStrategy: () => 20 },
+    );
+
+    await q.add("job", { v: "x" }, { attempts: 3 });
+    await drained(q);
+
+    // CONTROL: if `opts` did not travel with the re-enqueued attempt, the
+    // queue default of 1 would apply from the second one on and this is [0, 1].
+    // `llm-usage-retry` rides on exactly this — 288 attempts, per job.
+    expect(attempts).toEqual([0, 1, 2]);
+  });
+});
 
 describe("LocalQueue.shutdown — retries inside the budget", () => {
   // CONTROL for the whole file: before the budget check existed, `shutdown()`
@@ -315,5 +405,90 @@ describe("LocalQueue.shutdown — jobs that never started", () => {
     // for it — so assert on what actually ran, not on the queue depth.)
     await tick(80);
     expect(ran).toEqual([1]);
+  });
+});
+
+/**
+ * Deny the event loop for `ms`, synchronously. Models the process being busy
+ * past its own shutdown deadline — the only way a timer armed BEFORE the
+ * deadline can fire after it, deterministically.
+ */
+function blockEventLoop(ms: number): void {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    // spin — denying the loop is the point, efficiency is not
+  }
+}
+
+describe("LocalQueue.shutdown — a retry re-enqueued mid-shutdown", () => {
+  it("runs an attempt that comes due inside the budget, after the queued work", async () => {
+    const { lines, logger, emitted } = recordingLogger();
+    const q = new LocalQueue<{ v: string }>("test-shutdown-delayed", undefined, logger);
+    const ran: string[] = [];
+
+    q.process(
+      async (job: QueueJob<{ v: string }>) => {
+        ran.push(`${job.data.v}#${job.attemptsMade}`);
+        if (job.data.v === "bad" && job.attemptsMade === 0) throw new Error("transient");
+      },
+      { concurrency: 1, backoffStrategy: () => 300 },
+    );
+
+    await q.add("job", { v: "bad" }, { attempts: 2 });
+    await emitted(RETRY_SCHEDULED);
+    await q.add("job", { v: "queued" });
+
+    await q.shutdown();
+
+    // The attempt re-enters `pending` while shutdown is already waiting, and
+    // still runs: `drain()` keeps starting work until the budget is spent.
+    // Nothing was thrown away, so nothing was logged as abandoned.
+    expect(ran).toEqual(["bad#0", "queued#0", "bad#1"]);
+    expect(abandonLines(lines)).toHaveLength(0);
+    expect(await q.count()).toBe(0);
+  });
+});
+
+describe("LocalQueue.shutdown — a retry that comes due past the deadline", () => {
+  /**
+   * The attempt is due inside the budget, so the pre-sweep keeps it — but the
+   * process stalls and the timer only fires once the budget is spent. It
+   * re-enters `pending`, finds `drain()` closed, and would sit there unrun and
+   * unreported: the silent loss this whole file exists to prevent.
+   */
+  it("reports an attempt that re-entered the queue after the budget was spent", async () => {
+    const { lines, logger, emitted } = recordingLogger();
+    const q = new LocalQueue<{ v: string }>("test-late-retry", undefined, logger);
+    const attempts: number[] = [];
+
+    q.process(
+      async (job: QueueJob<{ v: string }>) => {
+        attempts.push(job.attemptsMade);
+        throw new Error("transient");
+      },
+      { concurrency: 1, backoffStrategy: () => 60 },
+    );
+
+    await q.add("job", { v: "x" }, { attempts: 5 });
+    await emitted(RETRY_SCHEDULED);
+
+    // Not awaited yet: `shutdown()` runs up to its first await (deadline set,
+    // the attempt kept because it is due in 60ms of a 150ms budget), then the
+    // loop is denied for 400ms — well past both the deadline and the timer.
+    const shutdown = q.shutdown(150);
+    blockEventLoop(400);
+    await shutdown;
+
+    // The attempt never ran, and it is named exactly once.
+    expect(attempts).toEqual([0]);
+    const abandoned = abandonLines(lines);
+    expect(abandoned).toHaveLength(1);
+    expect(abandoned[0]!.msg).toContain("never started");
+    expect(abandoned[0]!.data).toMatchObject({ queue: "test-late-retry", jobName: "job" });
+
+    // Nothing left behind: no queued item, no armed timer.
+    expect(await q.count()).toBe(0);
+    await tick(200);
+    expect(attempts).toEqual([0]);
   });
 });

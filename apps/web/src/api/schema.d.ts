@@ -20312,6 +20312,9 @@ export interface operations {
                      *         },
                      *         "agents": {
                      *           "status": "healthy"
+                     *         },
+                     *         "realtime": {
+                     *           "status": "healthy"
                      *         }
                      *       }
                      *     }
@@ -20332,6 +20335,11 @@ export interface operations {
                             };
                             /** @description Agent runtime readiness established during platform boot. */
                             agents?: {
+                                /** @enum {string} */
+                                status?: "healthy" | "degraded";
+                            };
+                            /** @description PG LISTEN fan-out behind the realtime SSE streams. `degraded` when a channel failed to install. Advisory: not part of the top-level `status`. */
+                            realtime?: {
                                 /** @enum {string} */
                                 status?: "healthy" | "degraded";
                             };

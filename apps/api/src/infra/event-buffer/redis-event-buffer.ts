@@ -3,19 +3,9 @@
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { getRedisConnection } from "../../lib/redis.ts";
 import { logger } from "../../lib/logger.ts";
-import type { EventBuffer, BufferedEvent } from "./interface.ts";
+import { MAX_BUFFER_ENTRIES, type EventBuffer, type BufferedEvent } from "./interface.ts";
 
 const KEY_PREFIX = "appstrate:remote-run:buffer:";
-
-/**
- * Hard cap on buffered events per run. A pathological runner that
- * permanently skips a sequence would otherwise accumulate every later
- * event in Redis until the watchdog finalises the run — sized 100×
- * above any realistic burst so the happy path never trips this. When
- * it does trip, we drop the LOWEST-scored entries (the stale ones
- * waiting on the missing gap) so the most recent events are kept.
- */
-const MAX_BUFFER_ENTRIES = 10_000;
 
 /**
  * Redis-backed ordering buffer — a sorted set per run keyed by sequence.
