@@ -161,13 +161,20 @@ function LibraryMatrix({
             {spaces.map((space) => {
               const installed = pkg.installed_in.includes(space.id);
               const systemAlwaysActive = lockSystem && pkg.source === "system";
-              const disabled = systemAlwaysActive || !canToggle(space.id, installed);
+              const missingPermission = !canToggle(space.id, installed);
+              // Two different reasons the box cannot be clicked, and a
+              // disabled control that says neither reads as broken.
+              const title = systemAlwaysActive
+                ? t("library.systemAlwaysActive")
+                : missingPermission
+                  ? t(installed ? "library.cannotUninstall" : "library.cannotInstall")
+                  : undefined;
               return (
                 <TableCell key={space.id} className="text-center">
                   <Checkbox
                     checked={systemAlwaysActive || installed}
-                    disabled={disabled}
-                    title={systemAlwaysActive ? t("library.systemAlwaysActive") : undefined}
+                    disabled={systemAlwaysActive || missingPermission}
+                    title={title}
                     onCheckedChange={() => handleToggle(pkg, space.id, installed)}
                   />
                 </TableCell>

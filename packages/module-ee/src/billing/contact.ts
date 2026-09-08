@@ -28,7 +28,7 @@ import { getOrgQueries } from "../platform-org-queries.ts";
 import { logger } from "../logger.ts";
 
 /** Product cap on the CC list — see the schema comment for why it is not a CHECK. */
-export const MAX_BILLING_CC = 5;
+const MAX_BILLING_CC = 5;
 
 /**
  * Wire shape of `PATCH /api/billing/contact`. Both fields are optional so a

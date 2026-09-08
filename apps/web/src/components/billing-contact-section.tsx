@@ -25,7 +25,6 @@ import {
   toBillingContactDraft,
   type BillingContactDraft,
 } from "../lib/billing-contact";
-import { billingSaveErrorMessage } from "../lib/billing-error";
 import { LoadingState, ErrorState } from "./page-states";
 import { SectionCard } from "./section-card";
 import { Spinner } from "./spinner";
@@ -115,9 +114,7 @@ export function BillingContactSection() {
           toast.success(t("billingContact.saveSuccess"));
         },
         onError: (err) =>
-          toast.error(
-            billingSaveErrorMessage(err, (message) => t("error.prefix", { ns: "common", message })),
-          ),
+          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
       },
     );
   };

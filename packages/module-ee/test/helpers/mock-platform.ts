@@ -45,9 +45,10 @@ export function setMockLedgerListHook(fn: (() => void | Promise<void>) | null): 
  * platform write. Tests assert on this instead of a platform DB.
  *
  * The member name matters more than it looks: `mockPlatformServices` is cast
- * `as unknown as PlatformServices`, so a name that has drifted from the real
- * interface still typechecks and every assertion here quietly sees zero calls.
- * It is what the rename off `setDocumentStorageLimit` broke first.
+ * `as unknown as PlatformServices`, so a double whose member no longer matches
+ * the one the code calls still typechecks, and every assertion here quietly
+ * sees zero calls instead of failing. Check the name against
+ * `PlatformServices` when this file stops catching a regression it should.
  */
 export const mockStorageLimitCalls: Array<{ orgId: string; bytes: number | null }> = [];
 

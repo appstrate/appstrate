@@ -42,7 +42,7 @@ export function OrgSettingsMembersPage() {
   const canInvite = can("members:invite");
   const canChangeRole = can("members:change-role");
 
-  const [invitingOrgId, setInvitingOrgId] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
   const {
@@ -93,7 +93,7 @@ export function OrgSettingsMembersPage() {
       <p className="text-muted-foreground mb-4 text-sm">{t("orgSettings.usersDescription")}</p>
       {canInvite && orgId && (
         <div className="mb-4 flex justify-end">
-          <Button data-testid="invite-org-user-button" onClick={() => setInvitingOrgId(orgId)}>
+          <Button data-testid="invite-org-user-button" onClick={() => setInviting(true)}>
             <UserPlus />
             {t("orgSettings.inviteUser")}
           </Button>
@@ -187,10 +187,10 @@ export function OrgSettingsMembersPage() {
         />
       )}
 
-      {canInvite && orgId && invitingOrgId === orgId && (
+      {canInvite && orgId && inviting && (
         <Modal
           open
-          onClose={() => setInvitingOrgId(null)}
+          onClose={() => setInviting(false)}
           title={t("orgSettings.inviteUser")}
           className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
         >
@@ -198,8 +198,8 @@ export function OrgSettingsMembersPage() {
             key={orgId}
             orgId={orgId}
             allowGuest
-            onSuccess={() => setInvitingOrgId(null)}
-            onCancel={() => setInvitingOrgId(null)}
+            onSuccess={() => setInviting(false)}
+            onCancel={() => setInviting(false)}
           />
         </Modal>
       )}

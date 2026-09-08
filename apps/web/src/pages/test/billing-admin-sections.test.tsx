@@ -5,14 +5,12 @@
  * a save puts on the wire.
  *
  * Gating is the interesting half. The module's admin routes require
- * `billing:manage`, so
- * that — not the org role — is what mounts the sections: a member who can only
- * READ billing gets the plan cards and nothing else.
+ * `billing:manage`, so that — not the org role — is what mounts the sections:
+ * a member who can only READ billing gets the plan cards and nothing else.
  *
  * The picker is a Radix `Popover`, which renders nothing under
  * `renderToStaticMarkup` — what it may offer is pinned in
- * `lib/test/billing-managers`, and the message a refused save produces in
- * `lib/test/billing-error`.
+ * `lib/test/billing-managers`.
  *
  * The stores read `localStorage` at module init, so the globals are installed
  * before the dynamic imports below.
