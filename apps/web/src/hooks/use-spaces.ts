@@ -4,13 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
 
-export function useSpaces() {
+/** `enabled: false` for a surface that mounts the hook but needs no space list. */
+export function useSpaces(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/spaces",
     { params: { header: scope.header } },
-    { enabled: scope.enabled, select: (e) => e.data },
+    { enabled: enabled && scope.enabled, select: (e) => e.data },
   );
 }
 

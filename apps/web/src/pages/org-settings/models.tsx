@@ -73,9 +73,13 @@ function ModelsList({
   canDelete: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const testMutation = useTestModel();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
-  const { data: registry } = useProvidersRegistry();
+  // Provider icons are a nicety; the registry is behind
+  // `model-provider-credentials:read`, which a member reading the model list
+  // does not hold.
+  const { data: registry } = useProvidersRegistry(can("model-provider-credentials:read"));
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
@@ -454,7 +458,11 @@ export function OrgSettingsModelsPage() {
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
   const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
-  const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
+  const {
+    data: credentials,
+    isLoading: pkLoading,
+    error: pkError,
+  } = useModelProviderCredentials(canReadCredentials);
   // The credentials tab has its own resource; `models:read` alone does not open it.
   const activeTab = canReadCredentials ? subTab : "models-list";
   const createPkMutation = useCreateModelProviderCredential();

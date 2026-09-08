@@ -34,24 +34,29 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
     >
   >;
 
-export function useModelProviderCredentials() {
+/**
+ * Both reads are gated server-side by `model-provider-credentials:read`, which
+ * a `member` or a `guest` does not hold. `enabled` lets a surface that renders
+ * for those roles skip the request instead of collecting a guaranteed 403.
+ */
+export function useModelProviderCredentials(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials",
     { params: { header: scope.header } },
-    { enabled: scope.enabled, select: (e) => e.data },
+    { enabled: enabled && scope.enabled, select: (e) => e.data },
   );
 }
 
-export function useProvidersRegistry() {
+export function useProvidersRegistry(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials/registry",
     { params: { header: scope.header } },
     {
-      enabled: scope.enabled,
+      enabled: enabled && scope.enabled,
       staleTime: 5 * 60 * 1000,
       // This hook never sends `?fields=`, so the server returns full entries —
       // narrow the projection-loosened wire type to the full catalog shape.

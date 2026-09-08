@@ -80,6 +80,9 @@ export function BillingManagersSection() {
 
   if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
   if (managersQuery.error) return <ErrorState message={getErrorMessage(managersQuery.error)} />;
+  // Without the roster every saved manager reads as "no longer a member", which
+  // makes the list dirty and turns Save into a PUT of the empty set.
+  if (orgQuery.error) return <ErrorState message={getErrorMessage(orgQuery.error)} />;
 
   const saved = (managersQuery.data?.managers ?? []).map((m) => m.user_id);
   const selected = draft ?? saved;

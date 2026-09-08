@@ -67,9 +67,11 @@ interface SeedOptions {
   permissions: string[];
   managers?: { user_id: string; added_by: string; created_at: string }[];
   contact?: { billing_email: string | null; billing_cc: string[] };
+  /** The org read the managers card resolves its rows against fails. */
+  orgError?: boolean;
 }
 
-function seed({ permissions, managers = [], contact }: SeedOptions): QueryClient {
+function seed({ permissions, managers = [], contact, orgError }: SeedOptions): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
@@ -97,10 +99,21 @@ function seed({ permissions, managers = [], contact }: SeedOptions): QueryClient
       upgrades: [],
     },
   );
-  queryClient.setQueryData(
-    $api.queryOptions("get", "/api/orgs/{orgId}", { params: { path: { orgId: ORG_ID } } }).queryKey,
-    { id: ORG_ID, name: "Acme", members: MEMBERS, invitations: [] },
-  );
+  const orgKey = $api.queryOptions("get", "/api/orgs/{orgId}", {
+    params: { path: { orgId: ORG_ID } },
+  }).queryKey;
+  queryClient.setQueryData(orgKey, { id: ORG_ID, name: "Acme", members: MEMBERS, invitations: [] });
+  if (orgError) {
+    queryClient
+      .getQueryCache()
+      .find({ queryKey: orgKey })!
+      .setState({
+        data: undefined,
+        status: "error",
+        error: new Error("Organization unavailable"),
+        fetchStatus: "idle",
+      });
+  }
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/billing/managers", { params: { header } }).queryKey,
     { managers },
@@ -200,6 +213,23 @@ describe("billing managers section", () => {
     expect(html).toContain("n'est plus membre de l'organisation");
     // Save is what removes it, so it must be reachable with no edit made.
     expect(managersSection(html)).not.toContain('disabled="">Enregistrer</button>');
+  });
+
+  it("refuses to render a Save at all when the member roster failed to load", () => {
+    const html = renderPage({
+      permissions: ADMIN,
+      orgError: true,
+      managers: [
+        { user_id: "usr_member", added_by: "usr_owner", created_at: "2026-02-01T00:00:00Z" },
+      ],
+    });
+    // The card is replaced by its error state, so it has no header to slice on.
+    const section = html.slice(0, html.indexOf("Contact de facturation"));
+    expect(section).toContain("Une erreur est survenue.");
+    // With no roster every saved manager reads as gone, the list reads dirty and
+    // Save would PUT the empty set — so there must be no Save to press.
+    expect(section).not.toContain("Enregistrer");
+    expect(section).not.toContain("n'est plus membre de l'organisation");
   });
 });
 
