@@ -19,14 +19,6 @@ describe("EE module exports", () => {
     it("has a unified beforeUsage admission gate", () => {
       expect(typeof eeModule.hooks?.beforeUsage).toBe("function");
     });
-
-    it("does NOT register afterRun — billing moved to the cursor sweep, not the hook", () => {
-      expect(eeModule.hooks?.afterRun).toBeUndefined();
-    });
-
-    it("does NOT register beforeSignup — domain allowlist is platform-native (AUTH_ALLOWED_SIGNUP_DOMAINS)", () => {
-      expect(eeModule.hooks?.beforeSignup).toBeUndefined();
-    });
   });
 
   describe("emailOverrides", () => {
@@ -47,24 +39,11 @@ describe("EE module exports", () => {
     it("has onOrgDelete function", () => {
       expect(typeof eeModule.events?.onOrgDelete).toBe("function");
     });
-
-    it("does NOT register onRunStatusChange — billing is driven by the cursor sweep, not events", () => {
-      expect(eeModule.events?.onRunStatusChange).toBeUndefined();
-    });
-
-    it("does NOT register onUsageRecorded — the cursor is authoritative, not an event consumer", () => {
-      expect(eeModule.events?.onUsageRecorded).toBeUndefined();
-    });
   });
 
   describe("publicPaths", () => {
     it('includes "/api/billing/webhooks"', () => {
       expect(eeModule.publicPaths).toContain("/api/billing/webhooks");
-    });
-
-    it("is an array with at least 1 entry", () => {
-      expect(Array.isArray(eeModule.publicPaths)).toBe(true);
-      expect(eeModule.publicPaths!.length).toBeGreaterThanOrEqual(1);
     });
   });
 

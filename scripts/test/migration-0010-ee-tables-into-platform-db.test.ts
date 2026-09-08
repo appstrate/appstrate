@@ -23,13 +23,26 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { SQL } from "bun";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { describeRequiresPostgres } from "../../apps/api/test/helpers/tier.ts";
 import { EE_TABLES } from "../migration/0010-ee-tables-into-platform-db.ts";
-import { migrateEeDb } from "../../packages/module-ee/src/db.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const SCRIPT = "scripts/migration/0010-ee-tables-into-platform-db.ts";
-const MIGRATIONS_DIR = resolve(REPO_ROOT, "packages/module-ee/drizzle/migrations");
+const MODULE_ROOT = resolve(REPO_ROOT, "packages/module-ee");
+const MIGRATIONS_DIR = resolve(MODULE_ROOT, "drizzle/migrations");
 const SUFFIX = Math.random().toString(36).slice(2, 10);
+
+/**
+ * The module's migrator, reached by a computed specifier — the same shape the
+ * script under test uses. This file is Apache-2.0 and the module is not: it
+ * runs the module's code, it does not name it in a literal specifier.
+ */
+async function migrateEeDb(url: string): Promise<void> {
+  const db = (await import(resolve(MODULE_ROOT, "src/db.ts"))) as {
+    migrateEeDb: (databaseUrl: string) => Promise<void>;
+  };
+  await db.migrateEeDb(url);
+}
 
 const ORG_A = "00000000-0000-4000-a000-00000000aa01";
 const ORG_B = "00000000-0000-4000-a000-00000000aa02";
@@ -39,6 +52,16 @@ const CREATED_AT = "2026-03-04 05:06:07.123456+00";
 const BILLING_CC = ["copy@example.com", "second copy@example.com"];
 /** One more than the script's page size, so the keyset walk takes a second page. */
 const MANAGERS = 501;
+
+/**
+ * How many migrations the module ships, read where the script reads it. A
+ * literal here would turn every new migration into a failure of this file.
+ */
+const SHIPPED_MIGRATIONS = (
+  JSON.parse(readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as {
+    entries: unknown[];
+  }
+).entries.length;
 
 let admin: SQL | undefined;
 const created: string[] = [];
@@ -104,229 +127,245 @@ async function applyMigration(db: SQL, tag: string): Promise<void> {
   }
 }
 
-beforeAll(async () => {
-  admin = new SQL(databaseUrl("postgres"));
-  sourceUrl = await createDatabase("ee_src");
-  targetUrl = await createDatabase("ee_dst");
-  legacyUrl = await createDatabase("ee_legacy_src");
-  legacyTargetUrl = await createDatabase("ee_legacy_dst");
-  refusalTargetUrl = await createDatabase("ee_refuse_dst");
+/**
+ * Every phase needs two live PostgreSQL databases and a subprocess that can
+ * attach to them, so the whole file is gated: tier-0 runs on PGlite and has no
+ * DATABASE_URL for `databaseUrl()` to derive a throwaway from.
+ */
+describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", () => {
+  beforeAll(async () => {
+    admin = new SQL(databaseUrl("postgres"));
+    sourceUrl = await createDatabase("ee_src");
+    targetUrl = await createDatabase("ee_dst");
+    legacyUrl = await createDatabase("ee_legacy_src");
+    legacyTargetUrl = await createDatabase("ee_legacy_dst");
+    refusalTargetUrl = await createDatabase("ee_refuse_dst");
 
-  await migrateEeDb(sourceUrl);
-  source = new SQL(sourceUrl);
-  target = new SQL(targetUrl);
-  legacy = new SQL(legacyUrl);
-  legacyTarget = new SQL(legacyTargetUrl);
-  refusalTarget = new SQL(refusalTargetUrl);
+    await migrateEeDb(sourceUrl);
+    source = new SQL(sourceUrl);
+    target = new SQL(targetUrl);
+    legacy = new SQL(legacyUrl);
+    legacyTarget = new SQL(legacyTargetUrl);
+    refusalTarget = new SQL(refusalTargetUrl);
 
-  await source.unsafe(
-    `INSERT INTO ee_billing_accounts (org_id, plan_id, credits_used, credit_quota, billing_cc, created_at, updated_at)
-     VALUES ($1, 'pro', 42, 20000, $2::text[], $3::timestamptz, $3::timestamptz),
-            ($4, 'free', 0, 0, '{}', $3::timestamptz, $3::timestamptz)`,
-    [ORG_A, `{"${BILLING_CC[0]}","${BILLING_CC[1]}"}`, CREATED_AT, ORG_B],
-  );
-  await source.unsafe(
-    `INSERT INTO ee_usage_records (org_id, context_type, context_id, cost_credits, cost_usd, created_at)
-     VALUES ($1, 'run', 'run-1', 12, 0.012345678901, $2::timestamptz),
-            ($1, 'chat', 'chat-1', 3, 0.000000000001, $2::timestamptz)`,
-    [ORG_A, CREATED_AT],
-  );
-  await source.unsafe(
-    `INSERT INTO ee_stripe_events (event_id, event_type, status, claimed_at, processed_at)
-     VALUES ('evt_1', 'invoice.paid', 'done', $1::timestamptz, $1::timestamptz),
-            ('evt_2', 'customer.subscription.updated', 'processing', $1::timestamptz, NULL)`,
-    [CREATED_AT],
-  );
-  await source.unsafe(
-    `INSERT INTO ee_billed_llm_usage (llm_usage_id, billed_at)
-     VALUES (1, $1::timestamptz), (2, $1::timestamptz)`,
-    [CREATED_AT],
-  );
-  await source.unsafe(
-    `INSERT INTO ee_free_tier_claims (email, claimed_at) VALUES ('claimed@example.com', $1::timestamptz)`,
-    [CREATED_AT],
-  );
-  await source.unsafe(
-    `INSERT INTO ee_billing_cursor (id, last_llm_usage_id, updated_at) VALUES (true, 99, $1::timestamptz)`,
-    [CREATED_AT],
-  );
-  // A composite primary key, over more rows than one page holds.
-  await source.unsafe(
-    `INSERT INTO ee_billing_managers (org_id, user_id, added_by, created_at)
-     SELECT gen_random_uuid(), 'user-' || g, 'user-owner', $1::timestamptz
-       FROM generate_series(1, ${MANAGERS}) g`,
-    [CREATED_AT],
-  );
+    await source.unsafe(
+      `INSERT INTO ee_billing_accounts (org_id, plan_id, credits_used, credit_quota, billing_cc, created_at, updated_at)
+       VALUES ($1, 'pro', 42, 20000, $2::text[], $3::timestamptz, $3::timestamptz),
+              ($4, 'free', 0, 0, '{}', $3::timestamptz, $3::timestamptz)`,
+      [ORG_A, `{"${BILLING_CC[0]}","${BILLING_CC[1]}"}`, CREATED_AT, ORG_B],
+    );
+    await source.unsafe(
+      `INSERT INTO ee_usage_records (org_id, context_type, context_id, cost_credits, cost_usd, created_at)
+       VALUES ($1, 'run', 'run-1', 12, 0.012345678901, $2::timestamptz),
+              ($1, 'chat', 'chat-1', 3, 0.000000000001, $2::timestamptz)`,
+      [ORG_A, CREATED_AT],
+    );
+    await source.unsafe(
+      `INSERT INTO ee_stripe_events (event_id, event_type, status, claimed_at, processed_at)
+       VALUES ('evt_1', 'invoice.paid', 'done', $1::timestamptz, $1::timestamptz),
+              ('evt_2', 'customer.subscription.updated', 'processing', $1::timestamptz, NULL)`,
+      [CREATED_AT],
+    );
+    await source.unsafe(
+      `INSERT INTO ee_billed_llm_usage (llm_usage_id, billed_at)
+       VALUES (1, $1::timestamptz), (2, $1::timestamptz)`,
+      [CREATED_AT],
+    );
+    await source.unsafe(
+      `INSERT INTO ee_free_tier_claims (email, claimed_at) VALUES ('claimed@example.com', $1::timestamptz)`,
+      [CREATED_AT],
+    );
+    await source.unsafe(
+      `INSERT INTO ee_billing_cursor (id, last_llm_usage_id, updated_at) VALUES (true, 99, $1::timestamptz)`,
+      [CREATED_AT],
+    );
+    // A composite primary key, over more rows than one page holds.
+    await source.unsafe(
+      `INSERT INTO ee_billing_managers (org_id, user_id, added_by, created_at)
+       SELECT gen_random_uuid(), 'user-' || g, 'user-owner', $1::timestamptz
+         FROM generate_series(1, ${MANAGERS}) g`,
+      [CREATED_AT],
+    );
 
-  // Production's shape: the chain stops at 0003, so the tables are still
-  // `cloud_*`, there is no managers table and no billing contact columns.
-  for (const tag of [
-    "0000_init",
-    "0001_cursor_billing",
-    "0002_numeric_cost",
-    "0003_normalize_free_subscription_status",
-  ]) {
-    await applyMigration(legacy, tag);
-  }
-  await legacy.unsafe(
-    `INSERT INTO cloud_billing_accounts (org_id, plan_id, credits_used, credit_quota, created_at, updated_at)
-     VALUES ($1, 'pro', 42, 20000, $2::timestamptz, $2::timestamptz)`,
-    [ORG_A, CREATED_AT],
-  );
-  await legacy.unsafe(
-    `INSERT INTO cloud_usage_records (org_id, context_type, context_id, cost_credits, cost_usd, created_at)
-     VALUES ($1, 'run', 'run-legacy', 7, 0.007000000001, $2::timestamptz)`,
-    [ORG_A, CREATED_AT],
-  );
-  await legacy.unsafe(
-    `INSERT INTO cloud_billing_cursor (id, last_llm_usage_id, updated_at) VALUES (true, 41, $1::timestamptz)`,
-    [CREATED_AT],
-  );
-}, 120_000);
+    // Production's shape: the chain stops at 0003, so the tables are still
+    // `cloud_*`, there is no managers table and no billing contact columns.
+    for (const tag of [
+      "0000_init",
+      "0001_cursor_billing",
+      "0002_numeric_cost",
+      "0003_normalize_free_subscription_status",
+    ]) {
+      await applyMigration(legacy, tag);
+    }
+    await legacy.unsafe(
+      `INSERT INTO cloud_billing_accounts (org_id, plan_id, credits_used, credit_quota, created_at, updated_at)
+       VALUES ($1, 'pro', 42, 20000, $2::timestamptz, $2::timestamptz)`,
+      [ORG_A, CREATED_AT],
+    );
+    await legacy.unsafe(
+      `INSERT INTO cloud_usage_records (org_id, context_type, context_id, cost_credits, cost_usd, created_at)
+       VALUES ($1, 'run', 'run-legacy', 7, 0.007000000001, $2::timestamptz)`,
+      [ORG_A, CREATED_AT],
+    );
+    await legacy.unsafe(
+      `INSERT INTO cloud_billing_cursor (id, last_llm_usage_id, updated_at) VALUES (true, 41, $1::timestamptz)`,
+      [CREATED_AT],
+    );
+  }, 120_000);
 
-afterAll(async () => {
-  await source?.close();
-  await target?.close();
-  await legacy?.close();
-  await legacyTarget?.close();
-  await refusalTarget?.close();
-  if (!admin) return;
-  for (const name of created) {
-    await admin.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-  }
-  await admin.close();
-});
-
-describe("0010 — ee tables into the platform database", () => {
-  it("names the missing variable instead of half-running", () => {
-    const proc = Bun.spawnSync({
-      cmd: ["bun", SCRIPT],
-      cwd: REPO_ROOT,
-      env: { ...process.env, EE_SOURCE_DATABASE_URL: "", DATABASE_URL: targetUrl },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    expect(proc.exitCode).toBe(2);
-    expect(proc.stdout.toString()).toContain("EE_SOURCE_DATABASE_URL is required");
+  afterAll(async () => {
+    await source?.close();
+    await target?.close();
+    await legacy?.close();
+    await legacyTarget?.close();
+    await refusalTarget?.close();
+    if (!admin) return;
+    for (const name of created) {
+      await admin.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    }
+    await admin.close();
   });
 
-  it("dry-runs: counts both sides and writes nothing", async () => {
-    const { code, output } = run({ source: sourceUrl, target: targetUrl });
-    expect(code).toBe(0);
-    expect(output).toContain("source prefix: ee_");
-    expect(output).toContain("would apply the module's migrations — 6 pending on the target");
-    expect(output).toMatch(/ee_billing_accounts\s+\|\s+2\s+\|\s+absent/);
-    expect(output).toMatch(
-      new RegExp(`ee_billing_managers\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+absent`),
-    );
-    expect(output).toContain("dry-run — nothing was written");
+  describe("0010 — ee tables into the platform database", () => {
+    it("names the missing variable instead of half-running", () => {
+      const proc = Bun.spawnSync({
+        cmd: ["bun", SCRIPT],
+        cwd: REPO_ROOT,
+        env: { ...process.env, EE_SOURCE_DATABASE_URL: "", DATABASE_URL: targetUrl },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(proc.exitCode).toBe(2);
+      expect(proc.stdout.toString()).toContain("EE_SOURCE_DATABASE_URL is required");
+    });
 
-    // Not "no rows" but "no tables": a dry-run does not migrate either.
-    const [{ present }] = await target.unsafe(
-      `SELECT to_regclass('ee_billing_accounts') IS NOT NULL AS present`,
-    );
-    expect(present).toBe(false);
-  }, 60_000);
-
-  it("copies every row, preserving microseconds and arrays and paging past the page size", async () => {
-    const { code, output } = run({ source: sourceUrl, target: targetUrl }, ["--apply"]);
-    expect(code).toBe(0);
-    expect(output).toContain("copied — every table matches");
-    expect(output).toMatch(/ee_billing_accounts\s+\|\s+2\s+\|\s+2\s+\|\s+yes/);
-    expect(output).toMatch(
-      new RegExp(`ee_billing_managers\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+yes`),
-    );
-
-    expect(await snapshot(target)).toEqual(await snapshot(source));
-
-    const [account] = await target.unsafe(
-      `SELECT to_char(created_at, 'US') AS us, billing_cc FROM ee_billing_accounts WHERE org_id = $1`,
-      [ORG_A],
-    );
-    expect(account.us).toBe("123456");
-    expect(account.billing_cc).toEqual(BILLING_CC);
-
-    const [{ applied }] = await target.unsafe(
-      `SELECT count(*)::int AS applied FROM drizzle.ee_migrations`,
-    );
-    expect(applied).toBe(6);
-  }, 60_000);
-
-  it("refuses a second --apply and leaves the target as it was", async () => {
-    const before = await snapshot(target);
-    const { code, output } = run({ source: sourceUrl, target: targetUrl }, ["--apply"]);
-    expect(code).toBe(1);
-    expect(output).toContain("refusing: the target already holds ee_* rows");
-    expect(output).toContain("ee_billing_accounts");
-    expect(await snapshot(target)).toEqual(before);
-  }, 60_000);
-});
-
-describe("0010 — a cloud_ source at migration level 0003", () => {
-  it("copies it into ee_*, defaulting the columns 0004 would have added", async () => {
-    const { code, output } = run({ source: legacyUrl, target: legacyTargetUrl }, ["--apply"]);
-    expect(code).toBe(0);
-    expect(output).toContain("source prefix: cloud_");
-    expect(output).toContain("billing_email, billing_cc ← default");
-    expect(output).toContain("ee_billing_managers ← absent from the source");
-    expect(output).toContain("copied — every table matches");
-
-    const [account] = await legacyTarget.unsafe(
-      `SELECT plan_id, billing_email, billing_cc, to_char(created_at, 'US') AS us
-         FROM ee_billing_accounts WHERE org_id = $1`,
-      [ORG_A],
-    );
-    expect(account.plan_id).toBe("pro");
-    expect(account.billing_email).toBeNull();
-    expect(account.billing_cc).toEqual([]);
-    expect(account.us).toBe("123456");
-
-    const [record] = await legacyTarget.unsafe(`SELECT context_id, cost_usd FROM ee_usage_records`);
-    expect(record.context_id).toBe("run-legacy");
-    expect(record.cost_usd).toBe("0.007000000001");
-
-    const [{ managers }] = await legacyTarget.unsafe(
-      `SELECT count(*)::int AS managers FROM ee_billing_managers`,
-    );
-    expect(managers).toBe(0);
-
-    const [cursor] = await legacyTarget.unsafe(`SELECT last_llm_usage_id FROM ee_billing_cursor`);
-    expect(cursor.last_llm_usage_id).toBe(41);
-  }, 60_000);
-});
-
-describe("0010 — a source it cannot account for is refused before the target is touched", () => {
-  /** The target must still have no `ee_*` tables: nothing ran, migrations included. */
-  async function targetUntouched(): Promise<boolean> {
-    const [{ present }] = await refusalTarget.unsafe(
-      `SELECT to_regclass('ee_billing_accounts') IS NOT NULL AS present`,
-    );
-    return present === false;
-  }
-
-  it("refuses an ee_/cloud_ table it does not move rather than leaving it behind", async () => {
-    await legacy.unsafe(`CREATE TABLE cloud_extra (id integer PRIMARY KEY)`);
-    try {
-      const { code, output } = run({ source: legacyUrl, target: refusalTargetUrl }, ["--apply"]);
-      expect(code).toBe(1);
-      expect(output).toContain("does not move: cloud_extra");
-      expect(await targetUntouched()).toBe(true);
-    } finally {
-      await legacy.unsafe(`DROP TABLE cloud_extra`);
-    }
-  }, 60_000);
-
-  it("refuses a source column the target does not declare rather than dropping it", async () => {
-    await legacy.unsafe(`ALTER TABLE cloud_billing_accounts ADD COLUMN legacy_note text`);
-    try {
-      const { code, output } = run({ source: legacyUrl, target: refusalTargetUrl }, ["--apply"]);
-      expect(code).toBe(1);
+    it("dry-runs: counts both sides and writes nothing", async () => {
+      const { code, output } = run({ source: sourceUrl, target: targetUrl });
+      expect(code).toBe(0);
+      expect(output).toContain("source prefix: ee_");
       expect(output).toContain(
-        "refusing: cloud_billing_accounts has column(s) ee_billing_accounts does not declare: legacy_note",
+        `would apply the module's migrations — ${SHIPPED_MIGRATIONS} pending on the target`,
       );
-      expect(await targetUntouched()).toBe(true);
-    } finally {
-      await legacy.unsafe(`ALTER TABLE cloud_billing_accounts DROP COLUMN legacy_note`);
+      expect(output).toMatch(/ee_billing_accounts\s+\|\s+2\s+\|\s+absent/);
+      expect(output).toMatch(
+        new RegExp(`ee_billing_managers\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+absent`),
+      );
+      expect(output).toContain("dry-run — nothing was written");
+
+      // Not "no rows" but "no tables": a dry-run does not migrate either.
+      const [{ present }] = await target.unsafe(
+        `SELECT to_regclass('ee_billing_accounts') IS NOT NULL AS present`,
+      );
+      expect(present).toBe(false);
+    }, 60_000);
+
+    it("copies every row, preserving microseconds and arrays and paging past the page size", async () => {
+      const { code, output } = run({ source: sourceUrl, target: targetUrl }, ["--apply"]);
+      expect(code).toBe(0);
+      expect(output).toContain("copied — every table matches");
+      expect(output).toMatch(/ee_billing_accounts\s+\|\s+2\s+\|\s+2\s+\|\s+yes/);
+      expect(output).toMatch(
+        new RegExp(`ee_billing_managers\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+yes`),
+      );
+
+      expect(await snapshot(target)).toEqual(await snapshot(source));
+
+      const [account] = await target.unsafe(
+        `SELECT to_char(created_at, 'US') AS us, billing_cc FROM ee_billing_accounts WHERE org_id = $1`,
+        [ORG_A],
+      );
+      expect(account.us).toBe("123456");
+      expect(account.billing_cc).toEqual(BILLING_CC);
+
+      const [{ applied }] = await target.unsafe(
+        `SELECT count(*)::int AS applied FROM drizzle.ee_migrations`,
+      );
+      expect(applied).toBe(SHIPPED_MIGRATIONS);
+    }, 60_000);
+
+    it("refuses a second --apply and leaves the target as it was", async () => {
+      const before = await snapshot(target);
+      const { code, output } = run({ source: sourceUrl, target: targetUrl }, ["--apply"]);
+      expect(code).toBe(1);
+      expect(output).toContain("refusing: the target already holds ee_* rows");
+      expect(output).toContain("ee_billing_accounts");
+      expect(await snapshot(target)).toEqual(before);
+    }, 60_000);
+  });
+
+  describe("0010 — a cloud_ source at migration level 0003", () => {
+    it("copies it into ee_*, defaulting the columns 0004 would have added", async () => {
+      const { code, output } = run({ source: legacyUrl, target: legacyTargetUrl }, ["--apply"]);
+      expect(code).toBe(0);
+      expect(output).toContain("source prefix: cloud_");
+      // `0004`'s two columns are absent from this source and take their declared
+      // default. Matched inside the accounts line rather than as a bare
+      // substring: a later migration adding a column defaults them beside it.
+      expect(output).toMatch(
+        /ee_billing_accounts ← cloud_billing_accounts \([^)]*\bbilling_email\b[^)]*\bbilling_cc\b[^)]*← default\)/,
+      );
+      expect(output).toContain("ee_billing_managers ← absent from the source");
+      expect(output).toContain("copied — every table matches");
+
+      const [account] = await legacyTarget.unsafe(
+        `SELECT plan_id, billing_email, billing_cc, to_char(created_at, 'US') AS us
+           FROM ee_billing_accounts WHERE org_id = $1`,
+        [ORG_A],
+      );
+      expect(account.plan_id).toBe("pro");
+      expect(account.billing_email).toBeNull();
+      expect(account.billing_cc).toEqual([]);
+      expect(account.us).toBe("123456");
+
+      const [record] = await legacyTarget.unsafe(
+        `SELECT context_id, cost_usd FROM ee_usage_records`,
+      );
+      expect(record.context_id).toBe("run-legacy");
+      expect(record.cost_usd).toBe("0.007000000001");
+
+      const [{ managers }] = await legacyTarget.unsafe(
+        `SELECT count(*)::int AS managers FROM ee_billing_managers`,
+      );
+      expect(managers).toBe(0);
+
+      const [cursor] = await legacyTarget.unsafe(`SELECT last_llm_usage_id FROM ee_billing_cursor`);
+      expect(cursor.last_llm_usage_id).toBe(41);
+    }, 60_000);
+  });
+
+  describe("0010 — a source it cannot account for is refused before the target is touched", () => {
+    /** The target must still have no `ee_*` tables: nothing ran, migrations included. */
+    async function targetUntouched(): Promise<boolean> {
+      const [{ present }] = await refusalTarget.unsafe(
+        `SELECT to_regclass('ee_billing_accounts') IS NOT NULL AS present`,
+      );
+      return present === false;
     }
-  }, 60_000);
+
+    it("refuses an ee_/cloud_ table it does not move rather than leaving it behind", async () => {
+      await legacy.unsafe(`CREATE TABLE cloud_extra (id integer PRIMARY KEY)`);
+      try {
+        const { code, output } = run({ source: legacyUrl, target: refusalTargetUrl }, ["--apply"]);
+        expect(code).toBe(1);
+        expect(output).toContain("does not move: cloud_extra");
+        expect(await targetUntouched()).toBe(true);
+      } finally {
+        await legacy.unsafe(`DROP TABLE cloud_extra`);
+      }
+    }, 60_000);
+
+    it("refuses a source column the target does not declare rather than dropping it", async () => {
+      await legacy.unsafe(`ALTER TABLE cloud_billing_accounts ADD COLUMN legacy_note text`);
+      try {
+        const { code, output } = run({ source: legacyUrl, target: refusalTargetUrl }, ["--apply"]);
+        expect(code).toBe(1);
+        expect(output).toContain(
+          "refusing: cloud_billing_accounts has column(s) ee_billing_accounts does not declare: legacy_note",
+        );
+        expect(await targetUntouched()).toBe(true);
+      } finally {
+        await legacy.unsafe(`ALTER TABLE cloud_billing_accounts DROP COLUMN legacy_note`);
+      }
+    }, 60_000);
+  });
 });
