@@ -1,50 +1,17 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * The prop type of every billing email, plus the `BillingEmailType` union the
- * registry keys on. This module does not depend on `@appstrate/emails`, so the
- * renderer/props shapes it needs are declared here.
+ * The prop type of every BILLING email, plus the `BillingEmailType` union the
+ * registry keys on. These have no OSS counterpart — `@appstrate/emails` knows
+ * nothing about subscriptions — so they are declared here. The props of the
+ * four templates this module OVERRIDES are not: those come from
+ * `@appstrate/emails`, whose `EmailPropsMap` is what the platform actually
+ * calls the renderer with.
  */
 
-import type { OrgRole } from "@appstrate/core/permissions";
+import type { RenderedEmail, SupportedLocale } from "@appstrate/emails";
 
-export type SupportedLocale = "fr" | "en";
-
-export interface RenderedEmail {
-  subject: string;
-  html: string;
-}
-
-// ---------------------------------------------------------------------------
-// OSS email override types (verification + invitation)
-// ---------------------------------------------------------------------------
-
-export interface VerificationProps {
-  user: { name: string; email: string };
-  url: string;
-  locale: SupportedLocale;
-}
-
-export interface InvitationProps {
-  email: string;
-  inviteUrl: string;
-  orgName: string;
-  inviterName: string;
-  role: OrgRole;
-  locale: SupportedLocale;
-}
-
-export interface MagicLinkProps {
-  email: string;
-  url: string;
-  locale: SupportedLocale;
-}
-
-export interface ResetPasswordProps {
-  email: string;
-  url: string;
-  locale: SupportedLocale;
-}
+export type { RenderedEmail, SupportedLocale };
 
 // ---------------------------------------------------------------------------
 // Billing email types (EE-only — not in @appstrate/emails)

@@ -5,7 +5,7 @@ import { useOrg } from "./use-org.ts";
 import { useSpaces } from "./use-spaces.ts";
 import { useCurrentSpaceId } from "./use-current-space.ts";
 import type { OrgRole } from "@appstrate/shared-types";
-import type { CorePermission } from "@appstrate/core/permissions";
+import { ORG_ROLES_WITH_FULL_ACCESS, type CorePermission } from "@appstrate/core/permissions";
 
 /**
  * A permission string `can()` accepts.
@@ -40,7 +40,7 @@ export function roleI18nKey(role: OrgRole): string {
  */
 export function useCanPreviewRole(): boolean {
   const { orgRole } = usePermissions();
-  return orgRole === "owner" || orgRole === "admin";
+  return orgRole !== null && (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(orgRole);
 }
 
 /**

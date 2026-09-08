@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import type { PaymentFailedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapEeLayout, ctaButton } from "../layout.ts";
+import { ctaButton, interpolate, wrapEeLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -35,10 +35,6 @@ const strings = {
     footer: "If you have any questions, contact our support team.",
   },
 } as const;
-
-function interpolate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
 
 function clampAttempt(n: number): 1 | 2 | 3 {
   if (n <= 1) return 1;

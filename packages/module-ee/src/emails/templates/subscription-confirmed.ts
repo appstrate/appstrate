@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import type { SubscriptionConfirmedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapEeLayout, ctaButton, formatDate } from "../layout.ts";
+import { ctaButton, formatDate, interpolate, wrapEeLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -22,10 +22,6 @@ const strings = {
     footer: "You can manage your subscription at any time from the billing settings.",
   },
 } as const;
-
-function interpolate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
 
 export function renderSubscriptionConfirmedEmail(
   props: SubscriptionConfirmedProps,

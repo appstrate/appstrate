@@ -13,16 +13,20 @@
  * explained, and left out of the body.
  */
 
+import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
+
 import type { components } from "../api/client";
 
 export type OrgMember = components["schemas"]["OrgMember"];
 
 /**
- * The org roles the server refuses in `user_ids` — mirrors
- * `ROLES_WITH_BILLING_MANAGE` in `packages/module-ee/src/routes/billing.ts`.
- * They already hold `billing:read` + `billing:manage` through their role.
+ * The org roles the server refuses in `user_ids`: they already hold
+ * `billing:read` + `billing:manage` through their role, so a grant naming one
+ * of them means nothing. Read from core, which is where the route reads it too.
  */
-const ROLES_WITH_BILLING_MANAGE: ReadonlySet<OrgMember["role"]> = new Set(["owner", "admin"]);
+const ROLES_WITH_BILLING_MANAGE: ReadonlySet<OrgMember["role"]> = new Set(
+  ORG_ROLES_WITH_FULL_ACCESS,
+);
 
 /** The members the picker may offer, in the order the org listing returns them. */
 export function billingManagerCandidates(members: readonly OrgMember[]): OrgMember[] {

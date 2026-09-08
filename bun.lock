@@ -351,6 +351,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/core": "workspace:*",
+        "@appstrate/emails": "workspace:*",
         "drizzle-orm": "^0.45.2",
         "hono": "^4.12.33",
         "ioredis": "^6.0.0",

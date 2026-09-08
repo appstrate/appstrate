@@ -109,6 +109,15 @@ export function billingSettingsUrl(appUrl: string): string {
   return `${appUrl}/org-settings/billing`;
 }
 
+/**
+ * Substitute `{name}` placeholders in a localized string. An unknown key is
+ * left as it was written rather than blanked, so a typo shows up in the mail
+ * instead of silently deleting the sentence it was in.
+ */
+export function interpolate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+}
+
 export function ctaButton(label: string, url: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
   <tr>

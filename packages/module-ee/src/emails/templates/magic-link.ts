@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
-import type { MagicLinkProps, RenderedEmail } from "../types.ts";
+import type { EmailPropsMap, RenderedEmail } from "@appstrate/emails";
 import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
 
 const strings = {
@@ -22,7 +22,7 @@ const strings = {
   },
 } as const;
 
-export function renderEeMagicLinkEmail(props: MagicLinkProps): RenderedEmail {
+export function renderEeMagicLinkEmail(props: EmailPropsMap["magic-link"]): RenderedEmail {
   const { url, locale } = props;
   const s = strings[locale] ?? strings.fr;
 

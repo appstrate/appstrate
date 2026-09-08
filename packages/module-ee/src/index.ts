@@ -37,6 +37,7 @@ import { initBillingEmail } from "./emails/send.ts";
 import { resolveBillingRecipients } from "./emails/recipients.ts";
 import { BILLING_MANAGER_PERMISSIONS, isBillingManager } from "./billing/managers.ts";
 import { billingContactPatchSchema } from "./billing/contact.ts";
+import type { EmailRenderer, EmailType } from "@appstrate/emails";
 import { z } from "zod";
 
 // Register `billing` as a module-owned RBAC resource. The declaration
@@ -54,8 +55,15 @@ declare module "@appstrate/core/permissions" {
   }
 }
 
-// Email template overrides — branded Appstrate Cloud versions
-const emailOverrides = {
+// Email template overrides — branded Appstrate Cloud versions.
+//
+// Typed against `@appstrate/emails`' own registry shape rather than left to
+// inference: `registerEmailOverrides` takes exactly this type, so a key that is
+// not an `EmailType` (or a renderer whose props do not match the one the
+// platform calls it with) is a `tsc` error here instead of a template the
+// registry silently never reaches. Core's `emailOverrides` slot stays
+// `Record<string, any>` — core cannot depend on a workspace-only package.
+const emailOverrides: Partial<{ [K in EmailType]: EmailRenderer<K> }> = {
   verification: renderEeVerificationEmail,
   invitation: renderEeInvitationEmail,
   "magic-link": renderEeMagicLinkEmail,
