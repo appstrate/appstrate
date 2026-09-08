@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateCloudTables, getCloudDb } from "../../helpers/db.ts";
+import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
 import {
   seedBillingAccount,
   seedBillingManager,
@@ -11,8 +13,11 @@ import { resetStripeMock, requests } from "../../helpers/stripe.ts";
 import { onOrgCreate, onOrgDelete } from "../../../src/onboarding/post-signup.ts";
 import { listBillingManagers } from "../../../src/billing/managers.ts";
 import { billingAccounts, freeTierClaims, orgUsageRecords } from "../../../drizzle/schema.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
 
-// Cloud owns its DB now — no org stub/FK to seed before onOrgCreate.
+useEeTestSeams();
+
+// EE owns its DB now — no org stub/FK to seed before onOrgCreate.
 async function testOrgCreated(orgId: string, email: string): Promise<void> {
   return onOrgCreate(orgId, email);
 }
@@ -21,7 +26,7 @@ describe("post-signup", () => {
   const orgId = "00000000-0000-4000-a000-000000000050";
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     resetStripeMock();
   });
 
@@ -29,7 +34,7 @@ describe("post-signup", () => {
     it("creates a billing account with 5000 credits quota for a new email", async () => {
       await testOrgCreated(orgId, "alice@example.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -47,7 +52,7 @@ describe("post-signup", () => {
       // an invoice to a rewritten address is a different job.
       await testOrgCreated(orgId, "Alice.Smith+billing@gmail.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -60,7 +65,7 @@ describe("post-signup", () => {
     it("inserts a free tier claim for new emails", async () => {
       await testOrgCreated(orgId, "bob@example.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [claim] = await db
         .select()
         .from(freeTierClaims)
@@ -75,7 +80,7 @@ describe("post-signup", () => {
       const orgId2 = "00000000-0000-4000-a000-000000000051";
       await testOrgCreated(orgId2, "claimed@example.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -97,7 +102,7 @@ describe("post-signup", () => {
         testOrgCreated(orgB, "race@example.com"),
       ]);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const accounts = await db
         .select({ creditQuota: billingAccounts.creditQuota })
         .from(billingAccounts);
@@ -109,7 +114,7 @@ describe("post-signup", () => {
     it("normalizes email to lowercase", async () => {
       await testOrgCreated(orgId, "Alice@Example.COM");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [claim] = await db
         .select()
         .from(freeTierClaims)
@@ -125,7 +130,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "a.l.i.c.e@gmail.com");
       await testOrgCreated(orgId2, "alice@gmail.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -142,7 +147,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "alice+test@example.com");
       await testOrgCreated(orgId2, "alice+other@example.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -159,7 +164,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "alice@googlemail.com");
       await testOrgCreated(orgId2, "alice@gmail.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -176,7 +181,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "a.l.i.c.e+tag@googlemail.com");
       await testOrgCreated(orgId2, "alice@gmail.com");
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -227,16 +232,16 @@ describe("post-signup", () => {
       await expect(onOrgDelete(unknownOrg)).resolves.toBeUndefined();
     });
 
-    it("deletes all of the org's cloud-owned rows (no FK cascade exists)", async () => {
-      // Cloud runs its own DB — onOrgDelete is the ONLY thing that cleans up
-      // an org's rows. Seed every org-keyed cloud table, then assert empty.
+    it("deletes all of the org's EE-owned rows (no FK cascade exists)", async () => {
+      // EE runs its own DB — onOrgDelete is the ONLY thing that cleans up
+      // an org's rows. Seed every org-keyed EE table, then assert empty.
       await seedBillingAccount({ orgId, creditsUsed: 100, creditQuota: 5000 });
       await seedUsageRecord({ orgId, contextId: "run-del-001", costCredits: 100 });
       await seedBillingManager({ orgId, userId: "user-finance" });
 
       await onOrgDelete(orgId);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const accounts = await db
         .select()
         .from(billingAccounts)

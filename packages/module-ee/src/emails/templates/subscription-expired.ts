@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { SubscriptionExpiredProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapCloudLayout, ctaButton } from "../layout.ts";
+import { wrapEeLayout, ctaButton } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -37,6 +39,6 @@ ${ctaButton(s.button, resubscribeUrl)}`;
 
   return {
     subject: s.subject,
-    html: wrapCloudLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

@@ -1,24 +1,26 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { z } from "zod";
 
-const cloudEnvSchema = z.object({
+const eeEnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
   STRIPE_PRICE_ID_STARTER: z.string().min(1),
   STRIPE_PRICE_ID_PRO: z.string().min(1),
 
-  // Cloud runs its OWN database, fully separate from the platform's. Billing
+  // EE runs its OWN database, fully separate from the platform's. Billing
   // data never shares a database with OSS tables; the platform's `llm_usage`
   // ledger is read through the `services.usage` cursor, not a cross-DB join.
-  // Required when the cloud module is loaded.
-  CLOUD_DATABASE_URL: z.string().min(1),
+  // Required when the EE module is loaded.
+  EE_DATABASE_URL: z.string().min(1),
 
-  // Billing sweeper — the cloud metering consumer. Each tick advances a
+  // Billing sweeper — the EE metering consumer. Each tick advances a
   // serial-`id` watermark through the platform's append-only `llm_usage`
-  // ledger, claims platform-provided rows into `cloud_billed_llm_usage`, and
+  // ledger, claims platform-provided rows into `ee_billed_llm_usage`, and
   // debits credits. A failed pass advances nothing; the next tick retries.
   //
   // Var names kept stable (deployed): INTERVAL is the sweep cadence, BATCH_SIZE
-  // the max rows per tick. Defaults tuned for a small cloud: 5-min cadence, 100
+  // the max rows per tick. Defaults tuned for a small deployment: 5-min cadence, 100
   // rows per tick. Set INTERVAL=0 to disable.
   CLOUD_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
   // Max 1000 is the platform's `usage.list` hard ceiling (LLM_USAGE_LIST_MAX_LIMIT):
@@ -36,7 +38,7 @@ const cloudEnvSchema = z.object({
   // 100 — after which `WHERE id > watermark` can never return row 100 again. It
   // is never billed and nothing logs it: silent revenue loss, no alarm. Scanning
   // from `watermark − REPLAY_WINDOW` closes that window. This is cheap and safe
-  // ONLY because `cloud_billed_llm_usage` is the arbiter: a re-read row that was
+  // ONLY because `ee_billed_llm_usage` is the arbiter: a re-read row that was
   // already claimed debits nothing (`ON CONFLICT DO NOTHING RETURNING`) and
   // claims are never purged. DO NOT "optimize" the re-read away because it looks
   // redundant — the redundancy IS the fix, and what it prevents is silent.
@@ -75,22 +77,22 @@ const cloudEnvSchema = z.object({
   CLOUD_RECONCILIATION_REPLAY_WINDOW: z.coerce.number().int().min(0).max(500).default(200),
 });
 
-export type CloudEnv = z.infer<typeof cloudEnvSchema>;
+export type EeEnv = z.infer<typeof eeEnvSchema>;
 
-let _env: CloudEnv | null = null;
+let _env: EeEnv | null = null;
 
-export function getCloudEnv(): CloudEnv {
+export function getEeEnv(): EeEnv {
   if (!_env) {
-    _env = cloudEnvSchema.parse(process.env);
+    _env = eeEnvSchema.parse(process.env);
   }
   return _env;
 }
 
 /**
- * Test-only — drop the cached parsed env so the next `getCloudEnv()` re-
+ * Test-only — drop the cached parsed env so the next `getEeEnv()` re-
  * reads `process.env`. Lets a single test file flip env vars between
  * cases without spawning a fresh process.
  */
-export function _resetCloudEnvForTests(): void {
+export function _resetEeEnvForTests(): void {
   _env = null;
 }

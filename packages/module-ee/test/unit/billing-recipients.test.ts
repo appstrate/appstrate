@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it } from "bun:test";
 import { composeBillingRecipients } from "../../src/emails/recipients.ts";
 

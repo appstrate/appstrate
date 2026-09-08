@@ -1,11 +1,20 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, afterAll } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { sql } from "drizzle-orm";
-import { migrateCloudDb, getCloudDb } from "../../../src/db.ts";
-import { getCloudEnv } from "../../../src/env.ts";
+import { migrateEeDb, getEeDb } from "../../../src/db.ts";
+import { getEeEnv } from "../../../src/env.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
 
-const CLOUD_TABLES = [
+useEeTestSeams();
+
+// The chain runs under TWO prefixes: 0000-0004 create `cloud_*` tables and
+// 0005 renames them to `ee_*`. A replay that stops before 0005 therefore
+// leaves `cloud_*` behind, so a blank slate has to drop both eras — plus the
+// legacy `cloud_pending_bills` that 0001 drops.
+const LEGACY_TABLES = [
   "cloud_usage_records",
   "cloud_billed_llm_usage",
   "cloud_billing_cursor",
@@ -13,12 +22,18 @@ const CLOUD_TABLES = [
   "cloud_free_tier_claims",
   "cloud_billing_managers",
   "cloud_billing_accounts",
+  "cloud_pending_bills",
 ];
 
-// Every cloud table across the migration chain, INCLUDING the legacy
-// cloud_pending_bills that 0001 drops — the upgrade tests reset to a true
-// pre-0000 blank slate.
-const ALL_CLOUD_TABLES = [...CLOUD_TABLES, "cloud_pending_bills"];
+const EE_TABLES = [
+  "ee_usage_records",
+  "ee_billed_llm_usage",
+  "ee_billing_cursor",
+  "ee_stripe_events",
+  "ee_free_tier_claims",
+  "ee_billing_managers",
+  "ee_billing_accounts",
+];
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../drizzle/migrations");
 
@@ -40,35 +55,35 @@ function migrationStatements(tag: string): string[] {
     );
 }
 
-async function applyMigration(db: ReturnType<typeof getCloudDb>, tag: string): Promise<void> {
+async function applyMigration(db: ReturnType<typeof getEeDb>, tag: string): Promise<void> {
   for (const statement of migrationStatements(tag)) {
     await db.execute(sql.raw(statement));
   }
 }
 
-async function resetToBlankSlate(db: ReturnType<typeof getCloudDb>): Promise<void> {
-  await db.execute(sql.raw(`DROP TABLE IF EXISTS ${ALL_CLOUD_TABLES.join(", ")} CASCADE`));
+async function resetToBlankSlate(db: ReturnType<typeof getEeDb>): Promise<void> {
+  const tables = [...LEGACY_TABLES, ...EE_TABLES].join(", ");
+  await db.execute(sql.raw(`DROP TABLE IF EXISTS ${tables} CASCADE`));
   await db.execute(sql.raw("DROP SCHEMA IF EXISTS drizzle CASCADE"));
 }
 
-describe("migrateCloudDb", () => {
+describe("migrateEeDb", () => {
   it("serializes two concurrent migrations on a FRESH schema without crashing", async () => {
-    const db = getCloudDb();
-    const url = getCloudEnv().CLOUD_DATABASE_URL;
+    const db = getEeDb();
+    const url = getEeEnv().EE_DATABASE_URL;
 
     // Reset to a pre-migration state so the two runs actually RACE to create the
-    // schema (the advisory lock is what's under test). Drop the cloud tables AND
-    // the drizzle journal so the migrator believes nothing is applied.
-    await db.execute(sql.raw(`DROP TABLE IF EXISTS ${CLOUD_TABLES.join(", ")} CASCADE`));
-    await db.execute(sql.raw("DROP SCHEMA IF EXISTS drizzle CASCADE"));
+    // schema (the advisory lock is what's under test). Drop the module's tables
+    // AND the drizzle journal so the migrator believes nothing is applied.
+    await resetToBlankSlate(db);
 
     // Without the pg_advisory_lock one of these would crash with
     // "relation already exists"; with it they serialize (loser no-ops).
-    await expect(Promise.all([migrateCloudDb(url), migrateCloudDb(url)])).resolves.toBeArray();
+    await expect(Promise.all([migrateEeDb(url), migrateEeDb(url)])).resolves.toBeArray();
 
     // Schema is back and usable (table exists, empty).
     const [{ count }] = await db.execute(
-      sql.raw("SELECT count(*)::int AS count FROM cloud_billing_accounts"),
+      sql.raw("SELECT count(*)::int AS count FROM ee_billing_accounts"),
     );
     expect(count).toBe(0);
   });
@@ -80,13 +95,13 @@ describe("migration chain upgrades", () => {
   // afterwards or every test file that runs later sees the older shape — e.g. a
   // `cost_usd` still `double precision` (wrong rounding).
   afterAll(async () => {
-    const db = getCloudDb();
+    const db = getEeDb();
     await resetToBlankSlate(db);
-    await migrateCloudDb(getCloudEnv().CLOUD_DATABASE_URL);
+    await migrateEeDb(getEeEnv().EE_DATABASE_URL);
   });
 
   it("0000 → 0001 re-keys usage records, backfills cost_usd, and drops the retry queue", async () => {
-    const db = getCloudDb();
+    const db = getEeDb();
     await resetToBlankSlate(db);
     await applyMigration(db, "0000_init");
 
@@ -139,7 +154,7 @@ describe("migration chain upgrades", () => {
   });
 
   it("0001 → 0002 converts cost_usd to numeric without losing a stored value", async () => {
-    const db = getCloudDb();
+    const db = getEeDb();
     await resetToBlankSlate(db);
     await applyMigration(db, "0000_init");
     await applyMigration(db, "0001_cursor_billing");
@@ -181,7 +196,7 @@ describe("migration chain upgrades", () => {
   });
 
   it("0002 → 0003 normalizes legacy free accounts without an attached subscription", async () => {
-    const db = getCloudDb();
+    const db = getEeDb();
     await resetToBlankSlate(db);
     await applyMigration(db, "0000_init");
     await applyMigration(db, "0001_cursor_billing");
@@ -226,7 +241,7 @@ describe("migration chain upgrades", () => {
   });
 
   it("0001 refuses to drop a non-empty cloud_pending_bills, then succeeds once drained", async () => {
-    const db = getCloudDb();
+    const db = getEeDb();
     await resetToBlankSlate(db);
     await applyMigration(db, "0000_init");
 
@@ -252,5 +267,42 @@ describe("migration chain upgrades", () => {
       sql.raw("SELECT to_regclass('cloud_pending_bills') AS pending"),
     );
     expect(pending).toBeNull();
+  });
+
+  it("0004 → 0005 renames every table, index and constraint off the cloud_ prefix", async () => {
+    const db = getEeDb();
+    await resetToBlankSlate(db);
+    for (const tag of [
+      "0000_init",
+      "0001_cursor_billing",
+      "0002_numeric_cost",
+      "0003_normalize_free_subscription_status",
+      "0004_billing_managers_and_contact",
+    ]) {
+      await applyMigration(db, tag);
+    }
+
+    const org = "00000000-0000-4000-a000-0000000000e1";
+    await db.execute(sql.raw(`INSERT INTO cloud_billing_accounts (org_id) VALUES ('${org}')`));
+
+    await applyMigration(db, "0005_rename_ee_tables");
+
+    // The rows moved with the table — a rename, never a copy.
+    const [account] = await db.execute(sql.raw("SELECT org_id FROM ee_billing_accounts"));
+    expect(account!.org_id).toBe(org);
+
+    // Nothing is left under the old prefix, and every object Postgres named
+    // after a table followed it: a database upgraded through this file has the
+    // names a database created fresh from the current schema has.
+    const named = await db.execute(
+      sql.raw(`
+        SELECT relname AS name FROM pg_class
+        WHERE relnamespace = 'public'::regnamespace AND relname LIKE 'cloud%'
+        UNION ALL
+        SELECT conname FROM pg_constraint
+        WHERE connamespace = 'public'::regnamespace AND conname LIKE 'cloud%'
+      `),
+    );
+    expect(named).toEqual([]);
   });
 });

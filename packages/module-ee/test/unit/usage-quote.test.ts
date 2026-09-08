@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * `quoteUsage` — the pure per-component credit estimate admission gates on.
  *

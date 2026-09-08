@@ -1,10 +1,15 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateCloudTables } from "../../helpers/db.ts";
+import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { resetStripeMock, generateWebhookEvent, setNextError } from "../../helpers/stripe.ts";
-import { flushCloudRedis } from "../../helpers/redis.ts";
+import { flushEeRedis } from "../../helpers/redis.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { getPlans } from "../../../src/config.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -21,9 +26,9 @@ describe("billing routes", () => {
   }
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     resetStripeMock();
-    await flushCloudRedis();
+    await flushEeRedis();
   });
 
   describe("GET /api/billing", () => {

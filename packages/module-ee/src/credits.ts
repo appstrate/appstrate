@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Credit conversion module.
  *
@@ -24,7 +26,7 @@ export const CREDITS_PER_DOLLAR = 1000;
  * billing SQL in `billing/usage-recorder.ts`, whose `round()` runs over
  * `numeric` operands (Postgres `round(numeric)` is half away from zero;
  * `round(double precision)` is half to even and would disagree). One rule,
- * shared, so `cloud_billing_accounts` and `cloud_usage_records` can never drift.
+ * shared, so `ee_billing_accounts` and `ee_usage_records` can never drift.
  */
 export function dollarsToCredits(dollars: number): number {
   return Math.round(dollars * CREDITS_PER_DOLLAR);

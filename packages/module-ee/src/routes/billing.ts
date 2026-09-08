@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { Hono, type Context } from "hono";
 import Stripe from "stripe";
 import { z } from "zod";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { createCheckoutSession } from "../stripe/checkout.ts";
@@ -9,7 +11,7 @@ import { createPortalSession } from "../stripe/portal.ts";
 import { handleWebhook } from "../stripe/webhooks.ts";
 import { getPlans, WARNING_STATUSES, type PlanDefinition } from "../config.ts";
 import { logger } from "../logger.ts";
-import { cloudRateLimit, cloudRequireAdmin, cloudRequirePermission } from "../middleware.ts";
+import { eeRateLimit, eeRequireAdmin, eeRequirePermission } from "../middleware.ts";
 import {
   listBillingManagers,
   replaceBillingManagers,
@@ -35,7 +37,7 @@ import type { OrgRole } from "../types.ts";
 // the session caller: billing-manager grants are attributed to whoever made
 // them, and the platform's own `principalPermissions` surface is session-only,
 // so a request that reaches a `billing:manage` route always has one.
-type CloudEnv = {
+type EeEnv = {
   Variables: {
     orgId: string;
     orgRole: OrgRole;
@@ -83,12 +85,12 @@ function planDetail(p: PlanDefinition): {
 }
 
 // Wire = snake_case (platform casing policy). The web sends plan_id / return_url.
-const checkoutBodySchema = z.object({
+export const checkoutBodySchema = z.object({
   plan_id: z.enum(["starter", "pro"]),
   return_url: z.string().startsWith("/").optional(),
 });
 
-const managersBodySchema = z.object({ user_ids: z.array(z.string().min(1)) });
+export const managersBodySchema = z.object({ user_ids: z.array(z.string().min(1)) });
 
 /** Org roles that already hold `billing:*` — see the PUT handler's refusal. */
 const ROLES_WITH_BILLING_MANAGE: ReadonlySet<string> = new Set(["owner", "admin"]);
@@ -105,7 +107,7 @@ function managerDetail(m: BillingManager) {
  * typo into a 500. Each caller phrases its own 400.
  */
 async function parseJsonBody<T>(
-  c: Context<CloudEnv>,
+  c: Context<EeEnv>,
   schema: z.ZodType<T>,
 ): Promise<{ ok: true; data: T } | { ok: false; malformed: boolean }> {
   let raw: unknown;
@@ -118,13 +120,13 @@ async function parseJsonBody<T>(
   return parsed.success ? { ok: true, data: parsed.data } : { ok: false, malformed: false };
 }
 
-export function createBillingRoutes(appUrl: string): Hono<CloudEnv> {
-  const router = new Hono<CloudEnv>();
+export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
+  const router = new Hono<EeEnv>();
 
   // GET /api/billing — current plan, usage percentage
-  router.get("/api/billing", cloudRequirePermission("billing:read"), async (c) => {
+  router.get("/api/billing", eeRequirePermission("billing:read"), async (c) => {
     const orgId = c.get("orgId");
-    const db = getCloudDb();
+    const db = getEeDb();
 
     const [account] = await db
       .select({
@@ -178,8 +180,8 @@ export function createBillingRoutes(appUrl: string): Hono<CloudEnv> {
   // POST /api/billing/checkout — create Stripe Checkout session (admin only, 5/min)
   router.post(
     "/api/billing/checkout",
-    cloudRequireAdmin(),
-    cloudRateLimit(5, (c) => `checkout:${c.get("orgId")}`),
+    eeRequireAdmin(),
+    eeRateLimit(5, (c) => `checkout:${c.get("orgId")}`),
     async (c) => {
       const orgId = c.get("orgId");
       const body = await parseJsonBody(c, checkoutBodySchema);
@@ -224,8 +226,8 @@ export function createBillingRoutes(appUrl: string): Hono<CloudEnv> {
   // POST /api/billing/portal — create Stripe Customer Portal session (admin only, 5/min)
   router.post(
     "/api/billing/portal",
-    cloudRequireAdmin(),
-    cloudRateLimit(5, (c) => `portal:${c.get("orgId")}`),
+    eeRequireAdmin(),
+    eeRateLimit(5, (c) => `portal:${c.get("orgId")}`),
     async (c) => {
       const orgId = c.get("orgId");
 
@@ -243,13 +245,13 @@ export function createBillingRoutes(appUrl: string): Hono<CloudEnv> {
   );
 
   // GET /api/billing/managers — the org users granted billing:* outside RBAC
-  router.get("/api/billing/managers", cloudRequireAdmin(), async (c) => {
+  router.get("/api/billing/managers", eeRequireAdmin(), async (c) => {
     const managers = await listBillingManagers(c.get("orgId"));
     return c.json({ managers: managers.map(managerDetail) });
   });
 
   // PUT /api/billing/managers — replace the whole set (the dashboard saves a list)
-  router.put("/api/billing/managers", cloudRequireAdmin(), async (c) => {
+  router.put("/api/billing/managers", eeRequireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await parseJsonBody(c, managersBodySchema);
     if (!body.ok) {
@@ -263,7 +265,7 @@ export function createBillingRoutes(appUrl: string): Hono<CloudEnv> {
 
     const wanted = [...new Set(body.data.user_ids)];
 
-    // One platform call answers both refusals below: cloud has no access to the
+    // One platform call answers both refusals below: EE has no access to the
     // platform's membership table, and an id that is not a member of this org
     // simply does not come back.
     const members = wanted.length === 0 ? [] : await getOrgQueries().getOrgMembers(orgId, wanted);
@@ -298,14 +300,14 @@ export function createBillingRoutes(appUrl: string): Hono<CloudEnv> {
   });
 
   // GET /api/billing/contact — where invoices and payment alerts go
-  router.get("/api/billing/contact", cloudRequireAdmin(), async (c) => {
+  router.get("/api/billing/contact", eeRequireAdmin(), async (c) => {
     const contact = await getBillingContact(c.get("orgId"));
     if (!contact) return problemJson(c, noBillingAccount());
     return c.json({ billing_email: contact.billingEmail, billing_cc: contact.billingCc });
   });
 
   // PATCH /api/billing/contact — set the contact (and the Stripe customer email)
-  router.patch("/api/billing/contact", cloudRequireAdmin(), async (c) => {
+  router.patch("/api/billing/contact", eeRequireAdmin(), async (c) => {
     const body = await parseJsonBody(c, billingContactPatchSchema);
     if (!body.ok) {
       return problemJson(

@@ -1,12 +1,14 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Plan → file-storage entitlement projection.
  *
  * The platform enforces the per-org storage limit synchronously inside its
- * file-write transaction; cloud is the logical owner of that value and
+ * file-write transaction; EE is the logical owner of that value and
  * projects the billing plan onto it via the
  * `PlatformServices.setFileStorageLimit` capability. Unlike credits
  * (renewable budget, swept asynchronously), storage is persistent capacity —
- * the exact counter and admission stay in the core transaction; cloud only
+ * the exact counter and admission stay in the core transaction; EE only
  * writes the ceiling.
  *
  * Sync points:
@@ -17,7 +19,7 @@
  *    idempotent, backfills pre-existing orgs and repairs any transition sync
  *    that failed (the two DBs share no transaction).
  *
- * Cloud ALWAYS writes an explicit byte value, never null: null would clear the
+ * EE ALWAYS writes an explicit byte value, never null: null would clear the
  * override and drop the org to the deployment-global `ORG_STORAGE_QUOTA_BYTES`
  * fallback, which is an OSS knob, not a plan entitlement. Downgrading below
  * current usage is safe by design — the platform blocks new writes and never
@@ -28,7 +30,7 @@
  */
 
 import { eq } from "drizzle-orm";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { getPlans } from "../config.ts";
 import { getPlatformServices } from "../platform.ts";
@@ -74,7 +76,7 @@ async function projectOrgEntitlement(
   setter: (orgId: string, bytes: number | null) => Promise<void>,
   opts: { logSuccess?: boolean } = {},
 ): Promise<ProjectionOutcome> {
-  const db = getCloudDb();
+  const db = getEeDb();
   for (let attempt = 1; ; attempt++) {
     // Read the plan at the last moment, right before the write — never from a
     // caller-held snapshot (see resyncAllStorageEntitlements).
@@ -136,7 +138,7 @@ export async function syncOrgStorageEntitlement(orgId: string): Promise<boolean>
 
 /**
  * Reconcile every billing account's storage entitlement. Blind idempotent
- * rewrite — no drift detection needed (cloud has no read capability on the
+ * rewrite — no drift detection needed (EE has no read capability on the
  * platform limit, and one UPDATE per org per pass is cheap at current scale).
  * Serves as both the backfill for orgs created before this feature and the
  * repair loop for failed transition syncs.
@@ -147,7 +149,7 @@ export async function syncOrgStorageEntitlement(orgId: string): Promise<boolean>
  * committing mid-pass would be overwritten with the pre-transition value and
  * stay wrong until the next pass.
  *
- * BOUNDED CONCURRENCY: orgs are projected `concurrency` at a time (2 cloud reads
+ * BOUNDED CONCURRENCY: orgs are projected `concurrency` at a time (2 EE reads
  * + 1 platform write each). Strictly serial — the previous behavior — a
  * 10 000-org fleet costs minutes of wall clock; unbounded, it would burst 10 000
  * concurrent platform writes. The caller (`billing-sweeper.ts`) owns the
@@ -167,7 +169,7 @@ export interface ResyncResult {
 
 export async function resyncAllStorageEntitlements(concurrency = 8): Promise<ResyncResult> {
   const setter = getSetter();
-  const db = getCloudDb();
+  const db = getEeDb();
   const accounts = await db.select({ orgId: billingAccounts.orgId }).from(billingAccounts);
 
   const result: ResyncResult = { synced: 0, failed: 0, skipped: 0 };

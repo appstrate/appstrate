@@ -1,16 +1,18 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
- * Cursor-based billing sweep — the cloud metering consumer.
+ * Cursor-based billing sweep — the EE metering consumer.
  *
- * Cloud consumes the platform's append-only `llm_usage` ledger by serial-`id`
- * watermark (`cloud_billing_cursor`). Each pass reads the next batch through
+ * EE consumes the platform's append-only `llm_usage` ledger by serial-`id`
+ * watermark (`ee_billing_cursor`). Each pass reads the next batch through
  * the mock `PlatformServices.usage.list`, bills the leading run of consecutive
  * SETTLED rows (the "frontier"), claims platform-provided ("system") rows into
- * `cloud_billed_llm_usage`, debits credits, and advances the watermark — all in
+ * `ee_billed_llm_usage`, debits credits, and advances the watermark — all in
  * one transaction. These tests pin that contract.
  */
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateCloudTables, getCloudDb } from "../../helpers/db.ts";
+import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
 import {
   seedBillingAccount,
   seedLlmUsage,
@@ -33,20 +35,23 @@ import {
   ensureCursorSeeded,
   type SweepResult,
 } from "../../../src/billing/usage-recorder.ts";
-import { _resetCloudEnvForTests } from "../../../src/env.ts";
+import { _resetEeEnvForTests } from "../../../src/env.ts";
 import { initBillingEmail } from "../../../src/emails/send.ts";
 import { logger } from "../../../src/logger.ts";
 import {
   billingAccounts,
   orgUsageRecords,
   billingCursor,
-  cloudBilledLlmUsage,
+  eeBilledLlmUsage,
 } from "../../../drizzle/schema.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000010";
 
 async function creditsUsed(org = orgId): Promise<number> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [account] = await db
     .select({ creditsUsed: billingAccounts.creditsUsed })
     .from(billingAccounts)
@@ -55,7 +60,7 @@ async function creditsUsed(org = orgId): Promise<number> {
 }
 
 async function cursorValue(): Promise<number> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [row] = await db
     .select({ lastLlmUsageId: billingCursor.lastLlmUsageId })
     .from(billingCursor)
@@ -65,14 +70,14 @@ async function cursorValue(): Promise<number> {
 
 describe("billing sweep — cursor consumer", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });
 
   it("initializes the cursor at the current max id and bills nothing (cutover)", async () => {
-    // Historical rows exist before cloud ever swept.
+    // Historical rows exist before EE ever swept.
     seedLlmUsage({ orgId, costUsd: 0.25 });
     seedLlmUsage({ orgId, costUsd: 0.5 });
 
@@ -100,7 +105,7 @@ describe("billing sweep — cursor consumer", () => {
     expect(result.cursorTo).toBe(1);
     expect(await creditsUsed()).toBe(50);
 
-    const db = getCloudDb();
+    const db = getEeDb();
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(1);
     expect(records[0]!.contextType).toBe("run");
@@ -147,7 +152,7 @@ describe("billing sweep — cursor consumer", () => {
     expect(await creditsUsed()).toBe(150);
 
     // Force a re-read of already-claimed rows (as would happen if a crash lost a
-    // cursor advance). The claim table (`cloud_billed_llm_usage`) dedups them.
+    // cursor advance). The claim table (`ee_billed_llm_usage`) dedups them.
     await seedBillingCursor(0);
     const result = await runBillingSweep();
     expect(result.billed).toBe(0);
@@ -198,7 +203,7 @@ describe("billing sweep — cursor consumer", () => {
 
     expect(await creditsUsed()).toBe(50); // debited
 
-    const db = getCloudDb();
+    const db = getEeDb();
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(1);
     expect(records[0]!.contextType).toBe("unattributed");
@@ -218,7 +223,7 @@ describe("billing sweep — cursor consumer", () => {
     // Cumulative $0.0008 → round(0.8) = 1. The old per-pass conversion
     // rounded both $0.0004 rows to zero and lost them permanently.
     expect(await creditsUsed()).toBe(1);
-    const db = getCloudDb();
+    const db = getEeDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -240,7 +245,7 @@ describe("billing sweep — cursor consumer", () => {
 
     await runBillingSweep();
 
-    const db = getCloudDb();
+    const db = getEeDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -260,7 +265,7 @@ describe("billing sweep — cursor consumer", () => {
     expect(await creditsUsed()).toBe(0); // 0.0004 → round(0.4) = 0 credits
     // The context record still exists, carrying the raw dollars forward so a
     // later pass for the same context can cross the whole-credit boundary.
-    const db = getCloudDb();
+    const db = getEeDb();
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(1);
     expect(records[0]!.costCredits).toBe(0);
@@ -280,7 +285,7 @@ describe("billing sweep — cursor consumer", () => {
 
     expect(await creditsUsed()).toBe(1); // aggregated, not floored to 0 per row
 
-    const db = getCloudDb();
+    const db = getEeDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -362,13 +367,13 @@ describe("billing sweep — cursor consumer", () => {
     });
 
     // Its debt is NOT lost: the row is claimed (so it can never be double-billed
-    // later) and the exact credits are durable in cloud_usage_records, which is
+    // later) and the exact credits are durable in ee_usage_records, which is
     // what `repair:account` replays.
-    const db = getCloudDb();
+    const db = getEeDb();
     const claims = await db
       .select()
-      .from(cloudBilledLlmUsage)
-      .where(eq(cloudBilledLlmUsage.llmUsageId, orphanUsageId));
+      .from(eeBilledLlmUsage)
+      .where(eq(eeBilledLlmUsage.llmUsageId, orphanUsageId));
     expect(claims).toHaveLength(1);
     const records = await db
       .select()
@@ -403,7 +408,7 @@ describe("billing sweep — cursor consumer", () => {
 
     await runBillingSweep();
 
-    const db = getCloudDb();
+    const db = getEeDb();
     const records = await db
       .select()
       .from(orgUsageRecords)
@@ -639,7 +644,7 @@ describe("billing sweep — cursor consumer", () => {
 
     expect(await creditsUsed()).toBe(3); // NOT 4
 
-    const db = getCloudDb();
+    const db = getEeDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -653,7 +658,7 @@ describe("billing sweep — cursor consumer", () => {
     // (half to EVEN → 2) and `dollarsToCredits`/`round(numeric)` (half AWAY from
     // zero → 3) disagree. $0.0015 then $0.0010 for ONE context accumulate to
     // exactly $0.0025 → 2.5 credits, which must resolve to 3 (away from zero) and
-    // leave cloud_billing_accounts and cloud_usage_records agreeing on 3.
+    // leave ee_billing_accounts and ee_usage_records agreeing on 3.
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.0015, source: "proxy", contextType: "chat", contextId: "sess-half" }); // prettier-ignore
     await runBillingSweep(); // cumulative $0.0015 → round(1.5) = 2 credits
@@ -664,7 +669,7 @@ describe("billing sweep — cursor consumer", () => {
 
     // Account debits sum to exactly 3, and the usage record agrees.
     expect(await creditsUsed()).toBe(3);
-    const db = getCloudDb();
+    const db = getEeDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -690,11 +695,11 @@ describe("billing sweep — cursor consumer", () => {
     // Cursor unchanged, credits unchanged, and no claim persisted.
     expect(await cursorValue()).toBe(0);
     expect(await creditsUsed()).toBe(0);
-    const db = getCloudDb();
+    const db = getEeDb();
     const claims = await db
       .select()
-      .from(cloudBilledLlmUsage)
-      .where(eq(cloudBilledLlmUsage.llmUsageId, id));
+      .from(eeBilledLlmUsage)
+      .where(eq(eeBilledLlmUsage.llmUsageId, id));
     expect(claims).toHaveLength(0);
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(0);
@@ -703,16 +708,16 @@ describe("billing sweep — cursor consumer", () => {
 
 describe("billing cursor — init-time seed (cutover loss window)", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });
 
   it("seeds an absent cursor at the settled frontier and reports it seeded", async () => {
     // Empty ledger at boot → frontier 0.
-    const seed = await ensureCursorSeeded(mockPlatformServices, getCloudDb());
+    const seed = await ensureCursorSeeded(mockPlatformServices, getEeDb());
     expect(seed).toEqual({ seeded: true, lastLlmUsageId: 0 });
     expect(await cursorValue()).toBe(0);
   });
@@ -722,7 +727,7 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
     // at THAT moment's frontier, so rows recorded between boot and the tick fell
     // below the initial watermark and were never billed. Seeding at init closes
     // the window: the first tick is a normal pass that bills these rows.
-    await ensureCursorSeeded(mockPlatformServices, getCloudDb()); // boot: frontier 0
+    await ensureCursorSeeded(mockPlatformServices, getEeDb()); // boot: frontier 0
     expect(await cursorValue()).toBe(0);
 
     // Usage recorded after boot, before the first tick.
@@ -739,14 +744,14 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
 
   it("is idempotent — a second call leaves an existing watermark untouched (no rewind)", async () => {
     await seedBillingCursor(7); // an already-advanced watermark
-    const first = await ensureCursorSeeded(mockPlatformServices, getCloudDb());
+    const first = await ensureCursorSeeded(mockPlatformServices, getEeDb());
     expect(first).toEqual({ seeded: false, lastLlmUsageId: 7 });
     expect(await cursorValue()).toBe(7);
 
     // Even with a higher frontier now available, a second call never reseeds or
     // rewinds — it is a pure no-op on an existing cursor.
     seedLlmUsage({ orgId, costUsd: 0.5 }); // would move the frontier if reseeded
-    const second = await ensureCursorSeeded(mockPlatformServices, getCloudDb());
+    const second = await ensureCursorSeeded(mockPlatformServices, getEeDb());
     expect(second).toEqual({ seeded: false, lastLlmUsageId: 7 });
     expect(await cursorValue()).toBe(7);
   });
@@ -754,9 +759,9 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
 
 describe("billing sweep — backlog drain within one tick", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "4";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });
@@ -809,7 +814,7 @@ describe("billing sweep — backlog drain within one tick", () => {
   it("bounds a tick at the drain cap and rides the remainder onto the next tick", async () => {
     // batch 1, cap 50 → a tick drains at most 50 rows. Seed 60 settled rows.
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "1";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     await seedBillingCursor(0);
     for (let i = 0; i < 60; i++) seedLlmUsage({ orgId, costUsd: 0.01 });
 
@@ -821,7 +826,7 @@ describe("billing sweep — backlog drain within one tick", () => {
     expect(await creditsUsed()).toBe(600); // all 60 eventually billed
 
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
   });
 });
 
@@ -830,7 +835,7 @@ describe("billing sweep — quota warning email", () => {
   const sentEmails: Array<{ to: string; subject: string }> = [];
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
     sentEmails.length = 0;
     initBillingEmail({
@@ -884,21 +889,21 @@ describe("billing sweep — quota warning email", () => {
  * transaction opened, so there were never two open transactions, never two
  * `ON CONFLICT` inserts contending, and never two `UPDATE credits_used` on the
  * same row. These cases exercise the real interleaving the production
- * guarantees rest on: the PK on `cloud_billed_llm_usage.llm_usage_id`, the
+ * guarantees rest on: the PK on `ee_billed_llm_usage.llm_usage_id`, the
  * `ON CONFLICT DO NOTHING RETURNING` claim, and the monotonic watermark.
  */
 describe("billing sweep — real concurrent passes", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
   });
 
   async function claimCount(): Promise<number> {
-    const db = getCloudDb();
-    return (await db.select().from(cloudBilledLlmUsage)).length;
+    const db = getEeDb();
+    return (await db.select().from(eeBilledLlmUsage)).length;
   }
 
   it("bills each row exactly once when two passes race on the same backlog", async () => {
@@ -919,7 +924,7 @@ describe("billing sweep — real concurrent passes", () => {
 
   it("bills a shared context exactly once when two passes race", async () => {
     // Same (context_type, context_id) for every row: both passes contend on ONE
-    // `cloud_usage_records` row, so a lost claim that still accumulated dollars
+    // `ee_usage_records` row, so a lost claim that still accumulated dollars
     // would double the cumulative and double the debit.
     await seedBillingCursor(0);
     for (let i = 0; i < 20; i++) {
@@ -928,7 +933,7 @@ describe("billing sweep — real concurrent passes", () => {
 
     await Promise.all([sweepLedgerBatch(100), sweepLedgerBatch(100)]);
 
-    const db = getCloudDb();
+    const db = getEeDb();
     const records = await db
       .select()
       .from(orgUsageRecords)
@@ -963,17 +968,17 @@ describe("billing sweep — real concurrent passes", () => {
  * advances the watermark past 100 — and a `WHERE id > watermark` cursor can then
  * never return row 100 again. It is never billed, and nothing logs it.
  *
- * Every case below models that interleaving the way cloud actually experiences
+ * Every case below models that interleaving the way EE actually experiences
  * it: the ledger lives behind `PlatformServices.usage.list`, so "a row committed
- * late" IS "a row `usage.list` did not return before and returns now". The cloud
+ * late" IS "a row `usage.list` did not return before and returns now". The EE
  * side — cursor, claims, usage records, account debits — is the real database.
  */
 describe("billing sweep — serial-visibility replay window", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
     process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = "200";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
   });
 
@@ -1000,11 +1005,11 @@ describe("billing sweep — serial-visibility replay window", () => {
     expect(second.replayBilled).toBe(1);
     expect(second.billed).toBe(1);
     expect(await creditsUsed()).toBe(210); // 120 + 90 — nothing lost
-    const db = getCloudDb();
+    const db = getEeDb();
     const claims = await db
       .select()
-      .from(cloudBilledLlmUsage)
-      .where(eq(cloudBilledLlmUsage.llmUsageId, 2));
+      .from(eeBilledLlmUsage)
+      .where(eq(eeBilledLlmUsage.llmUsageId, 2));
     expect(claims).toHaveLength(1);
     // The window is a READ offset: the watermark did not move to reach id 2.
     expect(await cursorValue()).toBe(3);
@@ -1016,7 +1021,7 @@ describe("billing sweep — serial-visibility replay window", () => {
     // WHY the window is not redundant work: delete the replay and this is the
     // behaviour you get back, silently.
     process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = "0";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
 
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.05, id: 1, contextId: "run-1" });
@@ -1167,7 +1172,7 @@ describe("billing sweep — serial-visibility replay window", () => {
 
     // (b) Below-watermark stall: rows 10 and 12 bill and carry the watermark to
     //     12, then row 11 commits late and is still in flight.
-    await truncateCloudTables();
+    await truncateEeTables();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.05, id: 10, contextId: "run-10" });
@@ -1222,7 +1227,7 @@ describe("billing sweep — serial-visibility replay window", () => {
     // every pass would lose `REPLAY_WINDOW` rows of forward throughput, and a
     // window at or above the batch size would stall the sweeper outright.
     process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = "10";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     await seedBillingCursor(0);
     for (let i = 0; i < 9; i++) seedLlmUsage({ orgId, costUsd: 0.01, contextId: `run-${i}` });
 
@@ -1262,13 +1267,13 @@ describe("billing sweep — serial-visibility replay window", () => {
   });
 
   async function claimCount(): Promise<number> {
-    const db = getCloudDb();
-    return (await db.select().from(cloudBilledLlmUsage)).length;
+    const db = getEeDb();
+    return (await db.select().from(eeBilledLlmUsage)).length;
   }
 
   async function claimedIds(): Promise<number[]> {
-    const db = getCloudDb();
-    const rows = await db.select({ id: cloudBilledLlmUsage.llmUsageId }).from(cloudBilledLlmUsage);
+    const db = getEeDb();
+    const rows = await db.select({ id: eeBilledLlmUsage.llmUsageId }).from(eeBilledLlmUsage);
     return rows.map((r) => r.id).sort((a, b) => a - b);
   }
 });

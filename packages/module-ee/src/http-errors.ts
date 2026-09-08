@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { Context } from "hono";
 import { ApiError } from "@appstrate/core/api-errors";
 
@@ -5,12 +7,12 @@ import { ApiError } from "@appstrate/core/api-errors";
  * Render an `ApiError` as an RFC 9457 `application/problem+json` Response,
  * matching the platform's core error contract.
  *
- * Cloud routes mount into the SAME Hono app as core routes, so emitting the
+ * EE routes mount into the SAME Hono app as core routes, so emitting the
  * same shape (type/title/status/detail/code/requestId + `Request-Id` header)
  * keeps the API surface uniform — a client gets the same error envelope from
  * `/api/billing` as from `/api/runs`. We render locally rather than throwing
  * for the platform's error handler so the behavior is identical with or without
- * that middleware (e.g. cloud's own test app) and robust against
+ * that middleware (e.g. EE's own test app) and robust against
  * module-boundary `instanceof` quirks.
  */
 export function problemJson(c: Context, err: ApiError): Response {
@@ -27,9 +29,9 @@ export function problemJson(c: Context, err: ApiError): Response {
   });
 }
 
-// ── Cloud-specific ApiError builders ────────────────────────────────────────
+// ── EE-specific ApiError builders ────────────────────────────────────────
 // Reuse core factories (invalidRequest, forbidden, …) where the generic code
-// fits; these cover the cloud-only codes / statuses core has no factory for.
+// fits; these cover the EE-only codes / statuses core has no factory for.
 
 export function noBillingAccount(): ApiError {
   return new ApiError({
@@ -61,7 +63,7 @@ export function paymentServiceUnavailable(): ApiError {
 }
 
 /**
- * 409 — this deployment pairs `@appstrate/cloud` with a platform that does not
+ * 409 — this deployment pairs `@appstrate/module-ee` with a platform that does not
  * report the execution facts admission is priced from (see
  * `assertExecutionFacts`). Permanent until an operator changes the deployment.
  *

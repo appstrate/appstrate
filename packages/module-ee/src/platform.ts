@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Holder for the `PlatformServices` handle injected at `init(ctx)`.
  *
- * Cloud runs its own database, so it never reads platform-owned tables
+ * EE runs its own database, so it never reads platform-owned tables
  * directly. The platform reads it needs — the append-only `llm_usage` ledger
  * cursor — go through `services.usage.list` / `services.usage.settledFrontier`.
  * Captured once at boot, mirroring the `_appUrl` holder.
@@ -16,6 +18,6 @@ export function setPlatformServices(services: PlatformServices): void {
 }
 
 export function getPlatformServices(): PlatformServices {
-  if (!_services) throw new Error("Cloud not initialized. Call init() first.");
+  if (!_services) throw new Error("EE not initialized. Call init() first.");
   return _services;
 }

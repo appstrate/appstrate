@@ -1,33 +1,35 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
- * Database helpers for cloud module tests.
+ * Database helpers for EE module tests.
  *
- * Provides access to the cloud DB client and a truncation helper
+ * Provides access to the EE DB client and a truncation helper
  * that respects foreign key ordering (children first, parents last).
  */
-import { getCloudDb } from "../../src/db.ts";
+import { getEeDb } from "../../src/db.ts";
 import { sql } from "drizzle-orm";
 import { resetMockLedger } from "./mock-platform.ts";
 import { resetOrgDirectory } from "./org-queries.ts";
 import { resetLlmUsageIdSeq } from "./seed.ts";
 
-export { getCloudDb };
+export { getEeDb };
 
-// Cloud-owned tables only — cloud runs its own database and never touches OSS
+// EE-owned tables only — EE runs its own database and never touches OSS
 // tables. The platform `llm_usage` ledger is read through the mock
 // `PlatformServices` (see `mock-platform.ts`), reset alongside the DB.
-const CLOUD_TABLES = [
-  "cloud_usage_records",
-  "cloud_billed_llm_usage",
-  "cloud_billing_cursor",
-  "cloud_stripe_events",
-  "cloud_free_tier_claims",
-  "cloud_billing_managers",
-  "cloud_billing_accounts",
+const EE_TABLES = [
+  "ee_usage_records",
+  "ee_billed_llm_usage",
+  "ee_billing_cursor",
+  "ee_stripe_events",
+  "ee_free_tier_claims",
+  "ee_billing_managers",
+  "ee_billing_accounts",
 ] as const;
 
-export async function truncateCloudTables(): Promise<void> {
-  const db = getCloudDb();
-  for (const table of CLOUD_TABLES) {
+export async function truncateEeTables(): Promise<void> {
+  const db = getEeDb();
+  for (const table of EE_TABLES) {
     await db.execute(sql.raw(`DELETE FROM ${table}`));
   }
   resetMockLedger();

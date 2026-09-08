@@ -36,10 +36,6 @@
  * (`test` directories, `*.test.ts`) are out of scope in both directions, as
  * they already were: `test/setup/preload.ts` loads every module by design.
  *
- * Scope: in-repo modules only. cloud lives in a separate repo and enforces its
- * own equivalent (its `usage-recorder.ts` cross-join into core `llm_usage` is
- * the known violation tracked by the data-isolation plan — fixed there, not here).
- *
  * Override via env: `MODULE_ISOLATION_POLICY=warn|fail|off`.
  */
 

@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { getStripe } from "./client.ts";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 
 export async function createPortalSession(orgId: string, appUrl: string): Promise<string> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [account] = await db
     .select({ stripeCustomerId: billingAccounts.stripeCustomerId })
     .from(billingAccounts)

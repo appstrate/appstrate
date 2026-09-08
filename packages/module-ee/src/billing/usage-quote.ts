@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Usage quoting — the credit estimate for one admission attempt.
  *

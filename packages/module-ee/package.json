@@ -1,51 +1,32 @@
 {
-  "name": "@appstrate/cloud",
-  "version": "0.1.0",
+  "name": "@appstrate/module-ee",
+  "version": "0.0.0",
+  "description": "Appstrate module — commercial features: Stripe billing, credit quotas, usage metering, custom space roles. Opt-in: append `@appstrate/module-ee` to MODULES to enable. Source-available, NOT Apache-2.0 — see LICENSE.",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "type": "module",
+  "main": null,
+  "module": null,
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "check": "tsc --noEmit && eslint . && prettier --check . && bun run verify:no-migration-dml",
-    "verify:no-migration-dml": "bun run scripts/verify-no-migration-dml.ts",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix && prettier --write .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "test": "bun test test/unit/ && bun test test/integration/",
-    "test:unit": "bun test test/unit/",
-    "test:integration": "bun test test/integration/",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/",
     "repair:account": "bun run src/scripts/repair-account.ts",
     "db:generate": "cd drizzle && bunx drizzle-kit generate",
     "db:migrate": "cd drizzle && bunx drizzle-kit migrate"
   },
   "dependencies": {
-    "drizzle-orm": "^0.39.3",
-    "hono": "4.12.33",
-    "ioredis": "^5.10.0",
-    "postgres": "^3.4.7",
+    "@appstrate/core": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.33",
+    "ioredis": "^6.0.0",
+    "postgres": "^3.4.9",
     "stripe": "^18.1.0",
-    "zod": "4.4.3"
-  },
-  "peerDependencies": {
-    "@appstrate/core": ">=10.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@appstrate/core": {
-      "optional": true
-    }
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/bun": "latest",
-    "@types/semver": "^7.7.1",
-    "drizzle-kit": "^0.30.5",
-    "eslint": "^10.0.0",
-    "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.3.0",
-    "prettier": "^3.8.1",
-    "typescript": "^5.8.3",
-    "typescript-eslint": "^8.55.0"
+    "drizzle-kit": "^0.31.10"
   }
 }

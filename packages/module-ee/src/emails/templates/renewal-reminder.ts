@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { RenewalReminderProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapCloudLayout, ctaButton, formatDate } from "../layout.ts";
+import { wrapEeLayout, ctaButton, formatDate } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -47,6 +49,6 @@ ${ctaButton(s.button, portalUrl)}`;
 
   return {
     subject: interpolate(s.subject, vars).replace(/[\r\n]/g, ""),
-    html: wrapCloudLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

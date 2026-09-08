@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { VerificationProps, RenderedEmail } from "../types.ts";
-import { wrapCloudLayout, ctaButton, escapeHtml } from "../layout.ts";
+import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -20,7 +22,7 @@ const strings = {
   },
 } as const;
 
-export function renderCloudVerificationEmail(props: VerificationProps): RenderedEmail {
+export function renderEeVerificationEmail(props: VerificationProps): RenderedEmail {
   const { url, locale } = props;
   const s = strings[locale] ?? strings.fr;
 
@@ -33,6 +35,6 @@ ${ctaButton(s.button, url)}
 
   return {
     subject: s.subject,
-    html: wrapCloudLayout({ locale, content, footer: s.footer }),
+    html: wrapEeLayout({ locale, content, footer: s.footer }),
   };
 }

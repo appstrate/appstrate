@@ -1,4 +1,6 @@
-import { getCloudEnv } from "./env.ts";
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
+import { getEeEnv } from "./env.ts";
 import type { QuoteRates } from "./billing/usage-quote.ts";
 
 export interface PlanDefinition {
@@ -23,10 +25,10 @@ export interface Plans {
 
 /**
  * Build plan definitions from env config. Not cached independently
- * since getCloudEnv() is already a lazy singleton.
+ * since getEeEnv() is already a lazy singleton.
  */
 export function getPlans(): Plans {
-  const env = getCloudEnv();
+  const env = getEeEnv();
   return {
     free: {
       id: "free",

@@ -63,8 +63,8 @@ describe("getModuleRegistry", () => {
  * out-of-tree modules bind this capability off the LIVE services object the
  * platform injects rather than off their pinned `PlatformServices` types — a
  * rename does not reach their read, it `TypeError`s their next boot. The alias
- * is gone and `@appstrate/cloud` binds the canonical name, so the two now move
- * in lockstep: core 8.0.0 on npm, then cloud, then this.
+ * is gone and `@appstrate/module-ee` binds the canonical name, so the two now
+ * move in lockstep: core 8.0.0 on npm, then the module, then this.
  *
  * Asserted rather than deleted because a reintroduced alias is invisible: it
  * would typecheck, pass every other test, and quietly restore two names for

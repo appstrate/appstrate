@@ -1,4 +1,6 @@
-import { getCloudDb } from "../db.ts";
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
+import { getEeDb } from "../db.ts";
 import { billingAccounts, freeTierClaims, orgUsageRecords } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { getPlans } from "../config.ts";
@@ -52,7 +54,7 @@ export async function provisionBillingAccount(
   normalizedEmail: string,
   billingEmail: string,
 ): Promise<{ freeTierGranted: boolean; creditQuota: number }> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const freePlan = getPlans().free;
 
   const claim = await db.transaction(async (tx) => {
@@ -108,7 +110,7 @@ export async function onOrgCreate(orgId: string, userEmail: string): Promise<voi
 }
 
 export async function onOrgDelete(orgId: string): Promise<void> {
-  const db = getCloudDb();
+  const db = getEeDb();
 
   // FINAL BILLING DRAIN — must run BEFORE anything below is deleted.
   //
@@ -143,10 +145,10 @@ export async function onOrgDelete(orgId: string): Promise<void> {
     }
   }
 
-  // Cloud runs its own database — there is no FK cascade from the OSS
-  // `organizations` table. Delete the org's cloud-owned rows explicitly.
-  // (`cloud_billed_llm_usage` is keyed by ledger id, not org; its rows are
-  // harmless billed-markers and are left in place. `cloud_billing_cursor` is a
+  // EE runs its own database — there is no FK cascade from the OSS
+  // `organizations` table. Delete the org's EE-owned rows explicitly.
+  // (`ee_billed_llm_usage` is keyed by ledger id, not org; its rows are
+  // harmless billed-markers and are left in place. `ee_billing_cursor` is a
   // global singleton, never per-org.)
   await deleteBillingManagers(orgId);
   await db.delete(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));

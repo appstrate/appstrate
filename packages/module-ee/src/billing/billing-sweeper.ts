@@ -1,16 +1,18 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { logger } from "../logger.ts";
-import { getCloudEnv } from "../env.ts";
+import { getEeEnv } from "../env.ts";
 import { resyncAllStorageEntitlements } from "./storage-entitlement.ts";
 import { sweepLedgerBatch, type SweepResult } from "./usage-recorder.ts";
 
 /**
- * Periodic billing sweeper — the cloud metering consumer.
+ * Periodic billing sweeper — the EE metering consumer.
  *
- * Cloud consumes the platform's append-only `llm_usage` ledger by serial-`id`
+ * EE consumes the platform's append-only `llm_usage` ledger by serial-`id`
  * cursor: each tick advances a watermark through the settled frontier, claims
- * the platform-provided ("system") rows into `cloud_billed_llm_usage`, and
+ * the platform-provided ("system") rows into `ee_billed_llm_usage`, and
  * debits credits. A failed pass advances nothing and the next tick retries from
- * the last committed id. Cloud reads the ledger only through
+ * the last committed id. EE reads the ledger only through
  * `services.usage.list` / `services.usage.settledFrontier`; it never joins the
  * platform DB.
  *
@@ -43,12 +45,11 @@ import { sweepLedgerBatch, type SweepResult } from "./usage-recorder.ts";
  * These deliberately do NOT go through `@appstrate/core/telemetry`: that façade
  * exposes a fixed set of platform recorders (run duration, container spawn, LLM
  * latency) with no generic counter/gauge for billing. The shape of the façade is
- * the whole reason, and it is the only reason left: cloud now resolves the
- * PLATFORM's copy of `@appstrate/core` (the image symlinks
- * `@appstrate/cloud/node_modules/@appstrate/core` → `/app/packages/core`), so the
- * installed telemetry provider IS the one cloud would see — verified in the built
- * image, `core same instance: true`. A billing counter added to the façade would
- * therefore work from here; until the module contract carries one, structured
+ * the whole reason, and it is the only reason left: this module is a workspace
+ * package, so it resolves the very same `@appstrate/core` instance the platform
+ * does and the installed telemetry provider IS the one it would see. A billing
+ * counter added to the façade would therefore work from here; until the module
+ * contract carries one, structured
  * pino logs are the honest transport.
  *
  * Disable: set `CLOUD_RECONCILIATION_INTERVAL_SECONDS=0`.
@@ -101,7 +102,7 @@ export function startBillingSweeper(): void {
     logger.warn("billing sweeper already running");
     return;
   }
-  const env = getCloudEnv();
+  const env = getEeEnv();
   const intervalSec = env.CLOUD_RECONCILIATION_INTERVAL_SECONDS;
   if (intervalSec === 0) {
     logger.info("billing sweeper disabled (CLOUD_RECONCILIATION_INTERVAL_SECONDS=0)");
@@ -116,7 +117,7 @@ export function startBillingSweeper(): void {
 }
 
 /**
- * Stop the periodic sweep — called from the cloud module's `shutdown()`.
+ * Stop the periodic sweep — called from the EE module's `shutdown()`.
  * Idempotent.
  */
 export function stopBillingSweeper(): void {
@@ -153,7 +154,7 @@ function scheduleNext(intervalSec: number): void {
  * an idempotent rewrite the next boot repeats).
  *
  * The bound covers a full drain tick (`MAX_DRAIN_ITERATIONS` batches) instead of
- * the previous 5 s, which routinely expired mid-pass and let `closeCloudDb()`
+ * the previous 5 s, which routinely expired mid-pass and let `closeEeDb()`
  * run underneath an open transaction.
  */
 export async function drainBillingSweeper(timeoutMs = 60_000): Promise<void> {
@@ -261,7 +262,7 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
  * stall/backlog accounting below runs once per tick, not once per drained batch.
  */
 export async function runBillingSweep(): Promise<SweepResult> {
-  const env = getCloudEnv();
+  const env = getEeEnv();
   const batchSize = env.CLOUD_RECONCILIATION_BATCH_SIZE;
 
   let result = await sweepLedgerBatch(batchSize);

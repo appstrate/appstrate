@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { CancellationConfirmedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapCloudLayout, formatDate } from "../layout.ts";
+import { wrapEeLayout, formatDate } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -40,6 +42,6 @@ export function renderCancellationConfirmedEmail(
 
   return {
     subject: s.subject,
-    html: wrapCloudLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

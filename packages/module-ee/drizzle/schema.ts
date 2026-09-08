@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import {
   pgTable,
   uuid,
@@ -13,12 +15,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-// All Cloud tables are prefixed with "cloud_" to avoid collisions with OSS tables.
-// Cloud migrations NEVER modify OSS tables — they only create/alter cloud_* tables
+// All EE tables are prefixed with "ee_" to avoid collisions with OSS tables.
+// EE migrations NEVER modify OSS tables — they only create/alter ee_* tables
 // and add FK references to OSS tables via raw SQL.
 
 export const billingAccounts = pgTable(
-  "cloud_billing_accounts",
+  "ee_billing_accounts",
   {
     orgId: uuid("org_id").primaryKey(),
     stripeCustomerId: text("stripe_customer_id"),
@@ -50,8 +52,8 @@ export const billingAccounts = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("idx_cloud_billing_stripe_customer").on(table.stripeCustomerId),
-    uniqueIndex("idx_cloud_billing_stripe_subscription").on(table.stripeSubscriptionId),
+    uniqueIndex("idx_ee_billing_stripe_customer").on(table.stripeCustomerId),
+    uniqueIndex("idx_ee_billing_stripe_subscription").on(table.stripeSubscriptionId),
   ],
 );
 
@@ -85,7 +87,7 @@ export const billingAccounts = pgTable(
  * float. Callers that need a number convert explicitly.
  */
 export const orgUsageRecords = pgTable(
-  "cloud_usage_records",
+  "ee_usage_records",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     orgId: uuid("org_id").notNull(),
@@ -97,13 +99,13 @@ export const orgUsageRecords = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("uq_cloud_usage_records_context").on(table.contextType, table.contextId),
-    index("idx_cloud_usage_records_org_id").on(table.orgId),
-    index("idx_cloud_usage_records_created_at").on(table.createdAt),
+    uniqueIndex("uq_ee_usage_records_context").on(table.contextType, table.contextId),
+    index("idx_ee_usage_records_org_id").on(table.orgId),
+    index("idx_ee_usage_records_created_at").on(table.createdAt),
   ],
 );
 
-export const stripeEvents = pgTable("cloud_stripe_events", {
+export const stripeEvents = pgTable("ee_stripe_events", {
   eventId: text("event_id").primaryKey(),
   eventType: text("event_type").notNull(),
   status: text("status", { enum: ["processing", "done"] })
@@ -117,14 +119,14 @@ export const stripeEvents = pgTable("cloud_stripe_events", {
  * Side-car table tracking which `llm_usage` rows have been billed.
  *
  * The platform-owned `llm_usage` table is the canonical LLM-call ledger
- * (per-call cost, attribution, credential source). Billing is a cloud-only
+ * (per-call cost, attribution, credential source). Billing is an EE-only
  * concern, so the "this row has been debited" marker lives here instead of as a
  * column on `llm_usage` — that would leak a billing concept into the OSS schema.
  *
  * Contract:
  *   - `llmUsageId` — PRIMARY KEY, type `integer` to match the OSS
  *     `llm_usage.id` column (declared `serial`, i.e. `INTEGER`). Cross-
- *     table FKs are intentionally avoided: cloud schemas never
+ *     table FKs are intentionally avoided: EE schemas never
  *     `.references()` platform-owned tables (no ownership inversion).
  *     The primary key gives us idempotent inserts via
  *     `ON CONFLICT (llm_usage_id) DO NOTHING` — the claim that lets the
@@ -134,18 +136,18 @@ export const stripeEvents = pgTable("cloud_stripe_events", {
  * `(integer, timestamptz)` row per billed ledger row is small enough that
  * unbounded growth is not a concern at any plausible scale.
  */
-export const cloudBilledLlmUsage = pgTable("cloud_billed_llm_usage", {
+export const eeBilledLlmUsage = pgTable("ee_billed_llm_usage", {
   llmUsageId: integer("llm_usage_id").primaryKey(),
   billedAt: timestamp("billed_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const freeTierClaims = pgTable("cloud_free_tier_claims", {
+export const freeTierClaims = pgTable("ee_free_tier_claims", {
   email: text("email").primaryKey(),
   claimedAt: timestamp("claimed_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /**
- * Single-row watermark for the cursor-based billing sweep. Cloud consumes the
+ * Single-row watermark for the cursor-based billing sweep. EE consumes the
  * platform's append-only `llm_usage` ledger by serial `id`: `last_llm_usage_id`
  * is the highest ledger id already processed. The sweep reads
  * `usage.list({ afterId: last_llm_usage_id })`, bills the settled frontier, and
@@ -158,37 +160,37 @@ export const freeTierClaims = pgTable("cloud_free_tier_claims", {
  * MONOTONIC: every code path advances it with `GREATEST(...)`, so two
  * overlapping sweepers can never rewind it. Operator SQL is deliberately NOT
  * fenced off — re-seeding the watermark is a documented recovery action, and
- * the claim table (`cloud_billed_llm_usage`, never purged) makes a re-read of
+ * the claim table (`ee_billed_llm_usage`, never purged) makes a re-read of
  * already-billed rows a no-op anyway.
  */
 export const billingCursor = pgTable(
-  "cloud_billing_cursor",
+  "ee_billing_cursor",
   {
     id: boolean("id").primaryKey().default(true),
     lastLlmUsageId: integer("last_llm_usage_id").notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [check("cloud_billing_cursor_single_row", sql`${table.id}`)],
+  (table) => [check("ee_billing_cursor_single_row", sql`${table.id}`)],
 );
 
 /**
  * Billing managers — org users who may act on billing without being org admins
- * (RBAC spec §10). Cloud grants them `billing:read` + `billing:manage` through
+ * (RBAC spec §10). EE grants them `billing:read` + `billing:manage` through
  * the module's `principalPermissions` surface, so the grant attaches to a
- * PRINCIPAL instead of to an org role: `billing` is cloud vocabulary and core's
+ * PRINCIPAL instead of to an org role: `billing` is EE vocabulary and core's
  * `org_role` enum is Apache-2.0, which is exactly the coupling that surface
  * exists to avoid.
  *
  * `user_id` / `added_by` are `text`, matching the platform's `user.id` (Better
- * Auth ids are text, not uuid); `org_id` is `uuid` like every other cloud
- * table. As everywhere in cloud, there is no FK to a platform-owned table —
- * cloud runs its own database. Consequence: a row can outlive the user it
+ * Auth ids are text, not uuid); `org_id` is `uuid` like every other EE
+ * table. As everywhere in EE, there is no FK to a platform-owned table —
+ * EE runs its own database. Consequence: a row can outlive the user it
  * names. That is harmless because the resolver only ever answers "is THIS
  * caller a manager", and a caller the platform no longer authenticates never
  * reaches it.
  */
 export const billingManagers = pgTable(
-  "cloud_billing_managers",
+  "ee_billing_managers",
   {
     orgId: uuid("org_id").notNull(),
     userId: text("user_id").notNull(),

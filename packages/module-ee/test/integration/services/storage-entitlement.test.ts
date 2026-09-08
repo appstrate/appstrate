@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Plan → storage-entitlement projection.
  *
- * Cloud owns the platform's per-org document storage limit and projects the
+ * EE owns the platform's per-org document storage limit and projects the
  * billing plan onto it via `PlatformServices.setFileStorageLimit` (the
- * only platform WRITE cloud performs — recorded by the mock, no platform DB).
+ * only platform WRITE EE performs — recorded by the mock, no platform DB).
  * Covered here:
  *   - the sync service itself (plan mapping, unknown plan, missing account,
  *     platform write failure)
@@ -15,13 +17,13 @@
  */
 
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
-import { truncateCloudTables } from "../../helpers/db.ts";
+import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { resetStripeMock, generateWebhookEvent } from "../../helpers/stripe.ts";
 import { mockStorageLimitCalls, resetMockStorageLimits } from "../../helpers/mock-platform.ts";
 import { setMockStorageLimitError, setMockStorageLimitHook } from "../../helpers/mock-platform.ts";
 import { eq } from "drizzle-orm";
-import { getCloudDb } from "../../../src/db.ts";
+import { getEeDb } from "../../../src/db.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
 import {
   syncOrgStorageEntitlement,
@@ -37,7 +39,10 @@ import {
 } from "../../../src/billing/billing-sweeper.ts";
 import { logger } from "../../../src/logger.ts";
 import { getPlans, GIB } from "../../../src/config.ts";
-import { _resetCloudEnvForTests } from "../../../src/env.ts";
+import { _resetEeEnvForTests } from "../../../src/env.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -45,7 +50,7 @@ describe("storage entitlement", () => {
   const orgId = "00000000-0000-4000-a000-000000000060";
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     resetStripeMock();
     resetMockStorageLimits();
   });
@@ -116,7 +121,7 @@ describe("storage entitlement", () => {
       setMockStorageLimitHook(async () => {
         if (fired) return;
         fired = true;
-        await getCloudDb()
+        await getEeDb()
           .update(billingAccounts)
           .set({ planId: "pro" })
           .where(eq(billingAccounts.orgId, orgId));
@@ -139,7 +144,7 @@ describe("storage entitlement", () => {
       let i = 0;
       setMockStorageLimitHook(async () => {
         const next = flip[i++ % flip.length]!;
-        await getCloudDb()
+        await getEeDb()
           .update(billingAccounts)
           .set({ planId: next })
           .where(eq(billingAccounts.orgId, orgId));
@@ -293,7 +298,7 @@ describe("storage entitlement", () => {
   describe("throttled reconcile on the billing tick", () => {
     beforeEach(() => {
       process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-      _resetCloudEnvForTests();
+      _resetEeEnvForTests();
       _resetBillingSweeperForTests();
     });
 

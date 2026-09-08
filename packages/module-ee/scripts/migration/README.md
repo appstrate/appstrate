@@ -2,14 +2,14 @@
 
 Operational scripts that rewrite row **contents** once, against the deployments
 that need it, and are then finished. They are **not** replayed, **not** part of
-`migrateCloudDb()`, and **never** live in `drizzle/migrations/`.
+`migrateEeDb()`, and **never** live in `drizzle/migrations/`.
 
-The rule and every reason behind it live in the platform's
-`docs/NO_TRANSITIONAL_CODE.md` §2, which is the authority for this repo too.
+The rule and every reason behind it live in `docs/NO_TRANSITIONAL_CODE.md` §2 at
+the repository root, which is the authority.
 
 ## The split
 
-`drizzle/migrations/*.sql` describes schema shape, is replayed on every cloud
+`drizzle/migrations/*.sql` describes schema shape, is replayed on every EE
 database at module `init()` forever, and is reviewed as a permanent contract; a
 script here fixes data once, on the deployments that need it, and is reviewed as
 an operational task. The one legitimate overlap — a backfill that is the
@@ -46,10 +46,10 @@ so a rewritten cumulative silently re-bills or under-bills the next pass.
 
 ## Running one
 
-Cloud has one operator-script convention and it is worth following: a task with
+This module has one operator-script convention and it is worth following: a task with
 logic gets a named `package.json` script that runs a `.ts` file, the way
 `repair:account` → `src/scripts/repair-account.ts` does. Such a script opens the
-database itself with `initCloudDb(getCloudEnv().CLOUD_DATABASE_URL)` and never
+database itself with `initEeDb(getEeEnv().EE_DATABASE_URL)` and never
 touches the platform, so it runs against a live deployment without the API
 process. Add the entry alongside `repair:account`:
 
@@ -58,16 +58,16 @@ process. Add the entry alongside `repair:account`:
 ```
 
 A pure-SQL task needs no entry — run it through `psql` against
-`CLOUD_DATABASE_URL` (the **cloud** database, which is not the platform's):
+`EE_DATABASE_URL` (the **EE** database, which is not the platform's):
 
 ```sh
 # 0. ALWAYS dump first
-docker exec <pg> pg_dump "$CLOUD_DATABASE_URL" --no-owner --no-privileges \
+docker exec <pg> pg_dump "$EE_DATABASE_URL" --no-owner --no-privileges \
   -Fc -f /tmp/pre.dump
 
 # 1. rehearse against a restored copy, never straight at production
 # 2. then, and only then:
-docker exec -i <pg> psql "$CLOUD_DATABASE_URL" -v ON_ERROR_STOP=1 \
+docker exec -i <pg> psql "$EE_DATABASE_URL" -v ON_ERROR_STOP=1 \
   -f - < scripts/migration/<NNNN>-<slug>.sql
 ```
 

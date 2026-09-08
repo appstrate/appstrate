@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it } from "bun:test";
-import { getCloudEnv, _resetCloudEnvForTests } from "../../src/env.ts";
+import { getEeEnv, _resetEeEnvForTests } from "../../src/env.ts";
 
 describe("env", () => {
-  describe("getCloudEnv()", () => {
-    it("returns a valid CloudEnv object with all required fields", () => {
-      const env = getCloudEnv();
+  describe("getEeEnv()", () => {
+    it("returns a valid EeEnv object with all required fields", () => {
+      const env = getEeEnv();
       expect(env.STRIPE_SECRET_KEY).toBeString();
       expect(env.STRIPE_WEBHOOK_SECRET).toBeString();
       expect(env.STRIPE_PRICE_ID_STARTER).toBeString();
@@ -12,7 +14,7 @@ describe("env", () => {
     });
 
     it("returns the test values set by preload", () => {
-      const env = getCloudEnv();
+      const env = getEeEnv();
       expect(env.STRIPE_SECRET_KEY).toBe("sk_test_fake_key_for_testing");
       expect(env.STRIPE_WEBHOOK_SECRET).toBe("whsec_test_secret_for_webhook_verification");
       expect(env.STRIPE_PRICE_ID_STARTER).toBe("price_starter_test");
@@ -20,13 +22,13 @@ describe("env", () => {
     });
 
     it("returns the same cached reference on subsequent calls", () => {
-      const first = getCloudEnv();
-      const second = getCloudEnv();
+      const first = getEeEnv();
+      const second = getEeEnv();
       expect(first).toBe(second);
     });
 
     it("has non-empty string values for all fields", () => {
-      const env = getCloudEnv();
+      const env = getEeEnv();
       expect(env.STRIPE_SECRET_KEY.length).toBeGreaterThan(0);
       expect(env.STRIPE_WEBHOOK_SECRET.length).toBeGreaterThan(0);
       expect(env.STRIPE_PRICE_ID_STARTER.length).toBeGreaterThan(0);
@@ -34,7 +36,7 @@ describe("env", () => {
     });
 
     it("returns an object containing the required Stripe keys plus reconciliation tunables", () => {
-      const env = getCloudEnv();
+      const env = getEeEnv();
       expect(Object.keys(env)).toEqual(
         expect.arrayContaining([
           "STRIPE_SECRET_KEY",
@@ -49,7 +51,7 @@ describe("env", () => {
     });
 
     it("applies sensible defaults to reconciliation env vars when unset", () => {
-      const env = getCloudEnv();
+      const env = getEeEnv();
       expect(env.CLOUD_RECONCILIATION_INTERVAL_SECONDS).toBeGreaterThanOrEqual(0);
       expect(env.CLOUD_RECONCILIATION_BATCH_SIZE).toBeGreaterThan(0);
     });
@@ -58,7 +60,7 @@ describe("env", () => {
       // The window closes a SILENT revenue loss, so it must be on by default —
       // an operator who never heard of the var still gets the fix. Preload sets
       // no value for it, so this reads the schema default.
-      const env = getCloudEnv();
+      const env = getEeEnv();
       expect(env.CLOUD_RECONCILIATION_REPLAY_WINDOW).toBe(200);
     });
 
@@ -69,9 +71,9 @@ describe("env", () => {
       // structural rather than dependent on operator discipline.
       const parse = (value: string): boolean => {
         process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW = value;
-        _resetCloudEnvForTests();
+        _resetEeEnvForTests();
         try {
-          getCloudEnv();
+          getEeEnv();
           return true;
         } catch {
           return false;
@@ -85,7 +87,7 @@ describe("env", () => {
         expect(parse("0")).toBe(true);
       } finally {
         delete process.env.CLOUD_RECONCILIATION_REPLAY_WINDOW;
-        _resetCloudEnvForTests();
+        _resetEeEnvForTests();
       }
     });
   });

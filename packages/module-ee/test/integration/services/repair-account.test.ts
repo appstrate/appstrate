@@ -1,16 +1,18 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * `repair:account` — recovery for an org the sweep isolated because it has
  * billable usage and no billing account.
  *
  * The sweep no longer aborts on that org (which used to freeze billing for the
- * whole fleet); it records the debt in `cloud_usage_records`, reports the org at
+ * whole fleet); it records the debt in `ee_usage_records`, reports the org at
  * `error` level, and moves on. This is the other half: re-provision the account
  * and apply the recorded debt, so the isolation is temporary rather than a
  * silent write-off.
  */
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateCloudTables, getCloudDb } from "../../helpers/db.ts";
+import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
 import {
   seedBillingAccount,
   seedLlmUsage,
@@ -19,22 +21,25 @@ import {
 } from "../../helpers/seed.ts";
 import { runBillingSweep, _resetBillingSweeperForTests } from "../../../src/billing/billing-sweeper.ts"; // prettier-ignore
 import { repairBillingAccount } from "../../../src/billing/repair-account.ts";
-import { _resetCloudEnvForTests } from "../../../src/env.ts";
+import { _resetEeEnvForTests } from "../../../src/env.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000300";
 
 async function account() {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [row] = await db.select().from(billingAccounts).where(eq(billingAccounts.orgId, orgId));
   return row ?? null;
 }
 
 describe("repairBillingAccount", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     _resetBillingSweeperForTests();
   });
 

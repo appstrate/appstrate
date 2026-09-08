@@ -1,9 +1,14 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateCloudTables } from "../../helpers/db.ts";
+import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { checkQuota, QuotaExceededError } from "../../../src/billing/quota-check.ts";
 import type { UsageQuote } from "../../../src/billing/usage-quote.ts";
 import { ESTIMATED_MODEL_CREDITS_PER_RUN } from "../../../src/config.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 /**
  * Build a quote worth `total` credits. `checkQuota` only reads `totalCredits`;
@@ -17,7 +22,7 @@ const ZERO_QUOTE = quoteOf(0);
 
 describe("checkQuota", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
   });
 
   const orgId = "00000000-0000-4000-a000-000000000001";

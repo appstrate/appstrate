@@ -1,15 +1,17 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import Redis from "ioredis";
 
-let cloudRedis: Redis | null = null;
+let eeRedis: Redis | null = null;
 
-export function getCloudRedis(): Redis | null {
-  return cloudRedis;
+export function getEeRedis(): Redis | null {
+  return eeRedis;
 }
 
-export function initCloudRedis(redisUrl: string): void {
-  if (!redisUrl) return; // Redis is optional — cloud features degrade gracefully
-  cloudRedis = new Redis(redisUrl, {
-    keyPrefix: "cloud:",
+export function initEeRedis(redisUrl: string): void {
+  if (!redisUrl) return; // Redis is optional — EE features degrade gracefully
+  eeRedis = new Redis(redisUrl, {
+    keyPrefix: "ee:",
     maxRetriesPerRequest: 3,
     enableReadyCheck: true,
   });

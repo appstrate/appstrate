@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { BillingEmailType, BillingEmailPropsMap } from "./types.ts";
 import { renderBillingEmail } from "./registry.ts";
 import { logger } from "../logger.ts";

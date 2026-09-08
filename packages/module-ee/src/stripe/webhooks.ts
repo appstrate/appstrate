@@ -1,12 +1,14 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import Stripe from "stripe";
 import { z } from "zod";
 import { getStripe } from "./client.ts";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
 import { and, eq } from "drizzle-orm";
 import { logger } from "../logger.ts";
 import { getPlans, type Plans, type PlanDefinition } from "../config.ts";
-import { getCloudEnv } from "../env.ts";
+import { getEeEnv } from "../env.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { syncOrgStorageEntitlement } from "../billing/storage-entitlement.ts";
 
@@ -64,13 +66,13 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
   const event = await getStripe().webhooks.constructEventAsync(
     body,
     signature,
-    getCloudEnv().STRIPE_WEBHOOK_SECRET,
+    getEeEnv().STRIPE_WEBHOOK_SECRET,
   );
 
   // Idempotency via atomic claim: INSERT ... ON CONFLICT DO NOTHING.
   // If INSERT succeeds → exclusive right to process this event.
   // If INSERT fails (duplicate) → another handler already claimed it.
-  const db = getCloudDb();
+  const db = getEeDb();
 
   const [inserted] = await db
     .insert(stripeEvents)
@@ -136,7 +138,7 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
 }
 
 async function processEvent(event: Stripe.Event): Promise<void> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const plans = getPlans();
 
   switch (event.type) {

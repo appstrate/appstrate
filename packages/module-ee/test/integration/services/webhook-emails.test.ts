@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
-import { truncateCloudTables, getCloudDb } from "../../helpers/db.ts";
+import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import {
   resetStripeMock,
@@ -8,8 +9,10 @@ import {
   setSubscriptionResponse,
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
-import { billingAccounts } from "../../../drizzle/schema.ts";
 import { initBillingEmail } from "../../../src/emails/send.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -24,7 +27,7 @@ describe("webhook billing emails", () => {
   const sentEmails: Array<{ to: string; subject: string }> = [];
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     resetStripeMock();
     sentEmails.length = 0;
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type {
   BillingEmailType,
   BillingEmailRenderer,

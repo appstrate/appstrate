@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { Context, Next } from "hono";
-import { getCloudRedis } from "./redis.ts";
+import { getEeRedis } from "./redis.ts";
 import { logger } from "./logger.ts";
 import { problemJson, rateLimited } from "./http-errors.ts";
 import { forbidden } from "@appstrate/core/api-errors";
@@ -18,7 +20,7 @@ return count
 `;
 
 /**
- * Rate limiter for cloud billing routes.
+ * Rate limiter for EE billing routes.
  *
  * Posture: **fail-open**. When Redis is unconfigured OR errors, the request is
  * allowed. These routes are admin-gated (`billing:manage`) and Stripe-side
@@ -27,9 +29,9 @@ return count
  * absent but failed closed (500) when Redis was down; this makes both paths
  * consistent.
  */
-export function cloudRateLimit(maxPerMinute: number, keyFn: (c: Context) => string) {
+export function eeRateLimit(maxPerMinute: number, keyFn: (c: Context) => string) {
   return async (c: Context, next: Next) => {
-    const redis = getCloudRedis();
+    const redis = getEeRedis();
     if (!redis) return next(); // No Redis — fail open
 
     const key = `ratelimit:${keyFn(c)}`;
@@ -60,11 +62,11 @@ export function cloudRateLimit(maxPerMinute: number, keyFn: (c: Context) => stri
 }
 
 /**
- * RBAC guard for cloud billing routes. Checks the `permissions` Set from Hono
+ * RBAC guard for EE billing routes. Checks the `permissions` Set from Hono
  * context (populated by the platform's RBAC middleware). Emits RFC 9457
  * problem+json on denial, matching the platform's core error contract.
  */
-export function cloudRequirePermission(permission: string) {
+export function eeRequirePermission(permission: string) {
   return async (c: Context, next: Next) => {
     const permissions = c.get("permissions") as ReadonlySet<string> | undefined;
     if (!permissions || !permissions.has(permission)) {
@@ -75,6 +77,6 @@ export function cloudRequirePermission(permission: string) {
 }
 
 /** Admin-tier guard — billing mutations (checkout / portal) require `billing:manage`. */
-export function cloudRequireAdmin() {
-  return cloudRequirePermission("billing:manage");
+export function eeRequireAdmin() {
+  return eeRequirePermission("billing:manage");
 }

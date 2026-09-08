@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * `isAffordable` — the balance rule, isolated from the account read.
  *

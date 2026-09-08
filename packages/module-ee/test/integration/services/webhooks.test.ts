@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateCloudTables, getCloudDb } from "../../helpers/db.ts";
-import { seedBillingAccount, seedStripeEvent } from "../../helpers/seed.ts";
+import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
+import { seedBillingAccount } from "../../helpers/seed.ts";
 import {
   resetStripeMock,
   generateWebhookEvent,
@@ -9,6 +11,9 @@ import {
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { billingAccounts, stripeEvents } from "../../../drizzle/schema.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -16,7 +21,7 @@ describe("handleWebhook", () => {
   const orgId = "00000000-0000-4000-a000-000000000040";
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     resetStripeMock();
   });
 
@@ -42,7 +47,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -81,7 +86,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -126,7 +131,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -186,7 +191,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -245,7 +250,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -299,7 +304,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -354,7 +359,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -399,7 +404,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -437,7 +442,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -479,7 +484,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -512,7 +517,7 @@ describe("handleWebhook", () => {
       await handleWebhook(body, signature);
 
       // Verify it was processed
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -549,7 +554,7 @@ describe("handleWebhook", () => {
     });
 
     it("deletes stale claims (>5min) for retry", async () => {
-      const db = getCloudDb();
+      const db = getEeDb();
 
       // Manually insert a stale stripe_event claim (6 minutes old)
       const staleTime = new Date(Date.now() - 6 * 60 * 1000);
@@ -631,7 +636,7 @@ describe("handleWebhook", () => {
       await handleWebhook(body, signature);
 
       // Account should remain unchanged
-      const db = getCloudDb();
+      const db = getEeDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -658,7 +663,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getCloudDb();
+      const db = getEeDb();
       const [event] = await db
         .select()
         .from(stripeEvents)

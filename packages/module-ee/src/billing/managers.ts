@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Billing managers — the org users who hold `billing:read` + `billing:manage`
  * without being org admins (RBAC spec §10).
  *
  * The grant travels through the module contract's `principalPermissions`
  * surface, so it attaches to a `(orgId, userId)` pair rather than to an org
- * role. That is the whole point: `billing` is cloud vocabulary, core's
+ * role. That is the whole point: `billing` is EE vocabulary, core's
  * `org_role` enum is Apache-2.0, and a `billing_manager` role would put the
  * one inside the other.
  *
@@ -18,7 +20,7 @@
 
 import { and, eq, inArray } from "drizzle-orm";
 import { invalidatePrincipalPermissions } from "@appstrate/core/principal-permissions";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingManagers } from "../../drizzle/schema.ts";
 
 /** The two strings a billing manager holds — also the module's `mayGrant`. */
@@ -32,7 +34,7 @@ export interface BillingManager {
 
 /** The org's managers, oldest grant first. */
 export async function listBillingManagers(orgId: string): Promise<BillingManager[]> {
-  const db = getCloudDb();
+  const db = getEeDb();
   return db
     .select({
       userId: billingManagers.userId,
@@ -49,7 +51,7 @@ export async function listBillingManagers(orgId: string): Promise<BillingManager
  * once per principal per cache miss on every session request. Keep it that.
  */
 export async function isBillingManager(orgId: string, userId: string): Promise<boolean> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [row] = await db
     .select({ userId: billingManagers.userId })
     .from(billingManagers)
@@ -75,7 +77,7 @@ export async function replaceBillingManagers(
   userIds: readonly string[],
   addedBy: string,
 ): Promise<BillingManager[]> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const wanted = [...new Set(userIds)];
 
   const previous = await db
@@ -117,7 +119,7 @@ export async function replaceBillingManagers(
  * platform could later reuse.
  */
 export async function deleteBillingManagers(orgId: string): Promise<void> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const removed = await db
     .delete(billingManagers)
     .where(eq(billingManagers.orgId, orgId))

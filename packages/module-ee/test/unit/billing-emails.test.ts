@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, it, expect } from "bun:test";
 import { renderSubscriptionConfirmedEmail } from "../../src/emails/templates/subscription-confirmed.ts";
 import { renderPaymentReceiptEmail } from "../../src/emails/templates/payment-receipt.ts";
@@ -35,7 +37,7 @@ describe("billing email templates", () => {
       expect(result.html).toContain("Starter");
     });
 
-    it("wraps in cloud layout", () => {
+    it("wraps in EE layout", () => {
       const result = renderSubscriptionConfirmedEmail(baseProps);
       expect(result.html).toContain("<!DOCTYPE html");
       expect(result.html).toContain("appstrate.com");

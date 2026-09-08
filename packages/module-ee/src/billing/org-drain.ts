@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Final billing drain for one organization, run from `onOrgDelete`.
  *
@@ -5,7 +7,7 @@
  *
  * The periodic cursor sweep runs every `CLOUD_RECONCILIATION_INTERVAL_SECONDS`
  * (300 s by default). An org that spends and then deletes itself inside that
- * window was never debited: `onOrgDelete` dropped its `cloud_billing_accounts`
+ * window was never debited: `onOrgDelete` dropped its `ee_billing_accounts`
  * row, and the platform's org cascade then removed its `llm_usage` rows — so
  * the next sweep could not even observe the loss. Repeatable at will.
  *
@@ -20,7 +22,7 @@
  *
  *   - The GLOBAL watermark is never touched. The drain reads forward from it and
  *     bills only THIS org's rows; the periodic sweep re-reads the same rows later
- *     and finds them already claimed (`cloud_billed_llm_usage` is the arbiter),
+ *     and finds them already claimed (`ee_billed_llm_usage` is the arbiter),
  *     so it is a no-op for them. Nothing is rewound, and the drain can bill an
  *     org sitting behind another tenant's head-of-line stall.
  *   - Bounded: at most {@link MAX_DRAIN_BATCHES} reads of the configured batch
@@ -28,9 +30,9 @@
  *     (the only billable rows). A truncated drain is reported at `warn`.
  */
 
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { getPlatformServices } from "../platform.ts";
-import { getCloudEnv } from "../env.ts";
+import { getEeEnv } from "../env.ts";
 import { logger } from "../logger.ts";
 import { billLedgerRows, ensureCursorSeeded, reportOrphanedOrg } from "./usage-recorder.ts";
 
@@ -66,8 +68,8 @@ export interface OrgDrainResult {
  */
 export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
   const services = getPlatformServices();
-  const db = getCloudDb();
-  const batchSize = getCloudEnv().CLOUD_RECONCILIATION_BATCH_SIZE;
+  const db = getEeDb();
+  const batchSize = getEeEnv().CLOUD_RECONCILIATION_BATCH_SIZE;
 
   // Start at the global watermark: everything below it has already been through
   // a sweep pass (claimed if billable, deliberately skipped otherwise).
@@ -118,7 +120,7 @@ export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
 }
 
 /**
- * Drain + report. The org row and its `cloud_usage_records` are about to be
+ * Drain + report. The org row and its `ee_usage_records` are about to be
  * deleted, so this log line is the durable trace of the org's final billed
  * usage — emit it even when the drain found nothing to bill only if something
  * was actually scanned, to keep steady-state deletions quiet.

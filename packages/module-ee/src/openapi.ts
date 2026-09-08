@@ -1,35 +1,35 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * OpenAPI 3.1 contribution for the cloud module.
+ * OpenAPI 3.1 contribution for the EE module.
  *
  * Surfaced through `AppstrateModule.openApiPaths()` / `openApiTags()` /
  * `openApiComponentSchemas()` so the assembled platform spec exposes the
- * billing endpoints when cloud is loaded. Disabled deployments contribute
+ * billing endpoints when EE is loaded. Disabled deployments contribute
  * nothing — the zero-footprint invariant holds.
  */
 
-const billingAccountSchemaRef = { $ref: "#/components/schemas/CloudBillingAccount" } as const;
-const billingPlanSchemaRef = { $ref: "#/components/schemas/CloudBillingPlan" } as const;
-// Cloud errors use the platform's shared RFC 9457 Problem Details schema
+const billingAccountSchemaRef = { $ref: "#/components/schemas/EeBillingAccount" } as const;
+const billingPlanSchemaRef = { $ref: "#/components/schemas/EeBillingPlan" } as const;
+// EE errors use the platform's shared RFC 9457 Problem Details schema
 // (contributed by core), so the billing surface matches the rest of the API.
 const errorProblemRef = { $ref: "#/components/schemas/ProblemDetail" } as const;
-const billingManagerSchemaRef = { $ref: "#/components/schemas/CloudBillingManager" } as const;
-const billingManagerListRef = { $ref: "#/components/schemas/CloudBillingManagerList" } as const;
-const billingContactSchemaRef = { $ref: "#/components/schemas/CloudBillingContact" } as const;
+const billingManagerSchemaRef = { $ref: "#/components/schemas/EeBillingManager" } as const;
+const billingManagerListRef = { $ref: "#/components/schemas/EeBillingManagerList" } as const;
+const billingContactSchemaRef = { $ref: "#/components/schemas/EeBillingContact" } as const;
 
 export function openApiTags() {
   return [
     {
-      name: "Cloud Billing",
-      description: "Stripe-backed billing surface contributed by @appstrate/cloud.",
+      name: "Billing",
+      description: "Stripe-backed billing surface contributed by `@appstrate/module-ee`.",
     },
   ];
 }
 
 export function openApiComponentSchemas(): Record<string, unknown> {
   return {
-    CloudBillingPlan: {
+    EeBillingPlan: {
       type: "object",
       required: ["id", "name", "price", "credit_quota", "file_storage_bytes"],
       properties: {
@@ -44,7 +44,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         },
       },
     },
-    CloudBillingManager: {
+    EeBillingManager: {
       type: "object",
       required: ["user_id", "added_by", "created_at"],
       properties: {
@@ -56,14 +56,14 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         created_at: { type: "string", format: "date-time" },
       },
     },
-    CloudBillingManagerList: {
+    EeBillingManagerList: {
       type: "object",
       required: ["managers"],
       properties: {
         managers: { type: "array", items: billingManagerSchemaRef },
       },
     },
-    CloudBillingContact: {
+    EeBillingContact: {
       type: "object",
       required: ["billing_email", "billing_cc"],
       properties: {
@@ -81,7 +81,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         },
       },
     },
-    CloudBillingAccount: {
+    EeBillingAccount: {
       type: "object",
       required: [
         "plan",
@@ -136,8 +136,8 @@ export function openApiPaths(): Record<string, unknown> {
   return {
     "/api/billing": {
       get: {
-        operationId: "getCloudBillingAccount",
-        tags: ["Cloud Billing"],
+        operationId: "getEeBillingAccount",
+        tags: ["Billing"],
         summary: "Get the current org's billing account",
         description:
           "Returns the org's current plan, credit usage, subscription status, and available upgrade tiers. Requires `billing:read` (granted to every org member).",
@@ -156,8 +156,8 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/checkout": {
       post: {
-        operationId: "createCloudBillingCheckoutSession",
-        tags: ["Cloud Billing"],
+        operationId: "createEeBillingCheckoutSession",
+        tags: ["Billing"],
         summary: "Create a Stripe Checkout session",
         description:
           "Returns a one-time Stripe Checkout URL the dashboard redirects to. Admin-only (`billing:manage`). Rate-limited to 5/min per org.",
@@ -169,6 +169,7 @@ export function openApiPaths(): Record<string, unknown> {
               schema: {
                 type: "object",
                 required: ["plan_id"],
+                additionalProperties: false,
                 properties: {
                   plan_id: { type: "string", enum: ["starter", "pro"] },
                   return_url: {
@@ -215,8 +216,8 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/portal": {
       post: {
-        operationId: "createCloudBillingPortalSession",
-        tags: ["Cloud Billing"],
+        operationId: "createEeBillingPortalSession",
+        tags: ["Billing"],
         summary: "Create a Stripe Customer Portal session",
         description:
           "Returns a one-time Stripe Customer Portal URL the dashboard redirects to (manage payment method, cancel subscription, view invoices). Admin-only (`billing:manage`). Rate-limited to 5/min per org.",
@@ -251,8 +252,8 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/managers": {
       get: {
-        operationId: "listCloudBillingManagers",
-        tags: ["Cloud Billing"],
+        operationId: "listEeBillingManagers",
+        tags: ["Billing"],
         summary: "List the organization's billing managers",
         description:
           "Org users granted `billing:read` + `billing:manage` without being owners or admins. Requires `billing:manage`.",
@@ -269,8 +270,8 @@ export function openApiPaths(): Record<string, unknown> {
         },
       },
       put: {
-        operationId: "replaceCloudBillingManagers",
-        tags: ["Cloud Billing"],
+        operationId: "replaceEeBillingManagers",
+        tags: ["Billing"],
         summary: "Replace the organization's billing managers",
         description:
           "Replaces the whole set with `user_ids`. Every id must be a member of the organization, and none may be an owner or admin — those already hold `billing:*` through their org role, so listing them would grant nothing while making the list read as if they were the only ones who could. Requires `billing:manage`.",
@@ -282,10 +283,11 @@ export function openApiPaths(): Record<string, unknown> {
               schema: {
                 type: "object",
                 required: ["user_ids"],
+                additionalProperties: false,
                 properties: {
                   user_ids: {
                     type: "array",
-                    items: { type: "string" },
+                    items: { type: "string", minLength: 1 },
                     description: "The complete set of billing managers. An empty array clears it.",
                   },
                 },
@@ -311,8 +313,8 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/contact": {
       get: {
-        operationId: "getCloudBillingContact",
-        tags: ["Cloud Billing"],
+        operationId: "getEeBillingContact",
+        tags: ["Billing"],
         summary: "Get the billing contact",
         description:
           "The address invoices, receipts and payment alerts are sent to, plus the CC list. Requires `billing:manage`.",
@@ -333,8 +335,8 @@ export function openApiPaths(): Record<string, unknown> {
         },
       },
       patch: {
-        operationId: "updateCloudBillingContact",
-        tags: ["Cloud Billing"],
+        operationId: "updateEeBillingContact",
+        tags: ["Billing"],
         summary: "Update the billing contact",
         description:
           "Sets `billing_email` and/or `billing_cc`; omitted fields are left as they are, and `billing_email: null` clears the contact so it falls back to the organization's owners. The primary address is pushed to the Stripe customer so Stripe addresses its own receipts. Requires `billing:manage`.",
@@ -345,6 +347,7 @@ export function openApiPaths(): Record<string, unknown> {
             "application/json": {
               schema: {
                 type: "object",
+                additionalProperties: false,
                 properties: {
                   billing_email: { type: ["string", "null"], format: "email" },
                   billing_cc: {
@@ -379,11 +382,11 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/webhooks": {
       post: {
-        operationId: "receiveCloudBillingStripeWebhook",
-        tags: ["Cloud Billing"],
+        operationId: "receiveEeBillingStripeWebhook",
+        tags: ["Billing"],
         summary: "Stripe webhook receiver",
         description:
-          "Stripe-signed webhook receiver. Public path (no platform auth) — verified by `Stripe-Signature` header against `STRIPE_WEBHOOK_SECRET`. Idempotent via `cloud_stripe_events`.",
+          "Stripe-signed webhook receiver. Public path (no platform auth) — verified by `Stripe-Signature` header against `STRIPE_WEBHOOK_SECRET`. Idempotent via `ee_stripe_events`.",
         security: [],
         parameters: [
           {

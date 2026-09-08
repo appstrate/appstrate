@@ -1,15 +1,20 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateCloudTables } from "../../helpers/db.ts";
+import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { resetStripeMock, setCheckoutResponse, requests } from "../../helpers/stripe.ts";
 import { createCheckoutSession } from "../../../src/stripe/checkout.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 describe("createCheckoutSession", () => {
   const orgId = "00000000-0000-4000-a000-000000000020";
   const appUrl = "http://localhost:3000";
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     resetStripeMock();
   });
 

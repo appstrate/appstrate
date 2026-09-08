@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
- * Test Hono app for cloud billing route tests.
+ * Test Hono app for EE billing route tests.
  *
  * Simulates the platform's auth and org-context middleware by reading
  * test headers (X-Test-Org-Id, X-Test-Org-Role) instead of requiring
@@ -9,7 +11,7 @@ import { Hono } from "hono";
 import { createBillingRoutes } from "../../src/routes/billing.ts";
 import type { OrgRole } from "../../src/types.ts";
 
-type CloudTestEnv = {
+type EeTestEnv = {
   Variables: {
     orgId: string;
     orgRole: OrgRole;
@@ -18,12 +20,12 @@ type CloudTestEnv = {
   };
 };
 
-let cachedApp: Hono<CloudTestEnv> | null = null;
+let cachedApp: Hono<EeTestEnv> | null = null;
 
-export function getTestApp(): Hono<CloudTestEnv> {
+export function getTestApp(): Hono<EeTestEnv> {
   if (cachedApp) return cachedApp;
 
-  const app = new Hono<CloudTestEnv>();
+  const app = new Hono<EeTestEnv>();
 
   // Simulate platform middleware: extract org context from test headers.
   // Skip auth for public paths (webhooks are verified by Stripe signature, not session).
@@ -42,7 +44,7 @@ export function getTestApp(): Hono<CloudTestEnv> {
     if (orgRole !== "guest") permissions.add("billing:read");
     if (orgRole === "owner" || orgRole === "admin") permissions.add("billing:manage");
     // The platform unions each module's `principalPermissions` answer into the
-    // same set — the header stands in for cloud's billing-manager resolver, so
+    // same set — the header stands in for EE's billing-manager resolver, so
     // a non-admin manager reaches the routes exactly as they would in production.
     for (const p of (c.req.header("X-Test-Principal-Grants") ?? "").split(",")) {
       if (p.trim()) permissions.add(p.trim());
@@ -60,12 +62,4 @@ export function getTestApp(): Hono<CloudTestEnv> {
 
   cachedApp = app;
   return app;
-}
-
-/**
- * Reset the cached app instance. Call this if you need a fresh app
- * (e.g., after reconfiguring the stripe mock between test suites).
- */
-export function resetTestApp(): void {
-  cachedApp = null;
 }

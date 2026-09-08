@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Local type definitions matching @appstrate/emails contracts.
- * Cloud doesn't depend on @appstrate/emails — these types mirror the
- * EmailRenderer/EmailPropsMap shapes so cloud templates are self-contained.
+ * EE doesn't depend on @appstrate/emails — these types mirror the
+ * EmailRenderer/EmailPropsMap shapes so EE templates are self-contained.
  */
 
 import type { OrgRole } from "../types.ts";
@@ -45,7 +47,7 @@ export interface ResetPasswordProps {
 }
 
 // ---------------------------------------------------------------------------
-// Billing email types (Cloud-only — not in @appstrate/emails)
+// Billing email types (EE-only — not in @appstrate/emails)
 // ---------------------------------------------------------------------------
 
 export type BillingEmailType =

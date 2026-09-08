@@ -1,14 +1,16 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Operator repair for an organization that has billable usage and no billing
  * account — the "bricked org" the billing sweep reports at `error` level.
  *
- * HOW AN ORG GETS THERE. `onOrgDelete` deletes `cloud_billing_accounts`
+ * HOW AN ORG GETS THERE. `onOrgDelete` deletes `ee_billing_accounts`
  * immediately, but the platform REFUSES to delete an organization while a run is
  * active, so the org can survive its own account. Everything it spends after
  * that has nowhere to be debited.
  *
  * WHAT THE SWEEP DOES MEANWHILE. It isolates the org: the rows are still claimed
- * and `cloud_usage_records` still accumulates the exact debt, but no account is
+ * and `ee_usage_records` still accumulates the exact debt, but no account is
  * touched and the pass commits — the rest of the fleet keeps being billed. (The
  * previous behavior aborted the whole transaction, which froze billing for every
  * tenant until an operator fixed the database by hand.)
@@ -16,10 +18,10 @@
  * WHAT THIS DOES. Re-provisions the account (idempotent, reusing the same
  * free-tier claim path as org creation, so a re-provisioned org cannot mint a
  * second free tier) and then applies the debt recorded while it had no account:
- * `credits_used = SUM(cloud_usage_records.cost_credits)` for the org.
+ * `credits_used = SUM(ee_usage_records.cost_credits)` for the org.
  *
  * WHY THE SUM, RATHER THAN LETTING THE NORMAL DEBIT PATH REPLAY IT. It cannot:
- * the orphaned rows were CLAIMED into `cloud_billed_llm_usage` and the watermark
+ * the orphaned rows were CLAIMED into `ee_billed_llm_usage` and the watermark
  * advanced past them in the SAME committed transaction that recorded the debt
  * (`billLedgerRows` claims before it debits; `sweepLedgerBatch` advances the
  * cursor in that transaction). The sweep only ever reads
@@ -37,7 +39,7 @@
  */
 
 import { eq, sql } from "drizzle-orm";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts, orgUsageRecords } from "../../drizzle/schema.ts";
 import { normalizeEmail, provisionBillingAccount } from "../onboarding/post-signup.ts";
 import { logger } from "../logger.ts";
@@ -57,7 +59,7 @@ export async function repairBillingAccount(
   orgId: string,
   ownerEmail: string,
 ): Promise<RepairOutcome> {
-  const db = getCloudDb();
+  const db = getEeDb();
 
   const [existing] = await db
     .select({ orgId: billingAccounts.orgId })

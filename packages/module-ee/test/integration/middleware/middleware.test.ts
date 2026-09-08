@@ -1,20 +1,25 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import { flushCloudRedis } from "../../helpers/redis.ts";
-import { cloudRateLimit, cloudRequireAdmin } from "../../../src/middleware.ts";
+import { flushEeRedis } from "../../helpers/redis.ts";
+import { eeRateLimit, eeRequireAdmin } from "../../../src/middleware.ts";
 import type { OrgRole } from "../../../src/types.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 describe("middleware", () => {
   beforeEach(async () => {
-    await flushCloudRedis();
+    await flushEeRedis();
   });
 
-  describe("cloudRateLimit", () => {
+  describe("eeRateLimit", () => {
     function createRateLimitApp(maxPerMinute: number) {
       const app = new Hono();
       app.use(
         "/test",
-        cloudRateLimit(maxPerMinute, (c) => `test:${c.req.header("X-Client-Id") ?? "default"}`),
+        eeRateLimit(maxPerMinute, (c) => `test:${c.req.header("X-Client-Id") ?? "default"}`),
       );
       app.get("/test", (c) => c.json({ ok: true }));
       return app;
@@ -96,7 +101,7 @@ describe("middleware", () => {
     });
   });
 
-  describe("cloudRequireAdmin", () => {
+  describe("eeRequireAdmin", () => {
     function createAdminApp() {
       const app = new Hono<{
         Variables: { orgRole: OrgRole; permissions: ReadonlySet<string> };
@@ -110,7 +115,7 @@ describe("middleware", () => {
         c.set("permissions", permissions);
         await next();
       });
-      app.use("/admin", cloudRequireAdmin());
+      app.use("/admin", eeRequireAdmin());
       app.get("/admin", (c) => c.json({ ok: true }));
       return app;
     }

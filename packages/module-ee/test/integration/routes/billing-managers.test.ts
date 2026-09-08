@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateCloudTables } from "../../helpers/db.ts";
+import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount, seedBillingManager } from "../../helpers/seed.ts";
 import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -12,7 +14,10 @@ import {
   resolvePrincipalPermissions,
   setPrincipalPermissionsProviders,
 } from "@appstrate/core/principal-permissions";
-import cloudModule from "../../../src/index.ts";
+import eeModule from "../../../src/index.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 /**
  * Billing managers — org users who hold `billing:*` without an admin role
@@ -34,7 +39,7 @@ describe("billing managers", () => {
   }
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     await seedBillingAccount({ orgId });
     seedOrgMembers(orgId, [
       { userId: "user-owner", email: "owner@example.com", role: "owner" },
@@ -203,14 +208,12 @@ describe("billing managers", () => {
     /**
      * Through core's own registry and cache, which is what the platform runs:
      * the module declares the surface, the platform caches the answer for 10s,
-     * and only cloud's own `invalidatePrincipalPermissions` call can make a
+     * and only EE's own `invalidatePrincipalPermissions` call can make a
      * write visible before the TTL. A write that forgot to invalidate passes
      * every test above and fails this one.
      */
     it("grants both strings through core, and a write is visible immediately", async () => {
-      setPrincipalPermissionsProviders([
-        { moduleId: "cloud", ...cloudModule.principalPermissions! },
-      ]);
+      setPrincipalPermissionsProviders([{ moduleId: "EE", ...eeModule.principalPermissions! }]);
       try {
         const ctx = { orgId, userId: "user-finance" };
         expect([...(await resolvePrincipalPermissions(ctx))]).toEqual([]);

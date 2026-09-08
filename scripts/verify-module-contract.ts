@@ -45,9 +45,9 @@
  * consumer repo over the GitHub API, so it also works where the sibling repos
  * are not checked out) and the module loader's boot gate at runtime (#973).
  *
- * Private repos absent in CI (cloud) never cause failure: the ledger records
- * their expected ownership, and the scanner only *adds* drift when a present
- * module declares a member the ledger did not expect.
+ * A module root absent from the checkout never causes failure: the ledger
+ * records its expected ownership, and the scanner only *adds* drift when a
+ * present module declares a member the ledger did not expect.
  *
  * Override via env: `MODULE_CONTRACT_POLICY=warn|fail|off` — a dev/CI knob on
  * THIS script, not to be confused with the runtime boot gate
@@ -72,7 +72,6 @@ import { readGatePolicy } from "./lib/policy-env.ts";
 // print every finding and still exit 0.
 const POLICY = readGatePolicy("MODULE_CONTRACT_POLICY");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
-const WORKSPACE = resolve(ROOT, "..");
 
 /**
  * The ONLY members allowed to carry `kind: "lifecycle"` (universal plumbing,
@@ -98,7 +97,7 @@ type EventMember = keyof ModuleEvents;
 /** Capabilities the platform injects — what a module CONSUMES, not declares. */
 type ServiceMember = keyof PlatformServices;
 
-type Tenant = "oss" | "cloud";
+type Tenant = "oss" | "ee";
 type Classification = "extension" | "seam" | "lifecycle";
 
 interface LedgerEntry {
@@ -131,27 +130,28 @@ const MODULE_TENANT: Record<string, Tenant> = {
   "module-claude-code": "oss",
   "module-chat": "oss",
   "module-observability": "oss",
-  cloud: "cloud",
+  "module-ee": "ee",
 };
 
 /**
  * Module source roots to scan. A module's contract members are frequently
- * split across files (cloud declares `openApiPaths` in `openapi.ts`, oidc
+ * split across files (module-ee declares `openApiPaths` in `openapi.ts`, oidc
  * declares `events`/`hooks` in sub-modules re-exported into the literal), so
- * we scan the whole tree, not just `index.ts`. Paths relative to the
- * workspace root; absent roots (private repos in CI) are skipped silently.
+ * we scan the whole tree, not just `index.ts`. Paths are relative to the
+ * repository root — every module now lives in it — and an absent root is
+ * skipped silently.
  */
 const DECLARER_ROOTS: Record<string, string> = {
-  oidc: "appstrate/apps/api/src/modules/oidc",
-  webhooks: "appstrate/apps/api/src/modules/webhooks",
-  mcp: "appstrate/apps/api/src/modules/mcp",
-  "core-providers": "appstrate/apps/api/src/modules/core-providers",
-  firecracker: "appstrate/apps/api/src/modules/firecracker",
-  "module-codex": "appstrate/packages/module-codex/src",
-  "module-claude-code": "appstrate/packages/module-claude-code/src",
-  "module-chat": "appstrate/packages/module-chat/src",
-  "module-observability": "appstrate/packages/module-observability/src",
-  cloud: "cloud/src",
+  oidc: "apps/api/src/modules/oidc",
+  webhooks: "apps/api/src/modules/webhooks",
+  mcp: "apps/api/src/modules/mcp",
+  "core-providers": "apps/api/src/modules/core-providers",
+  firecracker: "apps/api/src/modules/firecracker",
+  "module-codex": "packages/module-codex/src",
+  "module-claude-code": "packages/module-claude-code/src",
+  "module-chat": "packages/module-chat/src",
+  "module-observability": "packages/module-observability/src",
+  "module-ee": "packages/module-ee/src",
 };
 
 const LEDGER: Record<ContractMember, LedgerEntry> = {
@@ -159,34 +159,46 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   shutdown: { kind: "lifecycle", owners: [] },
 
   // ── extension — generic, must have >= 2 owners ──────────────────────────
-  createRouter: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
-  publicPaths: { kind: "extension", owners: ["oidc", "cloud"] },
+  createRouter: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+  },
+  publicPaths: { kind: "extension", owners: ["oidc", "mcp", "module-ee"] },
   permissionsContribution: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat"],
-    justification: "RBAC — the open-core boundary; cloud cannot migrate it into core (#488).",
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+    justification: "RBAC — the open-core boundary; module-ee cannot migrate it into core (#488).",
   },
   hooks: {
     kind: "extension",
-    owners: ["oidc", "cloud", "module-codex", "module-claude-code"],
+    owners: ["oidc", "module-ee", "module-codex", "module-claude-code"],
   },
-  events: { kind: "extension", owners: ["webhooks", "cloud"] },
-  features: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  events: { kind: "extension", owners: ["webhooks", "mcp", "module-ee", "module-chat"] },
+  features: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+  },
   modelProviders: {
     kind: "extension",
     owners: ["core-providers", "module-codex", "module-claude-code"],
     justification:
       "Provider registry stays module-owned: subscription providers live outside core while core-providers holds the built-in API-key catalog.",
   },
-  openApiPaths: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  openApiPaths: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+  },
   openApiComponentSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat"],
+    owners: ["oidc", "webhooks", "module-ee", "module-chat"],
   },
-  openApiTags: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  openApiTags: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+  },
   openApiSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "module-chat"],
+    owners: ["oidc", "webhooks", "module-chat", "module-ee"],
     justification:
       "Zod/OpenAPI parity is tied to each module's routes; centralizing these schemas would make the platform import module-private request shapes.",
   },
@@ -221,19 +233,19 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   principalPermissions: {
     kind: "seam",
-    owners: ["cloud"],
+    owners: ["module-ee"],
     justification:
       "Org-level grants attached to a PRINCIPAL rather than a role (RBAC spec §4.2/§10). " +
-      "Cloud's billing managers cannot be an `org_role` value — core is Apache-2.0 and carries " +
+      "The EE billing managers cannot be an `org_role` value — core is Apache-2.0 and carries " +
       "zero billing vocabulary — and the grant is per-user, so `permissionsContribution` " +
       "(role-keyed) cannot express it. Single-owner today; SSO group mapping is the second " +
       "consumer and promotes it to `extension`.",
   },
   emailOverrides: {
     kind: "seam",
-    owners: ["cloud"],
+    owners: ["module-ee"],
     justification:
-      "Email-template override into @appstrate/emails registry — cloud branding, single-owner by design.",
+      "Email-template override into @appstrate/emails registry — EE branding, single-owner by design.",
   },
 } satisfies Record<ContractMember, LedgerEntry>;
 
@@ -244,7 +256,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
  * platform maintained its whole call path.
  */
 const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
-  beforeUsage: { owners: ["cloud"] },
+  beforeUsage: { owners: ["module-ee"] },
   beforeSignup: { owners: ["oidc"] },
   afterSignup: { owners: ["oidc"] },
 };
@@ -255,10 +267,10 @@ const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
  * was emitted on every ledger write and listened to by nobody.
  */
 const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
-  onRunStatusChange: { owners: ["webhooks"] },
+  onRunStatusChange: { owners: ["webhooks", "module-chat"] },
   onRunConnectionMissing: { owners: ["webhooks"] },
-  onOrgCreate: { owners: ["mcp", "cloud"] },
-  onOrgDelete: { owners: ["mcp", "cloud"] },
+  onOrgCreate: { owners: ["mcp", "module-ee"] },
+  onOrgDelete: { owners: ["mcp", "module-ee"] },
 };
 
 /**
@@ -271,20 +283,20 @@ const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
 const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   logger: { owners: ["module-observability"] },
   http: { owners: ["module-chat", "module-observability"] },
-  usage: { owners: ["cloud"] },
+  usage: { owners: ["module-ee"] },
   inProcess: { owners: ["module-chat"] },
   resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },
   resolveChatAttachment: { owners: ["module-chat"] },
   cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
-  setFileStorageLimit: { owners: ["cloud"] },
+  setFileStorageLimit: { owners: ["module-ee"] },
 };
 
 /**
  * Detect a top-level object-literal member declaration on its own indented
  * line: `member:` (value), `member(` (method), or `member,` (ES shorthand —
- * how cloud declares `openApiPaths,`/`openApiTags,`). The scan is best-effort
+ * how module-ee declares `openApiPaths,`/`openApiTags,`). The scan is best-effort
  * (warnings only), so a stray false positive is a nudge, not a gate.
  */
 function declaresMember(source: string, member: string): boolean {
@@ -292,7 +304,7 @@ function declaresMember(source: string, member: string): boolean {
 }
 
 async function moduleIsPresent(root: string): Promise<boolean> {
-  return Bun.file(resolve(WORKSPACE, root, "index.ts")).exists();
+  return Bun.file(resolve(ROOT, root, "index.ts")).exists();
 }
 
 async function scanDeclarers(): Promise<{
@@ -304,7 +316,7 @@ async function scanDeclarers(): Promise<{
   const present = new Set<string>();
 
   for (const [moduleId, root] of Object.entries(DECLARER_ROOTS)) {
-    const absRoot = resolve(WORKSPACE, root);
+    const absRoot = resolve(ROOT, root);
     if (!(await moduleIsPresent(root))) continue; // private repo absent in CI — ledger covers it
     present.add(moduleId);
 
@@ -406,7 +418,7 @@ function auditNamedSurface(
 
 /**
  * Scan drift (soft) — assistive only; the scan can't see members assembled
- * dynamically, nor modules whose repo is absent (cloud in CI), so disagreement
+ * dynamically, nor a module whose root is absent from the checkout, so disagreement
  * is a nudge, not a gate.
  */
 function reportScanDrift(

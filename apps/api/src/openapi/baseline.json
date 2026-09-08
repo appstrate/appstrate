@@ -197,6 +197,16 @@
                               "enum": ["healthy", "degraded"]
                             }
                           }
+                        },
+                        "realtime": {
+                          "type": "object",
+                          "description": "PG LISTEN fan-out behind the realtime SSE streams. `degraded` when a channel failed to install. Advisory: not part of the top-level `status`.",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["healthy", "degraded"]
+                            }
+                          }
                         }
                       }
                     }
@@ -215,6 +225,9 @@
                       "latency_ms": 2.3
                     },
                     "agents": {
+                      "status": "healthy"
+                    },
+                    "realtime": {
                       "status": "healthy"
                     }
                   }
@@ -19085,7 +19098,7 @@
                       "type": "https://docs.appstrate.dev/errors/feature-unavailable",
                       "title": "Feature Unavailable",
                       "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/cloud` module).",
+                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
                       "instance": "urn:appstrate:request:req_2f1c6d84",
                       "code": "feature_unavailable",
                       "requestId": "req_2f1c6d84"
@@ -19269,7 +19282,7 @@
                       "type": "https://docs.appstrate.dev/errors/feature-unavailable",
                       "title": "Feature Unavailable",
                       "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/cloud` module).",
+                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
                       "instance": "urn:appstrate:request:req_2f1c6d84",
                       "code": "feature_unavailable",
                       "requestId": "req_2f1c6d84"
@@ -19355,7 +19368,7 @@
                       "type": "https://docs.appstrate.dev/errors/feature-unavailable",
                       "title": "Feature Unavailable",
                       "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/cloud` module).",
+                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
                       "instance": "urn:appstrate:request:req_2f1c6d84",
                       "code": "feature_unavailable",
                       "requestId": "req_2f1c6d84"

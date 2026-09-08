@@ -256,6 +256,16 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
+  // @appstrate/module-ee billing wire DTOs. The module runs its own database,
+  // so none of these has a Drizzle shared-type in this repo at all; the
+  // dashboard consumes the generated spec type.
+  EeBillingAccount: "module-ee billing wire DTO; the row lives in the module's own database",
+  EeBillingPlan: "module-ee plan catalog wire DTO, built from `config.ts`; no persisted row",
+  EeBillingManager:
+    "module-ee billing-manager wire DTO; the row lives in the module's own database",
+  EeBillingManagerList: "module-ee list envelope around EeBillingManager",
+  EeBillingContact:
+    "module-ee billing-contact wire DTO; the row lives in the module's own database",
   // File-explorer wire DTOs. Derived from ZIP entries, not from any table, so
   // there is no Drizzle shared-type to compare against; the canonical TS shape
   // lives in apps/api/src/services/package-files.ts and the SPA reads the

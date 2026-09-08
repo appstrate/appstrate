@@ -1,4 +1,6 @@
-import { getCloudDb } from "../db.ts";
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
+import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { ENDED_SUBSCRIPTION_STATUSES, HARD_BLOCKED_STATUSES } from "../config.ts";
@@ -97,7 +99,7 @@ export function isAffordable(quote: UsageQuote, account: AccountBalance): boolea
  * @param quote - the per-component credit estimate from `quoteUsage`.
  */
 export async function checkQuota(orgId: string, quote: UsageQuote): Promise<void> {
-  const db = getCloudDb();
+  const db = getEeDb();
 
   const [account] = await db
     .select({

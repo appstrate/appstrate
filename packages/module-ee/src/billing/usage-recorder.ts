@@ -1,15 +1,17 @@
-import { getCloudDb, type CloudDb, type CloudTx } from "../db.ts";
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
+import { getEeDb, type EeDb, type EeTx } from "../db.ts";
 import {
   billingAccounts,
   orgUsageRecords,
-  cloudBilledLlmUsage,
+  eeBilledLlmUsage,
   billingCursor,
 } from "../../drizzle/schema.ts";
 import { eq, sql, type SQL } from "drizzle-orm";
 import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 import { getPlatformServices } from "../platform.ts";
-import { getCloudEnv } from "../env.ts";
+import { getEeEnv } from "../env.ts";
 import { dollarsToCredits, CREDITS_PER_DOLLAR } from "../credits.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { getPlans } from "../config.ts";
@@ -25,7 +27,7 @@ const QUOTA_WARNING_THRESHOLD = 0.8;
 const LEDGER_LIST_MAX_LIMIT = 1000;
 
 /**
- * Decimal places of `cloud_usage_records.cost_usd` (`numeric(24,12)`). Every
+ * Decimal places of `ee_usage_records.cost_usd` (`numeric(24,12)`). Every
  * dollar amount is bound as a decimal STRING at exactly this scale, so
  * `stored + delta` and `stored - delta` are both exact in Postgres `numeric`
  * arithmetic — the pre-pass cumulative reconstructed by the `RETURNING`
@@ -57,7 +59,7 @@ export interface SweepResult {
    */
   processed: number;
   /**
-   * Rows this pass newly claimed (billed) into `cloud_billed_llm_usage`, from
+   * Rows this pass newly claimed (billed) into `ee_billed_llm_usage`, from
    * BOTH the forward batch and the replay window. Always ≥ {@link replayBilled}.
    */
   billed: number;
@@ -90,7 +92,7 @@ export interface SweepResult {
   replayBilled: number;
   /**
    * Orgs whose usage this pass recorded but could NOT debit because they have no
-   * `cloud_billing_accounts` row. Their debt is durable in `cloud_usage_records`;
+   * `ee_billing_accounts` row. Their debt is durable in `ee_usage_records`;
    * see {@link OrphanedOrgDebt}.
    */
   orphanedOrgs: number;
@@ -132,7 +134,7 @@ export interface CursorSeedResult {
 /**
  * Ensure the singleton billing cursor exists, seeding it at cutover.
  *
- * On the first boot after migration 0001 creates an empty `cloud_billing_cursor`,
+ * On the first boot after migration 0001 creates an empty `ee_billing_cursor`,
  * the watermark must be initialized to the platform's settled frontier
  * (`usage.settledFrontier()` — the highest id below which every row is settled)
  * so the sweep bills nothing retroactively yet strands no in-flight runner row.
@@ -157,7 +159,7 @@ export interface CursorSeedResult {
  */
 export async function ensureCursorSeeded(
   services: PlatformServices,
-  db: CloudDb,
+  db: EeDb,
 ): Promise<CursorSeedResult> {
   const [existing] = await db
     .select({ lastLlmUsageId: billingCursor.lastLlmUsageId })
@@ -192,7 +194,7 @@ export interface AccountDebit {
 
 /**
  * An org whose usage was recorded but could not be debited: it has billable
- * ledger rows and NO `cloud_billing_accounts` row.
+ * ledger rows and NO `ee_billing_accounts` row.
  *
  * This is reachable in production: `onOrgDelete` removes the billing account
  * immediately, but the platform REFUSES to delete an organization while a run
@@ -200,7 +202,7 @@ export interface AccountDebit {
  * lands here.
  *
  * Treatment (see {@link billLedgerRows}): the org is ISOLATED, never fatal. Its
- * rows are still claimed and its `cloud_usage_records` still accumulate — so the
+ * rows are still claimed and its `ee_usage_records` still accumulate — so the
  * exact debt is durable and auditable — but no account is debited and the pass
  * commits normally, so no other tenant's billing is held hostage. Repair with
  * `bun run repair:account -- <orgId> <ownerEmail>`, which re-provisions the
@@ -244,18 +246,18 @@ export interface BillOutcome {
  *
  * Rounding contract: credits are money, so nothing is dropped. For each
  * (org, context) bucket the call adds its won dollars to the context's
- * cumulative `cloud_usage_records.cost_usd` and bills the DELTA
+ * cumulative `ee_usage_records.cost_usd` and bills the DELTA
  * `dollarsToCredits(new cost_usd) - previously-debited cost_credits` (never
  * negative, since cumulative dollars only grow). A context whose cheap rows
  * straddle several passes therefore carries its sub-credit remainder forward in
  * `cost_usd` instead of flooring to 0 each pass. The org debit is the sum of its
- * buckets' deltas, keeping `cloud_billing_accounts` and `cloud_usage_records`
+ * buckets' deltas, keeping `ee_billing_accounts` and `ee_usage_records`
  * consistent. A null usage-context (rare: a row with no run/chat attribution)
  * accumulates in the org's synthetic (`unattributed`, orgId) context, so it
  * obeys the exact same carry-forward rule and loses no remainder.
  */
 export async function billLedgerRows(
-  tx: CloudTx,
+  tx: EeTx,
   billableRows: LlmUsageLedgerRow[],
 ): Promise<BillOutcome> {
   if (billableRows.length === 0) {
@@ -265,10 +267,10 @@ export async function billLedgerRows(
   // Claim the billable rows. `ON CONFLICT (llm_usage_id) DO NOTHING` skips rows
   // an earlier pass already claimed; `RETURNING` yields exactly this call's slice.
   const won = await tx
-    .insert(cloudBilledLlmUsage)
+    .insert(eeBilledLlmUsage)
     .values(billableRows.map((r) => ({ llmUsageId: r.id })))
     .onConflictDoNothing()
-    .returning({ llmUsageId: cloudBilledLlmUsage.llmUsageId });
+    .returning({ llmUsageId: eeBilledLlmUsage.llmUsageId });
 
   const billedIds = won.map((w) => w.llmUsageId);
   const billed = won.length;
@@ -385,7 +387,7 @@ export async function billLedgerRows(
       // the claims, the usage records AND the watermark advance of the whole
       // pass — so a single account-less org froze billing for the ENTIRE fleet
       // and every tick replayed the same doomed rows forever. The org's debt is
-      // still fully durable in `cloud_usage_records`; only the account debit is
+      // still fully durable in `ee_usage_records`; only the account debit is
       // impossible, because there is no account.
       orphans.push({ orgId, deltaCredits });
       continue;
@@ -422,12 +424,12 @@ function noProgress(args: {
 
 /**
  * One cursor sweep pass over the platform's append-only `llm_usage` ledger,
- * the cloud billing consumer.
+ * the EE billing consumer.
  *
- * Cloud owns its database, so it cannot SQL-join the platform ledger. It reads
+ * EE owns its database, so it cannot SQL-join the platform ledger. It reads
  * the ledger through `services.usage.list({ afterId })` (a serial-`id` cursor)
- * and claims each billable row by inserting a marker into the cloud-owned
- * `cloud_billed_llm_usage` side-car with `ON CONFLICT (llm_usage_id) DO NOTHING
+ * and claims each billable row by inserting a marker into the EE-owned
+ * `ee_billed_llm_usage` side-car with `ON CONFLICT (llm_usage_id) DO NOTHING
  * RETURNING`. The `RETURNING` set is exactly the rows THIS pass won, so a
  * re-read of already-processed rows is a cheap no-op. Open-core boundary
  * preserved: the OSS schema carries zero billing concepts.
@@ -436,7 +438,7 @@ function noProgress(args: {
  *   - Process the leading run of rows the watermark may safely pass, the
  *     "frontier". A SETTLED row is always in the frontier. An UNSETTLED row
  *     stalls the frontier ONLY when its `credentialSource` is `system` (a row
- *     cloud WILL bill once it settles: a runner row's `cost_usd` grows until its
+ *     EE WILL bill once it settles: a runner row's `cost_usd` grows until its
  *     run reaches a terminal status, so billing it early would under-count).
  *     An unsettled NON-system row (BYOK / null) is never billed and its
  *     `credentialSource` is fixed at first insert, so the watermark advances
@@ -446,7 +448,7 @@ function noProgress(args: {
  *     row can appear BELOW an already-advanced watermark and would otherwise be
  *     unreachable — and therefore unbilled and unlogged — forever. The window is
  *     a READ offset only; the committed watermark never moves backwards.
- *   - Advance the watermark to the last frontier row id, in the SAME cloud-DB
+ *   - Advance the watermark to the last frontier row id, in the SAME EE-DB
  *     transaction as the claims/debits. On any error nothing advances and the
  *     next pass retries from the last committed id. A stalled watermark (first
  *     row an unsettled system row) simply re-reads next pass; the claim table
@@ -477,7 +479,7 @@ export async function sweepLedgerBatch(
   hooks?: SweepHooks,
 ): Promise<SweepResult> {
   const services = getPlatformServices();
-  const db = getCloudDb();
+  const db = getEeDb();
 
   // 1. Load the watermark. Normally `init()` already seeded it at boot (closing
   //    the cutover loss window); this is the safety-net path — a pass that finds
@@ -504,14 +506,14 @@ export async function sweepLedgerBatch(
   //    is never billed and nothing logs it. Re-reading a bounded window below
   //    the watermark is what makes such a row reachable on a later pass. It
   //    costs one indexed range scan and debits nothing on the rows already
-  //    claimed, because `cloud_billed_llm_usage` — not the cursor — is the
+  //    claimed, because `ee_billed_llm_usage` — not the cursor — is the
   //    arbiter of what has been billed. Do not remove it as redundant work: the
   //    redundancy is the entire point, and the bug it prevents is silent.
   //
   //    The window is a READ offset ONLY. `scanFromId` never becomes the
   //    watermark; the committed advance stays `GREATEST`-guarded below, so the
   //    watermark is still strictly monotonic.
-  const replayWindow = getCloudEnv().CLOUD_RECONCILIATION_REPLAY_WINDOW;
+  const replayWindow = getEeEnv().CLOUD_RECONCILIATION_REPLAY_WINDOW;
   const scanFromId = Math.max(0, fromId - replayWindow); // clamped: a fresh cursor cannot underflow
   const replaySpan = fromId - scanFromId; // == min(replayWindow, fromId)
 
@@ -536,7 +538,7 @@ export async function sweepLedgerBatch(
 
   // 3. Frontier: the leading run of rows the watermark may safely pass. Settled
   //    rows always qualify. An unsettled row stalls the frontier ONLY when it is
-  //    a `system` row (cloud will bill it once it settles); an unsettled
+  //    a `system` row (EE will bill it once it settles); an unsettled
   //    NON-system row (BYOK / null) is never billed and its `credentialSource`
   //    is immutable from first insert, so we advance past it (it counts as
   //    processed, never billed) instead of letting a long BYOK run wedge billing
@@ -664,7 +666,7 @@ export function reportOrphanedOrg(orphan: OrphanedOrgDebt): void {
   logger.error("billable usage for an org with no billing account — recorded, NOT debited", {
     orgId: orphan.orgId,
     deltaCredits: orphan.deltaCredits,
-    // The debt is durable in cloud_usage_records; this re-provisions the account
+    // The debt is durable in ee_usage_records; this re-provisions the account
     // and applies it.
     repair: `bun run repair:account -- ${orphan.orgId} <owner-email>`,
   });

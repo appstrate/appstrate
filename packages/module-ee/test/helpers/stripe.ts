@@ -1,11 +1,12 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
- * Stripe mock server and webhook helpers for cloud module tests.
+ * Stripe mock server and webhook helpers for EE module tests.
  *
  * Uses Bun.serve on port 0 (OS-assigned) to mock all Stripe API endpoints
- * used by the cloud billing module. Supports response overrides, error
+ * used by the EE billing module. Supports response overrides, error
  * injection, and request recording for assertions.
  */
-import Stripe from "stripe";
 
 // ─── Request recording ──────────────────────────────────────────
 
@@ -17,28 +18,18 @@ export interface RecordedRequest {
 
 export const requests: RecordedRequest[] = [];
 
-export function clearRequests(): void {
+function clearRequests(): void {
   requests.length = 0;
 }
 
 // ─── Response overrides ─────────────────────────────────────────
 
-let customerOverride: Record<string, unknown> | null = null;
 let checkoutOverride: Record<string, unknown> | null = null;
-let portalOverride: Record<string, unknown> | null = null;
 let subscriptionOverride: Record<string, unknown> | null = null;
 let nextError: { status: number; body: Record<string, unknown> } | null = null;
 
-export function setCustomerResponse(response: Record<string, unknown>): void {
-  customerOverride = response;
-}
-
 export function setCheckoutResponse(response: Record<string, unknown>): void {
   checkoutOverride = response;
-}
-
-export function setPortalResponse(response: Record<string, unknown>): void {
-  portalOverride = response;
 }
 
 export function setSubscriptionResponse(response: Record<string, unknown>): void {
@@ -50,9 +41,7 @@ export function setNextError(status: number, body: Record<string, unknown>): voi
 }
 
 function resetOverrides(): void {
-  customerOverride = null;
   checkoutOverride = null;
-  portalOverride = null;
   subscriptionOverride = null;
   nextError = null;
 }
@@ -138,11 +127,6 @@ function defaultSubscriptionResponse(id: string): Record<string, unknown> {
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 
-export function getStripeMockPort(): number {
-  if (!server) throw new Error("Stripe mock server not started");
-  return server.port;
-}
-
 export function startStripeMock(): { port: number } {
   if (server) return { port: server.port };
 
@@ -165,9 +149,7 @@ export function startStripeMock(): { port: number } {
 
       // POST /v1/customers
       if (method === "POST" && path === "/v1/customers") {
-        const response = customerOverride ?? defaultCustomerResponse();
-        customerOverride = null;
-        return Response.json(response);
+        return Response.json(defaultCustomerResponse());
       }
 
       // POST /v1/customers/:id — customer update (billing contact push)
@@ -191,9 +173,7 @@ export function startStripeMock(): { port: number } {
 
       // POST /v1/billing_portal/sessions
       if (method === "POST" && path === "/v1/billing_portal/sessions") {
-        const response = portalOverride ?? defaultPortalResponse();
-        portalOverride = null;
-        return Response.json(response);
+        return Response.json(defaultPortalResponse());
       }
 
       // GET /v1/subscriptions/:id
@@ -219,13 +199,6 @@ export function startStripeMock(): { port: number } {
   });
 
   return { port: server.port };
-}
-
-export function stopStripeMock(): void {
-  if (server) {
-    server.stop(true);
-    server = null;
-  }
 }
 
 // ─── Webhook signature generation ───────────────────────────────

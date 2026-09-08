@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
@@ -8,12 +10,12 @@ export default defineConfig({
     url: process.env.DATABASE_URL!,
   },
   tablesFilter: [
-    "cloud_billing_accounts",
-    "cloud_usage_records",
-    "cloud_stripe_events",
-    "cloud_free_tier_claims",
-    "cloud_billed_llm_usage",
-    "cloud_billing_cursor",
-    "cloud_billing_managers",
+    "ee_billing_accounts",
+    "ee_usage_records",
+    "ee_stripe_events",
+    "ee_free_tier_claims",
+    "ee_billed_llm_usage",
+    "ee_billing_cursor",
+    "ee_billing_managers",
   ],
 });

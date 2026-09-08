@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
- * Test double for the platform `PlatformServices` handle cloud captures at
- * `init`. Cloud's only platform reads are the append-only `llm_usage` ledger
+ * Test double for the platform `PlatformServices` handle EE captures at
+ * `init`. EE's only platform reads are the append-only `llm_usage` ledger
  * cursor — `usage.list({ afterId, limit, credentialSource })` and
  * `usage.settledFrontier()`. Billing tests drive it by seeding `mockLedger` (an
  * id-ordered array of `LlmUsageLedgerRow`s) instead of inserting into the
- * platform-owned `llm_usage` table (which no longer lives in cloud's DB).
+ * platform-owned `llm_usage` table (which no longer lives in EE's DB).
  */
 
 import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
@@ -18,7 +20,7 @@ let mockLedgerError = false;
 /**
  * Runs inside `usage.list`, after `afterId` has been captured by the sweep but
  * before its transaction commits. Lets a test simulate a concurrent sweeper
- * mutating cloud state (e.g. advancing the watermark) mid-pass.
+ * mutating EE state (e.g. advancing the watermark) mid-pass.
  */
 let mockListHook: (() => void | Promise<void>) | null = null;
 

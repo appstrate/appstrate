@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { SupportedLocale } from "./types.ts";
 
 export function escapeHtml(str: string): string {
@@ -22,10 +24,10 @@ const orgLabels: Record<SupportedLocale, string> = {
 };
 
 /**
- * Cloud-branded email layout — Appstrate logo, light theme with transparent background.
+ * Appstrate Cloud-branded email layout — Appstrate logo, light theme with transparent background.
  * Works in both light and dark mode email clients.
  */
-export function wrapCloudLayout({ locale, content, footer, orgName }: LayoutProps): string {
+export function wrapEeLayout({ locale, content, footer, orgName }: LayoutProps): string {
   const trimmedOrgName = orgName?.trim();
   const orgLine = trimmedOrgName
     ? `<p style="margin:0 0 16px;font-size:13px;color:#737373;">${orgLabels[locale] ?? orgLabels.fr} <strong style="color:#525252;">${escapeHtml(trimmedOrgName)}</strong></p>

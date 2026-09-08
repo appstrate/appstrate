@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { getStripe } from "./client.ts";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { and, eq, isNull } from "drizzle-orm";
 import { getPlans } from "../config.ts";
@@ -14,7 +16,7 @@ export async function createCheckoutSession(
   const plan = getPlans()[planId];
   if (!plan || !plan.stripePriceId) throw new Error(`Invalid plan: ${planId}`);
 
-  const db = getCloudDb();
+  const db = getEeDb();
 
   const [account] = await db
     .select({
@@ -31,7 +33,7 @@ export async function createCheckoutSession(
   if (!customerId) {
     // The customer carries the billing contact so Stripe addresses its OWN
     // receipts and dunning mail — otherwise Stripe has no address at all and
-    // every payment notice depends on cloud noticing the webhook first.
+    // every payment notice depends on EE noticing the webhook first.
     // `undefined`, not `null`: Stripe's API treats an absent field as "unset",
     // and an org whose owner the platform can no longer resolve still checks out.
     const email = await resolvePrimaryBillingEmail(orgId, account.billingEmail);

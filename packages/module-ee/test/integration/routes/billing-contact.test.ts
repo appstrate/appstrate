@@ -1,11 +1,16 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateCloudTables } from "../../helpers/db.ts";
+import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount, seedBillingManager } from "../../helpers/seed.ts";
 import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { resetStripeMock, requests } from "../../helpers/stripe.ts";
 import { resolveBillingRecipients } from "../../../src/emails/recipients.ts";
 import { createCheckoutSession } from "../../../src/stripe/checkout.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 /**
  * Billing contact (RBAC spec §10): the address invoices go to, the CC list, and
@@ -27,7 +32,7 @@ describe("billing contact", () => {
   }
 
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     resetStripeMock();
     seedOrgMembers(orgId, [
       { userId: "user-owner", email: "owner@example.com", role: "owner" },

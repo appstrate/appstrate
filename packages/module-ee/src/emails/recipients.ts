@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Who a billing email goes to (RBAC spec §10):
  *
@@ -13,7 +15,7 @@
  */
 
 import { eq } from "drizzle-orm";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { listBillingManagers } from "../billing/managers.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
@@ -55,7 +57,7 @@ export function composeBillingRecipients(input: {
  * the platform round-trip.
  */
 export async function resolveBillingRecipients(orgId: string): Promise<string[]> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [account] = await db
     .select({
       billingEmail: billingAccounts.billingEmail,

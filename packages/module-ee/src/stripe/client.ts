@@ -1,11 +1,13 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import Stripe from "stripe";
-import { getCloudEnv } from "../env.ts";
+import { getEeEnv } from "../env.ts";
 
 let _stripe: Stripe | null = null;
 
 export function getStripe(): Stripe {
   if (!_stripe) {
-    _stripe = new Stripe(getCloudEnv().STRIPE_SECRET_KEY, {
+    _stripe = new Stripe(getEeEnv().STRIPE_SECRET_KEY, {
       apiVersion: "2025-08-27.basil",
       // Mock-host redirect is a TEST-ONLY hook. Gating on NODE_ENV keeps an
       // operator-set STRIPE_MOCK_HOST from silently rerouting production Stripe

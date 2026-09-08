@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { AppstrateModule, BeforeUsageParams, UsageRejection } from "@appstrate/core/module";
-import { initCloudDb, migrateCloudDb, closeCloudDb } from "./db.ts";
-import { initCloudRedis, getCloudRedis } from "./redis.ts";
-import { getCloudEnv } from "./env.ts";
+import { initEeDb, migrateEeDb, closeEeDb } from "./db.ts";
+import { initEeRedis, getEeRedis } from "./redis.ts";
+import { getEeEnv } from "./env.ts";
 import { setPlatformServices } from "./platform.ts";
-import { setOrgQueries, type CloudInitContext } from "./platform-org-queries.ts";
+import { setOrgQueries, type EeInitContext } from "./platform-org-queries.ts";
 import { checkQuota, QuotaExceededError } from "./billing/quota-check.ts";
 import { quoteUsage, assertExecutionFacts } from "./billing/usage-quote.ts";
 import { logger } from "./logger.ts";
@@ -14,17 +16,19 @@ import {
   drainBillingSweeper,
 } from "./billing/billing-sweeper.ts";
 import { ensureCursorSeeded } from "./billing/usage-recorder.ts";
-import { getCloudDb } from "./db.ts";
+import { getEeDb } from "./db.ts";
 import { onOrgCreate, onOrgDelete } from "./onboarding/post-signup.ts";
-import { createBillingRoutes } from "./routes/billing.ts";
+import { checkoutBodySchema, createBillingRoutes, managersBodySchema } from "./routes/billing.ts";
 import { openApiPaths, openApiTags, openApiComponentSchemas } from "./openapi.ts";
-import { renderCloudVerificationEmail } from "./emails/templates/verification.ts";
-import { renderCloudInvitationEmail } from "./emails/templates/invitation.ts";
-import { renderCloudMagicLinkEmail } from "./emails/templates/magic-link.ts";
-import { renderCloudResetPasswordEmail } from "./emails/templates/reset-password.ts";
+import { renderEeVerificationEmail } from "./emails/templates/verification.ts";
+import { renderEeInvitationEmail } from "./emails/templates/invitation.ts";
+import { renderEeMagicLinkEmail } from "./emails/templates/magic-link.ts";
+import { renderEeResetPasswordEmail } from "./emails/templates/reset-password.ts";
 import { initBillingEmail } from "./emails/send.ts";
 import { resolveBillingRecipients } from "./emails/recipients.ts";
 import { BILLING_MANAGER_PERMISSIONS, isBillingManager } from "./billing/managers.ts";
+import { billingContactPatchSchema } from "./billing/contact.ts";
+import { z } from "zod";
 
 // Register `billing` as a module-owned RBAC resource. The declaration
 // merging on `ModuleResources` feeds the typed `Resource` union consumed
@@ -32,7 +36,7 @@ import { BILLING_MANAGER_PERMISSIONS, isBillingManager } from "./billing/manager
 // declared via `permissionsContribution` on the module export below. Both
 // surfaces MUST stay in sync (compile-time vocabulary === runtime grants).
 //
-// Zero-footprint: when cloud is absent from `MODULES`, `billing` disappears
+// Zero-footprint: when EE is absent from `MODULES`, `billing` disappears
 // from `CoreResources ∪ ModuleResources`, role sets, and the API-key
 // allowlist. OSS deployments no longer carry dead `billing:*` scope strings.
 declare module "@appstrate/core/permissions" {
@@ -43,16 +47,16 @@ declare module "@appstrate/core/permissions" {
 
 // Email template overrides — branded Appstrate Cloud versions
 const emailOverrides = {
-  verification: renderCloudVerificationEmail,
-  invitation: renderCloudInvitationEmail,
-  "magic-link": renderCloudMagicLinkEmail,
-  "reset-password": renderCloudResetPasswordEmail,
+  verification: renderEeVerificationEmail,
+  invitation: renderEeInvitationEmail,
+  "magic-link": renderEeMagicLinkEmail,
+  "reset-password": renderEeResetPasswordEmail,
 };
 
 let _appUrl: string | null = null;
 
 function getAppUrl(): string {
-  if (!_appUrl) throw new Error("Cloud not initialized. Call init() first.");
+  if (!_appUrl) throw new Error("EE not initialized. Call init() first.");
   return _appUrl;
 }
 
@@ -60,45 +64,45 @@ function getAppUrl(): string {
 // AppstrateModule — native contract implementation
 // ---------------------------------------------------------------------------
 
-const cloudModule: AppstrateModule = {
+const eeModule: AppstrateModule = {
   manifest: {
-    id: "cloud",
+    id: "ee",
     name: "Appstrate Cloud",
     version: "0.1.0",
   },
 
-  // `CloudInitContext` narrows the platform's `ModuleInitContext` with the two
+  // `EeInitContext` narrows the platform's `ModuleInitContext` with the two
   // org queries this module needs (`platform-org-queries.ts`). `init` is a
-  // method on the contract, so the narrowing is accepted — and it puts cloud's
+  // method on the contract, so the narrowing is accepted — and it puts EE's
   // requirement in the signature instead of in a comment.
-  async init(ctx: CloudInitContext) {
-    // Fail-fast: validate all Cloud env vars (incl. CLOUD_DATABASE_URL) first.
-    let cloudEnv;
+  async init(ctx: EeInitContext) {
+    // Fail-fast: validate all EE env vars (incl. EE_DATABASE_URL) first.
+    let eeEnv;
     try {
-      cloudEnv = getCloudEnv();
+      eeEnv = getEeEnv();
     } catch {
-      throw new Error("Cloud env vars not configured (Stripe keys / CLOUD_DATABASE_URL missing)");
+      throw new Error("EE env vars not configured (Stripe keys / EE_DATABASE_URL missing)");
     }
 
     _appUrl = ctx.appUrl;
-    // Capture the platform handle — cloud's ONLY platform reads are the
+    // Capture the platform handle — EE's ONLY platform reads are the
     // append-only `llm_usage` ledger cursor (`services.usage.list` /
     // `services.usage.settledFrontier`), never a cross-DB join.
     setPlatformServices(ctx.services);
-    // The org queries answer what cloud's own database cannot: who owns this
+    // The org queries answer what EE's own database cannot: who owns this
     // org, and whether a user id is a member of it. Read directly — the
     // `@appstrate/core` floor in `package.json` is what guarantees they exist.
     setOrgQueries(ctx);
 
-    // Cloud owns its database: connect + self-migrate against CLOUD_DATABASE_URL.
+    // EE owns its database: connect + self-migrate against EE_DATABASE_URL.
     // `ModuleInitContext` exposes no platform database at all — a separate-tenant
     // module reads platform data through `ctx.services`, never through a
     // connection of its own.
-    initCloudDb(cloudEnv.CLOUD_DATABASE_URL);
-    await migrateCloudDb(cloudEnv.CLOUD_DATABASE_URL);
+    initEeDb(eeEnv.EE_DATABASE_URL);
+    await migrateEeDb(eeEnv.EE_DATABASE_URL);
 
     if (ctx.redisUrl) {
-      initCloudRedis(ctx.redisUrl);
+      initEeRedis(ctx.redisUrl);
     }
 
     // Initialize billing email transport. `getOrgName` is REQUIRED on
@@ -112,16 +116,16 @@ const cloudModule: AppstrateModule = {
 
     // Seed the billing cursor synchronously, BEFORE the sweeper starts and
     // before the platform server takes traffic. On the first boot after
-    // migration 0001 creates an empty `cloud_billing_cursor`, this initializes
+    // migration 0001 creates an empty `ee_billing_cursor`, this initializes
     // the watermark at the platform's settled frontier NOW, so any billable
     // usage recorded between boot and the first sweep tick (~5 min) is billed by
     // that first tick instead of falling below a watermark only set at the tick.
     // Idempotent + race-safe (ON CONFLICT DO NOTHING); a warm boot is a no-op.
-    await ensureCursorSeeded(ctx.services, getCloudDb());
+    await ensureCursorSeeded(ctx.services, getEeDb());
 
-    // Billing sweeper — the cloud metering consumer. Sweeps the platform's
+    // Billing sweeper — the EE metering consumer. Sweeps the platform's
     // append-only `llm_usage` ledger by serial-`id` cursor, claims the
-    // platform-provided rows into `cloud_billed_llm_usage`, and debits credits.
+    // platform-provided rows into `ee_billed_llm_usage`, and debits credits.
     // A failed pass advances nothing and the next tick retries. Its tick also
     // starts (without awaiting) the throttled storage-entitlement reconcile.
     // Disabled when `CLOUD_RECONCILIATION_INTERVAL_SECONDS=0`.
@@ -138,9 +142,36 @@ const cloudModule: AppstrateModule = {
   openApiTags,
   openApiComponentSchemas,
 
+  // The request bodies the routes actually parse, so `verify:openapi` §4 can
+  // hold each one against the shape `openapi.ts` documents. `POST
+  // /api/billing/webhooks` is absent because it parses no JSON at all — the
+  // Stripe signature covers the raw text (`EXEMPT_REQUEST_BODIES`).
+  openApiSchemas() {
+    return [
+      {
+        method: "POST",
+        path: "/api/billing/checkout",
+        jsonSchema: z.toJSONSchema(checkoutBodySchema) as Record<string, unknown>,
+        description: "Create a Stripe Checkout session",
+      },
+      {
+        method: "PUT",
+        path: "/api/billing/managers",
+        jsonSchema: z.toJSONSchema(managersBodySchema) as Record<string, unknown>,
+        description: "Replace the billing-manager set",
+      },
+      {
+        method: "PATCH",
+        path: "/api/billing/contact",
+        jsonSchema: z.toJSONSchema(billingContactPatchSchema) as Record<string, unknown>,
+        description: "Update the billing contact",
+      },
+    ];
+  },
+
   // `custom_roles` gates the platform's own `POST/PATCH/DELETE /api/roles`
   // (RBAC spec §9): the space-role data model, the presets and the read routes
-  // are OSS, but DEFINING a custom bundle is the EE surface, and cloud is the
+  // are OSS, but DEFINING a custom bundle is the EE surface, and EE is the
   // module that licenses it today.
   features: { billing: true, custom_roles: true },
 
@@ -284,15 +315,15 @@ const cloudModule: AppstrateModule = {
     // cleared FIRST so nothing new starts while we drain.
     stopBillingSweeper();
     await drainBillingSweeper();
-    const redis = getCloudRedis();
+    const redis = getEeRedis();
     if (redis) {
       await redis.quit();
     }
-    await closeCloudDb();
+    await closeEeDb();
   },
 };
 
-export default cloudModule;
+export default eeModule;
 
 // ---------------------------------------------------------------------------
 // Named exports — direct access for tests + custom integrations

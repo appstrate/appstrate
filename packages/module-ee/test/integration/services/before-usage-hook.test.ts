@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Unified `beforeUsage` admission gate.
  *
@@ -13,25 +15,28 @@
  */
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { getCloudDb, truncateCloudTables } from "../../helpers/db.ts";
+import { getEeDb, truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
-import cloudModule from "../../../src/index.ts";
+import eeModule from "../../../src/index.ts";
 import { ApiError } from "@appstrate/core/api-errors";
 import {
   ESTIMATED_MODEL_CREDITS_PER_RUN,
   ESTIMATED_MODEL_CREDITS_PER_CHAT_TURN,
 } from "../../../src/config.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000900";
 
-function beforeUsage(...args: Parameters<NonNullable<typeof cloudModule.hooks>["beforeUsage"]>) {
-  return cloudModule.hooks!.beforeUsage!(...args);
+function beforeUsage(...args: Parameters<NonNullable<typeof eeModule.hooks>["beforeUsage"]>) {
+  return eeModule.hooks!.beforeUsage!(...args);
 }
 
 describe("beforeUsage hook", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
   });
 
   it("allows a system run when the org has credits (null)", async () => {
@@ -266,7 +271,7 @@ describe("beforeUsage hook", () => {
       });
       expect(result).toBeNull();
 
-      const rows = await getCloudDb()
+      const rows = await getEeDb()
         .select({ orgId: billingAccounts.orgId })
         .from(billingAccounts)
         .where(eq(billingAccounts.orgId, orgId));
@@ -530,7 +535,7 @@ describe("beforeUsage hook", () => {
   });
 
   describe("fail-CLOSED on an unexpected error", () => {
-    // This hook is the only thing between an unreachable cloud DB and unmetered
+    // This hook is the only thing between an unreachable EE DB and unmetered
     // usage: it must BLOCK, not admit. Nothing pinned that before — replacing
     // its `return { status: 500 }` with `return null`, i.e. admitting unbilled
     // usage whenever the billing DB hiccups, broke no test.

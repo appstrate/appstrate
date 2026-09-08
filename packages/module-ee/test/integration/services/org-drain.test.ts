@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Final billing drain on organization deletion.
  *
@@ -11,19 +13,22 @@
  */
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
-import { truncateCloudTables, getCloudDb } from "../../helpers/db.ts";
+import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
 import { seedBillingAccount, seedLlmUsage, seedBillingCursor } from "../../helpers/seed.ts";
 import { drainOrgUsage } from "../../../src/billing/org-drain.ts";
 import { onOrgDelete } from "../../../src/onboarding/post-signup.ts";
 import { runBillingSweep, _resetBillingSweeperForTests } from "../../../src/billing/billing-sweeper.ts"; // prettier-ignore
-import { _resetCloudEnvForTests } from "../../../src/env.ts";
-import { billingAccounts, billingCursor, cloudBilledLlmUsage } from "../../../drizzle/schema.ts";
+import { _resetEeEnvForTests } from "../../../src/env.ts";
+import { billingAccounts, billingCursor, eeBilledLlmUsage } from "../../../drizzle/schema.ts";
+import { useEeTestSeams } from "../../helpers/setup.ts";
+
+useEeTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000200";
 const otherOrgId = "00000000-0000-4000-a000-000000000201";
 
 async function creditsUsed(org: string): Promise<number | null> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [account] = await db
     .select({ creditsUsed: billingAccounts.creditsUsed })
     .from(billingAccounts)
@@ -32,7 +37,7 @@ async function creditsUsed(org: string): Promise<number | null> {
 }
 
 async function cursorValue(): Promise<number> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [row] = await db
     .select({ lastLlmUsageId: billingCursor.lastLlmUsageId })
     .from(billingCursor)
@@ -41,19 +46,19 @@ async function cursorValue(): Promise<number> {
 }
 
 async function claimedIds(ids: number[]): Promise<number[]> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const rows = await db
-    .select({ llmUsageId: cloudBilledLlmUsage.llmUsageId })
-    .from(cloudBilledLlmUsage)
-    .where(inArray(cloudBilledLlmUsage.llmUsageId, ids));
+    .select({ llmUsageId: eeBilledLlmUsage.llmUsageId })
+    .from(eeBilledLlmUsage)
+    .where(inArray(eeBilledLlmUsage.llmUsageId, ids));
   return rows.map((r) => r.llmUsageId).sort((a, b) => a - b);
 }
 
 describe("final usage drain on org deletion", () => {
   beforeEach(async () => {
-    await truncateCloudTables();
+    await truncateEeTables();
     process.env.CLOUD_RECONCILIATION_BATCH_SIZE = "100";
-    _resetCloudEnvForTests();
+    _resetEeEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });

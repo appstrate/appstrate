@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
  * Billing contact — where invoices, receipts and payment alerts go
  * (RBAC spec §10).
  *
- * Two columns on `cloud_billing_accounts`: `billing_email`, the one primary
+ * Two columns on `ee_billing_accounts`: `billing_email`, the one primary
  * address, and `billing_cc`, up to five addresses copied on every billing
  * email. Neither has to belong to a platform user — "send the invoices to
  * accounting@" is the case this exists for, and requiring a user account for it
@@ -19,7 +21,7 @@
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { getCloudDb } from "../db.ts";
+import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { getStripe } from "../stripe/client.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
@@ -45,7 +47,7 @@ export interface BillingContact {
 
 /** The org's contact, or null when it has no billing account. */
 export async function getBillingContact(orgId: string): Promise<BillingContact | null> {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [account] = await db
     .select({
       billingEmail: billingAccounts.billingEmail,
@@ -76,7 +78,7 @@ export async function resolvePrimaryBillingEmail(
  * Stripe customer so Stripe's own receipts follow.
  *
  * The Stripe write is best-effort and deliberately AFTER the local commit: the
- * contact is cloud's record, and a Stripe outage must not refuse an address
+ * contact is EE's record, and a Stripe outage must not refuse an address
  * change the org can see is correct. A failed push is logged; the next checkout
  * re-sends the address anyway.
  *
@@ -86,7 +88,7 @@ export async function updateBillingContact(
   orgId: string,
   patch: z.infer<typeof billingContactPatchSchema>,
 ): Promise<BillingContact | null> {
-  const db = getCloudDb();
+  const db = getEeDb();
 
   const [updated] = await db
     .update(billingAccounts)

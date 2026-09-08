@@ -1,17 +1,18 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 /**
- * Seed factories for cloud module tests.
+ * Seed factories for EE module tests.
  *
- * Each function inserts a row into the corresponding cloud table
+ * Each function inserts a row into the corresponding EE table
  * and returns the inserted record. Required fields must be provided;
  * optional fields have sensible defaults.
  */
-import { getCloudDb } from "../../src/db.ts";
+import { getEeDb } from "../../src/db.ts";
 import {
   billingAccounts,
   orgUsageRecords,
-  stripeEvents,
   freeTierClaims,
-  cloudBilledLlmUsage,
+  eeBilledLlmUsage,
   billingCursor,
   billingManagers,
 } from "../../drizzle/schema.ts";
@@ -31,7 +32,7 @@ export async function seedBillingAccount(overrides: {
   billingEmail?: string | null;
   billingCc?: string[];
 }) {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [account] = await db
     .insert(billingAccounts)
     .values({
@@ -57,7 +58,7 @@ export async function seedUsageRecord(overrides: {
   contextId: string;
   costCredits: number;
 }) {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [record] = await db
     .insert(orgUsageRecords)
     .values({
@@ -70,25 +71,8 @@ export async function seedUsageRecord(overrides: {
   return record!;
 }
 
-export async function seedStripeEvent(overrides: {
-  eventId: string;
-  eventType: string;
-  status?: "processing" | "done";
-}) {
-  const db = getCloudDb();
-  const [event] = await db
-    .insert(stripeEvents)
-    .values({
-      eventId: overrides.eventId,
-      eventType: overrides.eventType,
-      status: overrides.status ?? "processing",
-    })
-    .returning();
-  return event!;
-}
-
 export async function seedFreeTierClaim(overrides: { email: string }) {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [claim] = await db
     .insert(freeTierClaims)
     .values({
@@ -107,10 +91,10 @@ export function resetLlmUsageIdSeq(): void {
 
 /**
  * Append a ledger row the platform would return via the mock
- * `PlatformServices.usage.list`. Cloud reads the ledger through that cursor —
+ * `PlatformServices.usage.list`. EE reads the ledger through that cursor —
  * never from its own DB — so tests populate the mock, not a table. Returns the
  * synthetic `llm_usage.id` so tests can assert the resulting billing marker in
- * `cloud_billed_llm_usage`.
+ * `ee_billed_llm_usage`.
  *
  * Defaults model the common case: a settled, platform-provided ("system") agent
  * run row. Tests override `settled`, `credentialSource`, `contextType`, etc. to
@@ -150,7 +134,7 @@ export function seedLlmUsage(overrides: {
 }
 
 /**
- * Insert a billing marker into the cloud-owned `cloud_billed_llm_usage`,
+ * Insert a billing marker into the EE-owned `ee_billed_llm_usage`,
  * simulating a past sweep that already claimed the ledger row. Used by tests
  * that need a pre-billed row (double-sweep idempotency).
  */
@@ -158,8 +142,8 @@ export async function markLlmUsageBilled(args: {
   llmUsageId: number;
   billedAt?: Date;
 }): Promise<void> {
-  const db = getCloudDb();
-  await db.insert(cloudBilledLlmUsage).values({
+  const db = getEeDb();
+  await db.insert(eeBilledLlmUsage).values({
     llmUsageId: args.llmUsageId,
     billedAt: args.billedAt ?? new Date(),
   });
@@ -167,20 +151,20 @@ export async function markLlmUsageBilled(args: {
 
 /** Seed the singleton billing cursor at a given watermark. */
 export async function seedBillingCursor(lastLlmUsageId: number): Promise<void> {
-  const db = getCloudDb();
+  const db = getEeDb();
   await db
     .insert(billingCursor)
     .values({ id: true, lastLlmUsageId })
     .onConflictDoUpdate({ target: billingCursor.id, set: { lastLlmUsageId } });
 }
 
-/** Grant `billing:*` to a user through the cloud-owned billing-manager table. */
+/** Grant `billing:*` to a user through the EE-owned billing-manager table. */
 export async function seedBillingManager(overrides: {
   orgId: string;
   userId: string;
   addedBy?: string;
 }) {
-  const db = getCloudDb();
+  const db = getEeDb();
   const [row] = await db
     .insert(billingManagers)
     .values({

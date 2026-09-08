@@ -426,7 +426,7 @@ const config: KnipConfig = {
        * exact: a new module dependency is not silently covered, it has to be
        * named here.
        */
-      ignoreDependencies: ["@appstrate/module-(chat|claude-code|codex|observability)"],
+      ignoreDependencies: ["@appstrate/module-(chat|claude-code|codex|ee|observability)"],
     },
 
     // The one workspace whose entries are NOT derived from its manifest:
@@ -513,6 +513,19 @@ const config: KnipConfig = {
     },
     "packages/module-codex": {
       entry: [...manifestEntries("packages/module-codex"), "test/tables.ts"],
+    },
+    // Plus `test/requirements.ts`, which only the root test preload and the
+    // tier-0 runner read (`test/setup/modules.ts`); this is the one module that
+    // declares it.
+    "packages/module-ee": {
+      entry: [
+        ...manifestEntries("packages/module-ee"),
+        "test/tables.ts",
+        "test/requirements.ts",
+        // Not at the workspace root, so knip's drizzle plugin does not find it.
+        // Run by this package's `db:generate` / `db:migrate`.
+        "drizzle/drizzle.config.ts",
+      ],
     },
     "packages/module-observability": {
       entry: [...manifestEntries("packages/module-observability"), "test/tables.ts"],

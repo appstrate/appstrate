@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+
 import type { InvitationProps, RenderedEmail } from "../types.ts";
-import { wrapCloudLayout, ctaButton, escapeHtml } from "../layout.ts";
+import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -24,7 +26,7 @@ function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
 }
 
-export function renderCloudInvitationEmail(props: InvitationProps): RenderedEmail {
+export function renderEeInvitationEmail(props: InvitationProps): RenderedEmail {
   const { inviteUrl, orgName, inviterName, role, locale } = props;
   const s = strings[locale] ?? strings.fr;
 
@@ -44,6 +46,6 @@ ${ctaButton(s.button, inviteUrl)}
 
   return {
     subject,
-    html: wrapCloudLayout({ locale, content, footer: s.footer }),
+    html: wrapEeLayout({ locale, content, footer: s.footer }),
   };
 }
