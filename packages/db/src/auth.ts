@@ -410,6 +410,13 @@ export interface CreateAuthOptions {
   plugins: BetterAuthPluginFactory;
   /** Shared storage for the built-in rate limiter. */
   rateLimitStorage: BetterAuthRateLimitStorage;
+  /**
+   * Whether the built-in limiter is armed. Better Auth arms it in production
+   * only; the platform keeps that split so development and e2e are not held
+   * to rules such as three sign-ups per ten seconds per IP, and the test
+   * harness arms it to exercise the rules.
+   */
+  rateLimitEnabled: boolean;
   /** Header the platform stamps with the resolved client IP. */
   clientIpHeader: string;
 }
@@ -702,12 +709,10 @@ function buildAuth(options: CreateAuthOptions) {
     plugins: [...basePlugins, ...extraPlugins],
 
     rateLimit: {
-      // Better Auth arms its limiter in production only and counts in
-      // per-process memory, so a fleet of replicas grants each caller one
-      // budget per replica. On, everywhere, against the shared platform
-      // limiter: one budget per caller, and the same rules exercised in
-      // development and in tests as in production.
-      enabled: true,
+      // Better Auth counts in per-process memory, so a fleet of replicas
+      // grants each caller one budget per replica. The shared platform
+      // limiter makes it one budget per caller.
+      enabled: options.rateLimitEnabled,
       customStorage: options.rateLimitStorage,
     },
 

@@ -409,6 +409,7 @@ createAuth({
     >;
   },
   rateLimitStorage: betterAuthRateLimitStorage(),
+  rateLimitEnabled: true,
   clientIpHeader: CLIENT_IP_HEADER,
 });
 

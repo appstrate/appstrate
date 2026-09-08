@@ -137,6 +137,7 @@ export async function bootCritical(): Promise<void> {
   createAuth({
     plugins: () => getModuleContributions().betterAuthPlugins as BetterAuthPluginList,
     rateLimitStorage: betterAuthRateLimitStorage(),
+    rateLimitEnabled: env.NODE_ENV === "production",
     clientIpHeader: CLIENT_IP_HEADER,
   });
 

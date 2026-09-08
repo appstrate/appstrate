@@ -21,6 +21,7 @@ describe("Better Auth factory", () => {
     createAuth({
       plugins: () => [],
       rateLimitStorage: betterAuthRateLimitStorage(),
+      rateLimitEnabled: true,
       clientIpHeader: CLIENT_IP_HEADER,
     }); // no-op
     const after = getAuth();
