@@ -590,8 +590,9 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // stdout, drained stderr arriving after the platform's
     // "exited non-zero" log) still surfaces a reason in the same place
     // operators look first. Fire-and-forget — this is a diagnostic-only
-    // observer; the actual exit handling stays in pi.ts.
-    proc.exited.then(async (code) => {
+    // observer; the actual exit handling stays in pi.ts. `void` is safe here:
+    // `Bun.Subprocess.exited` never rejects and the handler only sleeps and logs.
+    void proc.exited.then(async (code) => {
       if (code === 0) return;
       // Give the stderr drain a moment to flush remaining buffered lines
       // (the reader sees `done: true` only after the kernel closes the pipe).
@@ -649,7 +650,9 @@ export class ProcessOrchestrator implements RunOrchestrator {
     if (!ph?.stdoutPath || !ph?.proc) return;
 
     let exited = false;
-    ph.proc.exited.then(() => {
+    // Fire-and-forget flag flip read by the tail loop below; `exited` never
+    // rejects and the handler cannot throw.
+    void ph.proc.exited.then(() => {
       exited = true;
     });
     yield* tailFileLines(ph.stdoutPath, () => exited, signal);
@@ -716,12 +719,16 @@ export class ProcessOrchestrator implements RunOrchestrator {
     for (let attempt = 0; attempt < retries; attempt++) {
       const s1 = Bun.serve({ port: 0, fetch: () => new Response() });
       const port = s1.port ?? 0;
-      s1.stop(true);
+      // AWAITED: `Server.stop()` returns a promise that settles once the socket
+      // is actually released. Returning a port whose probe server is still
+      // bound is exactly the EADDRINUSE-at-sidecar-boot this function exists to
+      // avoid.
+      await s1.stop(true);
       if (!port) continue;
       if (reserved.has(port) || reserved.has(port + 1)) continue;
       try {
         const s2 = Bun.serve({ port: port + 1, fetch: () => new Response() });
-        s2.stop(true);
+        await s2.stop(true);
         return port;
       } catch {
         continue;

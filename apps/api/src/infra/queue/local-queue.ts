@@ -364,10 +364,21 @@ export class LocalQueue<T> implements JobQueue<T> {
       }
     };
 
-    run(job).finally(() => {
-      this.activeJobs--;
-      this.drain();
-    });
+    run(job)
+      .finally(() => {
+        this.activeJobs--;
+        this.drain();
+      })
+      // `run` swallows every rejection from `handler`, but its own catch block
+      // runs caller-supplied code (`backoffStrategy`) and the logger — a throw
+      // there escapes as an unhandled rejection, which takes the process down.
+      // Terminal `.catch` so the queue logs it and keeps draining instead.
+      .catch((err) => {
+        this.log.error(`${this.name} job runner crashed`, {
+          jobId: job.id,
+          error: getErrorMessage(err),
+        });
+      });
   }
 
   /**

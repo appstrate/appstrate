@@ -382,7 +382,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         event.tool === "invoke_operation" &&
         (event.outcome === "invoked" || event.outcome === "denied")
       ) {
-        trackAudit(
+        // `void`: deliberately off the response path — the rationale, and what
+        // drains these before the process exits, is the comment above.
+        void trackAudit(
           recordAudit(c, {
             action: event.outcome === "denied" ? "mcp.operation.denied" : "mcp.operation.invoked",
             resourceType: "mcp_operation",
