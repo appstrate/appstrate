@@ -26,9 +26,6 @@ export const GIB = 1024 * 1024 * 1024;
  */
 export const CHECKOUT_PLAN_IDS = ["starter", "pro"] as const;
 
-/** A plan id `POST /api/billing/checkout` accepts. */
-export type CheckoutPlanId = (typeof CHECKOUT_PLAN_IDS)[number];
-
 export interface Plans {
   free: PlanDefinition;
   starter: PlanDefinition;

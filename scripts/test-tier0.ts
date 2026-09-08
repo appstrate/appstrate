@@ -34,7 +34,13 @@ import { discoverModules, loadModuleRequirements, skipsInTier } from "../test/se
 
 const ROOT = resolve(import.meta.dir, "..");
 
-const ignorePatterns: string[] = [];
+// `--path-ignore-patterns` REPLACES bunfig's `[test].pathIgnorePatterns` instead
+// of adding to it, so the config's own list (the Playwright specs under
+// `e2e/**`) has to be re-supplied here or bun collects them as bun tests.
+const bunfig = Bun.TOML.parse(await Bun.file(resolve(ROOT, "bunfig.toml")).text()) as {
+  test?: { pathIgnorePatterns?: string[] };
+};
+const ignorePatterns: string[] = [...(bunfig.test?.pathIgnorePatterns ?? [])];
 for (const { dir } of discoverModules(ROOT)) {
   const requirements = await loadModuleRequirements(dir);
   if (!skipsInTier(requirements, true)) continue;
