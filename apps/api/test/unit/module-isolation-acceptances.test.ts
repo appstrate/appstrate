@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the two-directional acceptance check in
- * `scripts/verify-module-isolation.ts`.
+ * Unit tests for the pure decisions in `scripts/verify-module-isolation.ts` —
+ * the two-directional acceptance check (module → module) and the platform
+ * import review (core → module).
  *
  * `ACCEPTED_CROSS_MODULE_IMPORTS` is checked both ways: an accepted import must
  * not be reported as a violation, AND an acceptance with no matching import
@@ -22,8 +23,10 @@
 import { describe, it, expect } from "bun:test";
 import {
   reviewCrossModuleImports,
+  reviewPlatformModuleImports,
   type AcceptedCrossModuleImport,
   type CrossModuleImport,
+  type PlatformImport,
 } from "../../../../scripts/verify-module-isolation.ts";
 
 const imp: CrossModuleImport = {
@@ -78,5 +81,57 @@ describe("reviewCrossModuleImports", () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("../../mcp/lib/other.ts");
     expect(problems[0]).toContain("no such import exists any more");
+  });
+});
+
+describe("reviewPlatformModuleImports", () => {
+  it("reports a bare `@appstrate/module-*` import from platform source", () => {
+    const bare: PlatformImport = {
+      file: "apps/api/src/lib/boot.ts",
+      spec: "@appstrate/module-chat",
+    };
+    const problems = reviewPlatformModuleImports([bare]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("reaches into a module");
+  });
+
+  it("reports a relative import that lands inside packages/module-*", () => {
+    const problems = reviewPlatformModuleImports([
+      {
+        file: "packages/core/src/naming.ts",
+        spec: "../../module-chat/src/index.ts",
+        resolved: "packages/module-chat/src/index.ts",
+      },
+    ]);
+    expect(problems).toHaveLength(1);
+  });
+
+  it("passes ordinary platform imports", () => {
+    // The negative control. A rule that reported nothing and a rule that
+    // reported everything would both leave the scan "clean" on today's repo.
+    expect(
+      reviewPlatformModuleImports([
+        { file: "apps/api/src/lib/boot.ts", spec: "@appstrate/core/module" },
+        { file: "apps/api/src/lib/boot.ts", spec: "hono" },
+        {
+          file: "apps/api/src/lib/boot.ts",
+          spec: "./modules/module-loader.ts",
+          resolved: "apps/api/src/lib/modules/module-loader.ts",
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("does not mistake a package whose name merely starts with `module-`", () => {
+    expect(
+      reviewPlatformModuleImports([
+        { file: "apps/api/src/x.ts", spec: "@appstrate/modules-registry" },
+        {
+          file: "apps/api/src/x.ts",
+          spec: "../../modules-registry/src/index.ts",
+          resolved: "packages/modules-registry/src/index.ts",
+        },
+      ]),
+    ).toEqual([]);
   });
 });

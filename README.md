@@ -397,4 +397,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, conventions, and
 
 ## License
 
-[Apache License 2.0](./LICENSE)
+[Apache License 2.0](./LICENSE), with one exception: `packages/module-ee/` is source-available under the Appstrate Commercial License found in that directory.

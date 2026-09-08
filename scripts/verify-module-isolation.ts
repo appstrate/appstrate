@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Architecture test — module boundary isolation.
  *
@@ -8,11 +10,31 @@
  * services injected at init) is a legitimate backward dependency — modules
  * reference core entities; that is the FK-backward-ref pattern, not a violation.
  *
- * What this enforces, concretely:
- *   A module under `apps/api/src/modules/<m>` (or `packages/module-<m>/src`)
- *   MUST NOT import from another module's source tree. Importing another
- *   module's `schema.ts` is exactly how a cross-module SQL join would sneak in,
- *   so banning cross-module imports kills the join at the source.
+ * What this enforces, concretely, in two directions:
+ *
+ *   module → module. A module under `apps/api/src/modules/<m>` (or
+ *   `packages/module-<m>/src`) MUST NOT import from another module's source
+ *   tree. Importing another module's `schema.ts` is exactly how a cross-module
+ *   SQL join would sneak in, so banning cross-module imports kills the join at
+ *   the source.
+ *
+ *   core → module. No file under `apps/api/src` or any `packages/<p>/src` that
+ *   is not a module may statically import one: neither the bare
+ *   `@appstrate/module-<m>` specifier nor a relative path landing inside
+ *   `packages/module-<m>`. Modules are opt-in at runtime through the `MODULES`
+ *   env var; a static import makes one mandatory, links it into every build,
+ *   and — once a module is under a different licence — drags that licence into
+ *   the Apache-2.0 tree. The loader in `apps/api/src/lib/modules` is not
+ *   affected: it calls `import(specifier)` with a variable, which no static
+ *   specifier scan can match. A LITERAL `import("@appstrate/module-x")` does
+ *   count, and should.
+ *
+ * `apps/web` is deliberately OUT of scope of the core → module rule: the SPA
+ * imports `@appstrate/module-chat/ui` and `@appstrate/module-chat/unread` on
+ * purpose — a module contributes its own UI, and the bundler needs the static
+ * edge to build it. The rule is about the SERVER's runtime opt-in. Test files
+ * (`test` directories, `*.test.ts`) are out of scope in both directions, as
+ * they already were: `test/setup/preload.ts` loads every module by design.
  *
  * Scope: in-repo modules only. cloud lives in a separate repo and enforces its
  * own equivalent (its `usage-recorder.ts` cross-join into core `llm_usage` is
@@ -84,8 +106,13 @@ function ownerOf(absPath: string): string | null {
   return null;
 }
 
+// Three forms: `import|export … from "x"`, `import("x")`, and the side-effect
+// `import "x"`. The third was missing, and it is the one form that reaches a
+// module for its side effects alone — exactly what a static module import would
+// be written as. Measured: `import "@appstrate/module-chat";` appended to
+// `apps/api/src/lib/boot.ts` was read by the scan and reported nothing.
 const IMPORT_RE =
-  /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/g;
+  /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']|\bimport\s+["']([^"']+)["']/g;
 
 /** One relative import that crossed a module boundary, as the scan saw it. */
 export interface CrossModuleImport {
@@ -149,6 +176,66 @@ export function reviewCrossModuleImports(
   return problems;
 }
 
+/** One import statement found in platform (non-module) source. */
+export interface PlatformImport {
+  /** Repo-relative path of the importing file. */
+  file: string;
+  /** The import specifier, verbatim. */
+  spec: string;
+  /** Repo-relative path the specifier resolves to — relative imports only. */
+  resolved?: string;
+}
+
+/**
+ * Decide which platform imports reach into a module. Pure: the scan feeds it
+ * every import it read, `test/unit/module-isolation-acceptances.test.ts` feeds
+ * it synthetic ones.
+ *
+ * No acceptance list, deliberately. The module→module direction has one because
+ * it inherited real violations; this direction has none today, and an empty
+ * allowlist for a rule with no exceptions is a door left open.
+ */
+export function reviewPlatformModuleImports(imports: readonly PlatformImport[]): string[] {
+  const problems: string[] = [];
+  for (const imp of imports) {
+    const bare = /^@appstrate\/module-[a-z0-9-]+/.exec(imp.spec);
+    const reaches = bare !== null || imp.resolved?.startsWith("packages/module-") === true;
+    if (!reaches) continue;
+    problems.push(
+      `${imp.file} imports \`${imp.spec}\` → reaches into a module. Modules are opt-in at ` +
+        `runtime through MODULES; the platform loads them with a computed \`import(specifier)\`, ` +
+        `never a static one.`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * Every non-test source file under `root`, relative to it.
+ *
+ * One walk for both directions — a second one would be a second definition of
+ * "what counts as source", and the two would drift.
+ */
+async function sourceFilesUnder(root: string): Promise<string[]> {
+  const files: string[] = [];
+  const glob = new Glob("**/*.{ts,tsx}");
+  for await (const rel of glob.scan({ cwd: root })) {
+    if (rel.includes("/test/") || rel.startsWith("test/") || /\.test\.tsx?$/.test(rel)) continue;
+    files.push(rel);
+  }
+  return files;
+}
+
+/** Every import specifier in `source`, in order. */
+function importSpecifiers(source: string): string[] {
+  const specs: string[] = [];
+  for (const m of source.matchAll(IMPORT_RE)) {
+    const spec = m[1] ?? m[2] ?? m[3];
+    if (spec) specs.push(spec);
+  }
+  return specs;
+}
+
 // Guarded so tests can import the pure review logic above without running the
 // scan — which walks the repo and would exit(1) on a real violation.
 if (import.meta.main) {
@@ -194,17 +281,12 @@ if (import.meta.main) {
   let filesScanned = 0;
 
   for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
-    const glob = new Glob("**/*.ts");
-    for await (const rel of glob.scan({ cwd: root })) {
-      if (rel.includes("/test/") || rel.startsWith("test/") || rel.endsWith(".test.ts")) continue;
+    for (const rel of await sourceFilesUnder(root)) {
       const filePath = resolve(root, rel);
       const source = await Bun.file(filePath).text();
       filesScanned++;
 
-      for (const m of source.matchAll(IMPORT_RE)) {
-        const spec = m[1] ?? m[2];
-        if (!spec) continue;
-
+      for (const spec of importSpecifiers(source)) {
         // Relative import → resolve and check the owning module.
         if (spec.startsWith(".")) {
           const target = resolve(dirname(filePath), spec);
@@ -234,12 +316,45 @@ if (import.meta.main) {
 
   problems.push(...reviewCrossModuleImports(crossModuleImports, ACCEPTED_CROSS_MODULE_IMPORTS));
 
+  // ─── core → module ──────────────────────────────────────────────────
+  // The platform source: `apps/api/src` plus every `packages/*/src` that is
+  // not a module. `apps/web` is absent on purpose — see the header.
+  const platformRoots: string[] = [resolve(ROOT, "apps/api/src")];
+  {
+    const glob = new Glob("*/src");
+    for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
+      if (rel.startsWith("module-")) continue;
+      platformRoots.push(resolve(ROOT, "packages", rel));
+    }
+  }
+
+  const platformImports: PlatformImport[] = [];
+  let platformFilesScanned = 0;
+  for (const root of platformRoots) {
+    for (const rel of await sourceFilesUnder(root)) {
+      const filePath = resolve(root, rel);
+      const source = await Bun.file(filePath).text();
+      platformFilesScanned++;
+      const file = relative(ROOT, filePath).split(sep).join("/");
+      for (const spec of importSpecifiers(source)) {
+        const resolved = spec.startsWith(".")
+          ? relative(ROOT, resolve(dirname(filePath), spec))
+              .split(sep)
+              .join("/")
+          : undefined;
+        platformImports.push({ file, spec, resolved });
+      }
+    }
+  }
+  problems.push(...reviewPlatformModuleImports(platformImports));
+
   for (const p of problems) console.error(`❌ ${p}`);
 
   if (problems.length === 0) {
     const accepted = ACCEPTED_CROSS_MODULE_IMPORTS.length;
     console.log(
-      `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules` +
+      `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules, ` +
+        `${platformFilesScanned} platform files with no static module import` +
         `${accepted > 0 ? `, ${accepted} accepted cross-module import(s)` : ", no cross-module imports"}.`,
     );
     for (const e of ACCEPTED_CROSS_MODULE_IMPORTS) {

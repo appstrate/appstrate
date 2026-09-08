@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Verify that every known `@appstrate/core` consumer is in lockstep with
  * the version about to be published. Run by `.github/workflows/publish-core.yml`

@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The classifier behind `verify:license-boundary`.
+ *
+ * `packages/module-ee/` does not exist yet, so the repo scan can only ever
+ * exercise the Apache-2.0 half: the commercial branch — the whole reason the
+ * gate exists — would ship unexecuted. These assertions drive both sides from
+ * synthetic input, so the boundary is held from the day it is declared rather
+ * than from the day the directory arrives.
+ */
+
+import { describe, it, expect } from "bun:test";
+import { checkLicenseHeader, expectedLicenseFor } from "../verify-license-boundary.ts";
+
+const APACHE = "// SPDX-License-Identifier: Apache-2.0";
+const COMMERCIAL = "// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial";
+
+describe("expectedLicenseFor", () => {
+  it("puts packages/module-ee under the commercial licence", () => {
+    expect(expectedLicenseFor("packages/module-ee/src/index.ts")).toBe(
+      "LicenseRef-Appstrate-Commercial",
+    );
+  });
+
+  it("puts everything else under Apache-2.0", () => {
+    expect(expectedLicenseFor("packages/module-chat/src/index.ts")).toBe("Apache-2.0");
+    // Prefix matching, not substring: a sibling package whose name merely
+    // starts the same way is Apache-2.0.
+    expect(expectedLicenseFor("packages/module-eee/src/index.ts")).toBe("Apache-2.0");
+  });
+});
+
+describe("checkLicenseHeader", () => {
+  it("accepts each side carrying its own header", () => {
+    expect(checkLicenseHeader("apps/api/src/index.ts", [APACHE])).toBeNull();
+    expect(checkLicenseHeader("packages/module-ee/src/index.ts", [COMMERCIAL])).toBeNull();
+  });
+
+  it("accepts a header preceded by a shebang or a triple-slash directive", () => {
+    expect(
+      checkLicenseHeader("scripts/x.ts", [
+        "#!/usr/bin/env bun",
+        '/// <reference types="bun" />',
+        APACHE,
+      ]),
+    ).toBeNull();
+  });
+
+  it("reports a missing header", () => {
+    expect(checkLicenseHeader("apps/api/src/index.ts", ["export const a = 1;"])).toContain(
+      "no SPDX header in the first 3 lines",
+    );
+  });
+
+  it("reports a header pushed past the third line", () => {
+    expect(checkLicenseHeader("apps/api/src/index.ts", ["", "", "", APACHE])).toContain(
+      "no SPDX header",
+    );
+  });
+
+  it("reports Apache-2.0 inside the commercial directory", () => {
+    // The defect the gate is for: a file moved into `packages/module-ee/` keeps
+    // the licence of where it came from, and nothing else in the toolchain
+    // notices.
+    const problem = checkLicenseHeader("packages/module-ee/src/billing.ts", [APACHE]);
+    expect(problem).toContain(
+      "expected `// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial`",
+    );
+  });
+
+  it("reports the commercial licence outside that directory", () => {
+    const problem = checkLicenseHeader("packages/core/src/x.ts", [COMMERCIAL]);
+    expect(problem).toContain("expected `// SPDX-License-Identifier: Apache-2.0`");
+  });
+
+  it("rejects a non-`//` comment form", () => {
+    // No tracked `.ts`/`.tsx` file uses one, so accepting `#` or `<!-- -->`
+    // would be a branch nothing writes and nothing reads.
+    expect(
+      checkLicenseHeader("apps/api/src/index.ts", ["# SPDX-License-Identifier: Apache-2.0"]),
+    ).toContain("expected");
+    expect(
+      checkLicenseHeader("apps/api/src/index.ts", ["<!-- SPDX-License-Identifier: Apache-2.0 -->"]),
+    ).toContain("expected");
+  });
+});

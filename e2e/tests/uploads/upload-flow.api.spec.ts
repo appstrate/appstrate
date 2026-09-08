@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * E2E test for the upload:// protocol — covers the full direct-upload flow:
  *

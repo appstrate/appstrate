@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Test preload script — runs once before any test file.
  *
@@ -15,13 +17,16 @@
  * Each module directory contributes:
  *   - the entry file — default-exports an AppstrateModule (used by getTestApp)
  *   - test/tables.ts — default-exports a string[] of tables for truncateAll()
+ *   - test/requirements.ts — what the module needs before it can be imported
+ *     (see test/setup/modules.ts)
  *
- * Both are optional. Running core tests alone still picks up installed
+ * All three are optional. Running core tests alone still picks up installed
  * modules because anything in either root is part of the repo — there is no
- * "module disabled" state in tests, unlike production (MODULES env var).
+ * "module disabled" state in tests, unlike production (MODULES env var). The
+ * one exception is a module whose requirements the current tier cannot meet.
  */
-import { resolve, join } from "path";
-import { readdirSync, existsSync, statSync, mkdtempSync, rmSync } from "fs";
+import { resolve, join, relative } from "path";
+import { existsSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import type { AppstrateModule } from "@appstrate/core/module";
 import {
@@ -30,6 +35,13 @@ import {
   TEST_MINIO_CONTAINER,
   TEST_POSTGRES_CONTAINER,
 } from "./constants.ts";
+import {
+  discoverModules,
+  envToApply,
+  loadModuleRequirements,
+  skipsInTier,
+  type DiscoveredModule,
+} from "./modules.ts";
 
 // ─── Tier selection ─────────────────────────────────────────
 // tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),
@@ -279,45 +291,17 @@ if (TIER0) {
 // We do this from the root preload (not per-module) so that `bun test` from
 // any directory sees a consistent state.
 //
-// Two layouts are recognised:
-//   - apps/api/src/modules/<name>/index.ts (built-in modules)
-//   - packages/module-<name>/src/index.ts (workspace-package modules)
-// Both share the same `test/tables.ts` convention (relative to the module's
-// root directory) — and only that one. Modules do NOT own migrations: their
+// The two layouts, and the `test/tables.ts` / `test/requirements.ts`
+// conventions beside them, are described in `./modules.ts` — which the tier-0
+// runner reads too, so that a module this preload refuses to load is also a
+// module whose tests bun does not collect. Modules do NOT own migrations: their
 // tables live in the core schema and are created by the core migration step
 // above, as the code below says. This block used to promise a
 // `drizzle/migrations/` convention as well, which nothing here has read since
 // the tables moved.
 
-interface DiscoveredModule {
-  /** Module root directory. */
-  dir: string;
-  /** Absolute path to the module's entry file. */
-  entry: string;
-}
-
-function discoverModules(
-  root: string,
-  entryRel: string,
-  dirPredicate: (name: string) => boolean = () => true,
-): DiscoveredModule[] {
-  if (!existsSync(root)) return [];
-  return readdirSync(root)
-    .filter(dirPredicate)
-    .map((name) => ({ dir: join(root, name), entry: join(root, name, entryRel) }))
-    .filter(({ dir, entry }) => statSync(dir).isDirectory() && existsSync(entry));
-}
-
-const builtinModulesRoot = resolve(import.meta.dir, "../../apps/api/src/modules");
-const workspaceModulesRoot = resolve(import.meta.dir, "../../packages");
-const moduleEntries: DiscoveredModule[] = [
-  // Built-in modules — `apps/api/src/modules/<name>/index.ts`.
-  ...discoverModules(builtinModulesRoot, "index.ts"),
-  // Workspace-package modules — `packages/module-<name>/src/index.ts`.
-  // The `module-` prefix is the convention that distinguishes module
-  // workspace packages from regular library packages (core, db, ui, …).
-  ...discoverModules(workspaceModulesRoot, "src/index.ts", (n) => n.startsWith("module-")),
-];
+const repoRoot = resolve(import.meta.dir, "../..");
+const moduleEntries: DiscoveredModule[] = discoverModules(repoRoot);
 
 // Modules no longer own migrations — their tables live in the core schema and
 // are created by the core migration step above. Nothing to apply per module.
@@ -334,6 +318,26 @@ const { registerTestModule } = await import("../../apps/api/test/helpers/test-mo
 const importedModules: AppstrateModule[] = [];
 
 for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
+  // Read the module's requirements AFTER the env block above, not beside
+  // discovery: `requirements.ts` is TypeScript and may derive its values from
+  // the platform test env (DATABASE_URL and friends) at load time.
+  const requirements = await loadModuleRequirements(moduleDir);
+
+  if (skipsInTier(requirements, TIER0)) {
+    // Never silent. A module missing from the run makes a green tier-0 read as
+    // coverage it does not have, and nothing else here would say so.
+    console.warn(
+      `⚠ tier0: skipping module ${relative(repoRoot, moduleDir)} — it requires a real PostgreSQL.`,
+    );
+    continue;
+  }
+
+  // Modules cache their configuration at import/init, so this precedes the
+  // import. `??=`: an operator value already in the environment wins.
+  for (const [key, value] of Object.entries(envToApply(requirements, process.env))) {
+    process.env[key] = value;
+  }
+
   // Register the module itself so getTestApp() can mount its router
   const imported: { default?: AppstrateModule } = await import(indexFile);
   if (imported.default) {

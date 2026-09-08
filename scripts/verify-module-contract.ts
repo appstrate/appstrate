@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Verify the module contract (`@appstrate/core/module`) stays minimal — no
  * dead members, no single-owner business extension points smuggled into a
