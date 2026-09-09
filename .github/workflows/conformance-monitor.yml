@@ -94,6 +94,36 @@ jobs:
             gh issue create --title "$title" --label conformance --body-file conformance-report.md
           fi
 
+      - name: Close the tracking issue when the run comes back clean
+        # The counterpart to the step above. Without it the monitor is
+        # write-only: it opens an issue on drift and never retracts it, so the
+        # issue outlives the fix and someone closes it by hand — which is what
+        # happened to every one of #555, #683, #777, #898, #926, #1133 and
+        # #1206. An open `conformance` issue must mean "the last run found
+        # drift", or it means nothing.
+        #
+        # Closing on green is safe precisely because the issue is a rollup of
+        # ONE recurring title: the harness re-checks every package every run,
+        # so a clean exit code is a statement about all of them, not about
+        # whichever one was last reported. There is nothing left for the issue
+        # to still be tracking.
+        #
+        # WARNs are deliberately not consulted here, for the same reason they
+        # do not open the issue: "couldn't test" is not drift, and 29 of them
+        # are a standing backlog that would keep the issue open forever.
+        if: steps.run.outputs.code == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          existing=$(gh issue list --state open --label conformance --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then
+            echo "No open conformance issue — nothing to close."
+            exit 0
+          fi
+          gh issue close "$existing" --reason completed --comment \
+            "Conformance is clean again as of ${RUN_URL} — \`0 fail\`. Closed by the monitor; it reopens a fresh issue if drift returns."
+
       - name: Fail on conformance drift
         # The harness's exit code, re-raised. It is captured rather than left
         # to fail the step above BECAUSE the issue must be filed first: a job
