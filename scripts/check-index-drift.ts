@@ -33,11 +33,11 @@
  *
  * Actual set: every index in `public` EXCEPT those on a table a workspace module
  * owns. "Owns" is read from that module's own drizzle snapshot
- * (`scripts/lib/drizzle-snapshots.ts`), not inferred from a name prefix and not
- * widened to "any table the platform snapshot does not declare" — that wider
- * filter also hid every index on a platform table the schema STOPPED declaring,
- * which is the reverse-drift class this script exists to surface. An index on a
- * table nothing declares is now reported, with the table's name.
+ * (`scripts/lib/drizzle-snapshots.ts`), never inferred from a name prefix and
+ * never widened to "any table the platform snapshot does not declare": that
+ * wider rule also subtracts every index on a platform table the schema stopped
+ * declaring, which is the reverse-drift class this script exists to surface. An
+ * index on a table nothing declares is reported, with the table's name.
  *
  * SCOPE — this compares index NAMES ONLY. An index that exists under the
  * expected name with a different definition (other columns, a lost partial
@@ -121,7 +121,7 @@ const CONSTRAINT_BACKED_INDEXES_QUERY = `
 `;
 
 /** One row of `PUBLIC_INDEXES_QUERY`. */
-export interface ActualIndex {
+interface ActualIndex {
   indexname: string;
   tablename: string;
 }
@@ -293,11 +293,11 @@ export async function runCheck(input: {
 
   // A module-owned table migrates under a journal of its own, so its indexes
   // are in no platform snapshot and every one of them would read as reverse
-  // drift. Exactly those tables are subtracted — the wider filter this replaces
-  // kept only the tables the snapshot DECLARES, which also silently dropped
-  // every index on a platform table the schema stopped declaring: the exact
-  // population `reverseDrift` exists to name. What is skipped is counted, so
-  // the subtraction is visible instead of implied.
+  // drift. Exactly those tables are subtracted, and no more: keeping only the
+  // tables the snapshot DECLARES would also drop every index on a platform
+  // table the schema stopped declaring, the exact population `reverseDrift`
+  // exists to name. What is skipped is counted, so the subtraction is visible
+  // instead of implied.
   const skipped: ActualIndex[] = [];
   const considered: ActualIndex[] = [];
   for (const row of input.actual) {

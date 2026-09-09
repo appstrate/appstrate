@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The lexical half of the two module gates: how to walk TypeScript source past
- * the things that are not code — comments, string and template literals, regex
- * literals — without a `//` inside a specifier opening a comment or an
- * unterminated quote swallowing the rest of the file.
- *
- * `verify-module-isolation.ts` walks it to blank comments before reading import
- * specifiers; `verify-module-sql-boundary.ts` walks it to blank everything that
- * is not executed SQL. The two keep their own walks — one preserves text, the
- * other blanks it and counts the literals it kept — but the primitives those
- * walks are built from live here, once. Two copies of "where does this literal
- * end" is two chances for the gates to disagree about what a file contains, and
- * a gate that mis-tokenizes reports the exact opposite of the truth: it blanks
- * live code, or reads prose as code.
+ * The lexical half of the two module gates: walking TypeScript past what is not
+ * code — comments, string and template literals, regex literals — so a `//`
+ * inside a specifier opens no comment and an unterminated quote swallows
+ * nothing. `verify-module-isolation.ts` blanks comments before reading import
+ * specifiers, `verify-module-sql-boundary.ts` blanks all that is not executed
+ * SQL; the walks differ (one preserves text, the other counts the literals it
+ * kept) but share these primitives. Two answers to "where does this literal
+ * end" are two chances for the gates to disagree, and a mis-tokenizing gate
+ * reports the opposite of the truth: it blanks live code, or reads prose as it.
  */
 
 /**

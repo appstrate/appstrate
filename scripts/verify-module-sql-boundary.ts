@@ -180,7 +180,7 @@ const NOT_A_TABLE = new Set([
 ]);
 
 /** One table identifier a module's SQL names, with where it was written. */
-export interface TableReference {
+interface TableReference {
   /** The identifier verbatim, quotes and schema qualifier included. */
   table: string;
   /** 1-based line in the file the SQL came from. */
@@ -281,6 +281,26 @@ export function reviewModuleSql(
 }
 
 /**
+ * The refusal a module earns by owning a migration journal while declaring no
+ * tables — `null` when it declares some.
+ *
+ * Pure and separate from the walk so the refusal has a positive control: with
+ * an empty `tables` set every identifier in the repository reads as the
+ * module's own and the gate passes over a module it checked nothing about.
+ */
+export function reviewModuleSnapshot(module: {
+  id: string;
+  snapshot: string;
+  tables: ReadonlySet<string>;
+}): string | null {
+  if (module.tables.size > 0) return null;
+  return (
+    `module \`${module.id}\` owns a migration journal but ${module.snapshot} declares zero ` +
+    `tables — every table name would read as its own and this gate would pass vacuously.`
+  );
+}
+
+/**
  * Every file of a module package the scan reads: its own `.ts`/`.tsx`, tests
  * and installed dependencies excluded.
  *
@@ -312,13 +332,9 @@ if (import.meta.main) {
   let literals = 0;
 
   for (const module of modules) {
-    // A module whose snapshot declares nothing would accept every table name in
-    // the repository. That is a broken snapshot, not a clean module.
-    if (module.tables.size === 0) {
-      problems.push(
-        `module \`${module.id}\` owns a migration journal but ${module.snapshot} declares zero ` +
-          `tables — every table name would read as its own and this gate would pass vacuously.`,
-      );
+    const vacuous = reviewModuleSnapshot(module);
+    if (vacuous !== null) {
+      problems.push(vacuous);
       continue;
     }
     const files = await moduleSourceFiles(resolve(ROOT, module.packageDir));

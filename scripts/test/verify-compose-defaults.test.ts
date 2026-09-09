@@ -247,10 +247,15 @@ describe("verify-compose-defaults as a process", () => {
     return { code: run.exitCode ?? 1, output: run.stdout.toString() + run.stderr.toString() };
   }
 
-  it("passes over the real repo", () => {
+  it("passes over the real repo, having actually read a module schema", () => {
     const { code, output } = runGate();
     expect(code).toBe(0);
     expect(output).toContain("no duplicated env defaults");
+    // A discovery that found nothing checks the pass-through blocks against an
+    // empty population and prints the same tick. The count line says which it
+    // was, so the floor is read there.
+    expect(output).not.toContain("0 module schema(s)");
+    expect(output).toMatch(/from \d+ module schema\(s\)/);
   });
 
   it("fails when a tracked compose file is missing from the worktree", () => {

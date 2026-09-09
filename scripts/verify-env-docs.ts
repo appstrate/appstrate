@@ -24,12 +24,13 @@
  *
  * ─── Why the first line is a union ───────────────────────────────────
  *
- * `packages/module-ee/src/env.ts` declares seven variables of its own, and this
- * gate read `packages/env` alone: a key added there was documented nowhere and
- * passed. From an operator's side there is no distinction to make — the module
- * ships in the same image, reads the same `process.env`, and refuses to boot
- * with the same "Required". The module schemas are DISCOVERED
- * (`scripts/lib/module-env-schemas.ts`), so the next module joins on its own.
+ * A module declares variables of its own (`packages/module-ee/src/env.ts`
+ * declares seven), and reading `packages/env` alone would let every one of them
+ * through with a row nowhere. From an operator's side
+ * there is no distinction to make — the module ships in the same image, reads
+ * the same `process.env`, and refuses to boot with the same "Required". The
+ * module schemas are DISCOVERED (`scripts/lib/module-env-schemas.ts`), so the
+ * next module joins on its own.
  *
  * The THIRD line is deliberately NOT unioned. "Required" there means "the
  * platform cannot boot without it", and a module's hard-required key is
@@ -203,7 +204,7 @@ export function requiredSchemaKeys(
 }
 
 /** A required schema key that a shipped `.env.example` does not mention. */
-export interface MissingRequired {
+interface MissingRequired {
   name: string;
   file: string;
 }
@@ -287,7 +288,7 @@ export function findUndocumented(
  * are the production wiring and are resolved inside the function, so importing
  * this module still spawns no `git` and reads no file.
  */
-export interface MainDeps {
+interface MainDeps {
   /** The `.env.example` files to read. Default: every tracked one. */
   exampleFiles?: readonly string[];
   /** Reads one repo-relative path. Default: from disk. */

@@ -27,6 +27,8 @@
  * through a computed `import()` for that reason).
  *
  * Override via env: `MODULE_ISOLATION_POLICY=warn|fail|off`.
+ * `--verbose` additionally lists every file the two scans read, which is how a
+ * test pins a scan root to the files it has to cover.
  */
 
 import { Glob } from "bun";
@@ -36,10 +38,9 @@ import { REGEX_PRECEDERS, scanQuoted } from "./lib/ts-lexer.ts";
 
 // Under CI the override is ignored, so a green pipeline can never be bought
 // with `MODULE_ISOLATION_POLICY=off` — same pin `verify-module-contract.ts`
-// carries for the same reason. `readGatePolicy` also REJECTS a value that is
-// neither `warn`, `fail` nor `off`; the cast this replaces accepted anything
-// and every non-`fail` value silently downgraded the exit below to 0 while the
-// `❌` lines still printed.
+// carries for the same reason. `readGatePolicy` also REJECTS an unrecognised
+// value rather than letting it fall out of `fail`; `scripts/lib/policy-env.ts`
+// states why.
 const POLICY = readGatePolicy("MODULE_ISOLATION_POLICY");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 
@@ -290,13 +291,13 @@ if (import.meta.main) {
     }
   }
   // Workspace npm modules. The root is the PACKAGE directory, not its `src/`:
-  // `packages/module-ee` is the first module with production code outside
-  // `src/` (`drizzle/schema.ts` declares its tables, `drizzle/drizzle.config.ts`
-  // wires its migrator), and with the root pinned at `src` neither file was in
-  // ANY scan root — the module walk could not see them and the platform walk
-  // skips `module-*` — so an import from either one into another module was
-  // invisible. `sourceFilesUnder` already drops `test/` and `node_modules/`,
-  // which is the whole of what `src/` was buying.
+  // a module's production code is not confined to `src/` (`packages/module-ee`
+  // declares its tables in `drizzle/schema.ts` and wires its migrator in
+  // `drizzle/drizzle.config.ts`), and the platform walk skips `module-*`
+  // entirely — so anything outside a module's `src/` would sit in no scan root
+  // at all, and its imports would be invisible to both directions.
+  // `sourceFilesUnder` already drops `test/` and `node_modules/`, which is the
+  // whole of what narrowing to `src/` would buy.
   {
     const glob = new Glob("module-*/package.json");
     for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages") })) {
@@ -323,6 +324,11 @@ if (import.meta.main) {
 
   const problems: string[] = [];
   const crossModuleImports: CrossModuleImport[] = [];
+  // Repo-relative, for `--verbose`. The counts below say how MANY files each
+  // direction read; only the listing says which, and a scan root that quietly
+  // stops covering a population is the failure a count reads straight past.
+  const scannedFiles: string[] = [];
+  const verbose = process.argv.includes("--verbose");
   let filesScanned = 0;
 
   for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
@@ -330,6 +336,7 @@ if (import.meta.main) {
       const filePath = resolve(root, rel);
       const source = await Bun.file(filePath).text();
       filesScanned++;
+      scannedFiles.push(relative(ROOT, filePath).split(sep).join("/"));
 
       for (const spec of importSpecifiers(source)) {
         // Relative import → resolve and check the owning module.
@@ -399,6 +406,7 @@ if (import.meta.main) {
       const source = await Bun.file(filePath).text();
       platformFilesScanned++;
       const file = relative(ROOT, filePath).split(sep).join("/");
+      scannedFiles.push(file);
       for (const spec of importSpecifiers(source)) {
         const resolved = spec.startsWith(".")
           ? relative(ROOT, resolve(dirname(filePath), spec))
@@ -410,6 +418,8 @@ if (import.meta.main) {
     }
   }
   problems.push(...reviewPlatformModuleImports(platformImports));
+
+  if (verbose) for (const file of scannedFiles.sort()) console.log(`   scanned: ${file}`);
 
   for (const p of problems) console.error(`❌ ${p}`);
 

@@ -202,6 +202,28 @@ describe("the live repository", () => {
     const missing = Object.keys(envSchema.shape).filter((k) => !documented.has(k));
     expect(missing).toEqual([]);
   });
+
+  it("passes as a process, having actually discovered a module schema", async () => {
+    // Every `main` case above injects `moduleEnv`, so none of them says whether
+    // discovery finds anything at all. A glob or an import that stopped working
+    // would union zero module keys into the schema population and print this
+    // same tick — the count line is where the two cases differ.
+    const proc = Bun.spawn(["bun", "scripts/verify-env-docs.ts"], {
+      cwd: join(import.meta.dir, "..", ".."),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+    const modules = /from (\d+) module schema\(s\)/.exec(out);
+    expect(modules).not.toBeNull();
+    expect(Number(modules![1])).toBeGreaterThanOrEqual(1);
+  });
 });
 
 /**
