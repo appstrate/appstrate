@@ -51,9 +51,10 @@ describe("parseSkillFrontmatter", () => {
     ).toMatchObject({ found: true, name: "word-count", description: "Counts words." });
   });
 
-  // Pi tests `startsWith("---")`, so it reads no frontmatter behind a BOM. A
-  // parser that saw through it would report fields the runtime never sees.
-  it("reads NOTHING behind a UTF-8 BOM, exactly as the runtime does", () => {
+  // Deliberate: a parser that saw through a BOM would report fields a runtime
+  // testing `startsWith("---")` never sees — which is every Pi below 0.85 —
+  // and `checkSkillMarkdown` would lose the precise BOM message it returns.
+  it("reads NOTHING behind a UTF-8 BOM", () => {
     expect(parseSkillFrontmatter(`\uFEFF${skillMd("word-count", "Counts words.")}`)).toMatchObject({
       found: false,
       unterminated: false,

@@ -297,15 +297,18 @@ function firstLine(err: unknown): string {
  * (https://agentskills.io/specification) plus a non-empty bounded `description`.
  */
 export function checkSkillMarkdown(content: string): CompanionFileViolation | null {
-  // Rejected rather than stripped: Pi reads no frontmatter behind a BOM and
-  // drops the skill, while the platform's loader eats it — so the version
-  // would be minted, immutable, and simply never load.
+  // Rejected rather than stripped, and it stays rejected now that Pi >= 0.85
+  // strips a BOM itself: a minted version is immutable and has to load on every
+  // runtime image the platform ships, including the 0.84.x ones that test
+  // startsWith("---"), read no frontmatter behind a BOM and drop the skill.
+  // The platform's own loader eats it either way, so without this check the
+  // version would be minted and simply never load on those images.
   if (startsWithBom(content)) {
     return {
       reason: "SKILL_INVALID_FRONTMATTER",
       message:
         "skill SKILL.md starts with a byte-order mark (U+FEFF); remove it — " +
-        "the runtime cannot read frontmatter behind a BOM",
+        "older runtimes read no frontmatter behind a BOM and drop the skill",
       path: "SKILL.md",
     };
   }
