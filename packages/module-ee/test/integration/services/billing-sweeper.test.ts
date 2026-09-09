@@ -44,9 +44,10 @@ import {
   billingCursor,
   eeBilledLlmUsage,
 } from "../../../drizzle/schema.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
 
 useEeTestSeams();
+useEeReconciliationEnv();
 
 const orgId = "00000000-0000-4000-a000-000000000010";
 

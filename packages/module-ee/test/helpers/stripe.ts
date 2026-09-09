@@ -10,7 +10,7 @@
 
 // ─── Request recording ──────────────────────────────────────────
 
-export interface RecordedRequest {
+interface RecordedRequest {
   method: string;
   path: string;
   body: Record<string, unknown> | null;
@@ -32,6 +32,15 @@ export function setCheckoutResponse(response: Record<string, unknown>): void {
   checkoutOverride = response;
 }
 
+/**
+ * Answer the next `GET /v1/subscriptions/:id` (retrieve) with `response`.
+ *
+ * Retrieve only. The in-place plan change retrieves and then updates the same
+ * subscription, so an override both verbs consumed would be spent by the
+ * retrieve and never describe what the update answers — and one shaped for the
+ * retrieve (a subscription with no price item, say) would describe a Stripe
+ * response the update never returns.
+ */
 export function setSubscriptionResponse(response: Record<string, unknown>): void {
   subscriptionOverride = response;
 }
@@ -184,12 +193,11 @@ export function startStripeMock(): { port: number } {
         return Response.json(response);
       }
 
-      // POST /v1/subscriptions/:id — subscription update (in-place plan change)
+      // POST /v1/subscriptions/:id — subscription update (in-place plan change).
+      // Never reads the retrieve override; see `setSubscriptionResponse`.
       if (method === "POST" && path.startsWith("/v1/subscriptions/")) {
         const id = path.split("/").pop()!;
-        const response = subscriptionOverride ?? defaultSubscriptionResponse(id);
-        subscriptionOverride = null;
-        return Response.json(response);
+        return Response.json(defaultSubscriptionResponse(id));
       }
 
       // DELETE /v1/subscriptions/:id

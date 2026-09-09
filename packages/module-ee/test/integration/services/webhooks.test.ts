@@ -140,6 +140,92 @@ describe("handleWebhook", () => {
       expect(account!.subscriptionStatus).toBe("trialing");
       expect(account!.creditQuota).toBe(20000);
     });
+
+    it("leaves the account alone when it already carries THIS subscription", async () => {
+      // Stripe orders nothing, so `created` can land after
+      // `checkout.session.completed` or an `updated` for the same subscription.
+      // Its payload is creation-time state — `incomplete`, and whatever cancel
+      // flag the object was born with — so writing it would roll back the live
+      // status and cancel flag of the subscription the org is actually on.
+      await seedBillingAccount({
+        orgId,
+        planId: "pro",
+        stripeCustomerId: "cus_late_created",
+        stripeSubscriptionId: "sub_new",
+        subscriptionStatus: "active",
+        cancelAtPeriodEnd: false,
+        creditQuota: 80000,
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_late_created",
+        type: "customer.subscription.created",
+        data: {
+          object: {
+            id: "sub_new",
+            customer: "cus_late_created",
+            status: "incomplete",
+            cancel_at_period_end: true,
+            metadata: { orgId, planId: "starter" },
+            items: { data: [{ id: "si_new", price: { id: "price_starter_test" } }] },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.subscriptionStatus).toBe("active");
+      expect(account!.cancelAtPeriodEnd).toBe(false);
+      expect(account!.planId).toBe("pro");
+      expect(account!.creditQuota).toBe(80000);
+    });
+
+    it("attaches over an id the account carries with no status at all", async () => {
+      // Only `customer.subscription.deleted` nulls the id column, and only the
+      // status-writing handlers fill the status one — an account left with an id
+      // and no status has nothing Stripe is holding, so it must not be locked out.
+      await seedBillingAccount({
+        orgId,
+        planId: "free",
+        stripeCustomerId: "cus_statusless",
+        stripeSubscriptionId: "sub_statusless",
+        subscriptionStatus: null,
+        creditQuota: 0,
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_created_over_statusless",
+        type: "customer.subscription.created",
+        data: {
+          object: {
+            id: "sub_fresh",
+            customer: "cus_statusless",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { orgId, planId: "starter" },
+            items: { data: [{ id: "si_fresh", price: { id: "price_starter_test" } }] },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.stripeSubscriptionId).toBe("sub_fresh");
+      expect(account!.planId).toBe("starter");
+      expect(account!.creditQuota).toBe(20000);
+    });
   });
 
   describe("invoice.paid", () => {

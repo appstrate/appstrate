@@ -7,6 +7,7 @@ import {
   resetStripeMock,
   generateWebhookEvent,
   setNextError,
+  setSubscriptionResponse,
   requests,
 } from "../../helpers/stripe.ts";
 import { flushEeRedis } from "../../helpers/redis.ts";
@@ -156,6 +157,103 @@ describe("billing routes", () => {
       expect(body.usage_percent).toBe(0);
     });
 
+    it("reports an incomplete subscription under its own status", async () => {
+      // `incomplete` is a status Stripe holds the object at, so it is neither
+      // `none` nor a warning state — the dashboard shows the pending payment.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeSubscriptionId: "sub_incomplete_route",
+        subscriptionStatus: "incomplete",
+        creditQuota: 20000,
+      });
+
+      const res = await app.request("/api/billing", { headers: headers() });
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.status).toBe("incomplete");
+    });
+
+    /**
+     * `plan_action` is the server's answer to "where does a plan selection go".
+     * It has to be the exact predicate `POST /checkout` and `POST /plan` refuse
+     * on, or the dashboard sends a call this API rejects.
+     */
+    describe("plan_action", () => {
+      async function planActionFor(account: {
+        stripeSubscriptionId?: string | null;
+        subscriptionStatus?: string | null;
+        cancelAtPeriodEnd?: boolean;
+      }) {
+        await seedBillingAccount({ orgId, planId: "starter", creditQuota: 20000, ...account });
+        const res = await app.request("/api/billing", { headers: headers() });
+        return ((await res.json()) as { plan_action: string }).plan_action;
+      }
+
+      it("sends an org with no subscription to checkout", async () => {
+        expect(await planActionFor({ stripeSubscriptionId: null, subscriptionStatus: null })).toBe(
+          "checkout",
+        );
+      });
+
+      it("sends an active subscription to the in-place plan change", async () => {
+        expect(
+          await planActionFor({
+            stripeSubscriptionId: "sub_pa_active",
+            subscriptionStatus: "active",
+          }),
+        ).toBe("plan-change");
+      });
+
+      it("sends a past_due subscription to the in-place plan change", async () => {
+        // Stripe is still retrying it, so swapping the price item works.
+        expect(
+          await planActionFor({
+            stripeSubscriptionId: "sub_pa_past_due",
+            subscriptionStatus: "past_due",
+          }),
+        ).toBe("plan-change");
+      });
+
+      it("sends a canceling subscription to the in-place plan change", async () => {
+        // The cancel flag is set but Stripe still collects: picking another plan
+        // is a change, not a new subscription.
+        expect(
+          await planActionFor({
+            stripeSubscriptionId: "sub_pa_canceling",
+            subscriptionStatus: "active",
+            cancelAtPeriodEnd: true,
+          }),
+        ).toBe("plan-change");
+      });
+
+      it("sends an unpaid subscription to the Customer Portal", async () => {
+        expect(
+          await planActionFor({
+            stripeSubscriptionId: "sub_pa_unpaid",
+            subscriptionStatus: "unpaid",
+          }),
+        ).toBe("portal");
+      });
+
+      it("sends an incomplete subscription to the Customer Portal", async () => {
+        expect(
+          await planActionFor({
+            stripeSubscriptionId: "sub_pa_incomplete",
+            subscriptionStatus: "incomplete",
+          }),
+        ).toBe("portal");
+      });
+
+      it("sends a canceled subscription back to checkout", async () => {
+        expect(
+          await planActionFor({
+            stripeSubscriptionId: "sub_pa_canceled",
+            subscriptionStatus: "canceled",
+          }),
+        ).toBe("checkout");
+      });
+    });
+
     it("returns none when no Stripe subscription is attached despite a legacy canceled status", async () => {
       await seedBillingAccount({
         orgId,
@@ -295,6 +393,21 @@ describe("billing routes", () => {
       ).toHaveLength(0);
     });
 
+    it("returns 404 when the org has no billing account", async () => {
+      // Not a 503: no amount of retrying gives this org an account, and the
+      // generic Stripe-failure envelope would tell the caller to try again.
+      const res = await app.request("/api/billing/checkout", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "starter" }),
+      });
+
+      expect(res.status).toBe(404);
+      expect((await res.json()) as { code: string }).toMatchObject({
+        code: "no_billing_account",
+      });
+    });
+
     it("still opens a checkout for an org whose subscription has ended", async () => {
       // `canceled` leaves nothing to modify, so Checkout is the only way back.
       await seedBillingAccount({
@@ -416,6 +529,101 @@ describe("billing routes", () => {
       });
 
       expect(res.status).toBe(403);
+    });
+
+    it("returns 404 when the org has no billing account", async () => {
+      const res = await app.request("/api/billing/plan", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: "pro" }),
+      });
+
+      expect(res.status).toBe(404);
+      expect((await res.json()) as { code: string }).toMatchObject({
+        code: "no_billing_account",
+      });
+    });
+
+    /**
+     * `stripeCallFailure` renders one Stripe throw per branch. A refusal
+     * flattened into the generic 503 tells the caller to retry something that
+     * can never succeed.
+     */
+    describe("Stripe failure rendering", () => {
+      async function changePlan() {
+        return app.request("/api/billing/plan", {
+          method: "POST",
+          headers: { ...headers(), "Content-Type": "application/json" },
+          body: JSON.stringify({ plan_id: "pro" }),
+        });
+      }
+
+      it("renders a Stripe invalid-request as a 400 naming plan_id", async () => {
+        await seedBillingAccount({
+          orgId,
+          planId: "starter",
+          stripeSubscriptionId: "sub_bad_price",
+          subscriptionStatus: "active",
+        });
+        setNextError(400, {
+          error: { type: "invalid_request_error", message: "No such price: price_pro_test" },
+        });
+
+        const res = await changePlan();
+
+        expect(res.status).toBe(400);
+        expect((await res.json()) as { code: string; param: string }).toMatchObject({
+          code: "invalid_request",
+          param: "plan_id",
+        });
+      });
+
+      it("passes a Stripe rate limit through as a 429", async () => {
+        await seedBillingAccount({
+          orgId,
+          planId: "starter",
+          stripeSubscriptionId: "sub_stripe_429",
+          subscriptionStatus: "active",
+        });
+        setNextError(429, {
+          error: { type: "rate_limit_error", message: "Too many requests" },
+        });
+
+        const res = await changePlan();
+
+        expect(res.status).toBe(429);
+        expect((await res.json()) as { code: string }).toMatchObject({ code: "rate_limited" });
+      });
+
+      it("refuses a subscription with no price item without sending an update", async () => {
+        // `items: [{ price }]` without an item id ADDS a second priced item
+        // instead of replacing the first, so a subscription with nothing to
+        // replace must never reach the update call at all.
+        await seedBillingAccount({
+          orgId,
+          planId: "starter",
+          stripeSubscriptionId: "sub_no_items",
+          subscriptionStatus: "active",
+        });
+        setSubscriptionResponse({
+          id: "sub_no_items",
+          object: "subscription",
+          status: "active",
+          items: { object: "list", data: [] },
+        });
+
+        const res = await changePlan();
+
+        expect(res.status).toBe(503);
+        expect((await res.json()) as { code: string }).toMatchObject({
+          code: "payment_service_unavailable",
+        });
+        expect(
+          requests.filter(
+            (r) => r.method === "POST" && r.path === "/v1/subscriptions/sub_no_items",
+          ),
+        ).toHaveLength(0);
+      });
     });
   });
 

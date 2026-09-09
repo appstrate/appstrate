@@ -6,6 +6,9 @@ import {
   GIB,
   ENDED_SUBSCRIPTION_STATUSES,
   HARD_BLOCKED_STATUSES,
+  HELD_SUBSCRIPTION_STATUSES,
+  LIVE_SUBSCRIPTION_STATUSES,
+  planAction,
   WARNING_STATUSES,
   ESTIMATED_MODEL_CREDITS_PER_RUN,
   ESTIMATED_MODEL_CREDITS_PER_CHAT_TURN,
@@ -64,6 +67,55 @@ describe("config", () => {
 
     it("treats canceled and incomplete-expired subscriptions as ended paid entitlements", () => {
       expect(ENDED_SUBSCRIPTION_STATUSES).toEqual(new Set(["canceled", "incomplete_expired"]));
+    });
+
+    it("holds every status at which a second checkout would double-bill", () => {
+      expect(HELD_SUBSCRIPTION_STATUSES).toEqual(
+        new Set(["active", "trialing", "past_due", "unpaid", "paused", "incomplete"]),
+      );
+    });
+
+    it("moves a plan in place only where Stripe is still collecting", () => {
+      expect(LIVE_SUBSCRIPTION_STATUSES).toEqual(new Set(["active", "trialing", "past_due"]));
+    });
+
+    it("keeps LIVE a strict subset of HELD", () => {
+      // A status a plan change accepts but a checkout does not refuse would let
+      // one org hold two subscriptions at once.
+      for (const status of LIVE_SUBSCRIPTION_STATUSES) {
+        expect(HELD_SUBSCRIPTION_STATUSES.has(status)).toBe(true);
+      }
+      expect(LIVE_SUBSCRIPTION_STATUSES.size).toBeLessThan(HELD_SUBSCRIPTION_STATUSES.size);
+    });
+  });
+
+  describe("planAction", () => {
+    it("sends a live subscription to the in-place plan change", () => {
+      for (const status of LIVE_SUBSCRIPTION_STATUSES) {
+        expect(planAction({ stripeSubscriptionId: "sub_1", subscriptionStatus: status })).toBe(
+          "plan-change",
+        );
+      }
+    });
+
+    it("sends a held-but-uncollected subscription to the Customer Portal", () => {
+      for (const status of ["unpaid", "paused", "incomplete"]) {
+        expect(planAction({ stripeSubscriptionId: "sub_1", subscriptionStatus: status })).toBe(
+          "portal",
+        );
+      }
+    });
+
+    it("sends an account Stripe holds nothing for to checkout", () => {
+      expect(planAction({ stripeSubscriptionId: null, subscriptionStatus: null })).toBe("checkout");
+      expect(planAction({ stripeSubscriptionId: "sub_dead", subscriptionStatus: "canceled" })).toBe(
+        "checkout",
+      );
+      // A dead id with no status at all: only `customer.subscription.deleted`
+      // nulls the column, so this row is what a lost one leaves behind.
+      expect(planAction({ stripeSubscriptionId: "sub_dead", subscriptionStatus: null })).toBe(
+        "checkout",
+      );
     });
   });
 

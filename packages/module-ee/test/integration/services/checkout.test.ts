@@ -80,12 +80,13 @@ describe("createCheckoutSession", () => {
     );
   });
 
-  it("throws when no billing account exists for the org", async () => {
+  it("refuses an org with no billing account as a 404, not a retryable failure", async () => {
     const unknownOrg = "00000000-0000-4000-a000-000000000099";
 
-    await expect(createCheckoutSession(unknownOrg, "starter", appUrl)).rejects.toThrow(
-      "No billing account for org",
-    );
+    await expect(createCheckoutSession(unknownOrg, "starter", appUrl)).rejects.toMatchObject({
+      status: 404,
+      code: "no_billing_account",
+    });
   });
 
   it("throws when Stripe returns a session without a URL", async () => {
@@ -139,6 +140,24 @@ describe("createCheckoutSession", () => {
         stripeCustomerId: "cus_held_001",
         stripeSubscriptionId: "sub_held_001",
         subscriptionStatus: "unpaid",
+      });
+
+      await expect(createCheckoutSession(orgId, "pro", appUrl)).rejects.toMatchObject({
+        status: 409,
+        code: "subscription_exists",
+      });
+      expect(requests.filter((r) => r.path === "/v1/checkout/sessions")).toHaveLength(0);
+    });
+
+    it("refuses a checkout while the first payment is still pending", async () => {
+      // `incomplete` is HELD: Stripe may yet activate the subscription, so a
+      // second checkout can end with two live subscriptions on one org.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_incomplete_001",
+        stripeSubscriptionId: "sub_incomplete_001",
+        subscriptionStatus: "incomplete",
       });
 
       await expect(createCheckoutSession(orgId, "pro", appUrl)).rejects.toMatchObject({

@@ -43,9 +43,10 @@ import { setMockLedgerListHook } from "../../helpers/mock-platform.ts";
 import { logger } from "../../../src/logger.ts";
 import { getPlans, GIB } from "../../../src/config.ts";
 import { _resetEeEnvForTests } from "../../../src/env.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
 
 useEeTestSeams();
+useEeReconciliationEnv();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
