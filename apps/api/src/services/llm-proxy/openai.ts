@@ -63,12 +63,16 @@ function parseOpenAICompatibleUsage(u: Record<string, unknown>): UpstreamUsage |
       ? (rawDetails as Record<string, unknown>)
       : null;
 
-  // `?? ` chain, not `||`: a genuine 0 from the more specific source must not
-  // fall through to the next dialect's field.
+  // Three vendors spelling the SAME live quantity three ways. This reads like
+  // the `X ?? legacyX` chain docs/NO_TRANSITIONAL_CODE.md §1 prohibits and is
+  // not one: §1 governs a name WE retired, and none of these three replaced
+  // another — drop any branch and that vendor is mis-billed today. Most
+  // specific first, pi-ai's own precedence. `?? `, not `||`: a genuine 0 from
+  // the more specific source must not fall through to the next vendor's field.
   const reportedCacheRead =
-    tokenCount(details?.["cached_tokens"]) ??
-    tokenCount(u["prompt_cache_hit_tokens"]) ??
-    tokenCount(u["cached_tokens"]);
+    tokenCount(details?.["cached_tokens"]) ?? // OpenAI, OpenRouter
+    tokenCount(u["prompt_cache_hit_tokens"]) ?? // DeepSeek
+    tokenCount(u["cached_tokens"]); // Kimi
   const reportedCacheWrite = tokenCount(details?.["cache_write_tokens"]);
 
   const cacheWrite = reportedCacheWrite ?? 0;
