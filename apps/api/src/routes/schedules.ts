@@ -42,6 +42,7 @@ import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -563,10 +564,14 @@ export function createSchedulesRouter() {
     const scheduleId = c.req.param("id")!;
     const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+    // `schedules:read` is space-wide, so the schedule itself is readable to
+    // every member — but its RUNS are runs, and follow the run predicate:
+    // without `runs:read-all` a colleague's schedule lists nothing.
     const result = await listScheduleRuns(scope, scheduleId, {
       limit,
       offset,
       actor: getActor(c),
+      visibility: runVisibilityFilter(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);

@@ -30,6 +30,7 @@ import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
@@ -188,7 +189,7 @@ export function createAgentsRouter() {
     // Single query: system packages + installed packages via LEFT JOIN
     const [rows, runningCounts] = await Promise.all([
       listAccessiblePackages(scope, "agent"),
-      getRunningRunCounts(scope),
+      getRunningRunCounts(scope, runVisibilityFilter(c)),
     ]);
 
     const agentList = rows.map((row) => {

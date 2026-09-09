@@ -182,6 +182,41 @@ describe("presetPermissions", () => {
   });
 });
 
+describe("runs:read-all", () => {
+  it("is held by builder and admin, and by neither operator nor viewer", () => {
+    // `read` is the runs the principal launched; `read-all` is the space-wide
+    // supervision view. `admin`/`builder` derive it from the catalog — the
+    // point of asserting it here is that the derivation reaches them and the
+    // two narrower presets, which enumerate their grants by hand, stay out.
+    for (const preset of ["admin", "builder"] as const) {
+      expect(`${preset}: ${presetPermissions(preset)!.has("runs:read-all")}`).toBe(
+        `${preset}: true`,
+      );
+    }
+    for (const preset of ["operator", "viewer"] as const) {
+      expect(`${preset}: ${presetPermissions(preset)!.has("runs:read-all")}`).toBe(
+        `${preset}: false`,
+      );
+      // …while plain `runs:read` is unchanged for the operator.
+      expect(presetPermissions(preset)!.has("runs:read")).toBe(true);
+    }
+  });
+
+  it("is API-key grantable, and only to a creator who holds it", () => {
+    expect(API_KEY_ALLOWED_SCOPES.has("runs:read-all")).toBe(true);
+    // An org admin holds the `admin` preset in the default space.
+    expect(validateScopes(["runs:read", "runs:read-all"], inDefaultSpace("admin"))).toEqual([
+      "runs:read",
+      "runs:read-all",
+    ]);
+    // A plain member holds `operator` there: the wider scope narrows away
+    // silently, exactly like any other grant above the creator.
+    expect(validateScopes(["runs:read", "runs:read-all"], inDefaultSpace("member"))).toEqual([
+      "runs:read",
+    ]);
+  });
+});
+
 describe("validateScopes", () => {
   it("filters scopes to the creator's effective set + API key allowlist", () => {
     const scopes = ["agents:read", "agents:write", "agents:run"];

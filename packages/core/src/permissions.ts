@@ -75,7 +75,11 @@ export interface CoreResources {
   // manifest (MCPB vocabulary lifted to the root), authored externally and
   // imported as a `.afps`).
   "mcp-servers": "read" | "write" | "delete";
-  runs: "read" | "cancel" | "delete";
+  // `read` = the runs the principal launched (its own manual runs, and the
+  // runs of its own schedules). `read-all` = every run in the space, whoever
+  // launched it: other members', end-users', and the actor-less rows left by
+  // launch paths that predate #735.
+  runs: "read" | "read-all" | "cancel" | "delete";
   // Durable file store. `read` gates the family the same way `runs:read`
   // gates runs — it answers "may this principal touch files at all",
   // NOT "may it touch THIS file" (the per-file container ACL, derived
@@ -134,7 +138,7 @@ export const CORE_RESOURCE_ACTIONS = {
   agents: ["read", "write", "configure", "delete", "run"],
   skills: ["read", "write", "delete"],
   "mcp-servers": ["read", "write", "delete"],
-  runs: ["read", "cancel", "delete"],
+  runs: ["read", "read-all", "cancel", "delete"],
   files: ["read", "delete"],
   schedules: ["read", "write", "delete"],
   persistence: ["read", "delete"],

@@ -157,6 +157,9 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "agents:run",
     "skills:read",
     "mcp-servers:read",
+    // `runs:read` alone — the runs this member launched. Seeing a colleague's
+    // (or an end-user's) run is `runs:read-all`, which `admin` and `builder`
+    // derive from the catalog and an operator does not.
     "runs:read",
     "runs:cancel",
     // Files: read only — deleting is preset admin or the creator (per-file capability check).
@@ -212,8 +215,11 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "mcp-servers:read",
   "mcp-servers:write",
   "mcp-servers:delete",
-  // Runs
+  // Runs. `read-all` is grantable: a headless supervisor key must be able to
+  // read the whole space's runs, and the ceiling still caps it at what its
+  // creator holds.
   "runs:read",
+  "runs:read-all",
   "runs:cancel",
   "runs:delete",
   // Files (read the gallery / download deliverables; delete via API key

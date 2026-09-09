@@ -51,7 +51,8 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../lib/scope.ts";
-import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
+import { actorInsert, actorFromIds, actorFilter, actorScopeFilter } from "../lib/actor.ts";
+import { ownsRun } from "../lib/run-visibility.ts";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
@@ -1195,7 +1196,8 @@ const fileSelect = {
  * cross-org, cross-space, or cross-actor id is indistinguishable from a missing
  * one. The full {@link FileCapabilities} are derived once here (the single
  * source) — `permissions` supplies the `files:delete` grant that decides the
- * `keep` / `delete` capabilities (default: none).
+ * `keep` / `delete` capabilities, and the `runs:read-all` grant that widens a
+ * run container beyond the caller's own runs (default: neither).
  */
 export async function getFileForActor(
   scope: SpaceScope,
@@ -1214,11 +1216,13 @@ export async function getFileForActor(
   if (!row) return null;
 
   if (row.runId) {
-    // Run container: reuse the run's read semantics (org+space scope already
-    // matched above) plus the end-user guard (routes/runs.ts pattern).
+    // Run container: the file inherits its run's read-ACL, so resolving it by
+    // id is exactly as narrow as reading the run — a caller without
+    // `runs:read-all` reaches only the files of the runs it launched. Naming a
+    // colleague's file id is indistinguishable from naming a missing one.
     const run = await getRun(scope, row.runId);
     if (!run) return null;
-    if (actor.type === "end_user" && run.endUserId !== actor.id) return null;
+    if (!permissions.has("runs:read-all") && !ownsRun(actor, run)) return null;
   } else if (row.chatSessionId) {
     // Chat container: sessions are per-dashboard-user; only the owner reads.
     if (actor.type !== "user") return null;
@@ -1285,6 +1289,9 @@ export async function loadFileForPreview(orgId: string, fileId: string): Promise
  *    and echo it back; a foreign/missing file is a 404.
  *
  * Chat sessions are per dashboard user, so the actor is always a `user`.
+ * `ChatAttachmentRequest` carries plain fields, not the caller's permission
+ * set, so the ACL runs with none: a run-contained file attaches only when the
+ * session owner launched that run, `runs:read-all` or not.
  */
 export async function resolveChatAttachment(
   request: ChatAttachmentRequest,
@@ -1351,7 +1358,7 @@ async function runContainerFilter(scope: SpaceScope, runId: string): Promise<SQL
  * Files that make up one conversation's context: direct chat attachments,
  * outputs produced by its runs, and files consumed by those runs. The
  * session ownership check is load-bearing because chat sessions are private
- * even though dashboard members may read the org-wide run list.
+ * even for a member holding `runs:read-all`, who reads the space-wide run list.
  */
 async function chatContextFileFilter(
   scope: SpaceScope,
@@ -1415,9 +1422,9 @@ async function chatContextFileFilter(
  * Org+space-scoped file gallery, with container-inherited visibility (D7 —
  * consistent with `getFileForActor`):
  *
- *  - A dashboard `user` (member) sees every run-contained file in the space
- *    (mirroring the org-wide runs list — no per-user filter), plus chat-contained
- *    files only from their OWN sessions (chat sessions are private).
+ *  - A dashboard `user` (member) sees the run-contained files of the runs it may
+ *    read — the whole space with `runs:read-all`, else its own runs — plus
+ *    chat-contained files only from their OWN sessions (chat sessions are private).
  *  - An `end_user` sees only their own rows (`actorScopeFilter`).
  *
  * Keyset pagination on `(createdAt, id)` DESC — the same stable tuple cursor as
@@ -1440,13 +1447,23 @@ export async function listFilesForActor(
       : // Members — three visibility arms so a detached (both containers NULL)
         // `user_upload` is NOT widened by deletion (it was creator-only in its
         // chat/run origin and stays so):
-        //   1. run-contained (run_id set) → org-wide, mirroring the runs list;
+        //   1. run-contained (run_id set) → the runs the caller may read: the
+        //      whole space with `runs:read-all`, else the caller's own runs.
+        //      Published files copy their run's attribution, so the same
+        //      ownership test applies to the file's own columns;
         //   2. own rows (user_id = me) → own chat docs + own detached uploads;
-        //   3. detached `agent_output` → org-readable (it always was, via its run).
+        //   3. detached `agent_output` → org-readable (it always was, via its
+        //      run): it has lost its run container, so there is nothing left to
+        //      inherit visibility from.
         // A chat-contained doc (chat_session_id set, run_id null) is covered by
         // arm 2 only — unchanged owner-only visibility.
         or(
-          isNotNull(files.runId),
+          permissions.has("runs:read-all")
+            ? isNotNull(files.runId)
+            : and(
+                isNotNull(files.runId),
+                actorFilter(actor, { userId: files.userId, endUserId: files.endUserId }),
+              ),
           eq(files.userId, actor.id),
           and(isNull(files.runId), isNull(files.chatSessionId), eq(files.purpose, "agent_output")),
         )!,

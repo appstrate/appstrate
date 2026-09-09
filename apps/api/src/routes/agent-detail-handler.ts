@@ -26,6 +26,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 
 /**
  * Build the canonical Agent detail DTO — the exact object the `GET` agent
@@ -101,9 +102,13 @@ export async function buildAgentDetailDto(
     agent.id,
   );
 
+  // Both are the CALLER's view of the agent's activity: without
+  // `runs:read-all` the last run and the in-flight count are the caller's own
+  // runs, not a colleague's.
+  const visibility = runVisibilityFilter(c);
   const [lastRun, runningCount] = await Promise.all([
-    getLastRun(scope, agent.id, null),
-    getRunningRunsForPackage(scope, agent.id),
+    getLastRun(scope, agent.id, visibility),
+    getRunningRunsForPackage(scope, agent.id, visibility),
   ]);
 
   const parsed = parseScopedName(m.name);

@@ -115,7 +115,12 @@ export function createFilesRouter() {
     async (c) => {
       const scope = getSpaceScope(c);
       const actor = getActor(c);
-      const resolved = await getFileForActor(scope, actor, c.req.param("id")!);
+      const resolved = await getFileForActor(
+        scope,
+        actor,
+        c.req.param("id")!,
+        c.get("permissions"),
+      );
       if (!resolved) throw notFound("File not found");
       if (!resolved.capabilities.download) {
         throw forbidden("This file is not downloadable by the current actor");

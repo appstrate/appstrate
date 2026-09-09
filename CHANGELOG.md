@@ -119,6 +119,21 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **`runs:read` now means the runs you launched, and nothing else.** Your manual
+  runs and the runs of your own schedules — not a colleague's, not an
+  end-user's. The space-wide view is a permission of its own, **`runs:read-all`**,
+  held by the `admin` and `builder` presets and grantable to a custom role or an
+  API key; the `operator` and `viewer` presets do not hold it, so **an existing
+  operator stops seeing other members' runs**. It narrows every surface a run
+  reaches — the run list, an agent's run list, run detail, logs, cancel, the
+  in-flight counts and `last_run` on the agents pages, a schedule's run list,
+  `rerun_from` (replaying a run returns its input), and the run outputs in the
+  file gallery — and a run you may not read answers `404`, never `403`.
+  Bulk-deleting an agent's runs takes `runs:read-all` alongside `runs:delete`:
+  it spans the whole space.
+  `GET /api/runs?user=me` is now strictly your own runs for every caller,
+  end-user and actor-less runs included, whether or not you hold `read-all`.
+
 - **The commercial module stores its tables in the platform database.**
   `@appstrate/module-ee` does not run a PostgreSQL database of its own: it reads
   `DATABASE_URL`, opens its own pool on it and migrates its seven `ee_*` tables
