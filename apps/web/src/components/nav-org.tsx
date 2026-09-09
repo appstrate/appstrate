@@ -72,15 +72,27 @@ export function NavOrg() {
     { path: "/files", label: t("nav.files"), icon: FileText },
   ];
 
+  // Each entry asks for the permission its landing page's list route needs, so
+  // a caller who would land on a wall of 403s never sees the link. `agents` is
+  // the disjunction the route itself accepts: a `runner` launches agents it
+  // holds no `agents:read` on.
   const automationItems: NavItem[] = [
-    { path: "/agents", label: t("nav.agents"), icon: Layers },
-    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
+    ...(can("agents:read") || can("agents:run")
+      ? [{ path: "/agents", label: t("nav.agents"), icon: Layers }]
+      : []),
+    ...(can("schedules:read")
+      ? [{ path: "/schedules", label: t("nav.schedules"), icon: Calendar }]
+      : []),
   ];
 
   const extensionItems: NavItem[] = [
-    { path: "/skills", label: t("nav.skills"), icon: Wrench },
-    { path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug },
-    { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
+    ...(can("skills:read") ? [{ path: "/skills", label: t("nav.skills"), icon: Wrench }] : []),
+    ...(can("mcp-servers:read")
+      ? [{ path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug }]
+      : []),
+    ...(can("integrations:read")
+      ? [{ path: "/integrations", label: t("nav.integrations"), icon: Boxes }]
+      : []),
   ];
 
   const canReadWebhooks = WEBHOOK_READ_PERMISSIONS.some((p) => can(p));
@@ -155,15 +167,19 @@ export function NavOrg() {
         </SidebarMenu>
       </SidebarGroup>
 
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.section.automation")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(automationItems)}</SidebarMenu>
-      </SidebarGroup>
+      {automationItems.length > 0 && (
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("nav.section.automation")}</SidebarGroupLabel>
+          <SidebarMenu>{renderItems(automationItems)}</SidebarMenu>
+        </SidebarGroup>
+      )}
 
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.section.extensions")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(extensionItems)}</SidebarMenu>
-      </SidebarGroup>
+      {extensionItems.length > 0 && (
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("nav.section.extensions")}</SidebarGroupLabel>
+          <SidebarMenu>{renderItems(extensionItems)}</SidebarMenu>
+        </SidebarGroup>
+      )}
 
       {adminItems.length > 0 && (
         <SidebarGroup>

@@ -591,17 +591,21 @@ export function App() {
             <Route
               path="/agents/new"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
+                <RequirePermission permission="agents:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="agent" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/agents/:scope/:name/edit"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
+                <RequirePermission permission="agents:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="agent" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -647,9 +651,11 @@ export function App() {
             <Route
               path="/schedules"
               element={
-                <LazyRoute>
-                  <SchedulesListPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:read">
+                  <LazyRoute>
+                    <SchedulesListPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -679,9 +685,11 @@ export function App() {
             <Route
               path="/skills"
               element={
-                <LazyRoute>
-                  <SkillsPage />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <SkillsPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -719,17 +727,21 @@ export function App() {
             <Route
               path="/skills/new"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name/edit"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -751,9 +763,11 @@ export function App() {
             <Route
               path="/mcp-servers"
               element={
-                <LazyRoute>
-                  <McpServersPage />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <McpServersPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route

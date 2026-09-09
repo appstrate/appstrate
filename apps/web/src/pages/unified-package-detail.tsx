@@ -69,6 +69,13 @@ type DetailTab =
   | "content"
   | "usedBy";
 
+/**
+ * The agent tabs an `agents:run` caller without `agents:read` is not served:
+ * each is fed by a field the summary read omits (manifest, prompt, authoring
+ * history) or by a route — versions, files — that answers 403 to them.
+ */
+const SUMMARY_WITHHELD_TABS: readonly DetailTab[] = ["overview", "content", "versions", "diff"];
+
 /** A version that declares no parameters — distinct from "use the draft". */
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
@@ -146,6 +153,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
   const { can } = usePermissions();
+  // Whether this page is looking at the whole resource. Only an agent has a
+  // narrower read; every other type reaches this route on its own `<type>:read`.
+  const fullRead = type !== "agent" || can("agents:read");
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
@@ -241,7 +251,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   useEffect(() => {
     if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
-  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
+    // A hash naming a withheld tab must not mount its panel: the tab bar hides
+    // it, and the panels below key on `tab`, not on what the bar renders.
+    if (!fullRead && SUMMARY_WITHHELD_TABS.includes(tab)) setTab(defaultTab);
+  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab, fullRead]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
 
   // ── Loading / Error ──
@@ -317,11 +330,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
-    { id: "schedules", label: t("detail.tabSchedules") },
+    ...(can("schedules:read")
+      ? [{ id: "schedules" as DetailTab, label: t("detail.tabSchedules") }]
+      : []),
     { id: "memory", label: t("detail.tabMemory") },
     { id: "api", label: t("detail.tabApi") },
-    overviewTab,
-    filesTab,
+    ...(fullRead ? [overviewTab, filesTab] : []),
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
@@ -332,8 +346,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Shared tabs appended to all package types
   const sharedTabs: Array<{ id: DetailTab; label: string }> = [
-    ...(!isBuiltIn ? [{ id: "versions" as DetailTab, label: t("version.archives") }] : []),
-    ...(hasArchivableChanges && !isVersionView
+    ...(!isBuiltIn && fullRead
+      ? [{ id: "versions" as DetailTab, label: t("version.archives") }]
+      : []),
+    ...(hasArchivableChanges && !isVersionView && fullRead
       ? [{ id: "diff" as DetailTab, label: t("version.diff") }]
       : []),
   ];

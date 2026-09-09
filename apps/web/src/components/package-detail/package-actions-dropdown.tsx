@@ -107,6 +107,10 @@ export function PackageActionsDropdown({
   // asks for the string the matching route checks.
   const resource = PACKAGE_PERMISSIONS[type].resource;
   const canWrite = can(`${resource}:write`);
+  // The exports carry the manifest and every authored file, so the two download
+  // routes ask for `<type>:read` — the permission a summary-only caller (an
+  // `agents:run` runner) does not hold. Without this the items 403 on click.
+  const canRead = can(`${resource}:read`);
   const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
   const canDelete = can(`${resource}:delete`);
   // Deactivating / uninstalling an integration is the same route pair as
@@ -142,7 +146,7 @@ export function PackageActionsDropdown({
         )}
 
         {/* ── Download ── */}
-        {downloadVersion && onDownload && (
+        {canRead && downloadVersion && onDownload && (
           <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
             <Download size={14} />
             {t("btn.download", { ns: "common" })}
@@ -153,7 +157,7 @@ export function PackageActionsDropdown({
               Disabled when no version has been published: the export
               endpoint resolves `(packageId, version)` from the registry,
               so a draft-only package would 404. */}
-        {isAgent && onDownloadBundle && (
+        {canRead && isAgent && onDownloadBundle && (
           <DropdownMenuItem
             onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
             disabled={!hasPublishedVersion}
