@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/jira",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Jira (API)",
@@ -25,7 +25,15 @@
       "type": "oauth2",
       "authorization_endpoint": "https://auth.atlassian.com/authorize",
       "token_endpoint": "https://auth.atlassian.com/oauth/token",
-      "default_scopes": ["read:jira-work", "read:jira-user", "offline_access"],
+      "userinfo_endpoint": "https://api.atlassian.com/me",
+      "identity_claims": {
+        "accountId": "$.account_id",
+        "sub": "$.account_id",
+        "email": "$.email",
+        "name": "$.name",
+        "picture": "$.picture"
+      },
+      "default_scopes": ["read:jira-work", "read:jira-user", "read:me", "offline_access"],
       "token_endpoint_auth_method": "client_secret_post",
       "scope_catalog": [
         {

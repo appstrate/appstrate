@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/salesforce",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Salesforce (API)",
@@ -25,7 +25,16 @@
       "type": "oauth2",
       "authorization_endpoint": "https://login.salesforce.com/services/oauth2/authorize",
       "token_endpoint": "https://login.salesforce.com/services/oauth2/token",
-      "default_scopes": ["api", "refresh_token", "offline_access"],
+      "userinfo_endpoint": "https://login.salesforce.com/services/oauth2/userinfo",
+      "identity_claims": {
+        "accountId": "$.preferred_username",
+        "sub": "$.sub",
+        "userId": "$.user_id",
+        "organizationId": "$.organization_id",
+        "email": "$.email",
+        "name": "$.name"
+      },
+      "default_scopes": ["api", "openid", "profile", "email", "refresh_token", "offline_access"],
       "token_endpoint_auth_method": "client_secret_post",
       "code_challenge_methods_supported": ["S256"],
       "scope_catalog": [
