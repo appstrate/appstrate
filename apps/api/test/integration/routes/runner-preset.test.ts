@@ -280,6 +280,74 @@ describe("runner preset", () => {
     }
   });
 
+  it("refuses an inline run whose manifest declares a skill it cannot read", async () => {
+    // The inline routes take a manifest in the BODY, so a runner could name a
+    // skill there and reach through the composition it is not served on the
+    // agent detail. `assertPackageDependenciesAccessible` is what stops it, and
+    // it stops the dry-run validator on the same call.
+    const body = JSON.stringify({
+      manifest: {
+        name: "@runner/inline",
+        display_name: "Inline Agent",
+        version: "0.0.0",
+        type: "agent",
+        description: "Inline run",
+        schema_version: "0.1",
+        dependencies: { skills: { [SKILL_ID]: "^1.0.0" } },
+      },
+      prompt: "Do the thing.",
+      input: {},
+    });
+
+    for (const path of ["/api/runs/inline", "/api/runs/inline/validate"]) {
+      const denied = await app.request(path, {
+        method: "POST",
+        headers: authHeaders(runner, { "Content-Type": "application/json" }),
+        body,
+      });
+      expect(`${path}: ${denied.status}`).toBe(`${path}: 403`);
+
+      // The control: the operator holds `skills:read`, so the same body gets
+      // past the dependency gate — whatever it answers, it is not a 403.
+      const allowed = await app.request(path, {
+        method: "POST",
+        headers: authHeaders(operator, { "Content-Type": "application/json" }),
+        body,
+      });
+      expect(`${path}: ${allowed.status !== 403}`).toBe(`${path}: true`);
+    }
+  });
+
+  it("serves connection readiness — the integrations a launcher connects", async () => {
+    const res = await app.request(`/api/agents/${AGENT_PATH}/connection-readiness`, {
+      headers: authHeaders(runner),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      blocks_run: boolean;
+      integrations: { integration_id: string }[];
+    };
+    expect(body.integrations.map((i) => i.integration_id)).toEqual([INTEGRATION_ID]);
+    expect(await res.clone().text()).not.toContain(SKILL_ID);
+  });
+
+  it("keeps a runner's persistence read on its own actor, explicit actor_id or not", async () => {
+    // `persistence:read` gates the route and every preset holds it; the
+    // cross-actor view is gated on `persistence:delete`, which a runner does
+    // not hold — so naming another actor narrows to the caller anyway rather
+    // than answering 403.
+    const path = `/api/agents/${AGENT_PATH}/persistence`;
+    const own = await app.request(path, { headers: authHeaders(runner) });
+    expect(own.status).toBe(200);
+
+    const spoofed = await app.request(
+      `${path}?actor_type=user&actor_id=${encodeURIComponent(operator.user.id)}`,
+      { headers: authHeaders(runner) },
+    );
+    expect(spoofed.status).toBe(200);
+    expect(await spoofed.json()).toEqual(await own.json());
+  });
+
   it("403s every write, the import included", async () => {
     const writes = [
       {
@@ -344,7 +412,7 @@ describe("runner preset", () => {
 
     // A run of the same agent, launched by someone else: the runner holds
     // `runs:read` and not `runs:read-all`, so it never appears.
-    const colleagueRun = await seedRun({
+    await seedRun({
       packageId: LAUNCH_AGENT_ID,
       orgId: owner.orgId,
       spaceId: owner.defaultSpaceId,
@@ -365,7 +433,6 @@ describe("runner preset", () => {
     expect(((await list.json()) as { data: { id: string }[] }).data.map((r) => r.id)).toEqual([
       runId,
     ]);
-    expect(runId).not.toBe(colleagueRun.id);
 
     await waitForRunPipelineSettled();
   });

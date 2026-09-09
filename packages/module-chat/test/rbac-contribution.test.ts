@@ -19,12 +19,11 @@ import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import chatModule from "../src/index.ts";
 
 /** The `presets` list declared for `chat:<action>`, at `level: "space"`. */
-function presetsFor(action: string): readonly string[] {
+function presetsFor(action: "read" | "write"): readonly string[] {
   const entry = chatModule
     .permissionsContribution?.()
     .find(
-      (contribution) =>
-        contribution.resource === "chat" && contribution.actions.includes(action as never),
+      (contribution) => contribution.resource === "chat" && contribution.actions.includes(action),
     );
   if (entry === undefined || entry.level !== "space") {
     throw new Error(`module-chat declares no space-level contribution for chat:${action}`);
@@ -39,11 +38,10 @@ describe("module-chat RBAC contribution", () => {
   });
 
   it("names only presets the platform knows", () => {
-    for (const action of ["read", "write"]) {
+    const known: readonly string[] = SPACE_ROLE_PRESETS;
+    for (const action of ["read", "write"] as const) {
       for (const preset of presetsFor(action)) {
-        expect(
-          `chat:${action} names ${preset}: ${SPACE_ROLE_PRESETS.includes(preset as never)}`,
-        ).toBe(`chat:${action} names ${preset}: true`);
+        expect(known.includes(preset), `chat:${action} names ${preset}`).toBe(true);
       }
     }
   });

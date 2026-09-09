@@ -40,6 +40,16 @@ import {
 
 const app = getTestApp();
 
+/**
+ * Fixed launch timestamps, strictly increasing, so "the caller's latest run" is
+ * a property of the fixture rather than of insert timing. `runA` at T0 and
+ * `runAScheduled` at T2 make the scheduled row A's latest; `runB` sits between
+ * them so an ordering that ignores visibility picks the wrong one.
+ */
+const T0 = new Date("2026-01-01T10:00:00.000Z");
+const T1 = new Date("2026-01-01T11:00:00.000Z");
+const T2 = new Date("2026-01-01T12:00:00.000Z");
+
 const AGENT_ID = "@isolation/shared-agent";
 const AGENT_PATH = `${encodeURIComponent("@isolation")}/shared-agent`;
 /** The agent DETAIL lives under the packages router, not `/api/agents`. */
@@ -100,8 +110,11 @@ describe("run read isolation between members", () => {
       status: "success" as const,
     };
 
-    runA = (await seedRun({ ...common, userId: operatorA.user.id })).id;
-    runB = (await seedRun({ ...common, userId: operatorB.user.id })).id;
+    // Explicit, ordered timestamps: `last_run` is the LATEST run the caller may
+    // read, so which of A's two rows wins must be a fixture decision and not a
+    // race between two inserts in the same millisecond.
+    runA = (await seedRun({ ...common, userId: operatorA.user.id, startedAt: T0 })).id;
+    runB = (await seedRun({ ...common, userId: operatorB.user.id, startedAt: T1 })).id;
 
     // A schedule freezes its actor (`services/scheduler.ts` refuses one with
     // none), and every run it fires is inserted with that actor — so A's own
@@ -115,7 +128,12 @@ describe("run read isolation between members", () => {
     });
     scheduleId = schedule.id;
     runAScheduled = (
-      await seedRun({ ...common, userId: operatorA.user.id, scheduleId: schedule.id })
+      await seedRun({
+        ...common,
+        userId: operatorA.user.id,
+        scheduleId: schedule.id,
+        startedAt: T2,
+      })
     ).id;
 
     const endUser = await seedEndUser({
@@ -165,7 +183,7 @@ describe("run read isolation between members", () => {
     return ((await res.json()) as RunList).data.map((r) => r.id);
   }
 
-  /** The four per-run surfaces, each answering 404 for a run the caller cannot read. */
+  /** The three per-run surfaces, each answering 404 for a run the caller cannot read. */
   async function statusesFor(
     headers: Record<string, string>,
     runId: string,
@@ -259,6 +277,17 @@ describe("run read isolation between members", () => {
         `${label}: ${JSON.stringify({ detail: 404, logs: 404, cancel: 404 })}`,
       );
     }
+  });
+
+  it("404s ?wait on a colleague's run without waiting for it", async () => {
+    // `?wait` long-polls a run to a terminal status. Visibility is checked
+    // BEFORE any waiting starts, so a run the caller may not read answers the
+    // same 404 the plain call does — it must not hold the request open for the
+    // wait window and then answer it.
+    const started = Date.now();
+    const res = await app.request(`/api/runs/${runB}?wait=5`, { headers: authHeaders(operatorA) });
+    expect(res.status).toBe(404);
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 
   it("serves a member their own run on all three surfaces", async () => {
@@ -482,8 +511,8 @@ describe("run read isolation between members", () => {
     };
 
     expect((await detailFor(operatorB)).last_run?.id).toBe(runB);
-    // B launched exactly one run, so a leak from A or the end-user would show
-    // as a different id, not merely as a different count.
-    expect((await detailFor(operatorA)).last_run?.id).not.toBe(runB);
+    // A's latest is the SCHEDULED run (T2, after T0) — an exact id, so a leak
+    // from B or the end-user shows as a wrong id rather than a wrong count.
+    expect((await detailFor(operatorA)).last_run?.id).toBe(runAScheduled);
   });
 });

@@ -508,7 +508,11 @@ function openRealtimeStream(
   });
 }
 
-/** The run row a per-run stream reads twice: once to decide the 404, once to snapshot. */
+/**
+ * The run row behind a per-run stream: the visibility gate reads it before
+ * subscribing, {@link sendInitialRunSnapshot} reads it again after — which is
+ * the invariant documented there, not an accident to be optimised away.
+ */
 async function loadRunForStream(runId: string, scope: { orgId: string; spaceId: string }) {
   const [row] = await db
     .select({

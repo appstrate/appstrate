@@ -472,9 +472,7 @@ describe("module-loader", () => {
       const snapshot = collectModulePermissions([mcpModule, webhooksModule]);
 
       for (const permission of ["mcp:read", "mcp:invoke"]) {
-        expect(`runner holds ${permission}: ${snapshot.byPreset.runner.has(permission)}`).toBe(
-          `runner holds ${permission}: true`,
-        );
+        expect(snapshot.byPreset.runner.has(permission), `runner holds ${permission}`).toBe(true);
       }
       // The invoke half stops at `runner`; `viewer` keeps the read half only.
       expect(snapshot.byPreset.viewer.has("mcp:read")).toBe(true);
@@ -482,8 +480,9 @@ describe("module-loader", () => {
       // Webhooks are space governance: preset admin and builder, nothing below.
       for (const preset of ["operator", "runner", "viewer"] as const) {
         expect(
-          `${preset} holds webhooks:read: ${snapshot.byPreset[preset].has("webhooks:read")}`,
-        ).toBe(`${preset} holds webhooks:read: false`);
+          snapshot.byPreset[preset].has("webhooks:read"),
+          `${preset} holds webhooks:read`,
+        ).toBe(false);
       }
       expect(snapshot.byPreset.builder.has("webhooks:read")).toBe(true);
     });

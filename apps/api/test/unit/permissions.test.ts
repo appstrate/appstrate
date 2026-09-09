@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { SPACE_LEVEL_PERMISSIONS, type OrgRole } from "@appstrate/core/permissions";
+import {
+  SPACE_LEVEL_PERMISSIONS,
+  type OrgRole,
+  type SpaceLevelPermission,
+} from "@appstrate/core/permissions";
 import { describe, it, expect } from "bun:test";
 import {
   effectivePermissions,
@@ -8,6 +12,7 @@ import {
   presetPermissions,
   validateScopes,
   API_KEY_ALLOWED_SCOPES,
+  type Permission,
 } from "../../src/lib/permissions.ts";
 import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts";
 
@@ -193,7 +198,7 @@ describe("the `runner` preset", () => {
    * to `SPACE_LEVEL_PERMISSIONS`, the core space vocabulary. What the modules
    * add is the subject of the last test in this block.
    */
-  const RUNNER_GRANTS: string[] = [
+  const RUNNER_GRANTS: Permission[] = [
     "agents:run",
     "files:read",
     "integrations:connect",
@@ -205,9 +210,9 @@ describe("the `runner` preset", () => {
   ];
 
   /** The half of a preset's set that core defines, module contributions removed. */
-  function coreGrants(preset: Parameters<typeof presetPermissions>[0]): string[] {
-    return [...presetPermissions(preset)!]
-      .filter((p) => SPACE_LEVEL_PERMISSIONS.has(p as never))
+  function coreGrants(preset: Parameters<typeof presetPermissions>[0]): Permission[] {
+    return [...presetPermissions(preset)]
+      .filter((p) => SPACE_LEVEL_PERMISSIONS.has(p as SpaceLevelPermission))
       .sort();
   }
 
@@ -219,7 +224,7 @@ describe("the `runner` preset", () => {
     const runner = presetPermissions("runner");
     // The point of the preset (RBAC spec §3.3): the agent's content, the
     // packages it is built from, who else runs what, and any mutation at all.
-    for (const withheld of [
+    const withheldGrants: Permission[] = [
       "agents:read",
       "skills:read",
       "mcp-servers:read",
@@ -227,10 +232,9 @@ describe("the `runner` preset", () => {
       "end-users:read",
       "end-users:write",
       "runs:read-all",
-    ]) {
-      expect(`runner holds ${withheld}: ${runner.has(withheld as never)}`).toBe(
-        `runner holds ${withheld}: false`,
-      );
+    ];
+    for (const withheld of withheldGrants) {
+      expect(runner.has(withheld), `runner holds ${withheld}`).toBe(false);
     }
     // No core mutation at all: a runner starts what someone else authored.
     expect(coreGrants("runner").filter((p) => p.endsWith(":write"))).toEqual([]);
@@ -240,16 +244,15 @@ describe("the `runner` preset", () => {
     // The friendly surfaces a non-builder uses — every write behind them is
     // gated by the principal's own permissions, so they grant nothing the
     // preset withholds. `webhooks` names admin/builder only and must stay out.
-    const runner = presetPermissions("runner");
+    // Read as strings: `chat:*` is contributed by `@appstrate/module-chat`,
+    // a workspace whose `ModuleResources` declaration merge does not reach this
+    // project, so it is absent from `Permission` here while present in the set.
+    const runner: ReadonlySet<string> = presetPermissions("runner");
     for (const held of ["chat:read", "chat:write", "mcp:read", "mcp:invoke"]) {
-      expect(`runner holds ${held}: ${runner.has(held as never)}`).toBe(
-        `runner holds ${held}: true`,
-      );
+      expect(runner.has(held), `runner holds ${held}`).toBe(true);
     }
     for (const withheld of ["webhooks:read", "webhooks:write"]) {
-      expect(`runner holds ${withheld}: ${runner.has(withheld as never)}`).toBe(
-        `runner holds ${withheld}: false`,
-      );
+      expect(runner.has(withheld), `runner holds ${withheld}`).toBe(false);
     }
   });
 
@@ -277,16 +280,12 @@ describe("runs:read-all", () => {
     // point of asserting it here is that the derivation reaches them and the
     // two narrower presets, which enumerate their grants by hand, stay out.
     for (const preset of ["admin", "builder"] as const) {
-      expect(`${preset}: ${presetPermissions(preset)!.has("runs:read-all")}`).toBe(
-        `${preset}: true`,
-      );
+      expect(presetPermissions(preset).has("runs:read-all"), preset).toBe(true);
     }
     for (const preset of ["operator", "viewer"] as const) {
-      expect(`${preset}: ${presetPermissions(preset)!.has("runs:read-all")}`).toBe(
-        `${preset}: false`,
-      );
+      expect(presetPermissions(preset).has("runs:read-all"), preset).toBe(false);
       // …while plain `runs:read` is unchanged for the operator.
-      expect(presetPermissions(preset)!.has("runs:read")).toBe(true);
+      expect(presetPermissions(preset).has("runs:read"), preset).toBe(true);
     }
   });
 

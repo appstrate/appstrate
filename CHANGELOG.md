@@ -51,6 +51,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   role keyed `runner`** must rename it first — the migration refuses rather than
   let a bundle shadow the preset, and says so by name.
 
+  **API consumers**: `dependencies.skills`, `dependencies.mcp_servers` and
+  `forked_from` are optional on the agent DTOs from now on — a summary read
+  omits a withheld group rather than emptying it, and `skills: []` would say the
+  agent declares none, which is false rather than unknown. A loosening like this
+  is not a breaking change and `detect:breaking` does not classify it, so it is
+  written out here.
+
 - **Role preview — see the product as a role before you assign it.** An owner or
   administrator can have every request answered as a lesser persona (an org role,
   optionally with a role in one space) from Org settings → Roles or Space

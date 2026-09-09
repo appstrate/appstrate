@@ -621,8 +621,8 @@ describe("realtime service (integration)", () => {
     });
 
     it("gives an end-user its own run's logs and metrics, not only its status", async () => {
-      // Both payloads now carry the run's actor, so an end-user is no longer
-      // skipped wholesale on these two channels.
+      // All three payloads carry the run's actor, so one rule gates the three
+      // channels: an end-user subscriber receives its own run's frames on each.
       const filter = { ...SCOPE, isAdmin: true, endUserId: "eu-mine", readAll: false };
       expect(await framesFor(filter, "run_update")).toEqual(["end-user"]);
       expect(await framesFor(filter, "run_log_insert")).toEqual(["end-user"]);

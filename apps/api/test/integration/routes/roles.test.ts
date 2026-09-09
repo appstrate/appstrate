@@ -111,8 +111,14 @@ describe("custom space roles", () => {
       expect(res.status).toBe(200);
       const { data } = (await res.json()) as { data: RoleWire[] };
 
+      // The literal list, in order: comparing against the constant the route
+      // reads would pass on any list the constant happens to hold.
       expect(data.filter((r) => r.kind === "preset").map((r) => r.key)).toEqual([
-        ...SPACE_ROLE_PRESETS,
+        "admin",
+        "builder",
+        "operator",
+        "runner",
+        "viewer",
       ]);
       // Presets carry their permission list and no id — they are not rows.
       const viewer = data.find((r) => r.key === "viewer")!;
