@@ -365,7 +365,7 @@ async function executePlans(
       const outcome =
         plan.target === "claude-plugin"
           ? await applyPluginPlan(plan, fresh, carried, trees, fixedFiles, report, validate)
-          : await applySharedPlan(plan, fresh, trees, report);
+          : await applySharedPlan(plan, fresh, trees, report, validate);
       pluginOk = pluginOk && outcome.ok;
       if (!outcome.ok) continue;
       for (const slug of outcome.retained ?? []) carry(slug);
@@ -490,13 +490,14 @@ async function applySharedPlan(
   fresh: string[],
   trees: Map<string, SkillTree>,
   report: Report,
+  validate: () => Promise<void>,
 ): Promise<ApplyOutcome> {
   const root = targetRoot(plan.target);
   const placed = new Set<string>();
   const retained = new Set<string>();
   for (const slug of fresh) {
     try {
-      await writeSharedSkill(plan.target, trees.get(slug)!, root);
+      await writeSharedSkill(plan.target, trees.get(slug)!, root, validate);
       placed.add(slug);
     } catch (err) {
       if (plan.ledger.managed[slug]) retained.add(slug);
@@ -504,9 +505,10 @@ async function applySharedPlan(
     }
   }
   // Guarded one by one so a stubborn leftover does not strand the deletions
-  // behind it. The entry leaves the ledger either way.
+  // behind it. Failed removals retain ownership so cleanup can be retried.
   for (const slug of plan.removed) {
     try {
+      await validate();
       await removeManagedDir(skillDir(plan.target, slug));
     } catch (err) {
       retained.add(slug);

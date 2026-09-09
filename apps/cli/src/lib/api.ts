@@ -268,6 +268,7 @@ export async function apiFetchRaw(
   const profile = await resolveProfileOrThrow(profileName);
   const token = await resolveAccessToken(profileName, profile);
 
+  const { spaceId: explicitSpaceId, ...requestInit } = init;
   const doFetch = async (bearer: string): Promise<Response> => {
     const headers: Record<string, string> = {
       ...(init.headers ?? {}),
@@ -282,9 +283,9 @@ export async function apiFetchRaw(
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
-    const spaceId = init.spaceId ?? profile.spaceId;
+    const spaceId = explicitSpaceId ?? profile.spaceId;
     if (spaceId) headers["X-Space-Id"] = spaceId;
-    return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...init, headers });
+    return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...requestInit, headers });
   };
 
   const res = await doFetch(token);

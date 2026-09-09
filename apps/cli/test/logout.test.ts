@@ -13,6 +13,9 @@
  *      the user locally logged in.
  */
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { loadTokens } from "../src/lib/keyring.ts";
 import { getProfile } from "../src/lib/config.ts";
@@ -35,6 +38,8 @@ const configHome = useTempConfigHome("appstrate-cli-logout-");
 let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
+let dataHome: string;
+let previousDataHome: string | undefined;
 
 function installFetch(responder: (url: string, init?: RequestInit) => Promise<Response>): void {
   const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -57,6 +62,9 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
 
 beforeEach(async () => {
   await configHome.setup();
+  previousDataHome = process.env.XDG_DATA_HOME;
+  dataHome = await mkdtemp(join(tmpdir(), "appstrate-logout-data-"));
+  process.env.XDG_DATA_HOME = dataHome;
   keyring = installFakeKeyring();
   fetchCalls = [];
 });
@@ -65,6 +73,9 @@ afterEach(async () => {
   keyring.restore();
   globalThis.fetch = originalFetch;
   await configHome.teardown();
+  if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+  else process.env.XDG_DATA_HOME = previousDataHome;
+  await rm(dataHome, { recursive: true, force: true });
 });
 
 describe("logout (with refresh token)", () => {
@@ -137,4 +148,17 @@ describe("logout (idempotency)", () => {
     await logoutCommand({ profile: "never-logged-in" });
     expect(fetchCalls).toHaveLength(0);
   });
+});
+
+it("removes credentials even when the synchronization lock cannot be opened", async () => {
+  const { mkdir } = await import("node:fs/promises");
+  const { getLockPath } = await import("../src/lib/skills-sync/lock.ts");
+  const { createMemoryIO } = await import("./helpers/memory-io.ts");
+  await seedLoggedInProfile("default");
+  await mkdir(getLockPath(), { recursive: true });
+  const { io, stderr } = createMemoryIO();
+  await logoutCommand({}, io);
+  expect(await loadTokens("default")).toBeNull();
+  expect(await getProfile("default")).toBeNull();
+  expect(stderr()).toContain("could not complete skills cleanup");
 });

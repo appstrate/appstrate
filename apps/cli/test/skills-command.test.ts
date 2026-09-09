@@ -1244,7 +1244,7 @@ describe("skills sync — multiple spaces", () => {
     createSkillServer([...ONE_SKILL, second]).install();
     const serve = globalThis.fetch;
     const seen: string[] = [];
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       const space = new Headers(init?.headers).get("X-Space-Id");
       if (path === "/api/spaces")
@@ -1264,7 +1264,7 @@ describe("skills sync — multiple spaces", () => {
       if (path.includes("other")) expect(space).toBe("spc_2");
       seen.push(path);
       return serve(input, init);
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
     await skillsSyncCommand({ space: ["spc_1", "Library", "spc_2"] }, io);
     expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
@@ -1328,12 +1328,12 @@ describe("skills sync — active context replacement", () => {
     const { updateProfile } = await import("../src/lib/config.ts");
     createSkillServer(ONE_SKILL).install();
     const serve = globalThis.fetch;
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       if (new URL(String(input)).pathname.endsWith("/download")) {
         await updateProfile("default", { spaceId: "spc_changed" });
       }
       return serve(input, init);
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
     await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
     expect(await exists(pluginRoot())).toBe(false);
@@ -1356,4 +1356,124 @@ it("aborts a strict context replacement when a staged skill cannot be written", 
     ),
   ).rejects.toThrow("complete plugin");
   expect(await snapshot(pluginRoot())).toEqual(before);
+});
+
+describe("logout — managed skills", () => {
+  it("cleans offline, preserves unmanaged files, and refreshes as setup after logout", async () => {
+    const { logoutCommand } = await import("../src/commands/logout.ts");
+    const { getProfile } = await import("../src/lib/config.ts");
+    const { loadTokens } = await import("../src/lib/keyring.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await mkdir(join(codexRoot(), "personal"));
+    await writeFile(join(codexRoot(), "personal", "SKILL.md"), "mine");
+    globalThis.fetch = (async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+    await logoutCommand({}, createMemoryIO().io);
+    expect(await getProfile("default")).toBeNull();
+    expect(await loadTokens("default")).toBeNull();
+    expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+    expect(await readdir(codexRoot())).toEqual(["personal"]);
+    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+  });
+
+  it("does not remove another profile's installation and retries failed removals without tokens", async () => {
+    const { logoutCommand } = await import("../src/commands/logout.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await seedLoggedInProfile("other", { orgId: "org_other", spaceId: "spc_other" });
+    const before = await snapshot(pluginRoot());
+    await logoutCommand({ profile: "other" }, createMemoryIO().io);
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    await rm(join(codexRoot(), "pdf-tools"), { recursive: true });
+    await writeFile(join(codexRoot(), "pdf-tools"), "blocks deletion");
+    await logoutCommand({ profile: "default" }, createMemoryIO().io);
+    expect(
+      JSON.parse(await readText(getStatePath())).targets.codex.managed["pdf-tools"],
+    ).toBeDefined();
+    await rm(join(codexRoot(), "pdf-tools"));
+    await mkdir(join(codexRoot(), "pdf-tools"));
+    await logoutCommand({ profile: "default" }, createMemoryIO().io);
+    expect(await exists(join(codexRoot(), "pdf-tools"))).toBe(false);
+    expect(JSON.parse(await readText(getStatePath())).targets.codex).toBeUndefined();
+  });
+
+  it("preserves legacy files until a successful sync proves their current context", async () => {
+    const { logoutCommand } = await import("../src/commands/logout.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const legacy = JSON.parse(await readText(getStatePath()));
+    delete legacy.targets["claude-plugin"].context;
+    for (const entry of Object.values(legacy.targets["claude-plugin"].managed))
+      delete (entry as { context?: unknown }).context;
+    await writeFile(getStatePath(), JSON.stringify(legacy));
+    const before = await snapshot(pluginRoot());
+    await logoutCommand({}, createMemoryIO().io);
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
+    await skillsSyncCommand({}, createMemoryIO().io);
+    await logoutCommand({}, createMemoryIO().io);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+  });
+});
+
+it("serializes logout behind an in-flight sync and leaves no connected installation", async () => {
+  const { logoutCommand } = await import("../src/commands/logout.ts");
+  const { getProfile } = await import("../src/lib/config.ts");
+  createSkillServer(ONE_SKILL).install();
+  const serve = globalThis.fetch;
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const downloading = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/download")) {
+      started();
+      await held;
+    }
+    if (path.endsWith("/cli/revoke")) return Response.json({ revoked: true });
+    return serve(input, init);
+  }) as unknown as typeof fetch;
+  const sync = skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+  await downloading;
+  const logout = logoutCommand({}, createMemoryIO().io);
+  release();
+  await Promise.all([sync, logout]);
+  expect(await getProfile("default")).toBeNull();
+  expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+  expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
+  expect(await exists(join(codexRoot(), "pdf-tools"))).toBe(false);
+});
+
+it("a sync queued during logout re-reads the disconnected profile under the lock", async () => {
+  const { logoutCommand } = await import("../src/commands/logout.ts");
+  createSkillServer(ONE_SKILL).install();
+  await skillsSyncCommand({}, createMemoryIO().io);
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const revoking = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  globalThis.fetch = (async () => {
+    started();
+    await held;
+    return Response.json({ revoked: true });
+  }) as unknown as typeof fetch;
+  const logout = logoutCommand({}, createMemoryIO().io);
+  await revoking;
+  const sync = skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+  release();
+  await Promise.all([logout, sync]);
+  expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+  expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
 });

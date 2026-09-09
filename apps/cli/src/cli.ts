@@ -529,12 +529,12 @@ spaceGroup
 
 const skillsGroup = program
   .command("skills")
-  .description("Sync the pinned space's skills to Claude Code and Codex");
+  .description("Sync selected spaces' skills to Claude Code and Codex");
 
 skillsGroup
   .command("sync")
   .description(
-    "Materialize the pinned space's skills as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize selected spaces' skills as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",
