@@ -1289,9 +1289,10 @@ export async function loadFileForPreview(orgId: string, fileId: string): Promise
  *    and echo it back; a foreign/missing file is a 404.
  *
  * Chat sessions are per dashboard user, so the actor is always a `user`.
- * `ChatAttachmentRequest` carries plain fields, not the caller's permission
- * set, so the ACL runs with none: a run-contained file attaches only when the
- * session owner launched that run, `runs:read-all` or not.
+ * The request carries the caller's permission set, so the ACL here answers the
+ * same set the file gallery does: with `runs:read-all` a colleague's run output
+ * attaches, without it only the session owner's own runs. The picker and the
+ * attach must agree, or a file the user just chose from the gallery 404s.
  */
 export async function resolveChatAttachment(
   request: ChatAttachmentRequest,
@@ -1302,7 +1303,7 @@ export async function resolveChatAttachment(
   if (isFileUri(request.uri)) {
     const fileId = parseFileUri(request.uri);
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
-    const resolved = await getFileForActor(scope, actor, fileId);
+    const resolved = await getFileForActor(scope, actor, fileId, request.permissions);
     if (!resolved) throw notFound(`File '${fileId}' not found`);
     const { row } = resolved;
     return { uri: fileUri(row.id), name: row.name, mime: row.mime, size: row.size };

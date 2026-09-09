@@ -388,6 +388,11 @@ export async function handleChatStream(
         userId: user.id,
         chatSessionId: sessionId,
         uri,
+        // The container ACL reads as wide as the caller does: an `appfile://`
+        // the user picked from the gallery — which `runs:read-all` widens to
+        // the whole space's run outputs — must still resolve when they attach
+        // it. Picker and attach answer the same set.
+        permissions: c.get("permissions"),
       }),
     );
     messages[messages.length - 1] = lastMessage;

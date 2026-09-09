@@ -55,6 +55,7 @@ import {
   reconcileOrgFileBytes,
   setOrgFileStorageLimit,
   deleteFile,
+  resolveChatAttachment,
   FILES_BUCKET,
 } from "../../../src/services/files.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
@@ -1167,6 +1168,46 @@ describe("files service + routes", () => {
       metadata: true,
       download: true,
     });
+  });
+
+  it("a chat attachment resolves as wide as the caller reads runs", async () => {
+    // The gallery a chat user picks an `appfile://` from is filtered by
+    // `runs:read-all`. The attach has to answer that same set, or an admin
+    // attaching the file the picker just offered gets a 404.
+    const colleague = await createTestUser({ email: "colleague@attach.test" });
+    await addOrgMember(ctx.orgId, colleague.id, "member");
+    const theirRun = await seedRunRow(scope, { userId: colleague.id });
+    const { row: theirOutput } = await publishStream(scope, theirRun, "leur.txt", "leur livrable");
+
+    const ownRun = await seedRunRow(scope, { userId: ctx.user.id });
+    const { row: ownOutput } = await publishStream(scope, ownRun, "mien.txt", "mon livrable");
+
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: chatSessionId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+    });
+    const attach = (fileId: string, permissions?: ReadonlySet<string>) =>
+      resolveChatAttachment({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        chatSessionId,
+        uri: `appfile://${fileId}`,
+        ...(permissions ? { permissions } : {}),
+      });
+
+    // The colleague's run output: readable with the grant, indistinguishable
+    // from a missing file without it.
+    expect((await attach(theirOutput.id, READS_EVERY_RUN)).uri).toBe(`appfile://${theirOutput.id}`);
+    await expect(attach(theirOutput.id)).rejects.toMatchObject({ status: 404 });
+
+    // The session owner's own run output is theirs either way — the grant
+    // widens the set, it never gates ownership.
+    expect((await attach(ownOutput.id)).uri).toBe(`appfile://${ownOutput.id}`);
+    expect((await attach(ownOutput.id, READS_EVERY_RUN)).uri).toBe(`appfile://${ownOutput.id}`);
   });
 
   it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {

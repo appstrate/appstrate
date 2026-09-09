@@ -137,6 +137,10 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   wholesale for want of an actor in their payload.
   `GET /api/runs?user=me` is now strictly your own runs for every caller,
   end-user and actor-less runs included, whether or not you hold `read-all`.
+  Attaching a file to a chat reads as wide as the gallery you picked it from:
+  `ChatAttachmentRequest.permissions` (`@appstrate/core/chat-contract`) carries
+  the caller's set, so a `runs:read-all` holder attaches a colleague's run
+  output and everyone else attaches only their own.
 
 - **The commercial module stores its tables in the platform database.**
   `@appstrate/module-ee` does not run a PostgreSQL database of its own: it reads

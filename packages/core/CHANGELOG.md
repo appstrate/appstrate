@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
 
+- New optional member `ChatAttachmentRequest.permissions` (`@appstrate/core/chat-contract`), a `ReadonlySet<string>`: the caller's effective permission set in the space, which decides how wide the container ACL of an `appfile://` attachment reads. With `runs:read-all` a file anchored to a colleague's run resolves — the same set the file gallery the user picked it from answers; absent, the resolution is strict ownership and the file's run must be the session owner's. A module resolving attachments through `ctx.services.resolveChatAttachment` should forward `c.get("permissions")`, or its users see a 404 on a file the picker just offered them.
+
 ### Changed
 
 - **BREAKING: `invalidatePrincipalPermissions(orgId, userId)` requires
