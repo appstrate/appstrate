@@ -105,30 +105,54 @@ BEGIN
   SELECT count(*) INTO v_clients
     FROM oauth_clients WHERE signup_role = 'viewer';
 
-  IF v_members + v_pending + v_history + v_clients > 0 THEN
-    -- The remedy goes in the MESSAGE, not in a `HINT`: a client that surfaces
-    -- only `error.message` (drizzle's, PGlite's, and every log line the deploy
-    -- writes) would drop a hint silently, leaving the operator the counts and
-    -- no instruction.
-    --
-    -- All four counts are reported in ONE pass, and that is the guard's whole
-    -- product. Section B casts one table per statement and aborts on the first,
-    -- so without this an operator clears `org_members`, redeploys, meets the
-    -- same opaque `22P02` for `org_invitations`, and redeploys again — a
-    -- serialised loop of container restarts inside a stopped-traffic window.
-    --
-    -- The two scripts clear THREE of the four. `v_clients` is the exception and
-    -- says so in its own clause: neither script writes `oauth_clients`
-    -- (`0008` only reads `signup_role = 'guest'`, `0012` touches
-    -- `org_invitations` alone), because the row that count refers to is
-    -- `0056`'s to flip. Routing it to them would send the operator round the
-    -- loop this message exists to prevent. Same shape as `0021`'s
-    -- "migration 0020 did not apply. Check the `__drizzle_migrations`
-    -- watermark before retrying."
-    RAISE EXCEPTION
-      'org_role still carries % viewer member(s), % pending viewer invitation(s), % historical viewer invitation(s) and % viewer signup client(s). For the first three: run scripts/migration/0008-org-viewer-to-guest.sql and scripts/migration/0012-org-invitation-history-viewer-to-guest.sql, then redeploy. A non-zero signup client count is cleared by NEITHER script — it means 0056_space_roles.sql did not apply on this database; check the drizzle.__drizzle_migrations watermark before retrying.',
-      v_members, v_pending, v_history, v_clients;
-  END IF;
+  -- The remedy is COMPOSED, not appended: each half is emitted only when its
+  -- own counts are non-zero. Appending both unconditionally tells an operator
+  -- with three zeros to run two row scripts, and an operator with a zero client
+  -- count that `0056` may not have applied — the misdirection this block exists
+  -- to remove, in the opposite direction.
+  DECLARE
+    v_remedy text := '';
+  BEGIN
+    -- The two scripts own the first three counts.
+    IF v_members + v_pending + v_history > 0 THEN
+      v_remedy := ' Run scripts/migration/0008-org-viewer-to-guest.sql and'
+               || ' scripts/migration/0012-org-invitation-history-viewer-to-guest.sql,'
+               || ' then redeploy.';
+    END IF;
+    -- The fourth is nobody's: neither script writes `oauth_clients.signup_role`
+    -- — `0008` writes that table, but only `signup_space_assignments`, and it
+    -- reads `signup_role` to find its rows. The value is `0056`'s to flip (its
+    -- section G), and it validated a narrowed CHECK on the way out, so a
+    -- survivor means `0056` never applied here. Same shape as `0021`'s
+    -- "migration 0020 did not apply. Check the `__drizzle_migrations` watermark
+    -- before retrying." — and spelled unqualified for the same reason it is
+    -- there: the Tier 0 runner creates that table in `public`
+    -- (`apps/api/src/lib/pglite-migrate.ts`), so a `drizzle.` prefix would name
+    -- nothing on the path this file also runs on.
+    IF v_clients > 0 THEN
+      v_remedy := v_remedy
+               || ' The signup client count is cleared by NEITHER script: it means'
+               || ' 0056_space_roles.sql did not apply on this database — check the'
+               || ' __drizzle_migrations watermark before retrying.';
+    END IF;
+
+    IF v_remedy <> '' THEN
+      -- The remedy goes in the MESSAGE, not in a `HINT`: a client that surfaces
+      -- only `error.message` (drizzle's, PGlite's, and every log line the
+      -- deploy writes) would drop a hint silently, leaving the operator the
+      -- counts and no instruction.
+      --
+      -- All four counts are reported in ONE pass, and that is the guard's whole
+      -- product. Section B casts one table per statement and aborts on the
+      -- first, so without this an operator clears `org_members`, redeploys,
+      -- meets the same opaque `22P02` for `org_invitations`, and redeploys
+      -- again — a serialised loop of container restarts inside a
+      -- stopped-traffic window.
+      RAISE EXCEPTION
+        'org_role still carries % viewer member(s), % pending viewer invitation(s), % historical viewer invitation(s) and % viewer signup client(s).%',
+        v_members, v_pending, v_history, v_clients, v_remedy;
+    END IF;
+  END;
 END $$;--> statement-breakpoint
 
 -- ═══ B. Rebuild the type without `viewer` ════════════════════════════════════

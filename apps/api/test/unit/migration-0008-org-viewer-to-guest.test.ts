@@ -124,11 +124,11 @@ async function count(query: string): Promise<number> {
 /** One entry of a `space_assignments` / `signup_space_assignments` snapshot. */
 type SpaceAssignment = { space_id: string; preset_role: string };
 
-/** Read one jsonb value back as parsed JSON, whatever the driver hands over. */
+/** Read one jsonb value back. PGlite parses `jsonb` for us; this file only ever
+ * runs on PGlite, which is why it left the integration suite. */
 async function json<T = SpaceAssignment[]>(query: string): Promise<T> {
   const { rows } = await pg.query<{ v: unknown }>(query);
-  const value = rows[0]?.v;
-  return (typeof value === "string" ? JSON.parse(value) : value) as T;
+  return rows[0]!.v as T;
 }
 
 /**

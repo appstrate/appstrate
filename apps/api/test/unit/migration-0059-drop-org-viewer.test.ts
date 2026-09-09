@@ -55,12 +55,6 @@ const REPLAY_THROUGH = "0058_organization_deletion_reservation";
 
 const ORG = "e0000000-0000-4000-8000-00000000d059";
 const SPACE = "spc_d0590000-0000-4000-8000-000000000001";
-/** A second, NON-default space. `0008` writes one row per space a viewer reaches,
- * so a single-space org cannot tell a correct step 1 from one that only ever
- * covers the default space — both produce exactly one row, and `0008`'s own
- * coverage abort reads `v_expected = v_covered` either way. The product is the
- * claim; one space does not express it. */
-const SPACE_OTHER = "spc_d0590000-0000-4000-8000-000000000002";
 const VIEWER = "usr_0059_viewer";
 const MEMBER = "usr_0059_member";
 
@@ -106,7 +100,7 @@ async function applyMigration(pg: PGlite): Promise<void> {
  * A failure abandons the script before its `COMMIT` and leaves the session in
  * an aborted transaction that `25P02`s everything after it, so the rollback is
  * forced here — same helper, same reason, as
- * `test/integration/db/org-viewer-to-guest-migration.test.ts`.
+ * `migration-0008-org-viewer-to-guest.test.ts`.
  */
 async function runScript(pg: PGlite, path: string): Promise<void> {
   const source = await Bun.file(path).text();
@@ -179,8 +173,7 @@ async function seedRollout(pg: PGlite): Promise<void> {
   await pg.exec(`
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Zero59', 'zero-59');
     INSERT INTO spaces (id, org_id, name, is_default)
-      VALUES ('${SPACE}', '${ORG}', 'Default', true),
-             ('${SPACE_OTHER}', '${ORG}', 'Other', false);
+      VALUES ('${SPACE}', '${ORG}', 'Default', true);
     INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES
       ('${VIEWER}', 'Viewer', 'v-0059@example.com', true, now(), now()),
       ('${MEMBER}', 'Member', 'm-0059@example.com', true, now(), now());
@@ -253,6 +246,11 @@ describe("0059 — the RBAC rollout must have happened first", () => {
     // does not name the two scripts is an error nobody can act on.
     expect(message).toContain("0008-org-viewer-to-guest.sql");
     expect(message).toContain("0012-org-invitation-history-viewer-to-guest.sql");
+    // The fourth count is nobody's, and says so HERE, where it is non-zero.
+    // Neither script writes `oauth_clients.signup_role`, so an operator routed
+    // to them would run both and get the identical refusal back.
+    expect(message).toContain("cleared by NEITHER script");
+    expect(message).toContain("0056_space_roles.sql did not apply");
   });
 
   it("leaves the type and the rows exactly as they were when it refuses", async () => {
@@ -283,22 +281,13 @@ describe("0059 — the RBAC rollout must have happened first", () => {
     // Still refused, on the three arms the two scripts own — the client was
     // never the only thing standing in the way.
     expect(message).toContain("1 viewer member(s)");
-  });
-
-  it("routes the signup-client arm to `0056`, not to the two row scripts", async () => {
-    // Neither named script writes `oauth_clients`: `0008` only ever reads
-    // `signup_role = 'guest'`, and `0012` touches `org_invitations` alone. An
-    // operator who met that count and ran both would get the identical refusal
-    // back — the loop the one-pass message exists to prevent. So the message
-    // has to say which of its four counts the scripts do NOT clear.
-    const failure = await applyMigration(pg).then(
-      () => undefined,
-      (error: unknown) => error as Error,
-    );
-    const message = `${failure?.message ?? ""}`;
-    expect(message).toContain("cleared by NEITHER script");
-    expect(message).toContain("0056_space_roles.sql did not apply");
-    expect(message).toContain("__drizzle_migrations");
+    // And the remedy SHRINKS. This is the half that discriminates: the clause
+    // is unconditional text inside one format string unless the message is
+    // composed per count, so asserting its presence above proves nothing on its
+    // own. A zero count must not tell an operator to go and audit `0056`.
+    expect(message).not.toContain("cleared by NEITHER script");
+    expect(message).not.toContain("0056_space_roles.sql did not apply");
+    expect(message).toContain("0008-org-viewer-to-guest.sql");
   });
 
   it("`0012` moves the historical invitations and nothing else, twice over", async () => {
@@ -353,33 +342,13 @@ describe("0059 — the RBAC rollout must have happened first", () => {
   it("applies once `0008` has run too, and narrows the type", async () => {
     await runScript(pg, SCRIPT_0008);
 
-    // The reach a viewer had is preserved as an explicit row in EVERY space that
-    // existed — the product, not merely more than zero. A step 1 that covered
-    // only the default space would still write one row, and `0008`'s own
-    // coverage abort would still read `v_expected = v_covered`, so one space
-    // proves nothing about the JOIN; two do. `migration-0008-org-viewer-to-guest.test.ts`
-    // owns the rest of the script's behaviour on a database of its own.
-    expect(
-      await count(
-        pg,
-        `SELECT count(*)::int AS n FROM space_members
-           WHERE user_id = '${VIEWER}' AND preset_role = 'viewer'
-             AND space_id IN ('${SPACE}', '${SPACE_OTHER}')`,
-      ),
-    ).toBe(2);
-    // The plain member got none: they reach the open spaces implicitly.
-    expect(
-      await count(pg, `SELECT count(*)::int AS n FROM space_members WHERE user_id = '${MEMBER}'`),
-    ).toBe(0);
-    // And the pending invitation carries the snapshot that makes its acceptance
-    // equivalent — one entry per space, the one `0012` must never write.
-    expect(
-      await count(
-        pg,
-        `SELECT jsonb_array_length(space_assignments)::int AS n
-           FROM org_invitations WHERE id = 'inv_0059_pending'`,
-      ),
-    ).toBe(2);
+    // Only that `0008` RAN — this file's subject is the migration, and `0008`
+    // is its precondition. What the script does to memberships, snapshots and
+    // OAuth clients is asserted on a database of its own, with the 2 viewers x
+    // 2 spaces the product claim needs, in
+    // `migration-0008-org-viewer-to-guest.test.ts`. Asserting a weaker version
+    // of it here would be a second copy that fails later and says less.
+    expect(await memberRole(pg, VIEWER)).toBe("guest");
 
     await applyMigration(pg);
 

@@ -24,23 +24,26 @@
 -- The argument above is about widening `0008`'s existing WHERE. It does not
 -- reach the obvious alternative — a SEPARATE statement inside `0008`, which
 -- would touch neither `mig0008_invitations` (captured `pending` only) nor step
--- 5's predicates, and would break nothing. `0008` is also unapplied everywhere
--- and in no released tag, so amending it in place was available. The reason not
--- to is none of that:
+-- 5's predicates, and would break nothing. Nor does immutability: this
+-- directory has no such rule, and `0008` is in no released tag, so amending it
+-- was mechanically available. The reason not to is neither of those:
 --
--- `0008` CANNOT BE RE-RUN OUTSIDE ITS WINDOW. Its step 4 capture predicate is
+-- `0008` CANNOT BE RE-RUN OUTSIDE ITS WINDOW, so "amend it" and "ship the fix"
+-- are not the same act. Its step 4 capture predicate is
 -- `signup_role = 'guest' AND signup_space_assignments = '[]'::jsonb`, and that
--- is permanent: an org that had no space when `0008` ran keeps `'[]'` forever
--- and re-matches on every later run, at which point step 4 hands that OIDC
--- signup client `viewer` rows in every space created since. `0008`'s own header
--- says so. Folding this UPDATE into `0008` therefore ships the fix as "re-run
--- `0008`" to anyone who has already run it — a permission widening on the
--- auto-provisioning path, to repair two invitation rows.
+-- is permanent — it re-matches ANY client still holding an empty snapshot,
+-- including one an admin deliberately left with no assignments, and including
+-- one whose org simply had no space at the time. On a later run step 4 then
+-- hands that OIDC signup client `viewer` rows in every space created since.
+-- `0008`'s own header says so.
 --
--- A bare UPDATE on one column of one table has no window and no captured set,
--- so it is the only shape that can be handed to that operator. `main` is a
--- documented build path, `0008` has been on it since 2026-09-08, and that
--- operator is exactly who needs this file.
+-- Folding this UPDATE into `0008` therefore ships the fix as "re-run `0008`" —
+-- a permission widening on the auto-provisioning path, to repair a handful of
+-- invitation rows. "In no released tag" bounds who that reaches; it does not
+-- empty the set. `main` is a documented build path and `0008` has been on it
+-- since 2026-09-08, so the operator who has already run it is precisely the one
+-- this file is for, and a bare UPDATE on one column of one table — no window,
+-- no captured set — is the only shape that can be handed to them.
 --
 -- Second, independently: the `pending_before` / `pending_after` counters below
 -- are a cross-check on a DIFFERENT script — non-zero means `0008` has not run.
