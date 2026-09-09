@@ -9,7 +9,8 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import { getDataDir } from "../config.ts";
+import { normalizeInstance } from "../instance-url.ts";
+import { getDataDir, type Profile } from "../config.ts";
 
 /**
  * BUMP whenever PER-SKILL materialized output changes: the server-side digests
@@ -19,6 +20,8 @@ import { getDataDir } from "../config.ts";
 export const STATE_VERSION = 1;
 
 export interface ManagedSkill {
+  /** null preserves unproven legacy ownership after a failed removal. */
+  context?: SyncContext | null;
   packageId: string;
   /** Resolved version label — semver for `published`, `"draft"` for `draft`. */
   version: string;
@@ -26,7 +29,30 @@ export interface ManagedSkill {
   integrity: string;
 }
 
+export interface SyncContext {
+  profileName: string;
+  instance: string;
+  userId: string;
+  orgId: string;
+  spaceId: string;
+}
+
+export function syncContext(profileName: string, profile: Profile): SyncContext {
+  return {
+    profileName,
+    instance: normalizeInstance(profile.instance),
+    userId: profile.userId,
+    orgId: profile.orgId!,
+    spaceId: profile.spaceId!,
+  };
+}
+
+export function sameContext(a: SyncContext | undefined, b: SyncContext): boolean {
+  return !!a && Object.entries(b).every(([key, value]) => a[key as keyof SyncContext] === value);
+}
+
 export interface TargetState {
+  context?: SyncContext;
   source: "published" | "draft";
   /**
    * Recorded because `HOME` is not a constant — cron, launchd and devcontainers
@@ -66,7 +92,8 @@ function isManagedSkill(value: unknown): value is ManagedSkill {
     isRecord(value) &&
     isNonEmptyString(value.packageId) &&
     isNonEmptyString(value.version) &&
-    isNonEmptyString(value.integrity)
+    isNonEmptyString(value.integrity) &&
+    (value.context === undefined || value.context === null || isContext(value.context))
   );
 }
 
@@ -74,6 +101,7 @@ function isTargetState(value: unknown): value is TargetState {
   if (!isRecord(value)) return false;
   if (value.source !== "published" && value.source !== "draft") return false;
   if (!isNonEmptyString(value.root)) return false;
+  if (value.context !== undefined && !isContext(value.context)) return false;
   if (!isRecord(value.managed)) return false;
   return Object.values(value.managed).every(isManagedSkill);
 }
@@ -123,7 +151,16 @@ function sortState(state: SyncState): SyncState {
     for (const slug of Object.keys(entry.managed).sort()) {
       managed[slug] = entry.managed[slug]!;
     }
-    targets[target] = { source: entry.source, root: entry.root, managed };
+    targets[target] = { ...entry, managed };
   }
   return { version: state.version, targets };
+}
+
+function isContext(value: unknown): value is SyncContext {
+  return (
+    isRecord(value) &&
+    ["profileName", "instance", "userId", "orgId", "spaceId"].every((key) =>
+      isNonEmptyString(value[key]),
+    )
+  );
 }

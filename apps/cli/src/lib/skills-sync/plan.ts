@@ -19,7 +19,14 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { collisionSlug, DROPPED_ENTRIES, SKILL_ENTRY, skillSlug } from "./materialize.ts";
-import { emptyTargetState, STATE_VERSION, type SyncState, type TargetState } from "./state.ts";
+import {
+  emptyTargetState,
+  STATE_VERSION,
+  sameContext,
+  type SyncContext,
+  type SyncState,
+  type TargetState,
+} from "./state.ts";
 import { destinationExists, skillDir, targetRoot, type SyncTarget } from "./targets.ts";
 
 export const MAX_CONCURRENCY = 8;
@@ -316,6 +323,7 @@ export interface TargetPlan {
   removed: string[];
   /** Ledger slugs whose `SKILL.md` is on disk — asked by three rules below. */
   present: ReadonlySet<string>;
+  contextChanged?: boolean;
 }
 
 export interface Catalogue {
@@ -344,9 +352,14 @@ export async function diffTarget(
   catalogue: Catalogue,
   state: SyncState,
   source: SkillSource,
+  context?: SyncContext,
 ): Promise<TargetPlan> {
   const ledger = ownedLedger(target, state, source);
   // A ledger from a build whose materializer differs is stale, but still owned.
+  const contextChanged =
+    context !== undefined &&
+    state.targets[target]?.root === targetRoot(target) &&
+    !sameContext(ledger.context, context);
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
   const present = new Set<string>();
@@ -361,6 +374,7 @@ export async function diffTarget(
     blocked: [],
     removed: [],
     present,
+    contextChanged,
   };
 
   for (const [slug, skill] of catalogue.bySlug) {

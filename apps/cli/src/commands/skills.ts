@@ -34,6 +34,9 @@ import {
 } from "../lib/skills-sync/plan.ts";
 import {
   readSyncState,
+  syncContext,
+  sameContext,
+  type SyncContext,
   STATE_VERSION,
   writeSyncState,
   type ManagedSkill,
@@ -98,13 +101,6 @@ export async function skillsSyncCommand(
     io.exit(1);
   }
 
-  const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  const gap = connectionGap(profileName, profile);
-  if (gap && !printPath) {
-    io.stderr.write(`${gap.problem}. Run: ${gap.remedy}\n`);
-    io.exit(1);
-  }
-
   // Two grades, because `--print-path` treats them differently.
   let skillFailures = 0;
   let runFailures = 0;
@@ -124,6 +120,9 @@ export async function skillsSyncCommand(
 
   try {
     await withSyncLock(async () => {
+      const { profileName, profile } = await resolveActiveProfile(opts.profile);
+      const gap = connectionGap(profileName, profile);
+      if (gap && !printPath) throw new Error(`${gap.problem}. Run: ${gap.remedy}`);
       const { state, corrupt } = await readSyncState();
       if (corrupt) {
         io.stderr.write(
@@ -136,11 +135,27 @@ export async function skillsSyncCommand(
         return;
       }
 
+      const context = syncContext(profileName, profile!);
+      const validate = async (): Promise<void> => {
+        const current = await resolveActiveProfile(opts.profile);
+        if (
+          !current.profile ||
+          !sameContext(context, syncContext(current.profileName, current.profile)) ||
+          JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
+        ) {
+          throw new Error("Active sync context changed; run skills sync again.");
+        }
+      };
       const spaceIds = await selectedSpaces(profileName, profile!, opts.space);
       const catalogue = await resolveAll(profileName, source, state, targets, report, spaceIds);
       const plans = await Promise.all(
-        targets.map((target) => diffTarget(target, catalogue, state, source)),
+        targets.map((target) => diffTarget(target, catalogue, state, source, context)),
       );
+      if (plans.some((plan) => plan.contextChanged) && catalogue.unresolved.size > 0) {
+        throw new Error(
+          "Could not resolve the new context completely; previous installation preserved.",
+        );
+      }
       for (const plan of plans) {
         for (const slug of plan.blocked) {
           report.skill(
@@ -166,6 +181,8 @@ export async function skillsSyncCommand(
         catalogue.bySlug,
         fixedFiles,
         report,
+        context,
+        validate,
       );
       if (!printPath) reportPlans(plans, io.stdout);
     });
@@ -300,9 +317,17 @@ async function executePlans(
   bySlug: SkillsBySlug,
   fixedFiles: Record<string, Uint8Array>,
   report: Report,
+  context: SyncContext,
+  validate: () => Promise<void>,
 ): Promise<boolean> {
   const wanted = new Set(plans.flatMap((plan) => plan.write));
   const trees = await fetchTrees(profileName, source, [...wanted], bySlug, report);
+  if (plans.some((plan) => plan.contextChanged) && trees.size !== wanted.size) {
+    throw new Error(
+      "Could not download the new context completely; previous installation preserved.",
+    );
+  }
+  await validate();
 
   // Seeded from what is recorded: starting empty dropped the ledgers of
   // targets this run was not asked for, which then refused their own output.
@@ -314,12 +339,20 @@ async function executePlans(
       // not empty the ledger, or its directories become permanently unmanaged.
       const managed = new Map<string, ManagedSkill>();
       const carried: string[] = [];
-      const carry = (slug: string): void => {
+      const carry = (slug: string, verified = false): void => {
         carried.push(slug);
         const entry = plan.ledger.managed[slug];
-        if (entry) managed.set(slug, entry);
+        if (entry)
+          managed.set(slug, {
+            ...entry,
+            context: verified
+              ? context
+              : entry.context === undefined
+                ? (plan.ledger.context ?? null)
+                : entry.context,
+          });
       };
-      for (const slug of plan.keep) carry(slug);
+      for (const slug of plan.keep) carry(slug, bySlug.has(slug));
 
       const fresh: string[] = [];
       for (const slug of plan.write) {
@@ -331,10 +364,13 @@ async function executePlans(
 
       const outcome =
         plan.target === "claude-plugin"
-          ? await applyPluginPlan(plan, fresh, carried, trees, fixedFiles, report)
+          ? await applyPluginPlan(plan, fresh, carried, trees, fixedFiles, report, validate)
           : await applySharedPlan(plan, fresh, trees, report);
       pluginOk = pluginOk && outcome.ok;
-      for (const slug of outcome.placed) managed.set(slug, ledgerEntry(bySlug.get(slug)!));
+      if (!outcome.ok) continue;
+      for (const slug of outcome.retained ?? []) carry(slug);
+      for (const slug of outcome.placed)
+        managed.set(slug, { ...ledgerEntry(bySlug.get(slug)!), context });
 
       const root = targetRoot(plan.target);
       const recorded = state.targets[plan.target];
@@ -343,6 +379,7 @@ async function executePlans(
       if (managed.size > 0 || !recorded || recorded.root === root) {
         next.targets[plan.target] = {
           source,
+          context,
           root,
           managed: Object.fromEntries(managed),
         };
@@ -403,6 +440,7 @@ async function fetchTrees(
 
 /** `ok` gates the `--print-path` exit. */
 interface ApplyOutcome {
+  retained?: Set<string>;
   placed: Set<string>;
   ok: boolean;
 }
@@ -414,6 +452,7 @@ async function applyPluginPlan(
   trees: Map<string, SkillTree>,
   fixedFiles: Record<string, Uint8Array>,
   report: Report,
+  validate: () => Promise<void>,
 ): Promise<ApplyOutcome> {
   const root = targetRoot(plan.target);
   if (
@@ -429,6 +468,8 @@ async function applyPluginPlan(
       carried,
       root,
       fixedFiles,
+      plan.contextChanged,
+      validate,
     );
     const placed = new Set(fresh);
     for (const failure of failures) {
@@ -452,11 +493,13 @@ async function applySharedPlan(
 ): Promise<ApplyOutcome> {
   const root = targetRoot(plan.target);
   const placed = new Set<string>();
+  const retained = new Set<string>();
   for (const slug of fresh) {
     try {
       await writeSharedSkill(plan.target, trees.get(slug)!, root);
       placed.add(slug);
     } catch (err) {
+      if (plan.ledger.managed[slug]) retained.add(slug);
       report.skill(`Failed to write ${plan.target}/${slug}: ${formatError(err)}`);
     }
   }
@@ -466,10 +509,11 @@ async function applySharedPlan(
     try {
       await removeManagedDir(skillDir(plan.target, slug));
     } catch (err) {
+      retained.add(slug);
       report.skill(`Failed to remove ${plan.target}/${slug}: ${formatError(err)}`);
     }
   }
-  return { placed, ok: true };
+  return { placed, retained, ok: true };
 }
 
 function ledgerEntry(skill: PlannedSkill): ManagedSkill {

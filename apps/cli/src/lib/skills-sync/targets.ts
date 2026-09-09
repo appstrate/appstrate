@@ -210,6 +210,8 @@ export async function writePluginTree(
   carryOver: string[],
   root: string,
   fixedFiles: Record<string, Uint8Array>,
+  strict = false,
+  validate?: () => Promise<void>,
 ): Promise<SkillWriteFailure[]> {
   const failures: SkillWriteFailure[] = [];
   // Beside, not inside: the plugin root is the directory being replaced.
@@ -235,6 +237,9 @@ export async function writePluginTree(
         failures.push({ slug: tree.slug, error });
       }
     }
+    if (strict && failures.length > 0)
+      throw new Error("Could not prepare the complete plugin; previous installation preserved.");
+    await validate?.();
   });
   return failures;
 }

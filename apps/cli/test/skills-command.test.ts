@@ -774,7 +774,7 @@ describe("skills sync — ledger ownership", () => {
     expect(await exists(join(codexRoot(), "pdf-tools", "SKILL.md"))).toBe(true);
   });
 
-  it("does not record a slug whose write failed", async () => {
+  it("retains ownership of a slug whose removal failed", async () => {
     createSkillServer([...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }]).install();
     const { io } = createMemoryIO();
     await skillsSyncCommand({ target: ["codex"] }, io);
@@ -794,7 +794,7 @@ describe("skills sync — ledger ownership", () => {
       targets: Record<string, { root: string; managed: Record<string, unknown> }>;
     };
     expect(state.targets.codex!.root).toBe(codexRoot());
-    expect(Object.keys(state.targets.codex!.managed)).toEqual(["pdf-tools"]);
+    expect(Object.keys(state.targets.codex!.managed)).toEqual(["notes", "pdf-tools"]);
   });
 
   it("keeps --print-path at exit 0 when only the passenger target failed to write", async () => {
@@ -1184,12 +1184,9 @@ describe("skills sync — fresh install", () => {
     await rm(staging);
     const { io, stdout } = createMemoryIO();
 
-    await expect(
-      skillsSyncCommand({ profile: "nope", printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
-
-    expect(stdout()).toBe("");
-    expect(await exists(pluginRoot())).toBe(false);
+    await skillsSyncCommand({ profile: "nope", printPath: true }, io);
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(await exists(setupSkill())).toBe(true);
     await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
     expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
   });
@@ -1298,4 +1295,65 @@ it("uses stored sync spaces, supports an empty selection, and explicit spaces re
   await updateProfile("default", { orgId: "org_2" });
   const profile = await (await import("../src/lib/config.ts")).getProfile("default");
   expect(profile?.syncSpaces).toBeUndefined();
+});
+
+describe("skills sync — active context replacement", () => {
+  it("preserves skills and MCP together when a new context download fails, then replaces on retry", async () => {
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    const { io } = createMemoryIO();
+    await skillsSyncCommand({}, io);
+    const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
+    const previousState = await readText(getStatePath());
+    await updateProfile("default", { spaceId: "spc_2" });
+    const nextSkill = {
+      id: "@acme/new-context",
+      skillMd: skillMd("new-context", "New context skill."),
+    };
+    createSkillServer([{ ...nextSkill, corruptDownload: true }]).install();
+    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(previousMcp);
+    expect(await readText(getStatePath())).toBe(previousState);
+    createSkillServer([nextSkill]).install();
+    await skillsSyncCommand({}, io);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["new-context"]);
+    expect(
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
+        "X-Space-Id"
+      ],
+    ).toBe("spc_2");
+  });
+
+  it("rejects a context changed while downloading before writing any installation", async () => {
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    const serve = globalThis.fetch;
+    globalThis.fetch = (async (input, init) => {
+      if (new URL(String(input)).pathname.endsWith("/download")) {
+        await updateProfile("default", { spaceId: "spc_changed" });
+      }
+      return serve(input, init);
+    }) as typeof fetch;
+    const { io } = createMemoryIO();
+    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    expect(await exists(pluginRoot())).toBe(false);
+  });
+});
+
+it("aborts a strict context replacement when a staged skill cannot be written", async () => {
+  const { writePluginTree, pluginFixedFiles } = await import("../src/lib/skills-sync/targets.ts");
+  createSkillServer(ONE_SKILL).install();
+  await skillsSyncCommand({}, createMemoryIO().io);
+  const before = await snapshot(pluginRoot());
+  const bytes = new TextEncoder().encode("content");
+  await expect(
+    writePluginTree(
+      [{ slug: "broken", files: { file: bytes, "file/child": bytes } }],
+      [],
+      pluginRoot(),
+      pluginFixedFiles(),
+      true,
+    ),
+  ).rejects.toThrow("complete plugin");
+  expect(await snapshot(pluginRoot())).toEqual(before);
 });
