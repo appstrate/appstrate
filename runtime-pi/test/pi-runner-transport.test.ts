@@ -8,6 +8,7 @@ import type { PiModelConfig } from "@appstrate/runner-pi";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { createApp, type AppDeps } from "../sidecar/app.ts";
 import { createRuntimePiRunner } from "../pi-runner.ts";
+import { codexPlaceholderJwt } from "./helpers/container-e2e.ts";
 import {
   createCaptureSink,
   makeBundlePackage,
@@ -20,21 +21,11 @@ interface ObservedRequest {
   path: string;
 }
 
-const TEST_JWT = [
-  encodeJwtSegment({ alg: "none", typ: "JWT" }),
-  encodeJwtSegment({
-    "https://api.openai.com/auth": { chatgpt_account_id: "acct_test" },
-  }),
-  "placeholder",
-].join(".");
+const TEST_JWT = codexPlaceholderJwt("acct_test");
 
 const TEST_BUNDLE = makeTestBundle(
   makeBundlePackage("@test/runtime-sidecar-transport", "0.0.0", "agent", {}),
 );
-
-function encodeJwtSegment(value: unknown): string {
-  return btoa(JSON.stringify(value)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
 
 function completedResponse(): Response {
   return new Response(

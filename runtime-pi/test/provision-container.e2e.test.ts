@@ -24,95 +24,16 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { zipArtifact } from "@appstrate/core/zip";
 import {
-  extractRootFromAfps,
-  buildBundleFromCatalog,
-  writeBundleToBuffer,
-  emptyPackageCatalog,
-} from "@appstrate/afps-runtime/bundle";
+  buildAgentBundle,
+  dumpContainerLogs,
+  resolveContainerE2eGate,
+} from "./helpers/container-e2e.ts";
 
 const IMAGE = process.env.PI_IMAGE ?? "appstrate-pi:latest";
 const DEADLINE_MS = 60_000;
 
-function hasDocker(): boolean {
-  try {
-    return spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0;
-  } catch {
-    return false;
-  }
-}
-/**
- * `os/arch` from a docker `--format` template (e.g. "linux/arm64"), or null
- * when the command fails (daemon down, image absent) or prints something
- * unexpected. Both templates below emit Go's GOOS/GOARCH vocabulary, so the
- * two results are directly comparable.
- */
-function dockerPlatform(args: string[]): string | null {
-  try {
-    const out = spawnSync("docker", args, { encoding: "utf8" });
-    if (out.status !== 0) return null;
-    const platform = out.stdout.trim();
-    return /^[a-z0-9]+\/[a-z0-9]+$/.test(platform) ? platform : null;
-  } catch {
-    return null;
-  }
-}
-/** Platform the Docker engine runs containers on natively. */
-function daemonPlatform(): string | null {
-  return dockerPlatform(["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"]);
-}
-/** Platform the local image was built for, or null when the image is absent. */
-function imagePlatform(): string | null {
-  return dockerPlatform(["image", "inspect", IMAGE, "--format", "{{.Os}}/{{.Architecture}}"]);
-}
-
-// Opt-in gate: TEST_DOCKER=1 locally, CI=true on GitHub Actions (set
-// automatically). Mirrors the rule in apps/api/test/helpers/tier.ts.
-const dockerEnabled = process.env.TEST_DOCKER === "1" || process.env.CI === "true";
-
-// The `docker run` below uses the engine's native platform, so the gate must
-// check more than image presence: a bare `docker image inspect` is
-// architecture-blind, and an image built for another platform (e.g. an amd64
-// build left over on an Apple Silicon host) would pass it and then fail inside
-// `docker run` with a misleading "pull access denied" (#882). Require the
-// image's platform to match the daemon's and skip honestly otherwise.
-const daemon = dockerEnabled && hasDocker() ? daemonPlatform() : null;
-const image = daemon !== null ? imagePlatform() : null;
-const RUN = daemon !== null && image === daemon;
-if (dockerEnabled && !RUN) {
-  const hint =
-    image !== null && daemon !== null && image !== daemon
-      ? ` — rebuild natively: docker build --platform ${daemon} -t ${IMAGE} -f runtime-pi/Dockerfile .`
-      : "";
-  console.warn(
-    `[provision-container.e2e] skipped — docker=${hasDocker()} image(${IMAGE})=${image ?? "absent"} daemon=${daemon ?? "unknown"}${hint}`,
-  );
-}
-
-/**
- * Minimal valid agent `.afps-bundle` (the multi-package archive with
- * `bundle.json` that the platform's `/workspace` route serves and the runtime
- * reads via `readBundleFromFile`). A raw single-package `.afps` is rejected
- * with `BUNDLE_JSON_MISSING`.
- */
-async function buildAgentBundle(): Promise<Uint8Array> {
-  const manifest = {
-    name: "@e2e/provision-probe",
-    version: "1.0.0",
-    type: "agent",
-    schema_version: "0.2",
-    display_name: "Provision Probe",
-    author: "e2e",
-  };
-  const afps = zipArtifact({
-    "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
-    "prompt.md": new TextEncoder().encode("# probe\n\nStop immediately.\n"),
-  });
-  const root = extractRootFromAfps(afps);
-  const bundle = await buildBundleFromCatalog(root, emptyPackageCatalog, { depTypes: ["skills"] });
-  return writeBundleToBuffer(bundle);
-}
+const { run: RUN, daemon } = resolveContainerE2eGate("provision-container.e2e", [IMAGE]);
 
 describe.skipIf(!RUN)("runtime-pi container provisions files without spinning", () => {
   let server: ReturnType<typeof Bun.serve> | undefined;
@@ -222,9 +143,8 @@ describe.skipIf(!RUN)("runtime-pi container provisions files without spinning", 
         for (;;) {
           if (events.some((e) => e.includes("workspace initialized"))) break;
           if (Date.now() - start > DEADLINE_MS) {
-            const logs = spawnSync("docker", ["logs", containerName], { encoding: "utf8" });
             throw new Error(
-              `no post-provisioning event within ${DEADLINE_MS}ms — runtime likely spun in provisionFiles.\nevents=${JSON.stringify(events).slice(0, 500)}\ncontainer logs:\n${(logs.stdout ?? "") + (logs.stderr ?? "")}`.slice(
+              `no post-provisioning event within ${DEADLINE_MS}ms — runtime likely spun in provisionFiles.\nevents=${JSON.stringify(events).slice(0, 500)}\ncontainer logs:\n${dumpContainerLogs(containerName)}`.slice(
                 0,
                 1500,
               ),
