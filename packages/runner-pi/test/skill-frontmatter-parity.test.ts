@@ -42,8 +42,8 @@ import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
  * How Pi is expected to behave on a document the gate REFUSES.
  *
  * `"dropped"`      — Pi returns no skill at all (parse error, or no description).
- * `"warns-only"`   — Pi loads it; the platform is stricter on purpose. The
- *                    reason why is spelled per row.
+ * `"warns-only"`   — Pi loads it, warning at most; the platform is stricter on
+ *                    purpose. The reason why is spelled per row.
  */
 type PiOutcome = "dropped" | "warns-only";
 
@@ -157,8 +157,8 @@ const REJECTED: Fixture[] = [
   {
     dir: "fx-bom",
     content: "﻿---\nname: word-count\ndescription: Counts words.\n---\nBody.",
-    pi: "dropped",
-    why: "Pi tests startsWith('---'); a BOM defeats it, so it reads no frontmatter and drops the skill",
+    pi: "warns-only",
+    why: "Pi >=0.85 strips the BOM and loads the skill; the platform still refuses to mint one, because a version is immutable and must load on every runtime image the platform ships — including the 0.84.x ones, which test startsWith('---'), read no frontmatter behind a BOM and drop the skill",
   },
   {
     dir: "fx-no-space-after-colon",

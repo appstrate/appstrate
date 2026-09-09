@@ -20,7 +20,7 @@ custom-skill/
 
    Both fields are **required** and validated on every path that WRITES a skill — editor create and save, publish, version restore, ZIP/bundle/GitHub/MCP import — where a violation is a `400`. Reading an already-published skill is not gated, so a skill published before this rule keeps loading; fix it by editing its draft and publishing again.
 
-   The block is parsed with the [`yaml`](https://eemeli.org/yaml/) library at the same major the skill runtime uses, so anything the agent can parse Appstrate accepts, and anything YAML rejects (`description: a: b`, `name:x`, a duplicate key, a non-string value) Appstrate rejects too. Save the file **without a byte-order mark**: the runtime looks for a literal `---` at offset zero and reads no frontmatter behind a BOM.
+   The block is parsed with the [`yaml`](https://eemeli.org/yaml/) library at the same major the skill runtime uses, so anything the agent can parse Appstrate accepts, and anything YAML rejects (`description: a: b`, `name:x`, a duplicate key, a non-string value) Appstrate rejects too. Save the file **without a byte-order mark**: a runtime that looks for a literal `---` at offset zero reads no frontmatter behind a BOM, so Appstrate refuses to publish one.
 
    `name` follows the [Agent Skills specification](https://agentskills.io/specification) — 1-64 characters of lowercase `a-z`, `0-9` and `-`, no leading, trailing or consecutive hyphen — written **inline on one line**, and is the bare skill slug (`word-count`), not the scoped package id (`@acme/word-count`). `description` must be non-empty and at most 1024 characters; block scalars work:
 
