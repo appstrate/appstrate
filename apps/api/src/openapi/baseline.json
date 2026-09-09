@@ -579,7 +579,7 @@
         "operationId": "listAgents",
         "tags": ["Agents"],
         "summary": "List all agents",
-        "description": "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies` — the agent's composition — and keeps the identity, labels and run counters a launcher picks an agent by.",
+        "description": "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15662,7 +15662,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs` and `last_run` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `dependencies`, `version_count`, `has_unarchived_changes` and `forked_from`.",
+        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23353,7 +23353,16 @@
       },
       "AgentListItem": {
         "type": "object",
-        "required": ["id", "source", "type", "running_runs", "scope", "keywords", "version"],
+        "required": [
+          "id",
+          "source",
+          "type",
+          "running_runs",
+          "dependencies",
+          "scope",
+          "keywords",
+          "version"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -23398,18 +23407,21 @@
           },
           "dependencies": {
             "type": "object",
+            "required": ["integrations"],
             "properties": {
               "skills": {
                 "type": "object",
                 "additionalProperties": {
                   "type": "string"
-                }
+                },
+                "description": "Withheld from a summary read (`agents:run` without `agents:read`)."
               },
               "mcp_servers": {
                 "type": "object",
                 "additionalProperties": {
                   "type": "string"
-                }
+                },
+                "description": "Withheld from a summary read (`agents:run` without `agents:read`)."
               },
               "integrations": {
                 "type": "object",
@@ -23448,6 +23460,7 @@
           "source",
           "scope",
           "version",
+          "dependencies",
           "input",
           "running_runs",
           "last_run",
@@ -23547,13 +23560,14 @@
           },
           "dependencies": {
             "type": "object",
-            "required": ["skills", "mcp_servers", "integrations"],
+            "required": ["integrations"],
             "properties": {
               "skills": {
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/AgentSkillRef"
-                }
+                },
+                "description": "Withheld from a summary read (`agents:run` without `agents:read`)."
               },
               "mcp_servers": {
                 "type": "array",
@@ -23569,7 +23583,7 @@
                     }
                   }
                 },
-                "description": "AFPS §4.1 mcp_servers dependency group"
+                "description": "AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`)."
               },
               "integrations": {
                 "type": "array",

@@ -207,15 +207,24 @@ change. Two touches:
   non-builder uses, and every write they can trigger (`import_package_file`,
   `run_and_wait`) is gated by the principal's own permissions — a runner cannot
   alter a package through them.
-- **D-B4 — no `agents:read` ⇒ no manifest, no prompt, no dependencies.** The
+- **D-B4 — no `agents:read` ⇒ no manifest, no prompt, no composition.** The
   summary carries `id`, `display_name`, `description`, `scope`, `version`,
   `source`, `input` (schema + space values + locked fields — the run form needs
   it), `output` (shape only), `effective_timeout_seconds`, `running_runs`,
-  `last_run` (own, per Part A). It omits `manifest`, `prompt`, `dependencies`,
+  `last_run` (own, per Part A) and `dependencies.integrations`. It omits
+  `manifest`, `prompt`, `dependencies.skills`, `dependencies.mcp_servers`,
   `lock_version`, `updatedAt`, `has_unarchived_changes`, `version_count`,
-  `forked_from`. All of those are already optional on the wire (system agents
-  omit them today, `agent-detail-handler.ts:178-185`), so the OpenAPI schema
-  does not change shape — only its description.
+  `forked_from`. The integrations are the one dependency group a launcher is
+  entitled to: it holds `integrations:read`/`connect`/`disconnect` precisely so
+  it can hook its own accounts up to the agents it launches, and the run
+  preflight already names the missing ids back to it (`connection_missing`).
+  The skills and the MCP servers ARE the composition and stay withheld. An
+  omitted group is absent, never an empty array — `skills: []` would say the
+  agent declares none, which is false rather than unknown. Everything the
+  summary omits is already optional on the wire (system agents omit the
+  manifest half today, `agent-detail-handler.ts:178-185`); `dependencies`
+  itself stays required on both DTOs, with `skills` and `mcp_servers` optional
+  inside it.
 - **D-B5 — French label « Exécutant », key `runner`.**
 
 ### B.2 Vocabulary and DB
@@ -234,18 +243,18 @@ change. Two touches:
 
 ### B.3 Summary read on the two agent routes
 
-| Route                                                 | File                                            | Change                                                                                                                                                                                             |
-| ----------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/agents`                                     | `routes/agents.ts:185`                          | guard `requireAnyPermission(["agents:read", "agents:run"])`. When `!permissions.has("agents:read")`: drop `dependencies`, `keywords` stay. `running_runs` already goes through Part A's predicate. |
-| `GET /api/agents/:scope/:name`                        | `routes/agents.ts:311` → `buildAgentDetailDto`  | same guard; extend the existing `agent.source !== "system" && rawItem` branch with `&& hasAgentsRead` so the summary omits the D-B4 fields; also strip `dependencies` in that case.                |
-| `GET /api/agents/:scope/:name/settings`               | `routes/agents.ts:375`                          | same disjunction — the run modal reads the resolved model from it (`run-modal.tsx:114`, `useAgentModel`). Read-only, exposes `modelId`/`generationConfig`, no prompt.                              |
-| Everything else under `/api/agents/*`                 | versions, bundle export, files explorer, drafts | unchanged: `agents:read` / `agents:write`. A runner gets 403 there, which is the point.                                                                                                            |
-| `/api/packages/skills*`, `/api/packages/mcp-servers*` | —                                               | unchanged: `skills:read` / `mcp-servers:read`; 403 for a runner.                                                                                                                                   |
-| `requireAgent` (`middleware/guards.ts:12`)            | —                                               | unchanged (space-access lookup, no read permission).                                                                                                                                               |
+| Route                                                 | File                                            | Change                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/agents`                                     | `routes/agents.ts:185`                          | guard `requireAnyPermission(["agents:read", "agents:run"])`. When `!permissions.has("agents:read")`: drop `dependencies.skills` and `dependencies.mcp_servers`, keep `dependencies.integrations`; `keywords` stay. `running_runs` already goes through Part A's predicate. |
+| `GET /api/agents/:scope/:name`                        | `routes/agents.ts:311` → `buildAgentDetailDto`  | same guard; extend the existing `agent.source !== "system" && rawItem` branch with `&& hasAgentsRead` so the summary omits the D-B4 fields; `buildDependencyGroups` drops the `skills` and `mcp_servers` groups in that case and keeps `integrations`.                     |
+| `GET /api/agents/:scope/:name/settings`               | `routes/agents.ts:375`                          | same disjunction — the run modal reads the resolved model from it (`run-modal.tsx:114`, `useAgentModel`). Read-only, exposes `modelId`/`generationConfig`, no prompt.                                                                                                      |
+| Everything else under `/api/agents/*`                 | versions, bundle export, files explorer, drafts | unchanged: `agents:read` / `agents:write`. A runner gets 403 there, which is the point.                                                                                                                                                                                    |
+| `/api/packages/skills*`, `/api/packages/mcp-servers*` | —                                               | unchanged: `skills:read` / `mcp-servers:read`; 403 for a runner.                                                                                                                                                                                                           |
+| `requireAgent` (`middleware/guards.ts:12`)            | —                                               | unchanged (space-access lookup, no read permission).                                                                                                                                                                                                                       |
 
 Also list `runner` in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.3 and add
 a sentence to §3.4 `agents` row: "`run` also grants the summary projection of
-the two agent read routes (no manifest, prompt or dependencies)".
+the two agent read routes (no manifest, prompt, skills or MCP servers; the integrations stay)".
 
 ### B.4 SPA
 

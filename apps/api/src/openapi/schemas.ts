@@ -453,13 +453,20 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
-    // `running_runs`/`scope`/`keywords`/`version` are always emitted by the
-    // GET /api/agents mapper. `display_name`/`description`/`schema_version`/
-    // `author` stay optional (manifest-derived, may be absent); `forked_from`
-    // is not emitted by the list endpoint (shared-type optional). And
-    // `dependencies` is withheld from a summary read (`agents:run` without
-    // `agents:read`), so it is optional too.
-    required: ["id", "source", "type", "running_runs", "scope", "keywords", "version"],
+    // `running_runs`/`dependencies`/`scope`/`keywords`/`version` are always
+    // emitted by the GET /api/agents mapper. `display_name`/`description`/
+    // `schema_version`/`author` stay optional (manifest-derived, may be absent);
+    // `forked_from` is not emitted by the list endpoint (shared-type optional).
+    required: [
+      "id",
+      "source",
+      "type",
+      "running_runs",
+      "dependencies",
+      "scope",
+      "keywords",
+      "version",
+    ],
     properties: {
       id: { type: "string" },
       display_name: { type: "string" },
@@ -482,9 +489,22 @@ export const schemas = {
       running_runs: { type: "integer" },
       dependencies: {
         type: "object",
+        // `integrations` — which SaaS the agent talks to — is emitted to every
+        // caller; a launcher is the one who connects them. `skills` and
+        // `mcp_servers` are the composition, withheld from a summary read
+        // (`agents:run` without `agents:read`) and absent rather than empty.
+        required: ["integrations"],
         properties: {
-          skills: { type: "object", additionalProperties: { type: "string" } },
-          mcp_servers: { type: "object", additionalProperties: { type: "string" } },
+          skills: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
+          },
+          mcp_servers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
+          },
           integrations: { type: "object", additionalProperties: { type: "string" } },
         },
       },
@@ -506,15 +526,15 @@ export const schemas = {
     // Always emitted by buildAgentDetailDto. `display_name`/`description`/
     // `updatedAt`/`lock_version` stay optional: system agents omit the last two,
     // and the manifest-derived display_name/description may be absent (the
-    // shared-type marks them optional to match). `dependencies` and
-    // `forked_from` are optional for a second reason: a summary read
-    // (`agents:run` without `agents:read`) withholds the composition and the
-    // authoring history along with the manifest and the prompt.
+    // shared-type marks them optional to match). `forked_from` is optional for
+    // a second reason: a summary read (`agents:run` without `agents:read`)
+    // withholds the authoring history along with the manifest and the prompt.
     required: [
       "id",
       "source",
       "scope",
       "version",
+      "dependencies",
       "input",
       "running_runs",
       "last_run",
@@ -592,11 +612,17 @@ export const schemas = {
       },
       dependencies: {
         type: "object",
-        // The detail serializer always emits all three arrays (skills/mcp_servers
-        // from the manifest, integrations via parseManifestIntegrations).
-        required: ["skills", "mcp_servers", "integrations"],
+        // `integrations` (via parseManifestIntegrations) is emitted to every
+        // caller — a launcher is the one who connects them. `skills` and
+        // `mcp_servers`, the composition, are withheld from a summary read
+        // (`agents:run` without `agents:read`) and absent rather than empty.
+        required: ["integrations"],
         properties: {
-          skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
+          skills: {
+            type: "array",
+            items: { $ref: "#/components/schemas/AgentSkillRef" },
+            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
+          },
           mcp_servers: {
             type: "array",
             items: {
@@ -607,7 +633,8 @@ export const schemas = {
                 version: { type: "string" },
               },
             },
-            description: "AFPS §4.1 mcp_servers dependency group",
+            description:
+              "AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`).",
           },
           integrations: {
             type: "array",

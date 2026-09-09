@@ -51,7 +51,7 @@ export function useAgentReadiness(
         ? findMissingDependencies(
             (detail.manifest?.dependencies as Record<string, Record<string, string>> | undefined)
               ?.skills ?? {},
-            detail.dependencies?.skills.map((s: { id: string }) => s.id) ?? [],
+            detail.dependencies.skills?.map((s: { id: string }) => s.id) ?? [],
           ).length === 0
         : true,
     }),

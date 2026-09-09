@@ -80,7 +80,7 @@ function AgentEditorInner({
   effectiveTimeoutSeconds,
 }: {
   initialState: AgentEditorState;
-  resolvedDeps: { skills: unknown[] } | null;
+  resolvedDeps: { skills?: unknown[] } | null;
   packageId: string | undefined;
   isEdit: boolean;
   /**
@@ -168,13 +168,16 @@ function AgentEditorInner({
     }
   };
 
-  // Sync resolved skill metadata from server (names, descriptions)
+  // Sync resolved skill metadata from server (names, descriptions). The group
+  // is absent from a summary read of the agent, and then there is nothing to
+  // sync — the editor keeps what the manifest declares.
+  const resolvedSkills = resolvedDeps?.skills;
   useEffect(() => {
-    if (!resolvedDeps) return;
+    if (!resolvedSkills) return;
     setState((prev) => {
       const m = { ...prev.manifest };
       const skills = (
-        resolvedDeps.skills as {
+        resolvedSkills as {
           id: string;
           version?: string;
           name?: string;
@@ -184,7 +187,7 @@ function AgentEditorInner({
       setResourceEntries(m, "skills", skills);
       return { ...prev, manifest: m };
     });
-  }, [resolvedDeps, setState]);
+  }, [resolvedSkills, setState]);
 
   const onSubmit = () =>
     handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));

@@ -208,7 +208,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies` — the agent's composition — and keeps the identity, labels and run counters a launcher picks an agent by.
+         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -2839,7 +2839,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs` and `last_run` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `dependencies`, `version_count`, `has_unarchived_changes` and `forked_from`.
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
          */
         get: operations["getAgentPackage"];
         /**
@@ -4858,10 +4858,11 @@ export interface components {
                 /** @description Presentation order for schema properties */
                 property_order?: string[];
             };
-            dependencies?: {
-                skills: components["schemas"]["AgentSkillRef"][];
-                /** @description AFPS §4.1 mcp_servers dependency group */
-                mcp_servers: {
+            dependencies: {
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
+                skills?: components["schemas"]["AgentSkillRef"][];
+                /** @description AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`). */
+                mcp_servers?: {
                     id: string;
                     version: string;
                 }[];
@@ -4920,14 +4921,16 @@ export interface components {
              */
             type: "agent" | "skill" | "mcp-server" | "integration";
             running_runs: number;
-            dependencies?: {
+            dependencies: {
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
                     [key: string]: string;
                 };
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 mcp_servers?: {
                     [key: string]: string;
                 };
-                integrations?: {
+                integrations: {
                     [key: string]: string;
                 };
             };

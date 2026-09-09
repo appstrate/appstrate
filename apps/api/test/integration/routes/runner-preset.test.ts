@@ -7,9 +7,10 @@
  * a SUMMARY projection (RBAC spec §3.4) — the agent list, the agent detail,
  * and the resolved model the launch form reads. The summary carries what the
  * form needs (`input` with its stored values and locked fields, `output`, the
- * enforced timeout, the caller's own run counters) and withholds what an
- * author would call the agent's content: the manifest, the prompt, the
- * composition, and the authoring history.
+ * enforced timeout, the caller's own run counters, and the integrations it
+ * must connect) and withholds what an author would call the agent's content:
+ * the manifest, the prompt, the composition — its skills and MCP servers —
+ * and the authoring history.
  *
  * Everything else under `/api/agents/*` and `/api/packages/*` keeps its
  * `agents:read` / `agents:write` / `skills:read` guard and answers a runner
@@ -51,6 +52,7 @@ const AGENT_ID = "@runner/report-agent";
 const AGENT_PATH = "@runner/report-agent";
 const LAUNCH_AGENT_ID = "@runner/simple-agent";
 const SKILL_ID = "@runner/summarise";
+const INTEGRATION_ID = "@runner/svc";
 const MCP_ID = "@runner/filesystem";
 /** The agent DETAIL lives under the packages router, not `/api/agents`. */
 const AGENT_DETAIL_PATH = `/api/packages/agents/${AGENT_PATH}`;
@@ -89,8 +91,13 @@ describe("runner preset", () => {
         type: "agent",
         display_name: "Report Agent",
         description: "Writes the weekly report",
-        // The composition — what a summary read withholds.
-        dependencies: { skills: { [SKILL_ID]: "^1.0.0" } },
+        // The composition — withheld from a summary read — next to the
+        // integration, which is not composition: it is the account a launcher
+        // connects, and it stays.
+        dependencies: {
+          skills: { [SKILL_ID]: "^1.0.0" },
+          integrations: { [INTEGRATION_ID]: "^1.0.0" },
+        },
         input: {
           schema: {
             type: "object",
@@ -126,7 +133,7 @@ describe("runner preset", () => {
     return (await res.json()) as Record<string, unknown>;
   }
 
-  it("lists agents without their composition", async () => {
+  it("lists agents with their integrations and without their composition", async () => {
     const item = await agentList(runner);
 
     // What the launcher picks an agent by, all of it present.
@@ -140,10 +147,19 @@ describe("runner preset", () => {
       type: "agent",
       running_runs: 0,
     });
-    expect(item).not.toHaveProperty("dependencies");
+    // The integrations stay — a launcher connects them — and the composition
+    // is absent, not emptied: `skills: {}` would claim the agent declares none.
+    const deps = item.dependencies as Record<string, unknown>;
+    expect(deps.integrations).toEqual({ [INTEGRATION_ID]: "^1.0.0" });
+    expect(deps.skills).toBeUndefined();
+    expect(deps.mcp_servers).toBeUndefined();
 
     // The control: same row, same request, composition included.
-    expect(await agentList(operator)).toHaveProperty("dependencies");
+    expect((await agentList(operator)).dependencies).toEqual({
+      skills: { [SKILL_ID]: "^1.0.0" },
+      mcp_servers: {},
+      integrations: { [INTEGRATION_ID]: "^1.0.0" },
+    });
   });
 
   it("serves the detail the launch form needs and nothing of the agent's content", async () => {
@@ -158,12 +174,19 @@ describe("runner preset", () => {
     expect(detail.effective_timeout_seconds).toBeNumber();
     expect(detail).toMatchObject({ running_runs: 0, last_run: null });
 
+    // Which SaaS the agent talks to is what the launcher connects — it holds
+    // `integrations:connect` for that, and the run preflight already names the
+    // missing ids back to it. Its composition is absent, not emptied.
+    const deps = detail.dependencies as Record<string, unknown>;
+    expect(deps.integrations).toEqual([{ id: INTEGRATION_ID, version: "^1.0.0" }]);
+    expect(deps.skills).toBeUndefined();
+    expect(deps.mcp_servers).toBeUndefined();
+
     for (const field of [
       "manifest",
       "prompt",
       "updatedAt",
       "lock_version",
-      "dependencies",
       "version_count",
       "has_unarchived_changes",
       "forked_from",
@@ -180,7 +203,11 @@ describe("runner preset", () => {
 
     expect(detail.manifest).toMatchObject({ name: AGENT_ID });
     expect(detail.prompt).toContain("You write reports");
-    expect(detail.dependencies).toMatchObject({ skills: [{ id: SKILL_ID }] });
+    expect(detail.dependencies).toMatchObject({
+      skills: [{ id: SKILL_ID }],
+      mcp_servers: [],
+      integrations: [{ id: INTEGRATION_ID, version: "^1.0.0" }],
+    });
     expect(detail).toHaveProperty("lock_version");
     expect(detail).toHaveProperty("version_count");
     expect(detail).toHaveProperty("forked_from");
@@ -317,7 +344,9 @@ describe("runner preset", () => {
       "X-View-As": `org_role=member; space=${owner.defaultSpaceId}; role=preset:runner`,
     };
 
-    expect(await agentList(owner, view)).not.toHaveProperty("dependencies");
+    expect((await agentList(owner, view)).dependencies).toEqual({
+      integrations: { [INTEGRATION_ID]: "^1.0.0" },
+    });
 
     const detail = await agentDetail(owner, view);
     expect(detail.input).toMatchObject({ locked_fields: ["tone"] });

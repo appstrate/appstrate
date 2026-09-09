@@ -512,11 +512,12 @@ export interface AgentListItem extends BasePackageListItem {
   schema_version?: string;
   author?: string;
   keywords: string[];
-  /** Withheld from a summary read — `agents:run` without `agents:read`. */
-  dependencies?: {
+  dependencies: {
+    /** Withheld from a summary read — `agents:run` without `agents:read`. */
     skills?: Record<string, string>;
+    /** Withheld from a summary read — `agents:run` without `agents:read`. */
     mcp_servers?: Record<string, string>;
-    integrations?: Record<string, string>;
+    integrations: Record<string, string>;
   };
   running_runs: number;
   type: PackageType;
@@ -530,23 +531,28 @@ export interface AgentDetail {
   display_name?: string;
   description?: string;
   source: "system" | "local";
-  /**
-   * The agent's composition. Withheld from a summary read — `agents:run`
-   * without `agents:read` (RBAC spec §3.4) — like `manifest` and `prompt`.
-   */
-  dependencies?: {
-    // `version`/`name`/`description` are emitted only when present on the
-    // manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
-    skills: { id: string; version?: string; name?: string; description?: string }[];
-    /** AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry). */
-    mcp_servers: { id: string; version: string }[];
+  dependencies: {
+    /**
+     * The agent's composition — withheld from a summary read (`agents:run`
+     * without `agents:read`, RBAC spec §3.4) like `manifest` and `prompt`.
+     *
+     * `version`/`name`/`description` are emitted only when present on the
+     * manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
+     */
+    skills?: { id: string; version?: string; name?: string; description?: string }[];
+    /**
+     * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
+     * Composition too: withheld from a summary read, with `skills`.
+     */
+    mcp_servers?: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
-     * Always populated (system + user
-     * agents), so the dashboard's Connexions tab can render the
-     * integration-connection status without depending on the optional
-     * `manifest` field below.
+     * Always populated (system + user agents, full read + summary read), so the
+     * dashboard's Connexions tab can render the integration-connection status
+     * without depending on the optional `manifest` field below — and so a
+     * runner, who holds `integrations:connect` and no `agents:read`, can see
+     * which accounts the agent it launches needs.
      */
     integrations: AgentIntegrationEntry[];
   };

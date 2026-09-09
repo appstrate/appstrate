@@ -208,18 +208,20 @@ export function createAgentsRouter() {
         schema_version: manifest.schema_version,
         author: manifest.author,
         keywords: manifest.keywords ?? [],
-        // What the agent is BUILT FROM — the one field of this list a summary
-        // read withholds. Everything else is how the launcher names and picks
-        // an agent, which `agents:run` is entitled to.
-        ...(summaryOnly
-          ? {}
-          : {
-              dependencies: {
+        // `skills` and `mcp_servers` say what the agent is BUILT FROM — the
+        // one thing in this list a summary read withholds. `integrations` says
+        // which SaaS it talks to, which is what a launcher connects, so it
+        // answers every caller. Everything else is how the launcher names and
+        // picks an agent, which `agents:run` is entitled to.
+        dependencies: {
+          ...(summaryOnly
+            ? {}
+            : {
                 skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
                 mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
-                integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
-              },
-            }),
+              }),
+          integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
+        },
         running_runs: runningCounts[row.id] ?? 0,
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so

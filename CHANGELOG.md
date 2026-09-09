@@ -37,9 +37,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   of the agent: the list, the detail and the resolved model answer a runner with
   what the launch form needs — the parameter schema with its stored values and
   locked fields, the output shape, the enforced timeout, the caller's own run
-  counters — and omit the manifest, the prompt, the dependencies and the
-  authoring history. Every other agent route, and every skill or MCP-server
-  route, still answers 403. It is a preset and not a custom role on purpose —
+  counters, and the integrations the agent talks to, which a runner is the one
+  who connects — and omit the manifest, the prompt, the authoring history, and
+  the skills and MCP servers the agent is built from. Every other agent route,
+  and every skill or MCP-server route, still answers 403. It is a preset and not a custom role on purpose —
   custom roles need the `custom_roles` feature, and this reach has to exist on
   the open-source build as a code constant. Assign it wherever the other four
   are offered, including as a space's default role. The presets stop being a

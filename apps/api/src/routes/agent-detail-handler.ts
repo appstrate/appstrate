@@ -30,11 +30,18 @@ import { agentReadIsSummary } from "../lib/package-access.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 
 /**
- * The agent's composition — what it is built FROM. Resolved only for a caller
- * holding `agents:read`: a summary read omits the whole group, and with it the
- * skills catalog lookup, which an `agents:run`-only caller has no scope for.
+ * The agent's dependency groups, split by who is entitled to them.
  *
- * Both branches project off the EFFECTIVE manifest, never off the package
+ * `integrations` — which SaaS the agent talks to — answers EVERY caller. A
+ * runner holds `integrations:read`/`connect`/`disconnect` precisely so it can
+ * hook its own accounts up to the agents it launches, and the run preflight
+ * already names the missing ids back to it (`connection_missing`). `skills` and
+ * `mcp_servers` are the composition — what the agent is built FROM — so a
+ * summary read omits them, and with them the skills catalog lookup, a scope an
+ * `agents:run`-only caller does not hold. An omitted group is absent, never an
+ * empty array: `skills: []` would say the agent declares none, which is false.
+ *
+ * Both skill branches project off the EFFECTIVE manifest, never off the package
  * object (#878), but they expose different sets — a wire inconsistency that
  * predates this code: a versioned detail lists every DECLARED skill (bare
  * id + range, straight from the manifest — no catalog read) so the
@@ -49,9 +56,20 @@ import { runVisibilityFilter } from "../lib/run-visibility.ts";
 async function buildDependencyGroups(
   m: AgentManifest,
   orgId: string,
-  versioned: boolean,
+  opts: { versioned: boolean; summaryOnly: boolean },
 ): Promise<Record<string, unknown>> {
-  const skillDeps = versioned
+  const integrations = parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
+    id: e.id,
+    version: e.version,
+    // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead
+    // of spreading the string into `["*"]`.
+    ...(e.tools !== undefined ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] } : {}),
+    ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+  }));
+
+  if (opts.summaryOnly) return { integrations };
+
+  const skillDeps = opts.versioned
     ? Object.entries(
         (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
       ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
@@ -73,16 +91,7 @@ async function buildDependencyGroups(
       (m as { dependencies?: { mcp_servers?: Record<string, string> } }).dependencies
         ?.mcp_servers ?? {},
     ).map(([id, version]) => ({ id, version })),
-    integrations: parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
-      id: e.id,
-      version: e.version,
-      // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead
-      // of spreading the string into `["*"]`.
-      ...(e.tools !== undefined
-        ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
-        : {}),
-      ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
-    })),
+    integrations,
   };
 }
 
@@ -112,7 +121,8 @@ export async function buildAgentDetailDto(
   // `agents:run` without `agents:read`: the caller is handed what the launch
   // form needs and nothing an author would call the agent's content — the same
   // fields a system agent already withholds, plus the composition and the
-  // authoring metadata (RBAC spec §3.4).
+  // authoring metadata (RBAC spec §3.4). The agent's integrations are not
+  // content: a launcher connects them, so they stay.
   const summaryOnly = agentReadIsSummary(c);
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
@@ -136,7 +146,7 @@ export async function buildAgentDetailDto(
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
-  const dependencies = summaryOnly ? null : await buildDependencyGroups(m, orgId, versioned);
+  const dependencies = await buildDependencyGroups(m, orgId, { versioned, summaryOnly });
 
   const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
     spaceId,
@@ -170,7 +180,7 @@ export async function buildAgentDetailDto(
     // `{scope}` path params accept (issue #629).
     scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
-    ...(dependencies ? { dependencies } : {}),
+    dependencies,
     // The agent's ONE parameter schema, plus the per-space layers the
     // launch form needs: `values` are the editor's stored defaults and
     // `locked_fields` the fields it froze (not asked at launch, not

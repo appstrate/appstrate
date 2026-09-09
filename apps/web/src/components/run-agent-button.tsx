@@ -218,7 +218,7 @@ export function RunAgentButton({
             onClose={closeMissingModal}
             errors={missingErrors}
             agentPackageId={packageId}
-            {...(detail?.dependencies?.integrations
+            {...(detail?.dependencies.integrations
               ? { integrationEntries: detail.dependencies.integrations }
               : {})}
             retrying={runAgent.isPending}
