@@ -40,9 +40,9 @@ The row itself is deliberately thin (`packages/db/src/schema/spaces.ts:17`): `id
 
 ## The `spc_` id
 
-`prefixedId("spc")` mints `spc_` + `crypto.randomUUID()` — a canonical lowercase dashed UUID and nothing else (`apps/api/src/lib/ids.ts:6`, used at `apps/api/src/services/spaces.ts:27`).
+`prefixedId("spc")` mints `spc_` + `crypto.randomUUID()` — a canonical lowercase dashed UUID and nothing else (`apps/api/src/lib/ids.ts:6`, used at `apps/api/src/services/spaces.ts:77`).
 
-`SPACE_ID_RE` (`apps/api/src/lib/ids.ts:34`) pins exactly that shape:
+`SPACE_ID_RE` (`apps/api/src/lib/ids.ts:26`) pins exactly that shape:
 
 ```
 /^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/

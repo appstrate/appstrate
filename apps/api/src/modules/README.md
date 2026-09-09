@@ -242,13 +242,14 @@ their own role gives them.
 
 **Invalidation is yours.** Results are cached per `(orgId, userId)` with a 10s
 TTL. The platform cannot know when your table changed, so call
-`invalidatePrincipalPermissions(orgId, userId?)` from
+`invalidatePrincipalPermissions(orgId, userId)` from
 `@appstrate/core/principal-permissions` after every write the resolver reads.
-The cache is keyed by `(orgId, userId)`, not prefixed by org, so the `userId`-less
-form clears **every** cached principal on every replica, not just this org's —
-correct but blunt, which is why the per-user form is the one to reach for. The
-TTL is only the backstop for a lost bus broadcast, not the invalidation
-mechanism.
+Both arguments are required and it drops exactly that one principal on every
+replica: a write that changes N principals calls it N times, naming each. There
+is no org-wide form — the cache is keyed by the pair, not prefixed by org, so a
+blanket clear would drop every organization's principals to save the caller a
+loop. The TTL is only the backstop for a lost bus broadcast, not the
+invalidation mechanism.
 
 ### A space-level resource on a route the platform does not space-scope
 

@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `invalidatePrincipalPermissions(orgId, userId)` requires
+  `userId`.** The org-wide clear is removed: a call names exactly one principal
+  and drops it on every replica. The cache is keyed by the `(orgId, userId)`
+  pair rather than prefixed by org, so the org-wide form dropped EVERY
+  organization's principals — every replica re-resolving every session's grants
+  because one module wrote one row. A module invalidates the principals its
+  write touched, one call each; `@appstrate/module-ee`'s billing managers do
+  exactly that. A caller passing one argument fails to compile.
+
 - **BREAKING: `ModuleInitContext.getOrgAdminEmails` is REMOVED**, replaced by
   two narrower queries. `getOrgOwnerEmails(orgId)` returns the emails of the
   org's OWNERS only — the live fallback recipient for an unset billing contact,
@@ -31,7 +40,7 @@ userIds)` resolves a module's own stored user ids to
   list actually asks. A module calling `getOrgAdminEmails` fails to compile;
   the replacement is `getOrgOwnerEmails` when the answer wanted was "who is
   responsible for this org", and an explicit id list through `getOrgMembers`
-  when it wanted a named audience. First consumer: `@appstrate/cloud`'s billing
+  when it wanted a named audience. First consumer: `@appstrate/module-ee`'s billing
   managers and billing contact.
 
 - **New subpath `@appstrate/core/principal-permissions` — org-level grants per
@@ -43,14 +52,14 @@ userIds)` resolves a module's own stored user ids to
   must not be API-key- or end-user-grantable — evaluates the resolver for
   session-shaped callers only, filters each answer to that module's `mayGrant`
   (an undeclared string is dropped and logged), and isolates a throwing
-  resolver. First consumer: `@appstrate/cloud`'s billing managers.
+  resolver. First consumer: `@appstrate/module-ee`'s billing managers.
   New exports on the subpath: `resolvePrincipalPermissions`,
   `invalidatePrincipalPermissions`, `setPrincipalPermissionsProviders`, and the
   types `ModulePrincipalPermissions`, `PrincipalPermissionContext`,
   `RegisteredPrincipalPermissions`. Results are cached per `(orgId, userId)`
   with a 10s TTL and dropped across replicas by the cache bus, so a module that
   declares the surface MUST call `invalidatePrincipalPermissions(orgId,
-userId?)` after writing the table its resolver reads —
+userId)` after writing the table its resolver reads —
   `setPrincipalPermissionsProviders` is the platform's own boot wiring and a
   module never calls it. No behaviour change for a platform where no module
   declares the member: the resolver short-circuits without touching the cache.
@@ -72,7 +81,7 @@ userId?)` after writing the table its resolver reads —
   space that existed at migration time. `ModulePermissionsSnapshot.byRole`
   changes key accordingly (`viewer` → `guest`); a module whose
   `permissionsContribution()` names `viewer` in `grantTo` must name `guest`
-  (no in-tree module did — `@appstrate/cloud` grants `billing:read` to
+  (no in-tree module did — `@appstrate/module-ee` grants `billing:read` to
   owner/admin/member and needs no change, but a guest holding it would be a
   deliberate decision, not a rename). Existing `viewer` rows are moved by
   `scripts/migration/0008-org-viewer-to-guest.sql` (release notes).
@@ -113,7 +122,7 @@ userId?)` after writing the table its resolver reads —
   `getModulePresetScopes()`, and the types `PermissionLevel`,
   `OrgLevelPermission`, `SpaceLevelPermission`, `SpaceRolePreset`. Every
   module contributing permissions must add `level` to each entry and swap
-  `grantTo` for `presets` on its space-level resources; `@appstrate/cloud`'s
+  `grantTo` for `presets` on its space-level resources; `@appstrate/module-ee`'s
   `billing` entries are org-level.
 
 - **`extractSkillMeta` no longer owns its own frontmatter parser.** It returns

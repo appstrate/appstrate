@@ -500,9 +500,9 @@ its resolver returns is dropped, the strings may never be API-key- or
 end-user-grantable, and the surface is evaluated for session-shaped callers
 only, so no delegated credential can carry such a grant. The answers are cached
 per `(orgId, userId)` behind a 10s TTL and dropped across replicas by the
-granting module's own `invalidatePrincipalPermissions(orgId, userId?)`; the
-`userId`-less form clears every cached principal, because the cache is keyed
-rather than prefixed.
+granting module's own `invalidatePrincipalPermissions(orgId, userId)`, which
+names one principal per call — there is no org-wide form, because the cache is
+keyed by that pair rather than prefixed by org.
 
 `applySpacePermissions(c, space)` (`middleware/space-context.ts`) is the single
 place the space slice is added: it loads the caller's `space_members` row, runs

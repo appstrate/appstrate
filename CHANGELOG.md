@@ -566,17 +566,45 @@ progress` and emits nothing. Once a handler has run the organization is
   key of a private sibling space, given only its id. A key whose space the
   caller cannot reach now answers with that space's own wall (404 for a private
   one, 403 `not_a_space_member` otherwise). An API key still revokes only inside
-  the space it is pinned to, and a caller with no organization role — an OIDC
-  end-user token, whose fixed allowlist cannot be re-resolved for another space
-  — gets the same 404. The audit row names the KEY's space, not the space the
-  request entered from.
+  the space it is pinned to. The request re-enters the key's space before it
+  writes, so the audit row names the KEY's space, not the space the request came
+  in through.
 
 - **Integration OAuth clients are `integrations:configure`, not
   `integrations:install`.** Registering, rotating, deleting a BYO OAuth client
   and choosing the default one are governance (RBAC spec §3.4), and `install`
   is API-key-grantable — so a key could swap the OAuth application a whole
   space authenticates through. The four routes now require the session-only
-  permission the SPA already gated them on.
+  permission the SPA already gated them on. **OPERATOR ACTION: an API key that
+  registered, rotated or deleted a BYO OAuth client, or set the default one, now
+  gets 403 on those four routes — do that work from a session.**
+
+- **The realtime streams resolve the same org half as HTTP.** SSE runs outside
+  the auth pipeline and rebuilt the caller's org permissions without the grants a
+  module makes to one named principal, so an ee billing manager reached every
+  HTTP route their grant opens and none of the streams. The stream now reads
+  `principalGrants` exactly as the pipeline does, and its audit rows name the
+  session transport rather than the credential the query parameter carried.
+
+- **A malformed `space_id` in a space assignment answers 400, not 404.**
+  `space_assignments[].space_id` on an invitation and on an OAuth signup policy
+  is shape-checked (`spc_` + a UUID); anything else is `400 Malformed space id`
+  instead of a 404 that reads as "that space was deleted".
+
+- **Billing: deleting an org with no billing account still clears its billing
+  state (`@appstrate/module-ee`).** The handler returned as soon as it found no
+  account row, leaving the org's usage buckets and its billing managers behind —
+  rows naming an organization that no longer exists. The cleanup now runs for
+  every org, and the account row is only what decides whether Stripe is called.
+
+- **Billing: `POST /api/billing/checkout` and `/plan` answer 404 for an org with
+  no billing account (`@appstrate/module-ee`).** They answered 503, which tells a
+  client to retry something no retry can fix.
+
+- **A disabled install checkbox in the library says why.** The row now names the
+  reason — a system package, or the permission the caller lacks — and shows
+  nothing at all while permissions are still loading, rather than a bare disabled
+  box that reads as a broken control.
 
 - **The billing managers card no longer clears itself when the member roster
   fails to load.** Without the roster every saved manager read as "no longer a
@@ -616,12 +644,15 @@ progress` and emits nothing. Once a handler has run the organization is
   subscription (`@appstrate/module-ee`).** The plan picker always opened Stripe
   Checkout, and Checkout only ever CREATES — so an org that already subscribed
   came out of an upgrade with two live subscriptions and two charges.
-  `POST /api/billing/checkout` now refuses an account whose subscription is
-  active, trialing or past due (`409 subscription_exists`), and the new
-  `POST /api/billing/plan` (`billing:manage`, 5/min) moves the existing
-  subscription's price item onto the chosen plan with proration. The dashboard
-  routes a plan click to whichever of the two applies. Downgrading to free is
-  unchanged — it is a cancellation, taken through the Customer Portal.
+  `POST /api/billing/checkout` now refuses an account whose subscription is one
+  Stripe still HOLDS — `active`, `trialing`, `past_due`, `unpaid`, `paused` or
+  `incomplete` (`409 subscription_exists`) — because Checkout only creates, and
+  Stripe holds all six. The new `POST /api/billing/plan` (`billing:manage`,
+  5/min) moves the existing subscription's price item onto the chosen plan with
+  proration. Which door a plan click opens is the server's answer, not the
+  dashboard's guess: `GET /api/billing` carries a `plan_action` field
+  (`checkout` | `plan-change` | `portal`) and the SPA follows it. Downgrading to
+  free is unchanged — it is a cancellation, taken through the Customer Portal.
 
 - **Billing: an old subscription's events no longer destroy the active one
   (`@appstrate/module-ee`).** Every subscription-scoped Stripe webhook matched on
@@ -632,8 +663,18 @@ progress` and emits nothing. Once a handler has run the organization is
   `customer.subscription.updated` and `invoice.paid`, and a superseded
   subscription's dunning notice reached the customer as if their current plan
   were failing. Each handler now writes only to the account carrying that exact
-  subscription id (the two that ATTACH one also accept an account with none), and
-  an event about any other subscription is logged and ignored.
+  subscription id, and an event about any other subscription is logged and
+  ignored. The three handlers whose job includes ATTACHING one — checkout
+  completion, subscription creation and the first paid invoice — also accept an
+  account with no subscription, and one whose id names a subscription Stripe no
+  longer HOLDS: only `customer.subscription.deleted` nulls the column, so an org
+  sitting at `canceled` (or one whose `deleted` event was lost) still carries a
+  dead id, and pinning on the id alone dropped its next paid checkout as
+  "superseded" — charged, with no plan and no quota.
+  `customer.subscription.created` additionally never rewrites an account already
+  on that subscription: a creation event delivered late carries creation-time
+  status and plan, and replaying it over a subscription that has since moved
+  puts the account back where it started.
 
 - **Billing: the usage the cutover excluded is no longer billed on the second
   sweep (`@appstrate/module-ee`).** The cursor was seeded at the platform's
@@ -885,24 +926,20 @@ skills sync is running` and kept the stale plugin. The lock is now
   parameter, because the resolver only leaves it unset for system mcp-servers,
   which the route answers before it reads the query at all.
 
-- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired — `scripts/bootstrap.sh`
-  now refuses to run while it is set.** The variable was a fourth trigger for a
-  decision three live signals already make (`--yes`, `CI=true|1|yes`, stdout is
-  not a TTY), and its only justification was preserving the pre-two-step
-  "always auto-install" default for IaC written against it. Its only in-repo
-  writer was the CI scenario covering the legacy path itself.
+- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired.**
+  `scripts/bootstrap.sh` does not read it at all — nothing in the repository
+  does. It was a fourth trigger for a decision three live signals already make
+  (`--yes`, `CI=true|1|yes`, stdout is not a TTY), and its only justification
+  was preserving the pre-two-step "always auto-install" default for IaC written
+  against it.
 
-  It is a hard failure, not a silent ignore, because silence is the expensive
-  answer here: an Ansible / cloud-init run that still exports it would fall
-  through to the two-step path and exit 0 having dropped the binary and
-  installed nothing — a provisioning run that reports success and provisions
-  no instance. The guard runs before the first download and names the
-  replacement. **Replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
-  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`); CI runners and
+  **OPERATOR ACTION: replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
+  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`). An Ansible /
+  cloud-init run that still exports it takes the two-step path and exits 0
+  having dropped the binary and installed nothing, with no message naming the
+  variable — so fix the caller rather than waiting for one. CI runners and
   non-TTY contexts already select unattended mode on their own and need no
-  change. An explicitly blanked `APPSTRATE_AUTO_INSTALL=` carries no intent and
-  stays a no-op, matching `RETIRED_ENV_RENAMES` in `@appstrate/env`.
-  `APPSTRATE_NO_LAUNCH=1` is untouched.
+  change. `APPSTRATE_NO_LAUNCH=1` is untouched.
 
 ### Fixed
 
