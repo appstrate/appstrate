@@ -4,8 +4,7 @@ import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-or
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers, packages } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
-import { actorFilter, actorMatch, type Actor } from "../../lib/actor.ts";
-import { listRunsWithFilter } from "./runs.ts";
+import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 
 // --- Notifications ---
@@ -321,30 +320,4 @@ export async function listNotifications(
     })),
     has_more: hasMore,
   };
-}
-
-// --- Run list (GET /api/runs?user=me) ---
-//
-// Unrelated to notifications, but the handler shares this module.
-
-export async function listUserRuns(
-  scope: SpaceScope,
-  actor: Actor,
-  options: { limit?: number; offset?: number } = {},
-) {
-  const { limit = 20, offset = 0 } = options;
-  return listRunsWithFilter(
-    scopedWhere(runs, {
-      orgId: scope.orgId,
-      spaceId: scope.spaceId,
-      // `?user=me` means strictly mine, for every principal: `actorFilter`,
-      // never `actorScopeFilter`. The latter's `user_id IS NULL` arm would
-      // hand a member every end-user's and every actor-less run — the
-      // supervision view `runs:read-all` gates, not "my runs".
-      extra: [actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId })],
-    })!,
-    limit,
-    offset,
-    actor,
-  );
 }

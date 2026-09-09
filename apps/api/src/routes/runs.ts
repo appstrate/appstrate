@@ -14,7 +14,6 @@ import {
   RUN_LOG_LEVELS,
   GLOBAL_RUN_KINDS,
 } from "../services/state/runs.ts";
-import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { getInstalledPackageSettings } from "../services/space-packages.ts";
@@ -24,7 +23,12 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
-import { runVisibilityFilter, assertRunVisible, requireRunsRead } from "../lib/run-visibility.ts";
+import {
+  runVisibilityFilter,
+  ownRunsFilter,
+  assertRunVisible,
+  requireRunsRead,
+} from "../lib/run-visibility.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
@@ -419,19 +423,17 @@ export function createRunsRouter() {
     const actor = getActor(c);
     const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
-    // `user` is a closed set of one: `me`. Validated BEFORE the end-user branch
-    // below so the param means the same thing for every caller, instead of a
-    // typo surviving in an end-user integration until it runs under an org
-    // session.
+    // `user` is a closed set of one: `me`. The param means the same thing for
+    // every caller, so a typo is a 400 rather than something that survives in
+    // an end-user integration until it runs under an org session.
     const userFilter = closedSetQuery(c, "user", USER_FILTERS);
-    const endUser = c.get("endUser");
-
-    // End-users always see only their own runs — same semantic as before.
-    if (userFilter === "me" || endUser) {
-      const result = await listUserRuns(scope, actor, { limit, offset });
-      setOffsetLinkHeader({ c, limit, offset, total: result.total });
-      return c.json(result);
-    }
+    // `?user=me` narrows to the caller's own runs even when `runs:read-all`
+    // would have widened the list; without it the caller reads whatever their
+    // permission allows. An end-user needs no branch of its own: `read-all` is
+    // not grantable to them, so `runVisibilityFilter` already yields exactly
+    // their own runs — and either way the list composes with every filter
+    // below, instead of a self-view that quietly drops them.
+    const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
     const status = closedSetQuery(c, "status", runStatusValues);
@@ -456,7 +458,7 @@ export function createRunsRouter() {
       endDate,
       chatSessionId,
       actor,
-      visibility: runVisibilityFilter(c),
+      visibility,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);

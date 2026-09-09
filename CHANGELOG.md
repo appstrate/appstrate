@@ -172,7 +172,9 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   and `run_metric` payloads carry the run's actor, which the log channel had no
   way to read before and so could not gate on at all.
   `GET /api/runs?user=me` is now strictly your own runs for every caller,
-  end-user and actor-less runs included, whether or not you hold `read-all`.
+  end-user and actor-less runs included, whether or not you hold `read-all`,
+  and composes with the other filters (`kind`, `status`, dates,
+  `chat_session_id`) instead of ignoring them.
   Attaching a file to a chat reads as wide as the gallery you picked it from:
   `ChatAttachmentRequest.permissions` (`@appstrate/core/chat-contract`) carries
   the caller's set, so a `runs:read-all` holder attaches a colleague's run

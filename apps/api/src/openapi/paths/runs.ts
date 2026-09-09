@@ -755,7 +755,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs across the space (global view)",
       description:
-        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
+        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -765,7 +765,7 @@ const canonicalRunsPaths = {
           in: "query",
           schema: { type: "string", enum: ["me"] },
           description:
-            "Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org.",
+            "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org.",
         },
         {
           name: "limit",

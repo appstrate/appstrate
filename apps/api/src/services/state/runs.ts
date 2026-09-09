@@ -1501,7 +1501,13 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 
 type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
-export async function listRunsWithFilter(
+/**
+ * The enriched page + total behind the two list surfaces in this module
+ * (`listPackageRuns`, `listScheduleRuns`). Module-private: a caller outside
+ * builds its WHERE by hand, and a hand-built `runs` predicate is what the
+ * `runs:read` visibility rule exists to keep out of the query.
+ */
+async function listRunsWithFilter(
   filter: SQL,
   limit: number,
   offset = 0,

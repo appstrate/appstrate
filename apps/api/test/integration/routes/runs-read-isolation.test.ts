@@ -322,6 +322,38 @@ describe("run read isolation between members", () => {
     expect(await listedRuns(authHeaders(operatorA), "?user=me")).toHaveLength(2);
   });
 
+  it("composes ?user=me with the other filters instead of dropping them", async () => {
+    // "Mine" is a narrowing, not a separate view: the status, kind, date and
+    // chat-session filters still apply on top of it. The fixture's five rows
+    // are all `success`, so one failed run each side of the ownership boundary
+    // is what tells a composed filter from a dropped one.
+    const failedA = (
+      await seedRun({
+        packageId: AGENT_ID,
+        orgId: owner.orgId,
+        spaceId: owner.defaultSpaceId,
+        userId: operatorA.user.id,
+        status: "failed",
+        startedAt: T2,
+      })
+    ).id;
+    await seedRun({
+      packageId: AGENT_ID,
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      userId: operatorB.user.id,
+      status: "failed",
+      startedAt: T2,
+    });
+
+    expect(await listedRuns(authHeaders(operatorA), "?user=me&status=failed")).toEqual([failedA]);
+    // The owner reads the whole space, so `status=failed` alone returns both —
+    // `user=me` is what removes B's row, and it removes the owner's own reach
+    // over it rather than being ignored for a `read-all` caller.
+    expect((await listedRuns(authHeaders(owner), "?status=failed")).length).toBe(2);
+    expect(await listedRuns(authHeaders(owner), "?user=me&status=failed")).toEqual([]);
+  });
+
   it("keys an API key on its own scopes, not on its creator's preset", async () => {
     const headersFor = async (scopes: string[]) => {
       const key = await seedApiKey({

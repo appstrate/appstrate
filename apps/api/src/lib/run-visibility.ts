@@ -69,10 +69,21 @@ export function ownsRun(
   return actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
 }
 
+/**
+ * WHERE fragment for the runs this principal launched — the narrow half of
+ * {@link runVisibilityFilter}, and on its own what `GET /api/runs?user=me`
+ * means. "Mine" is one predicate whether it comes from the permission or from
+ * the query parameter, so a caller holding `read-all` who asks for `user=me`
+ * reads exactly the rows a plain `runs:read` caller reads.
+ */
+export function ownRunsFilter(actor: Actor): SQL {
+  return actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId });
+}
+
 /** WHERE fragment narrowing `runs` to what the caller may read; `undefined` = no narrowing. */
 export function runVisibilityFilter(c: Context<AppEnv>): SQL | undefined {
   if (canReadEveryRun(c.get("permissions"))) return undefined;
-  return actorFilter(getActor(c), { userId: runs.userId, endUserId: runs.endUserId });
+  return ownRunsFilter(getActor(c));
 }
 
 /**
