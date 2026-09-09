@@ -1238,7 +1238,28 @@ async function snapshot(root: string): Promise<Record<string, string>> {
   return out;
 }
 
+/** The caller's standing in a space, as `GET /api/spaces` reports it — a
+ * space listed without it is one this profile may only ask to join, and can
+ * therefore not be a skill source. */
+const MEMBER = { access: "member" as const, permissions: ["skills:read"] };
+
 describe("skills sync — multiple spaces", () => {
+  it("never sources a listed space this member never joined", async () => {
+    // The org lists its `closed` spaces to every member so they can ask to be
+    // added; the stub refuses every space-scoped read of one, as the server
+    // does, so selecting it would fail the whole run.
+    createSkillServer(ONE_SKILL, [
+      { id: "spc_1", name: "Active", isDefault: true },
+      { id: "spc_closed", name: "Closed", access: "none" },
+    ]).install();
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    expect(stderr()).not.toMatch(/not_a_space_member/);
+  });
+
   it("unions selected spaces, scopes downloads, and keeps MCP in the active space", async () => {
     const second = { id: "@acme/other", skillMd: skillMd("other", "Other skill.") };
     createSkillServer([...ONE_SKILL, second]).install();
@@ -1250,8 +1271,8 @@ describe("skills sync — multiple spaces", () => {
       if (path === "/api/spaces")
         return Response.json({
           data: [
-            { id: "spc_1", name: "Active" },
-            { id: "spc_2", name: "Library" },
+            { id: "spc_1", name: "Active", ...MEMBER },
+            { id: "spc_2", name: "Library", ...MEMBER },
           ],
         });
       if (path === "/api/packages/skills")
@@ -1284,7 +1305,7 @@ it("uses stored sync spaces, supports an empty selection, and explicit spaces re
   const serve = globalThis.fetch;
   globalThis.fetch = (async (input, init) =>
     new URL(String(input)).pathname === "/api/spaces"
-      ? Response.json({ data: [{ id: "spc_1", name: "Active" }] })
+      ? Response.json({ data: [{ id: "spc_1", name: "Active", ...MEMBER }] })
       : serve(input, init)) as typeof fetch;
   const { io } = createMemoryIO();
   await skillsSyncCommand({}, io);

@@ -75,6 +75,8 @@ function spaceRow(overrides: Partial<Space> = {}): Space {
     name: "Default",
     isDefault: true,
     createdAt: "t",
+    access: "member",
+    permissions: ["skills:read"],
     ...overrides,
   };
 }

@@ -48,12 +48,18 @@ const pluginRoot = (): string => join(getDataDir(), "claude-plugin");
 const SPACES = [
   { id: "spc_active", name: "Active" },
   { id: "spc_library", name: "Library" },
+  { id: "spc_closed", name: "Closed" },
 ];
 
 /**
  * `memberships` is the space → package attribution (`space_packages`), and
- * `reachable` is what `GET /api/spaces` answers for this principal — the two
+ * `listed` is what `GET /api/spaces` answers for this principal — the two
  * halves the real API keeps apart. Default: every space named in `memberships`.
+ *
+ * Being LISTED is not being able to use it: `isSpaceVisibleTo` also returns a
+ * `closed` space an org member never joined, so they can ask to be added, and
+ * `unjoined` models exactly that — listed with `access: "none"`, every
+ * space-scoped read of it refused 403, as the real server does.
  */
 function installSpaces(
   fixtures: SkillFixture[],
@@ -63,23 +69,52 @@ function installSpaces(
     duplicateNames?: boolean;
     seen?: string[];
     reachable?: string[];
+    /** Listed with `access: "none"` — visible, not enterable. */
+    unjoined?: string[];
+    /** Listed as a member, but with a space role that lacks `skills:read`. */
+    withoutSkillsRead?: string[];
   } = {},
 ) {
   const server = createSkillServer(fixtures);
   server.install();
   const serve = globalThis.fetch;
+  // What a space-scoped route answers when the header names a space this
+  // caller cannot use: `applySpacePermissions` first, then the route guard.
+  const refuse = (spaceId: string): Response | null => {
+    if (options.unjoined?.includes(spaceId)) {
+      return Response.json(
+        { code: "not_a_space_member", message: `You are not a member of space '${spaceId}'` },
+        { status: 403 },
+      );
+    }
+    if (options.withoutSkillsRead?.includes(spaceId)) {
+      return Response.json(
+        { code: "forbidden", message: "Insufficient permissions: skills:read required" },
+        { status: 403 },
+      );
+    }
+    return null;
+  };
   globalThis.fetch = (async (input, init) => {
     const url = new URL(String(input));
     const spaceId = new Headers(init?.headers).get("X-Space-Id") ?? "";
     if (url.pathname === "/api/spaces") {
-      const reachable = options.reachable ?? Object.keys(memberships);
+      const listed = options.reachable ?? Object.keys(memberships);
       return Response.json({
-        data: SPACES.filter((space) => reachable.includes(space.id)).map((space) => ({
-          ...space,
-          name: options.duplicateNames ? "Duplicate" : space.name,
-        })),
+        data: SPACES.filter((space) => listed.includes(space.id)).map((space) => {
+          const member = !options.unjoined?.includes(space.id);
+          return {
+            ...space,
+            name: options.duplicateNames ? "Duplicate" : space.name,
+            access: member ? "member" : "none",
+            permissions:
+              member && !options.withoutSkillsRead?.includes(space.id) ? ["skills:read"] : [],
+          };
+        }),
       });
     }
+    const refusal = refuse(spaceId);
+    if (refusal) return refusal;
     if (url.pathname === "/api/packages/skills") {
       if (spaceId === options.failingSpace)
         return Response.json({ message: "Unavailable" }, { status: 503 });
@@ -265,6 +300,97 @@ describe("multi-space skill distribution — access decides the sources", () => 
     ]);
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
     expect(mcp.mcpServers.appstrate.headers["X-Space-Id"]).toBe("spc_active");
+  });
+
+  // A space the org lists so a member can ASK to join it (`closed`,
+  // `access: "none"`) used to become a skill source, and its 403 failed the
+  // whole run — every session, for anyone whose org has one.
+  const CLOSED_SPACES = [...TWO_SPACES, { id: "@acme/closed-only", skillMd: skillMd("closed") }];
+  const WITH_CLOSED = { ...BOTH, spc_closed: ["@acme/closed-only"] };
+
+  it("ignores a listed space this member never joined and syncs the rest", async () => {
+    installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_closed"] });
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "active-only",
+      "library-only",
+      "shared",
+    ]);
+    expect(stderr()).not.toMatch(/not_a_space_member|403/);
+  });
+
+  it("treats a member space whose role lacks skills:read as no source at all", async () => {
+    installSpaces(CLOSED_SPACES, WITH_CLOSED, { withoutSkillsRead: ["spc_closed"] });
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "active-only",
+      "library-only",
+      "shared",
+    ]);
+    expect(stderr()).not.toMatch(/Insufficient permissions|403/);
+  });
+
+  it("skips a configured sync space that is listed but not joined, and says why", async () => {
+    installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_closed"] });
+    await updateProfile("default", { syncSpaces: ["spc_active", "spc_closed"] });
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(stderr()).toContain('Configured sync space "spc_closed" cannot supply skills');
+    expect(stderr()).toContain("you are not a member of it");
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["active-only", "shared"]);
+  });
+
+  it("fails an explicit --space naming a space this member never joined", async () => {
+    installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_closed"] });
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const before = await snapshot(pluginRoot());
+    const ledger = await readFile(getStatePath(), "utf8");
+    const { io, stderr, stdout } = createMemoryIO();
+
+    await expect(
+      skillsSyncCommand({ space: ["spc_closed"], printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    // Distinct from "no space matches": the id IS listed, it just cannot be used.
+    expect(stderr()).toContain("cannot supply skills: you are not a member of it");
+    expect(stderr()).not.toMatch(/No space matches/);
+    expect(stdout()).toBe("");
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    expect(await readFile(getStatePath(), "utf8")).toBe(ledger);
+  });
+
+  it("fails an explicit --space naming that space by name too", async () => {
+    installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_closed"] });
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({ space: ["Closed"] }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain('Space "Closed" (spc_closed) cannot supply skills');
+  });
+
+  it("warns about the pinned space when it is listed but not joined", async () => {
+    // The MCP header carries the pin, and the server refuses it for a space
+    // with no membership exactly as it does for one that is not listed at all.
+    installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_active"] });
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
+    // The pin supplies nothing any more; the spaces this member did join do.
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "closed",
+      "library-only",
+      "shared",
+    ]);
   });
 
   it("narrows to syncSpaces, and skips a configured space that access no longer covers", async () => {

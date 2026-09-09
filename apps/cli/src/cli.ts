@@ -529,12 +529,12 @@ spaceGroup
 
 const skillsGroup = program
   .command("skills")
-  .description("Sync the skills of every space you reach to Claude Code and Codex");
+  .description("Sync the skills of every space you belong to, to Claude Code and Codex");
 
 skillsGroup
   .command("sync")
   .description(
-    "Materialize the skills of every space this profile reaches as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",

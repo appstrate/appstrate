@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate skills sync` — the skills of every space this profile reaches, as
- * Agent Skills directories, run by a *machine*: a marketplace `command` source
- * re-runs it once per session in the background. So `--print-path` writes
+ * `appstrate skills sync` — the skills of every space this profile is a member
+ * of, as Agent Skills directories, run by a *machine*: a marketplace `command`
+ * source re-runs it once per session in the background. So `--print-path` writes
  * exactly one stdout line and only on success, and a per-skill failure must
  * NOT fail the process — Claude Code discards a run that exits non-zero, which
  * would throw away a correct plugin over a skill that was never in it.
@@ -550,12 +550,40 @@ function uniqueTargets(requested: SyncTarget[] | undefined): SyncTarget[] {
   return [...new Set(requested)];
 }
 
+/** What the list route requires of the caller in the space it is asked about. */
+const SKILLS_READ = "skills:read";
+
 /**
- * Which spaces supply skills. The default is EVERY space this profile reaches:
- * being granted a space is what puts its skills on the machine, and losing one
- * is what takes them off again — neither should need a second, manual step.
- * `GET /api/spaces` answers per principal (`listSpacesForPrincipal`), so the
- * grant is the whole mechanism.
+ * Can this space actually SUPPLY skills to this profile?
+ *
+ * `GET /api/spaces` answers what the caller may KNOW about, which is wider
+ * than what it may USE: `isSpaceVisibleTo` also lists a `closed` space an org
+ * member has not joined, so they can ask to be added, and it comes back with
+ * `access: "none"`. Naming such a space in `X-Space-Id` is refused with 403
+ * `not_a_space_member`; a member whose space role does not grant `skills:read`
+ * is refused by the list route itself. Either refusal fails the WHOLE sync
+ * (`report.run` → exit 1, and under `--print-path` Claude Code then discards
+ * the run and keeps the stale plugin), so one space nobody joined must never
+ * become a source.
+ */
+function suppliesSkills(space: Space): boolean {
+  return space.access === "member" && space.permissions.includes(SKILLS_READ);
+}
+
+/** Why `suppliesSkills` said no — the half of the answer a user can act on. */
+function unusableReason(space: Space): string {
+  return space.access === "member"
+    ? `your role there does not grant ${SKILLS_READ}`
+    : "you are not a member of it";
+}
+
+/**
+ * Which spaces supply skills. The default is every space this profile is a
+ * MEMBER of with `skills:read` there: being granted a space is what puts its
+ * skills on the machine, and losing one is what takes them off again — neither
+ * should need a second, manual step. `GET /api/spaces` answers per principal
+ * (`listSpacesForPrincipal`), so the grant is the whole mechanism — but it also
+ * lists spaces one may only ask to join, which `suppliesSkills` drops.
  *
  * `--space` and `syncSpaces` NARROW that set; they never widen it.
  */
@@ -569,31 +597,53 @@ async function selectedSpaces(
   // Skill sources no longer depend on the pin, so a pin that died would sync
   // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
   // else notices any more: say it here, where the space list is already in hand.
-  if (profile.spaceId && !spaces.some((space) => space.id === profile.spaceId))
+  // Listed-but-not-joined is the same refusal as absent — the MCP request sends
+  // the header either way — so membership, not presence in the list, is the test.
+  const pinned = spaces.find((space) => space.id === profile.spaceId);
+  if (profile.spaceId && (!pinned || pinned.access === "none"))
     report.note(
       `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused. Run: appstrate space switch`,
     );
-  if (explicit) return [...new Set(explicit.map((ref) => explicitSpaceId(spaces, ref)))];
-  if (!profile.syncSpaces) return spaces.map((space) => space.id);
+  if (explicit) {
+    const chosen = explicit.map((ref) => explicitSpace(spaces, ref));
+    // Typed just now, so it gets immediate feedback rather than a silent drop.
+    for (const space of chosen) {
+      if (!suppliesSkills(space))
+        throw new Error(
+          `Space "${space.name}" (${space.id}) cannot supply skills: ${unusableReason(space)}.`,
+        );
+    }
+    return [...new Set(chosen.map((space) => space.id))];
+  }
+  if (!profile.syncSpaces) return spaces.filter(suppliesSkills).map((space) => space.id);
   // A stored list outlives the grants it was written against. An id this
   // profile no longer reaches is dropped with a note, not a failure: losing
   // access is a decision elsewhere, and it must not break the other spaces.
-  const reachable = new Set(spaces.map((space) => space.id));
-  const kept = profile.syncSpaces.filter((id) => reachable.has(id));
-  for (const id of profile.syncSpaces.filter((id) => !reachable.has(id)))
+  const listed = new Map(spaces.map((space) => [space.id, space]));
+  const kept: string[] = [];
+  for (const id of profile.syncSpaces) {
+    const space = listed.get(id);
+    if (space && suppliesSkills(space)) {
+      kept.push(id);
+      continue;
+    }
     report.note(
-      `Configured sync space "${id}" is not accessible in the active organization — skipped.`,
+      space
+        ? `Configured sync space "${id}" cannot supply skills — ${unusableReason(space)}; skipped.`
+        : `Configured sync space "${id}" is not accessible in the active organization — skipped.`,
     );
+  }
   return [...new Set(kept)];
 }
 
 /** A flag is typed by hand, so it takes an ID or an unambiguous exact name. */
-function explicitSpaceId(spaces: Space[], ref: string): string {
+function explicitSpace(spaces: Space[], ref: string): Space {
   const trimmed = ref.trim();
-  if (spaces.some((space) => space.id === trimmed)) return trimmed;
+  const byId = spaces.find((space) => space.id === trimmed);
+  if (byId) return byId;
   const named = spaces.filter((space) => space.name === trimmed);
   if (named.length > 1) throw new Error(`Ambiguous space name "${ref}": use a space ID.`);
   // Nothing matched: `resolveSpaceRef` only throws here, and its message lists
   // the spaces this profile can see.
-  return named[0]?.id ?? resolveSpaceRef(spaces, trimmed).id;
+  return named[0] ?? resolveSpaceRef(spaces, trimmed);
 }

@@ -22,8 +22,46 @@ const encoder = new TextEncoder();
 /** The sync never reads it; the stub carries it because the real DTOs do. */
 const MANIFEST_DESCRIPTION = "A skill.";
 
-/** Same reason: `Space` declares it, the sync only ever reads `id`. */
+/** Same reason: `Space` declares it, nothing in the sync reads it. */
 const SPACE_STAMP = { createdAt: "2026-01-01T00:00:00.000Z" };
+
+/** What a member's role grants here; `skills:read` is what the list route wants. */
+const MEMBER_PERMISSIONS = ["agents:read", "skills:read"];
+
+/**
+ * A row of `GET /api/spaces`. The listing reports what the caller may SEE, and
+ * `access` / `permissions` are what separates that from what it may USE — a
+ * `closed` space an org member has not joined is listed with `access: "none"`
+ * and every space-scoped read of it is refused 403 `not_a_space_member`.
+ */
+export interface SpaceFixture {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+  /** Defaults to `"member"`. */
+  access?: "member" | "none";
+  /** Effective permissions in the space. Defaults to `MEMBER_PERMISSIONS`. */
+  permissions?: string[];
+}
+
+const DEFAULT_SPACES: SpaceFixture[] = [
+  { id: "spc_1", name: "Space One", isDefault: true },
+  { id: "spc_2", name: "Space Two" },
+];
+
+function spaceWire(fixture: SpaceFixture) {
+  const access = fixture.access ?? "member";
+  return {
+    id: fixture.id,
+    orgId: "org_1",
+    name: fixture.name,
+    isDefault: fixture.isDefault ?? false,
+    access,
+    role: access === "member" ? { kind: "preset", key: "editor", name: "editor" } : null,
+    permissions: fixture.permissions ?? (access === "member" ? MEMBER_PERMISSIONS : []),
+    ...SPACE_STAMP,
+  };
+}
 
 /** Draft-side state of a fixture, read by `--source draft`. */
 export interface DraftFixture {
@@ -123,15 +161,19 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
     headers: { "Content-Type": "application/json", ...headers },
   });
 
-export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
+export function createSkillServer(
+  fixtures: SkillFixture[],
+  spaces: SpaceFixture[] = DEFAULT_SPACES,
+): SkillServer {
   const prepared = fixtures.map(prepare);
+  const spaceById = new Map(spaces.map((space) => [space.id, space]));
   let downloads = 0;
   let indexReads = 0;
   let contentReads = 0;
   let inFlight = 0;
   let peakInFlight = 0;
 
-  const stub = async (input: string | URL | Request): Promise<Response> => {
+  const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     inFlight += 1;
     peakInFlight = Math.max(peakInFlight, inFlight);
     try {
@@ -139,26 +181,50 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
       // all: a stub that answers synchronously never has two in flight and
       // would measure a concurrency cap of 1 as if it were the real one.
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return await respond(input);
+      return await respond(input, init);
     } finally {
       inFlight -= 1;
     }
   };
 
-  const respond = async (input: string | URL | Request): Promise<Response> => {
+  /**
+   * The refusal a space-scoped route answers with when `X-Space-Id` names a
+   * space this caller cannot use — `applySpacePermissions` for a non-member,
+   * `requirePermission("skills", "read")` for a member whose role is too thin.
+   * Returning it here is what makes a selection bug fail a test instead of
+   * quietly working against a stub that ignores the header.
+   */
+  const spaceRefusal = (spaceId: string): Response | null => {
+    const space = spaceById.get(spaceId);
+    if (!space) return null;
+    if ((space.access ?? "member") === "none") {
+      return json(
+        { code: "not_a_space_member", message: `You are not a member of space '${spaceId}'` },
+        403,
+      );
+    }
+    const permissions = space.permissions ?? MEMBER_PERMISSIONS;
+    if (!permissions.includes("skills:read")) {
+      return json({ code: "forbidden", message: "Insufficient permissions: skills:read" }, 403);
+    }
+    return null;
+  };
+
+  const respond = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input.toString());
     const path = url.pathname;
+    const spaceId = new Headers(init?.headers).get("X-Space-Id") ?? "";
+    // `/api/spaces` is not space-scoped (`SPACE_SCOPED_PREFIXES`); every other
+    // route the sync reads is, so it is refused exactly as the server would.
+    if (path !== "/api/spaces") {
+      const refusal = spaceRefusal(spaceId);
+      if (refusal) return refusal;
+    }
 
     // The sync selects its skill sources from the spaces this profile reaches,
-    // so every run starts here. The two ids are the ones the suites pin.
+    // so every run starts here. The two default ids are the ones the suites pin.
     if (path === "/api/spaces") {
-      return json({
-        object: "list",
-        data: [
-          { id: "spc_1", orgId: "org_1", name: "Space One", isDefault: true, ...SPACE_STAMP },
-          { id: "spc_2", orgId: "org_1", name: "Space Two", isDefault: false, ...SPACE_STAMP },
-        ],
-      });
+      return json({ object: "list", data: spaces.map(spaceWire) });
     }
 
     if (path === "/api/packages/skills") {
