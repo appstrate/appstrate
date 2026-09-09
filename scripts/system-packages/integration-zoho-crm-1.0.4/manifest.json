@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/zoho-crm",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Zoho CRM (API)",
@@ -25,7 +25,22 @@
       "type": "oauth2",
       "authorization_endpoint": "https://accounts.zoho.com/oauth/v2/auth",
       "token_endpoint": "https://accounts.zoho.com/oauth/v2/token",
-      "default_scopes": ["ZohoCRM.modules.READ", "ZohoCRM.users.READ"],
+      "userinfo_endpoint": "https://accounts.zoho.com/oauth/v2/userinfo",
+      "identity_claims": {
+        "accountId": "$.email",
+        "sub": "$.sub",
+        "email": "$.email",
+        "name": "$.name",
+        "firstName": "$.first_name",
+        "lastName": "$.last_name"
+      },
+      "default_scopes": [
+        "ZohoCRM.modules.READ",
+        "ZohoCRM.users.READ",
+        "openid",
+        "email",
+        "profile"
+      ],
       "token_endpoint_auth_method": "client_secret_post",
       "scope_catalog": [
         {
@@ -75,6 +90,21 @@
         {
           "value": "ZohoCRM.bulk.CREATE",
           "label": "Create bulk operations"
+        },
+        {
+          "value": "openid",
+          "label": "Identity",
+          "description": "OpenID Connect sign-in — identifies the connected Zoho account."
+        },
+        {
+          "value": "email",
+          "label": "Email",
+          "description": "Read the connected account's email address (used as the connection label)."
+        },
+        {
+          "value": "profile",
+          "label": "Profile",
+          "description": "Read the connected account's name and profile picture."
         }
       ],
       "authorized_uris": [

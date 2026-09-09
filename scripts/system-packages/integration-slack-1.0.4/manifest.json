@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/slack",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Slack (API)",
@@ -25,6 +25,12 @@
       "type": "oauth2",
       "authorization_endpoint": "https://slack.com/oauth/v2/authorize",
       "token_endpoint": "https://slack.com/api/oauth.v2.access",
+      "identity_claims": {
+        "accountId": "$.authed_user.id",
+        "sub": "$.authed_user.id",
+        "teamId": "$.team.id",
+        "teamName": "$.team.name"
+      },
       "default_scopes": ["channels:read", "users:read"],
       "token_endpoint_auth_method": "client_secret_post",
       "scope_catalog": [

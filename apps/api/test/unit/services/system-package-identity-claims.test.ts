@@ -220,6 +220,22 @@ const CASES: Record<string, Case> = {
     accountId: "wash@serenity.io",
     source_doc: "developers.intercom.com — GET https://api.intercom.io/me",
   },
+  "@appstrate/jira": {
+    authKey: "primary",
+    // Atlassian hides `email` behind profile visibility on most accounts, so
+    // this fixture omits it: the account key must survive that, which is why
+    // the mapping reads `account_id` rather than the email every sibling uses.
+    source: {
+      account_type: "atlassian",
+      account_id: "5b10a2844c20165700ede21g",
+      name: "Mia Krystof",
+      picture: "https://avatar-management/initials/MK-0.png",
+      account_status: "active",
+    },
+    accountId: "5b10a2844c20165700ede21g",
+    source_doc:
+      "developer.atlassian.com/cloud/jira/platform — GET https://api.atlassian.com/me (read:me)",
+  },
   "@appstrate/linkedin": {
     authKey: "primary",
     source: {
@@ -302,6 +318,34 @@ const CASES: Record<string, Case> = {
     accountId: "spez",
     source_doc: "reddit.com/dev/api/oauth — GET /api/v1/me",
   },
+  "@appstrate/salesforce": {
+    authKey: "primary",
+    source: {
+      sub: "https://login.salesforce.com/id/00Dxx0000001gPLEA2/005xx000001SvogAAC",
+      user_id: "005xx000001SvogAAC",
+      organization_id: "00Dxx0000001gPLEA2",
+      preferred_username: "user@example.com",
+      name: "Sample User",
+      email: "user@example.com",
+    },
+    accountId: "user@example.com",
+    source_doc: "login.salesforce.com/.well-known/openid-configuration — claims_supported",
+  },
+  // Slack has no usable userinfo endpoint: every Web API method answers HTTP
+  // 200 with `{"ok": false}` on a bad token, so the manifest declares none and
+  // identity is read straight off the `oauth.v2.access` token response — the
+  // first of the three layers `extractIdentity` is handed.
+  "@appstrate/slack": {
+    authKey: "primary",
+    source: {
+      ok: true,
+      app_id: "A0KRD3HEB",
+      team: { name: "Slack Softball Team", id: "T9TK3CUKW" },
+      authed_user: { id: "U1234", scope: "chat:write", token_type: "user" },
+    },
+    accountId: "U1234",
+    source_doc: "docs.slack.dev/reference/methods/oauth.v2.access — response example",
+  },
   "@appstrate/typeform": {
     authKey: "primary",
     source: { alias: "Batman", email: "bruce@wayne.com", language: "en" },
@@ -331,6 +375,19 @@ const CASES: Record<string, Case> = {
     source: { sub: "e4f3b1c2", email: "user@company.com", given_name: "User", name: "User Name" },
     accountId: "user@company.com",
     source_doc: "identity.xero.com/.well-known/openid-configuration",
+  },
+  "@appstrate/zoho-crm": {
+    authKey: "primary",
+    source: {
+      sub: "12345678",
+      email: "user@company.com",
+      email_verified: true,
+      name: "User Name",
+      first_name: "User",
+      last_name: "Name",
+    },
+    accountId: "user@company.com",
+    source_doc: "accounts.zoho.com/.well-known/openid-configuration — claims_supported",
   },
   "@appstrate/zoom": {
     authKey: "primary",
