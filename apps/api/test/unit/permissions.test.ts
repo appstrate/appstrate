@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { OrgRole } from "@appstrate/core/permissions";
+import { SPACE_LEVEL_PERMISSIONS, type OrgRole } from "@appstrate/core/permissions";
 import { describe, it, expect } from "bun:test";
 import {
   effectivePermissions,
@@ -187,6 +187,11 @@ describe("the `runner` preset", () => {
    * Spelled out rather than derived: a runner launches agents it may not read,
    * so its set is the one preset that cannot be filtered out of a neighbour.
    * The list is asserted whole, so widening it anywhere is a diff in this file.
+   *
+   * `presetPermissions` answers the MERGED matrix — core plus whatever the
+   * loaded modules contributed to `runner` — so each assertion here is scoped
+   * to `SPACE_LEVEL_PERMISSIONS`, the core space vocabulary. What the modules
+   * add is the subject of the last test in this block.
    */
   const RUNNER_GRANTS: string[] = [
     "agents:run",
@@ -199,8 +204,15 @@ describe("the `runner` preset", () => {
     "runs:read",
   ];
 
-  it("holds exactly the eight space-level grants it is defined by", () => {
-    expect([...presetPermissions("runner")].sort() as string[]).toEqual(RUNNER_GRANTS);
+  /** The half of a preset's set that core defines, module contributions removed. */
+  function coreGrants(preset: Parameters<typeof presetPermissions>[0]): string[] {
+    return [...presetPermissions(preset)!]
+      .filter((p) => SPACE_LEVEL_PERMISSIONS.has(p as never))
+      .sort();
+  }
+
+  it("holds exactly the eight core space-level grants it is defined by", () => {
+    expect(coreGrants("runner")).toEqual(RUNNER_GRANTS);
   });
 
   it("withholds every read that would expose what it launches", () => {
@@ -220,7 +232,25 @@ describe("the `runner` preset", () => {
         `runner holds ${withheld}: false`,
       );
     }
-    expect([...runner].filter((p) => p.endsWith(":write"))).toEqual([]);
+    // No core mutation at all: a runner starts what someone else authored.
+    expect(coreGrants("runner").filter((p) => p.endsWith(":write"))).toEqual([]);
+  });
+
+  it("carries the module contributions that named it, and no others", () => {
+    // The friendly surfaces a non-builder uses — every write behind them is
+    // gated by the principal's own permissions, so they grant nothing the
+    // preset withholds. `webhooks` names admin/builder only and must stay out.
+    const runner = presetPermissions("runner");
+    for (const held of ["chat:read", "chat:write", "mcp:read", "mcp:invoke"]) {
+      expect(`runner holds ${held}: ${runner.has(held as never)}`).toBe(
+        `runner holds ${held}: true`,
+      );
+    }
+    for (const withheld of ["webhooks:read", "webhooks:write"]) {
+      expect(`runner holds ${withheld}: ${runner.has(withheld as never)}`).toBe(
+        `runner holds ${withheld}: false`,
+      );
+    }
   });
 
   it("is what an explicit member holding it reaches, org half included", () => {
