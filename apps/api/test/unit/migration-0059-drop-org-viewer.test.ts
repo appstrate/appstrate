@@ -55,6 +55,12 @@ const REPLAY_THROUGH = "0058_organization_deletion_reservation";
 
 const ORG = "e0000000-0000-4000-8000-00000000d059";
 const SPACE = "spc_d0590000-0000-4000-8000-000000000001";
+/** A second, NON-default space. `0008` writes one row per space a viewer reaches,
+ * so a single-space org cannot tell a correct step 1 from one that only ever
+ * covers the default space — both produce exactly one row, and `0008`'s own
+ * coverage abort reads `v_expected = v_covered` either way. The product is the
+ * claim; one space does not express it. */
+const SPACE_OTHER = "spc_d0590000-0000-4000-8000-000000000002";
 const VIEWER = "usr_0059_viewer";
 const MEMBER = "usr_0059_member";
 
@@ -173,7 +179,8 @@ async function seedRollout(pg: PGlite): Promise<void> {
   await pg.exec(`
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Zero59', 'zero-59');
     INSERT INTO spaces (id, org_id, name, is_default)
-      VALUES ('${SPACE}', '${ORG}', 'Default', true);
+      VALUES ('${SPACE}', '${ORG}', 'Default', true),
+             ('${SPACE_OTHER}', '${ORG}', 'Other', false);
     INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES
       ('${VIEWER}', 'Viewer', 'v-0059@example.com', true, now(), now()),
       ('${MEMBER}', 'Member', 'm-0059@example.com', true, now(), now());
@@ -330,34 +337,33 @@ describe("0059 — the RBAC rollout must have happened first", () => {
   it("applies once `0008` has run too, and narrows the type", async () => {
     await runScript(pg, SCRIPT_0008);
 
-    // `0008`'s own discriminating claim, asserted HERE because this file is the
-    // last place it can be: once the migration below has run, no database built
-    // from the journal can hold the `viewer` the script moves, so
-    // `test/integration/db/org-viewer-to-guest-migration.test.ts` — which seeds
-    // that value against the suite's shared database — has no reachable subject
-    // and is deleted in this change. The reach a viewer had is preserved as an
-    // explicit row per space that existed, which is what "0 viewers left" alone
-    // would not distinguish from "there were never any".
+    // The reach a viewer had is preserved as an explicit row in EVERY space that
+    // existed — the product, not merely more than zero. A step 1 that covered
+    // only the default space would still write one row, and `0008`'s own
+    // coverage abort would still read `v_expected = v_covered`, so one space
+    // proves nothing about the JOIN; two do. `migration-0008-org-viewer-to-guest.test.ts`
+    // owns the rest of the script's behaviour on a database of its own.
     expect(
       await count(
         pg,
         `SELECT count(*)::int AS n FROM space_members
-           WHERE user_id = '${VIEWER}' AND space_id = '${SPACE}' AND preset_role = 'viewer'`,
+           WHERE user_id = '${VIEWER}' AND preset_role = 'viewer'
+             AND space_id IN ('${SPACE}', '${SPACE_OTHER}')`,
       ),
-    ).toBe(1);
-    // The plain member got none: they reach the open space implicitly.
+    ).toBe(2);
+    // The plain member got none: they reach the open spaces implicitly.
     expect(
       await count(pg, `SELECT count(*)::int AS n FROM space_members WHERE user_id = '${MEMBER}'`),
     ).toBe(0);
     // And the pending invitation carries the snapshot that makes its acceptance
-    // equivalent — the one `0012` must never write.
+    // equivalent — one entry per space, the one `0012` must never write.
     expect(
       await count(
         pg,
         `SELECT jsonb_array_length(space_assignments)::int AS n
            FROM org_invitations WHERE id = 'inv_0059_pending'`,
       ),
-    ).toBe(1);
+    ).toBe(2);
 
     await applyMigration(pg);
 
