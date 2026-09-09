@@ -47,7 +47,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                                            |
 | `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
 | `appstrate space`     | List, switch, or create spaces pinned on the active profile.                                                |
-| `appstrate skills`    | Sync the pinned space's skills to Claude Code and Codex as Agent Skills directories.                        |
+| `appstrate skills`    | Sync selected spaces' skills to Claude Code and Codex as Agent Skills directories.                          |
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
 | `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
@@ -189,22 +189,24 @@ On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / space
 
 ### `appstrate logout`
 
-Revokes the active session server-side (`POST /api/auth/sign-out`) and wipes the local keyring entry + profile from `config.toml`.
+Revokes the selected profile's refresh-token family server-side (`POST /api/auth/cli/revoke`) and wipes the local keyring entry + profile from `config.toml`.
 
 ```sh
 appstrate logout
 appstrate logout --profile prod
-appstrate logout --all                # nukes every CLI session (every device)
 ```
 
 **Flags**
 
-| Flag              | Values | Description                                                                                                                           |
-| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `-p`, `--profile` | name   | Profile to log out from (default: `default`).                                                                                         |
-| `--all`           | —      | Revokes every CLI refresh-token family server-side via `POST /api/auth/cli/sessions/revoke-all`. Use after suspecting key compromise. |
+| Flag              | Values | Description                                                                                            |
+| ----------------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| `-p`, `--profile` | name   | Profile to log out from (resolved through the usual flag, environment and default-profile precedence). |
 
-If the instance is unreachable, local credentials are still wiped (with a warning on stderr) so the CLI returns to a clean state even during outages.
+If the instance is unreachable, local credentials are still wiped (with a warning on stderr). Skill-cleanup failures do not skip credential removal either.
+
+Logout also cleans the skill installations recorded as belonging to that profile: the generated Claude plugin becomes the setup plugin, without business skills or `.mcp.json`, and managed skills in shared targets are removed. Logging out another profile leaves the current installation alone. Cleanup also runs when credentials are already absent; failed deletions remain recorded so repeating `appstrate logout --profile <name>` can retry them. Unmanaged files and targets recorded under a different home directory are preserved.
+
+This immediately changes the generated source directory, not an already loaded Claude session. Run `claude plugin update appstrate@appstrate`, then start a fresh session to apply the installed copy. The next marketplace sync follows the active profile: deleting the default profile may select another configured profile and install its skills; without a configured profile, the setup plugin remains. An older ownership ledger has no profile identity: logout preserves those files and reports that a successful sync with the upgraded CLI is needed to establish ownership before automatic cleanup.
 
 The dashboard's **Devices** preferences page (and `GET /api/auth/cli/sessions`) lets you revoke individual sessions. Org admins can revoke any member's CLI sessions via `GET/DELETE /api/orgs/:orgId/cli-sessions[/:familyId]` (requires the `cli-sessions:read|delete` RBAC grant — owners + admins by default).
 
@@ -376,7 +378,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate skills`
 
-Materialize the skills installed in the pinned space as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server.
+Materialize the union of skills installed in selected spaces of the pinned organization as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server.
 
 The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no hook, no daemon, no server-side change.
 
@@ -386,6 +388,7 @@ appstrate skills sync --target codex                   # → ~/.agents/skills/
 appstrate skills sync --target claude-user             # → ~/.claude/skills/
 appstrate skills sync --target claude-plugin --target codex
 appstrate skills sync --source draft                   # sync working copies instead of published versions
+appstrate skills sync --space spc_prod --space spc_team # union for this invocation; MCP stays on the pinned space
 appstrate skills sync --dry-run                        # report what would change, write nothing
 appstrate skills sync --print-path                     # the plugin path as the ONLY stdout line
 ```
@@ -394,11 +397,24 @@ appstrate skills sync --print-path                     # the plugin path as the 
 
 | Flag / subcommand | Purpose                                                                                                                                                                                                                                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `skills sync`     | The only subcommand. Reads the skills installed in the pinned space and writes one directory per skill into each requested target.                                                                                                                                                                     |
+| `skills sync`     | The only subcommand. Reads the skills installed in the selected spaces and writes one directory per skill into each requested target.                                                                                                                                                                  |
 | `--target <name>` | Repeatable. `claude-plugin` (default) → `$XDG_DATA_HOME/appstrate/claude-plugin/`; `codex` → `~/.agents/skills/`; `claude-user` → `~/.claude/skills/`.                                                                                                                                                 |
+| `--space <id>`    | Repeatable. Accepts IDs or unambiguous exact names from `appstrate space list`. Overrides this sync only; does not change the pinned MCP space or persist the selection.                                                                                                                               |
 | `--source <name>` | `published` (default) syncs each skill's `latest` published version, integrity-verified. `draft` syncs the working copy instead — for authors iterating on their own machine.                                                                                                                          |
 | `--print-path`    | Print the plugin directory as the **only** stdout line; every message goes to stderr. This is what a marketplace `command` source consumes. Requires `--target claude-plugin`, and refuses `--dry-run`.                                                                                                |
 | `--dry-run`       | Print the per-target plan and write nothing. One line per target with the counts (`+N` new, `~N` refreshed, `=N` unchanged, `-N` removed), then one line per affected slug: `+`, `~` or `-`. Cannot be combined with `--print-path`: a dry run produces no plugin, so there is no path worth printing. |
+
+**Space selection.** Explicit `--space` flags take precedence over the profile's `syncSpaces` list; without either, sync uses the pinned `spaceId`. An explicit selection replaces the list, never adds the pinned space implicitly. A package installed in several selected spaces is downloaded once. Removing an explicit or configured space removes only skills no longer present in the resulting union at the next successful sync.
+
+For a persistent selection, add IDs to the existing profile in `config.toml` (see the complete example below):
+
+```toml
+syncSpaces = ["spc_prod", "spc_team"]
+```
+
+Changing organization clears this list because space IDs belong to one organization. Removing `syncSpaces` restores the pinned-space default. Setting `syncSpaces = []` installs no business skills while retaining the MCP connection. The pinned space remains required for the plugin's MCP connection even when the skills come from other spaces.
+
+**One active context per destination.** Profiles do not accumulate installations. A successful sync for another profile or organization replaces the previous context in the requested targets. The plugin switches its skills and MCP configuration together after the replacement has been prepared. Network, authentication or preparation failures during a context switch retain the previous plugin. Installed skill folders are generated copies: local edits are not sent back to Appstrate. Package authoring and bidirectional folder sync are outside this command.
 
 **Registering it with Claude Code.** Add the marketplace, then install the plugin — the consent screen shows the exact command string Claude Code will re-run each session:
 
@@ -416,7 +432,7 @@ if command -v appstrate >/dev/null 2>&1; then exec appstrate skills sync --targe
 
 It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update`. Skills then appear as `/appstrate:<skill>`.
 
-**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. This only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched.
+**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched. Explicit logout performs the cleanup described above.
 
 **MCP connection.** A connected sync writes this `.mcp.json` at the plugin root, using the profile's instance, pinned organization and pinned space:
 
@@ -436,13 +452,13 @@ It must stay byte-stable: changing it stops the background re-runs until the use
 
 It contains no tokens. The setup plugin has no MCP configuration. In Claude Code, open `/mcp`, select `plugin:appstrate:appstrate`, and complete the browser OAuth flow if authentication is needed. This login is separate from `appstrate login`; the CLI's keyring session is never copied into the plugin. Tools use names such as `mcp__plugin_appstrate_appstrate__search_operations`. [Claude Code plugin MCP reference](https://code.claude.com/docs/en/mcp#plugin-provided-mcp-servers).
 
-**Same space as the skills.** The `X-Space-Id` header pins MCP operations to the CLI's pinned space — the space the skills were synced from — so a skill that names an agent or a run executes where that agent lives. The server validates the header against the organization: a pinned space that no longer exists fails every MCP call with `404 Space '<id>' not found in this organization` until `appstrate space switch` re-pins one and the next sync rewrites the file. A connection without the header (a manual `claude mcp add`, see below) lands in the organization's **default space** instead; `appstrate space list` shows which one that is.
+**MCP stays on the active space.** The `X-Space-Id` header pins MCP operations to the CLI's pinned `spaceId`, independently of `--space` and `syncSpaces`. For example, skills selected from Production and Team still execute MCP operations in Production when Production is pinned. Synchronizing a skill from another space does not route its tools to that space. The server validates the header against the organization: a pinned space that no longer exists fails every MCP call with `404 Space '<id>' not found in this organization` until `appstrate space switch` re-pins one and the next sync rewrites the file. A connection without the header (a manual `claude mcp add`, see below) lands in the organization's **default space** instead; `appstrate space list` shows which one that is.
 
 **Upgrading or switching organizations or spaces.** The first sync after this CLI upgrade changes the plugin's content hash even if the skills are unchanged. Switching instance, organization or space also rewrites the connection. To apply it immediately:
 
 ```sh
 appstrate org switch <id-or-slug>        # when changing organizations
-appstrate space switch <id-or-slug>      # when changing spaces
+appstrate space switch <id>              # when changing spaces
 claude plugin update appstrate@appstrate # re-runs the default-profile sync
 ```
 
@@ -454,7 +470,7 @@ Then exit the active Claude Code session and start a new one, check the endpoint
 
 Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills YAML, but artifacts published before that rule existed are still synced exactly as authored. Each one is named once on stderr (`… does not pass the skill frontmatter rule …`): Claude Code and Codex may skip it, and the fix is to republish it from Appstrate.
 
-**Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and Appstrate ids are `@scope/name`, which is not a legal skill name. The directory is therefore the frontmatter `name` when it is already legal, falling back to the slugified package `name` segment. If two skills in the space claim the same slug, the second one — ordered by package id, so the choice is reproducible — becomes `<scope>-<name>`, then `<scope>-<name>-2`, `-3`, … until the name is free. Every rename is reported on stderr.
+**Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and Appstrate ids are `@scope/name`, which is not a legal skill name. The directory is therefore the frontmatter `name` when it is already legal, falling back to the slugified package `name` segment. If two skills in the selected spaces claim the same slug, the second one — ordered by package id, so the choice is reproducible — becomes `<scope>-<name>`, then `<scope>-<name>-2`, `-3`, … until the name is free. Every rename is reported on stderr.
 
 **Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors. The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
 
@@ -468,7 +484,7 @@ Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills
 | `--print-path` together with `--dry-run`                    | `--print-path cannot be combined with --dry-run: a dry run writes no plugin.`               |
 | The catalogue call, a target write or the state file failed | the underlying error                                                                        |
 
-**Per-skill failures are graded differently under `--print-path`.** A skill that was never published, whose bytes do not match the server's `X-Integrity`, or whose destination is not ours is reported on stderr and skipped; the rest of the sync completes.
+**Per-skill failures within the same installed context are graded differently under `--print-path`.** A skill that was never published, whose bytes do not match the server's `X-Integrity`, or whose destination is not ours is reported on stderr and skipped; the rest of the sync completes.
 
 - Without `--print-path`, the command then exits 1 so a wrapper notices.
 - With `--print-path`, it exits **0** as long as the plugin tree itself was written (or was already up to date), and prints the path. A non-zero exit makes Claude Code discard the run, so failing the process over one unpublished skill would throw away a correct plugin. When the plugin tree could _not_ be produced, nothing is printed on stdout and the command exits 1.
@@ -481,9 +497,9 @@ A skill whose refresh fails keeps the version already on disk and its state entr
 Skipped @acme/pdf-tools on codex: /home/you/.agents/skills/pdf-tools exists and is not managed by appstrate — remove or rename it
 ```
 
-There is no automatic rename: remove or rename the directory yourself and re-run. While a sync is in flight, staging happens under a dot-prefixed `.appstrate-staging/`, so neither Claude Code nor Codex can pick up a half-written skill. Concurrent syncs (two Claude Code sessions opening together) are serialized by a lock under `skills-sync/`; it records its owner's pid and is reaped as soon as that process is gone, so a sync killed mid-run never blocks the next one.
+There is no automatic rename: remove or rename the directory yourself and re-run. While a sync is in flight, staging happens under a dot-prefixed `.appstrate-staging/`, so neither Claude Code nor Codex can pick up a half-written skill. Concurrent syncs and logout cleanup are serialized by a `flock(2)` lock under `skills-sync/`. The kernel releases it when its descriptor closes or the process exits; the lock file is never removed.
 
-Ownership is recorded per target **together with the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten.
+Ownership is recorded per target **together with its profile context and the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten.
 
 #### Codex, and running without a Claude Code plugin
 
@@ -848,6 +864,7 @@ userId = "EWnC2cLyy88EpCGBa3WrIdS7uqI648BB"
 email = "alice@example.com"
 orgId = "org_123abc"
 spaceId = "spc_abc123"
+syncSpaces = ["spc_abc123", "spc_team456"] # optional skill sources; MCP uses spaceId
 
 [profile.dev]
 instance = "http://localhost:3000"
