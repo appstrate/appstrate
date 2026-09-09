@@ -261,6 +261,9 @@ export interface AppstrateModule {
    *     or any other module's resource
    *   - every entry for one resource declares the SAME `level`
    *   - `grantTo` names a known org role; `presets` a known space preset
+   *   - `presets` is upward-closed: naming a preset also names every preset
+   *     that already grants a superset of it. `runner` and `viewer` are
+   *     incomparable, so neither implies the other.
    *
    * No-op on platforms that don't load this module — neither the type
    * augmentation nor the runtime grants reach core, preserving the

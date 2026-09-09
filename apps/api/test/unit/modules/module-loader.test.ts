@@ -33,6 +33,8 @@ import type {
   AuthStrategy,
 } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
+import mcpModule from "../../../src/modules/mcp/index.ts";
+import webhooksModule from "../../../src/modules/webhooks/index.ts";
 
 // The fictitious resources these tests contribute. `ModulePermissionContribution`
 // is now typed against this augmentation, so a test module can no longer invent
@@ -455,6 +457,35 @@ describe("module-loader", () => {
       expect(snapshot.byPreset.admin.has("shared:read")).toBe(true);
       expect(snapshot.byPreset.builder.has("shared:read")).toBe(true);
       expect(snapshot.byPreset.operator.has("shared:read")).toBe(false);
+    });
+  });
+
+  describe("what the built-in modules grant the `runner` preset", () => {
+    /**
+     * The real contributions, not a fixture: `runner` is the preset whose whole
+     * point is the friendly surfaces without the authoring ones, so which
+     * module reaches it is policy and belongs in an assertion. `module-chat`
+     * declares the same pairing and asserts it in its own package — importing
+     * it here would pull its DOM-typed sources into this program.
+     */
+    it("reaches runner from mcp, and never from webhooks", () => {
+      const snapshot = collectModulePermissions([mcpModule, webhooksModule]);
+
+      for (const permission of ["mcp:read", "mcp:invoke"]) {
+        expect(`runner holds ${permission}: ${snapshot.byPreset.runner.has(permission)}`).toBe(
+          `runner holds ${permission}: true`,
+        );
+      }
+      // The invoke half stops at `runner`; `viewer` keeps the read half only.
+      expect(snapshot.byPreset.viewer.has("mcp:read")).toBe(true);
+      expect(snapshot.byPreset.viewer.has("mcp:invoke")).toBe(false);
+      // Webhooks are space governance: preset admin and builder, nothing below.
+      for (const preset of ["operator", "runner", "viewer"] as const) {
+        expect(
+          `${preset} holds webhooks:read: ${snapshot.byPreset[preset].has("webhooks:read")}`,
+        ).toBe(`${preset} holds webhooks:read: false`);
+      }
+      expect(snapshot.byPreset.builder.has("webhooks:read")).toBe(true);
     });
   });
 

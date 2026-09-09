@@ -50,7 +50,7 @@ export const spaces = pgTable(
     check("spaces_visibility_valid", sql`visibility IN ('open', 'closed', 'private')`),
     check(
       "spaces_default_role_valid",
-      sql`default_role IN ('admin', 'builder', 'operator', 'viewer')`,
+      sql`default_role IN ('admin', 'builder', 'operator', 'runner', 'viewer')`,
     ),
     // The default space is where a new org member lands, so it can never stop
     // being reachable by one.
@@ -88,7 +88,10 @@ export const spaceRoles = pgTable(
     uniqueIndex("idx_space_roles_org_key").on(table.orgId, table.key),
     // Referencing-side index for the `user` SET NULL action.
     index("idx_space_roles_created_by").on(table.createdBy),
-    check("space_roles_key_not_preset", sql`key NOT IN ('admin', 'builder', 'operator', 'viewer')`),
+    check(
+      "space_roles_key_not_preset",
+      sql`key NOT IN ('admin', 'builder', 'operator', 'runner', 'viewer')`,
+    ),
   ],
 );
 
@@ -125,7 +128,7 @@ export const spaceMembers = pgTable(
     check("space_members_one_role", sql`num_nonnulls(preset_role, custom_role_id) = 1`),
     check(
       "space_members_preset_valid",
-      sql`preset_role IS NULL OR preset_role IN ('admin', 'builder', 'operator', 'viewer')`,
+      sql`preset_role IS NULL OR preset_role IN ('admin', 'builder', 'operator', 'runner', 'viewer')`,
     ),
   ],
 );

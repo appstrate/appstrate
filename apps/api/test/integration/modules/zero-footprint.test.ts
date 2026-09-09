@@ -22,6 +22,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { buildAppConfig } from "../../../src/lib/app-config.ts";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import {
   orgPermissions,
   presetPermissions,
@@ -144,7 +145,7 @@ describe("zero-footprint invariant (no modules loaded)", () => {
           expect(perms.has(scope)).toBe(false);
         }
       }
-      for (const preset of ["admin", "builder", "operator", "viewer"] as const) {
+      for (const preset of SPACE_ROLE_PRESETS) {
         const perms: ReadonlySet<string> = presetPermissions(preset);
         for (const scope of moduleOwnedScopes) {
           expect(perms.has(scope)).toBe(false);

@@ -427,7 +427,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all runs for an agent
-         * @description Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).
+         * @description Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).
          */
         delete: operations["deleteAgentRuns"];
         options?: never;
@@ -3674,6 +3674,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched (an end-user principal receives its own runs' frames). The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamAgentRuns"];
         put?: never;
@@ -3702,6 +3704,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched (an end-user principal receives its own runs' frames). The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamAllRuns"];
         put?: never;
@@ -3728,6 +3732,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched (an end-user principal receives its own runs' frames). The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamRun"];
         put?: never;
@@ -5959,7 +5965,7 @@ export interface components {
         SpaceAssignment: {
             space_id: string;
             /** @enum {string} */
-            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
             custom_role_id?: string;
         } & (unknown | unknown);
         SpaceMemberAssignment: {
@@ -5967,7 +5973,7 @@ export interface components {
             object: "space_member";
             userId: string;
             /** @enum {string} */
-            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
             custom_role_id?: string;
         };
         SpaceMemberObject: {
@@ -6029,7 +6035,7 @@ export interface components {
              * @description Preset the implicit members of an `open` space hold
              * @enum {string}
              */
-            default_role: "admin" | "builder" | "operator" | "viewer";
+            default_role: "admin" | "builder" | "operator" | "runner" | "viewer";
             /**
              * @description Whether the caller may enter this space
              * @enum {string}
@@ -20558,7 +20564,7 @@ export interface operations {
                      * @description Preset the implicit members of an `open` space hold
                      * @enum {string}
                      */
-                    default_role?: "admin" | "builder" | "operator" | "viewer";
+                    default_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
                 };
             };
         };
@@ -20656,7 +20662,7 @@ export interface operations {
                     /** Format: email */
                     email?: string;
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
                     custom_role_id?: string;
                 } & ((unknown | unknown) & (unknown | unknown));
             };
@@ -20736,7 +20742,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
                     custom_role_id?: string;
                 } & (unknown | unknown);
             };

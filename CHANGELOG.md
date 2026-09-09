@@ -25,6 +25,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   consumed with the role and assignments current at its atomic claim, and a
   space grant serializes with the removal or promotion of the same member.
 
+- **A fifth space-role preset — `runner`, for people who launch without
+  reading.** It holds `agents:run`, its own runs (`runs:read`, `runs:cancel`),
+  `files:read`, `persistence:read` and its own integration connections
+  (`integrations:read/connect/disconnect`), plus chat and MCP so the friendly
+  surfaces work. It does **not** hold `agents:read`, `skills:read`,
+  `mcp-servers:read`, `schedules:read`, `end-users:*`, `runs:read-all` or any
+  `:write`: a runner starts what someone else built, sees what its own runs
+  produced, and never reads the agent's content, its skills or anyone else's
+  runs. It is a preset and not a custom role on purpose — custom roles need the
+  `custom_roles` feature, and this reach has to exist on the open-source build
+  as a code constant. Assign it wherever the other four are offered, including
+  as a space's default role. The presets stop being a single ladder here:
+  `runner` and `viewer` grant things the other does not, so neither is "above"
+  the other. Migration **0060** widens the three space-role CHECK constraints;
+  it is applied automatically at boot, with no operator step. One thing to check
+  before deploying: an organization that defined a **custom role keyed
+  `runner`** must rename it first — the migration refuses rather than let a
+  bundle shadow the preset, and says so by name.
+
 - **Role preview — see the product as a role before you assign it.** An owner or
   administrator can have every request answered as a lesser persona (an org role,
   optionally with a role in one space) from Org settings → Roles or Space

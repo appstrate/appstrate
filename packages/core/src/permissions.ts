@@ -292,11 +292,16 @@ export type OrgRole = (typeof ORG_ROLES)[number];
  * Space-role presets (RBAC spec §3.3). Constants, not rows. In core so modules can name
  * them in `ModulePermissionContribution.presets`; the preset → permission mapping is
  * policy and stays in `apps/api/src/lib/permissions.ts`.
- * Ordered strongest first — `assertPresetsUpwardClosed` reads the tuple in order.
+ *
+ * Ordered widest-reach first, which is the order every preset picker renders. It is NOT
+ * a strength ordering: `runner` launches agents it cannot read and `viewer` reads agents
+ * it cannot launch, so the two are incomparable and the presets form a lattice, not a
+ * chain. Whatever needs "stronger than" reads the permission matrix
+ * (`presetsStrictlyStrongerThan`), never a position in this tuple.
  */
-export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as const;
+export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "runner", "viewer"] as const;
 
-/** Space-role preset union — `"admin" | "builder" | "operator" | "viewer"`. */
+/** Space-role preset union — `"admin" | "builder" | "operator" | "runner" | "viewer"`. */
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
 
 /** Org roles holding every org-level permission in every space, without a `space_members` row. */
@@ -416,6 +421,7 @@ const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
     admin: new Set(),
     builder: new Set(),
     operator: new Set(),
+    runner: new Set(),
     viewer: new Set(),
   },
   apiKeyAllowed: new Set(),

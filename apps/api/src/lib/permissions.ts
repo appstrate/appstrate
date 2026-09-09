@@ -175,6 +175,28 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "end-users:write",
   ]);
 
+/**
+ * `runner`: launch what is built and see only your own — no reading of the
+ * agent's content, its skills, or anyone else's runs. `agents:run` carries the
+ * summary projection of the two agent read routes (RBAC spec §3.4), which is
+ * what the run form needs and nothing an author would call the agent's source.
+ */
+const RUNNER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>([
+  "agents:run",
+  // Own runs, and the ability to stop one. `runs:read-all` stays with the
+  // presets that supervise a space.
+  "runs:read",
+  "runs:cancel",
+  // Read what a run produced — the deliverable is the point of launching.
+  "files:read",
+  "persistence:read",
+  // Browse the catalog + self-connect: a runner's own accounts are what its
+  // runs authenticate with.
+  "integrations:read",
+  "integrations:connect",
+  "integrations:disconnect",
+]);
+
 /** `viewer`: look — the `:read` actions of `operator`. */
 const VIEWER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>(
   [...OPERATOR_PRESET_PERMISSIONS].filter((p) => p.endsWith(":read")),
@@ -185,8 +207,30 @@ const SPACE_PRESET_PERMISSIONS: Record<SpaceRolePreset, ReadonlySet<SpaceLevelPe
   admin: ADMIN_PRESET_PERMISSIONS,
   builder: BUILDER_PRESET_PERMISSIONS,
   operator: OPERATOR_PRESET_PERMISSIONS,
+  runner: RUNNER_PRESET_PERMISSIONS,
   viewer: VIEWER_PRESET_PERMISSIONS,
 };
+
+/**
+ * Presets whose static grants are a STRICT superset of `preset`'s: the ones a
+ * module contribution naming `preset` must also name, or the stronger role
+ * would hold less than the weaker one for that single resource
+ * (`assertPresetsUpwardClosed`).
+ *
+ * Computed from the matrix above, never from a position in
+ * `SPACE_ROLE_PRESETS`: `runner` and `viewer` each hold something the other
+ * does not, so the presets are a lattice and no tuple order can answer this.
+ * Module contributions are deliberately excluded — the core matrix is what
+ * defines the lattice, and this runs while those contributions are still being
+ * collected.
+ */
+export function presetsStrictlyStrongerThan(preset: SpaceRolePreset): SpaceRolePreset[] {
+  const grants = SPACE_PRESET_PERMISSIONS[preset];
+  return SPACE_ROLE_PRESETS.filter((candidate) => {
+    const other = SPACE_PRESET_PERMISSIONS[candidate];
+    return other.size > grants.size && [...grants].every((permission) => other.has(permission));
+  });
+}
 
 // ---------------------------------------------------------------------------
 // API Key scopes

@@ -1902,7 +1902,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
+            "description": "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2071,7 +2071,7 @@
         "operationId": "deleteAgentRuns",
         "tags": ["Runs"],
         "summary": "Delete all runs for an agent",
-        "description": "Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
+        "description": "Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2353,7 +2353,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/IdempotencyInProgress"
+            "$ref": "#/components/responses/RunAdmissionConflict"
           },
           "412": {
             "description": "Missing integration connection (`missing_integration_connection`)",
@@ -3278,7 +3278,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/IdempotencyInProgress"
+            "$ref": "#/components/responses/RunAdmissionConflict"
           },
           "412": {
             "description": "Missing integration connection (`missing_integration_connection`)",
@@ -4184,7 +4184,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched (an end-user principal receives its own runs' frames). The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -4236,7 +4236,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched (an end-user principal receives its own runs' frames). The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "id",
@@ -4296,7 +4296,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched (an end-user principal receives its own runs' frames). The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "packageId",
@@ -5767,7 +5767,7 @@
         "operationId": "createIntegrationOAuthClient",
         "tags": ["Integrations"],
         "summary": "Register a custom OAuth client for an integration auth",
-        "description": "Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Admin only.",
+        "description": "Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5914,7 +5914,7 @@
         "operationId": "rotateIntegrationOAuthClient",
         "tags": ["Integrations"],
         "summary": "Rotate a custom OAuth client's credentials",
-        "description": "Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Admin only.",
+        "description": "Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6058,7 +6058,7 @@
         "operationId": "deleteIntegrationOAuthClient",
         "tags": ["Integrations"],
         "summary": "Delete a custom OAuth client",
-        "description": "Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Admin only.",
+        "description": "Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6231,7 +6231,7 @@
         "operationId": "setDefaultIntegrationClient",
         "tags": ["Integrations"],
         "summary": "Set the default OAuth client for an integration auth",
-        "description": "Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Admin only.",
+        "description": "Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6791,7 +6791,10 @@
             "description": "Redirect to the provider OAuth screen or the hosted form."
           },
           "400": {
-            "description": "Missing token (HTML error page)."
+            "description": "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable."
+          },
+          "403": {
+            "description": "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint."
           },
           "410": {
             "description": "Invalid, expired, or already-used token (HTML error page)."
@@ -6800,7 +6803,7 @@
             "description": "Integration cannot be connected / unexpected failure (HTML error page)."
           },
           "502": {
-            "description": "Upstream provider failed to start the connection (HTML error page)."
+            "description": "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry."
           }
         }
       }
@@ -10802,7 +10805,7 @@
         "operationId": "revokeApiKey",
         "tags": ["API Keys"],
         "summary": "Revoke an API key",
-        "description": "Revoke (soft-delete) an API key. The key will immediately stop working.",
+        "description": "Revoke (soft-delete) an API key. The key will immediately stop working. `api-keys:revoke` is required in the KEY's own space, not in the space the request carries. A caller who cannot reach that space gets the space's own wall: 404 when it is `private` (its existence must not leak through the id of a key inside it), 403 `not_a_space_member` when it is `open` or `closed`. An API-key caller reaching for a key of another space always answers 404 — a key delegates authority in exactly one space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10896,7 +10899,8 @@
                       "slug": "acme-corp",
                       "role": "owner",
                       "permissions": ["org:read", "org:update", "members:invite"],
-                      "createdAt": "2026-01-10T08:00:00Z"
+                      "createdAt": "2026-01-10T08:00:00Z",
+                      "deleting_at": null
                     }
                   ]
                 }
@@ -12928,7 +12932,8 @@
                   "slug": "acme-corp",
                   "role": "member",
                   "permissions": ["org:read", "spaces:read"],
-                  "createdAt": "2026-01-10T08:00:00Z"
+                  "createdAt": "2026-01-10T08:00:00Z",
+                  "deleting_at": null
                 }
               }
             }
@@ -18015,7 +18020,7 @@
                   },
                   "default_role": {
                     "type": "string",
-                    "enum": ["admin", "builder", "operator", "viewer"],
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"],
                     "description": "Preset the implicit members of an `open` space hold"
                   }
                 },
@@ -18730,7 +18735,7 @@
                   },
                   "preset_role": {
                     "type": "string",
-                    "enum": ["admin", "builder", "operator", "viewer"]
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
                   },
                   "custom_role_id": {
                     "type": "string",
@@ -18834,7 +18839,7 @@
                 "properties": {
                   "preset_role": {
                     "type": "string",
-                    "enum": ["admin", "builder", "operator", "viewer"]
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
                   },
                   "custom_role_id": {
                     "type": "string",
@@ -22202,6 +22207,16 @@
           "403": {
             "description": "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only)."
           },
+          "409": {
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware)."
           },
@@ -22333,6 +22348,16 @@
           "403": {
             "description": "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only)."
           },
+          "409": {
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware)."
           },
@@ -22432,6 +22457,16 @@
           },
           "403": {
             "description": "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only)."
+          },
+          "409": {
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "413": {
             "description": "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware)."
@@ -23124,7 +23159,7 @@
       },
       "Organization": {
         "type": "object",
-        "required": ["id", "name", "slug", "role", "permissions", "createdAt"],
+        "required": ["id", "name", "slug", "role", "permissions", "createdAt", "deleting_at"],
         "properties": {
           "id": {
             "type": "string"
@@ -23150,6 +23185,11 @@
             "type": "string",
             "format": "date-time",
             "description": "Creation timestamp"
+          },
+          "deleting_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery."
           }
         }
       },
@@ -23194,7 +23234,7 @@
           },
           "preset_role": {
             "type": "string",
-            "enum": ["admin", "builder", "operator", "viewer"]
+            "enum": ["admin", "builder", "operator", "runner", "viewer"]
           },
           "custom_role_id": {
             "type": "string",
@@ -23252,6 +23292,11 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "deleting_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery."
           },
           "storage": {
             "type": "object",
@@ -25116,7 +25161,7 @@
           },
           "default_role": {
             "type": "string",
-            "enum": ["admin", "builder", "operator", "viewer"],
+            "enum": ["admin", "builder", "operator", "runner", "viewer"],
             "description": "Preset the implicit members of an `open` space hold"
           },
           "access": {
@@ -25233,7 +25278,7 @@
           },
           "preset_role": {
             "type": "string",
-            "enum": ["admin", "builder", "operator", "viewer"]
+            "enum": ["admin", "builder", "operator", "runner", "viewer"]
           },
           "custom_role_id": {
             "type": "string",
@@ -25660,6 +25705,45 @@
               "detail": "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
               "code": "idempotency_in_progress",
               "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "RunAdmissionConflict": {
+        "description": "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "examples": {
+              "idempotencyInProgress": {
+                "summary": "Same Idempotency-Key still in flight",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/idempotency-in-progress",
+                  "title": "Idempotency In Progress",
+                  "status": 409,
+                  "detail": "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
+                  "code": "idempotency_in_progress",
+                  "requestId": "req_abc123"
+                }
+              },
+              "orgDeleting": {
+                "summary": "The organization's deletion is reserved",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/org-deleting",
+                  "title": "Organization Is Being Deleted",
+                  "status": 409,
+                  "detail": "This organization is being deleted; no new work can be admitted.",
+                  "code": "org_deleting",
+                  "requestId": "req_abc123"
+                }
+              }
             }
           }
         }

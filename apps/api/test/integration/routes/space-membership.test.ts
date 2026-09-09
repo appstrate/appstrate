@@ -236,6 +236,35 @@ describe("space membership", () => {
     });
   });
 
+  describe("the `runner` preset reaches the database (migration 0060)", () => {
+    // Both columns carry a CHECK listing the presets by hand, so a preset the
+    // code knows and the constraint does not is a 500 on the INSERT, not a 400.
+    it("stores it on a member row and resolves it back", async () => {
+      const target = await member("member");
+      expect((await postMember({ userId: target.user.id, preset_role: "runner" })).status).toBe(
+        201,
+      );
+
+      const space = (await (await getSpace(owner.defaultSpaceId, target)).json()) as SpaceItem;
+      expect(space.role?.key).toBe("runner");
+      expect(space.permissions).toContain("agents:run");
+      expect(space.permissions).not.toContain("agents:read");
+    });
+
+    it("stores it as a space default", async () => {
+      const other = await seedSpace({ orgId: owner.orgId });
+      const res = await patchSpace(other.id, { default_role: "runner" });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as SpaceItem).default_role).toBe("runner");
+    });
+
+    it("still refuses a preset neither the code nor the constraint knows", async () => {
+      const target = await member("member");
+      expect((await postMember({ userId: target.user.id, preset_role: "bogus" })).status).toBe(400);
+      expect((await patchSpace(owner.defaultSpaceId, { default_role: "bogus" })).status).toBe(400);
+    });
+  });
+
   describe("/api/spaces/:id/members (§6.4)", () => {
     it("lists implicit members beside explicit ones, with their source", async () => {
       const implicitMember = await member("member");

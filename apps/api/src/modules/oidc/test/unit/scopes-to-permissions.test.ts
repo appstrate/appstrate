@@ -99,6 +99,7 @@ function installSnapshot(snapshot: Partial<ModulePermissionsSnapshot>): void {
       admin: new Set(),
       builder: new Set(),
       operator: new Set(),
+      runner: new Set(),
       viewer: new Set(),
       ...(snapshot.byPreset ?? {}),
     },

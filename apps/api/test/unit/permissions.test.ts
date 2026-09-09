@@ -167,7 +167,7 @@ describe("effectivePermissions", () => {
 });
 
 describe("presetPermissions", () => {
-  it("orders the four presets viewer ⊂ operator ⊂ builder ⊂ admin", () => {
+  it("nests the read chain viewer ⊂ operator ⊂ builder ⊂ admin", () => {
     const [viewer, operator, builder, admin] = (
       ["viewer", "operator", "builder", "admin"] as const
     ).map((p) => presetPermissions(p));
@@ -182,6 +182,64 @@ describe("presetPermissions", () => {
   });
 });
 
+describe("the `runner` preset", () => {
+  /**
+   * Spelled out rather than derived: a runner launches agents it may not read,
+   * so its set is the one preset that cannot be filtered out of a neighbour.
+   * The list is asserted whole, so widening it anywhere is a diff in this file.
+   */
+  const RUNNER_GRANTS: string[] = [
+    "agents:run",
+    "files:read",
+    "integrations:connect",
+    "integrations:disconnect",
+    "integrations:read",
+    "persistence:read",
+    "runs:cancel",
+    "runs:read",
+  ];
+
+  it("holds exactly the eight space-level grants it is defined by", () => {
+    expect([...presetPermissions("runner")].sort() as string[]).toEqual(RUNNER_GRANTS);
+  });
+
+  it("withholds every read that would expose what it launches", () => {
+    const runner = presetPermissions("runner");
+    // The point of the preset (RBAC spec §3.3): the agent's content, the
+    // packages it is built from, who else runs what, and any mutation at all.
+    for (const withheld of [
+      "agents:read",
+      "skills:read",
+      "mcp-servers:read",
+      "schedules:read",
+      "end-users:read",
+      "end-users:write",
+      "runs:read-all",
+    ]) {
+      expect(`runner holds ${withheld}: ${runner.has(withheld as never)}`).toBe(
+        `runner holds ${withheld}: false`,
+      );
+    }
+    expect([...runner].filter((p) => p.endsWith(":write"))).toEqual([]);
+  });
+
+  it("is what an explicit member holding it reaches, org half included", () => {
+    // Through the resolver, not the matrix: an org `member` added as `runner`
+    // in a closed space keeps the org reads and gains nothing else.
+    const ref = resolveSpaceRole(
+      "member",
+      { id: "spc_test", visibility: "closed", defaultRole: "operator" },
+      { ref: { kind: "preset", preset: "runner" } },
+    );
+    const effective = effectivePermissions({
+      orgPermissions: orgPermissions("member"),
+      spacePermissions: spacePermissions(ref),
+    });
+    expect(effective.has("agents:run")).toBe(true);
+    expect(effective.has("agents:read")).toBe(false);
+    expect(effective.has("org:read")).toBe(true);
+  });
+});
 describe("runs:read-all", () => {
   it("is held by builder and admin, and by neither operator nor viewer", () => {
     // `read` is the runs the principal launched; `read-all` is the space-wide

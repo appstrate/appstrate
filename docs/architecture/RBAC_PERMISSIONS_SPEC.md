@@ -80,12 +80,15 @@ Rule: **`space_members` never holds an owner or admin.** Their access is implied
 
 **Presets** are constants in `apps/api/src/lib/permissions.ts`, like the org matrix beside them — not rows. A new space-level permission joins the right preset in the same commit that adds it, with no data migration.
 
-| Preset     | Intent             | Grants                                                                                                                                                                                                                                                                                    |
-| ---------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin`    | run the space      | every space-level permission                                                                                                                                                                                                                                                              |
-| `builder`  | author and operate | everything except `space-settings:*`, `space-members:*`, `api-keys:*`                                                                                                                                                                                                                     |
-| `operator` | use what is built  | `agents:read/run`, `skills:read`, `mcp-servers:read`, `runs:read/cancel` (own runs only — `runs:read-all` is `admin`/`builder`), `files:read`, `schedules:read`, `persistence:read`, `integrations:read/connect/disconnect`, `end-users:read/write`, `chat:read/write`, `mcp:read/invoke` |
-| `viewer`   | look               | the `:read` actions of `operator` (so `api-keys:read`, `space-members:read` and `webhooks:read` are **not** viewer's — they are `admin`'s)                                                                                                                                                |
+| Preset     | Intent                               | Grants                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin`    | run the space                        | every space-level permission                                                                                                                                                                                                                                                                                                                                            |
+| `builder`  | author and operate                   | everything except `space-settings:*`, `space-members:*`, `api-keys:*`                                                                                                                                                                                                                                                                                                   |
+| `operator` | use what is built                    | `agents:read/run`, `skills:read`, `mcp-servers:read`, `runs:read/cancel` (own runs only — `runs:read-all` is `admin`/`builder`), `files:read`, `schedules:read`, `persistence:read`, `integrations:read/connect/disconnect`, `end-users:read/write`, `chat:read/write`, `mcp:read/invoke`                                                                               |
+| `runner`   | launch what is built, see only yours | `agents:run`, `runs:read/cancel` (own runs only), `files:read`, `persistence:read`, `integrations:read/connect/disconnect`, `chat:read/write`, `mcp:read/invoke`. **Not** `agents:read`, `skills:read`, `mcp-servers:read`, `schedules:read`, `end-users:*`, `runs:read-all`, nor any `:write` — a runner launches what someone else built and never reads its content. |
+| `viewer`   | look                                 | the `:read` actions of `operator` (so `api-keys:read`, `space-members:read` and `webhooks:read` are **not** viewer's — they are `admin`'s)                                                                                                                                                                                                                              |
+
+The presets are a lattice, not a chain: `viewer ⊂ operator ⊂ builder ⊂ admin` and `runner ⊂ operator`, but `runner` and `viewer` are **incomparable** — a runner launches what it cannot read, a viewer reads what it cannot launch. `SPACE_ROLE_PRESETS` is a display order; "stronger than" is computed from the matrix (`presetsStrictlyStrongerThan`), which is what a module's `presets` list must be upward-closed under (§3.5).
 
 **Custom roles** are rows in `space_roles` (§5): an org-scoped `key`, a display name, and `permissions text[]` validated at write against the loaded space-level vocabulary (core + modules that declared `level: "space"`). A string the validator does not know is a 400 naming it — same posture as `validateScopes` for API keys. A permission that becomes unknown later (module unloaded) is ignored at resolve time; `Set.has` never sees it.
 
@@ -153,7 +156,7 @@ type ModulePermissionContribution = {
 };
 ```
 
-`level: "org"` requires `grantTo` and forbids `presets`; `level: "space"` the reverse, enforced by the type and again at boot. Every contributing module declares its level: there is no default, and a `grantTo` on a space-level entry is refused rather than read charitably (`NO_TRANSITIONAL_CODE.md` §1).
+`level: "org"` requires `grantTo` and forbids `presets`; `level: "space"` the reverse, enforced by the type and again at boot. `presets` must additionally be **upward-closed** under the preset lattice (§3.3): naming a preset also names every preset that already grants a superset of it, or the stronger role would hold less than the weaker one for that one resource. A boot error, not a warning. `runner` and `viewer` are incomparable, so a read resource may be granted to `viewer` without `runner` and an action resource to `runner` without `viewer`. Every contributing module declares its level: there is no default, and a `grantTo` on a space-level entry is refused rather than read charitably (`NO_TRANSITIONAL_CODE.md` §1).
 
 A second, new module surface — `principalPermissions` — is the generic mechanism a module uses to grant **org-level** strings to a specific user rather than to a role. `module-ee` uses it for billing managers (§10). Signature and caching in §4.2.
 
@@ -230,7 +233,7 @@ ALTER TABLE spaces
   ADD COLUMN visibility   text NOT NULL DEFAULT 'open'
     CHECK (visibility IN ('open', 'closed', 'private')),
   ADD COLUMN default_role text NOT NULL DEFAULT 'operator'
-    CHECK (default_role IN ('admin', 'builder', 'operator', 'viewer')),
+    CHECK (default_role IN ('admin', 'builder', 'operator', 'runner', 'viewer')),
   ADD CONSTRAINT spaces_default_is_open CHECK (NOT is_default OR visibility = 'open');
 
 -- custom role definitions (org-scoped)
@@ -245,7 +248,7 @@ CREATE TABLE space_roles (
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),
   UNIQUE (org_id, key),
-  CHECK (key NOT IN ('admin', 'builder', 'operator', 'viewer'))
+  CHECK (key NOT IN ('admin', 'builder', 'operator', 'runner', 'viewer'))
 );
 CREATE INDEX idx_space_roles_created_by ON space_roles(created_by);   -- referencing side of SET NULL
 
@@ -253,7 +256,7 @@ CREATE INDEX idx_space_roles_created_by ON space_roles(created_by);   -- referen
 CREATE TABLE space_members (
   space_id       text NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
   user_id        text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
-  preset_role    text CHECK (preset_role IN ('admin', 'builder', 'operator', 'viewer')),
+  preset_role    text CHECK (preset_role IN ('admin', 'builder', 'operator', 'runner', 'viewer')),
   custom_role_id text REFERENCES space_roles(id) ON DELETE RESTRICT,
   added_by       text REFERENCES "user"(id) ON DELETE SET NULL,
   created_at     timestamptz NOT NULL DEFAULT now(),
@@ -360,11 +363,11 @@ An owner or administrator can have any authenticated request answered as a lesse
 
 Three carriers, one validation, and one vocabulary shared by every end (`@appstrate/core/permissions`):
 
-| Constant                | Value              | Carries                                                                                                                                                                                                   |
-| ----------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VIEW_AS_HEADER`        | `X-View-As`        | `org_role=member; space=spc_…; role=preset:viewer` — `space` and `role` optional as a PAIR; `role` is `preset:<admin\|builder\|operator\|viewer>` or `custom:<srl_ id>`. Sent by `buildScopingHeaders()`. |
-| `VIEW_AS_QUERY`         | `view_as`          | The same grammar on `/api/realtime/*`, where `EventSource` cannot send headers. The header is REFUSED there, never ignored.                                                                               |
-| `VIEW_AS_ACTIVE_HEADER` | `X-View-As-Active` | Response marker, `1`, on every response produced under a validated persona and only then.                                                                                                                 |
+| Constant                | Value              | Carries                                                                                                                                                                                                           |
+| ----------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VIEW_AS_HEADER`        | `X-View-As`        | `org_role=member; space=spc_…; role=preset:viewer` — `space` and `role` optional as a PAIR; `role` is `preset:<admin\|builder\|operator\|runner\|viewer>` or `custom:<srl_ id>`. Sent by `buildScopingHeaders()`. |
+| `VIEW_AS_QUERY`         | `view_as`          | The same grammar on `/api/realtime/*`, where `EventSource` cannot send headers. The header is REFUSED there, never ignored.                                                                                       |
+| `VIEW_AS_ACTIVE_HEADER` | `X-View-As-Active` | Response marker, `1`, on every response produced under a validated persona and only then.                                                                                                                         |
 
 The chat module's in-process loopback carries the persona in its signed claims instead, so a tool call the engine makes under a preview reaches exactly what the previewed role reaches.
 
