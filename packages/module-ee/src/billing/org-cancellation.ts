@@ -4,19 +4,14 @@
  * Cancelling an organization's Stripe subscription when the organization is
  * deleted — durably.
  *
- * WHY THIS IS NOT JUST A `subscriptions.cancel` CALL
- *
  * A cancellation Stripe does not confirm cannot be logged and forgotten: the
  * subscription id lives on the billing account row, so deleting the row anyway
- * would leave a subscription charging a customer every month for an
- * organization that is gone, with nothing left in the system able to name it. A
- * log line is a diagnosis, not a recovery.
- *
- * So the intent is written down first (`cancel_requested_at`) and the account
- * row — with its `stripe_subscription_id` — SURVIVES a failed cancellation. The
- * billing sweeper retries it on every tick and removes the rows once Stripe has
- * confirmed. The org is already gone from the platform; these rows are the
- * receipt for unfinished business with Stripe.
+ * leaves a subscription charging a customer every month for an organization
+ * that is gone, with nothing left able to name it. So the intent is written
+ * down first (`cancel_requested_at`) and the row survives a failed
+ * cancellation; the billing sweeper retries it on every tick and removes the
+ * rows once Stripe confirms. These rows are the receipt for unfinished business
+ * with Stripe.
  */
 
 import Stripe from "stripe";
@@ -28,27 +23,19 @@ import { logger } from "../logger.ts";
 import { deleteBillingManagers } from "./managers.ts";
 
 /**
- * Stripe's sentence for "this subscription is already canceled", which it
- * returns as a 400 with no distinguishing `code`. Anchored at the start and
- * matched whole: any other 400 — a bad parameter, a permission refusal, a
- * message that merely mentions cancellation — is a real failure, and reading it
- * as success would delete the rows that hold the subscription id, leaving a
- * live subscription charging a customer with nothing left to name it.
+ * Stripe's sentence for "this subscription is already canceled", returned as a
+ * 400 with no distinguishing `code`. Anchored at the start: any other 400 — a
+ * bad parameter, a refusal that merely quotes this sentence — is a real failure,
+ * and reading it as success deletes the row holding the subscription id.
  */
 const ALREADY_CANCELED_MESSAGE =
   /^A canceled subscription can only update its cancellation_details/;
 
 /**
- * Is this failure indistinguishable from success?
- *
- * A subscription Stripe no longer has — deleted out of band, or cancelled by an
- * earlier attempt whose response we lost — is exactly the state we were asking
- * for. Retrying it forever would keep a dead org's rows alive on a cancellation
- * that already happened.
- *
- *   - `resource_missing` / 404: no such subscription;
- *   - a 400 carrying {@link ALREADY_CANCELED_MESSAGE}, the one sentence Stripe
- *     answers a cancel-the-already-canceled request with.
+ * Is this failure indistinguishable from success? A subscription Stripe no
+ * longer has — `resource_missing`/404, or a 400 carrying
+ * {@link ALREADY_CANCELED_MESSAGE} — is the state we asked for, and retrying it
+ * forever keeps a dead org's rows alive on a cancellation that already happened.
  */
 function isAlreadyCanceled(err: unknown): boolean {
   if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
@@ -58,9 +45,8 @@ function isAlreadyCanceled(err: unknown): boolean {
 
 /**
  * Ask Stripe to cancel `subscriptionId`. Returns whether the subscription is now
- * gone — which includes "it was already gone". Never throws: the caller decides
- * what an unconfirmed cancellation means, and here it always means "keep the
- * reference and try again".
+ * gone — "already gone" included. Never throws: an unconfirmed cancellation
+ * always means "keep the reference and try again".
  */
 async function cancelSubscription(orgId: string, subscriptionId: string): Promise<boolean> {
   try {
@@ -99,11 +85,10 @@ async function deleteOrgBillingRows(orgId: string): Promise<void> {
 
 /**
  * Cancel the org's subscription and delete its EE rows — the terminal half of
- * `onOrgDelete`, and the body the sweeper's retry re-runs.
- *
- * Order is the point: the intent is durable BEFORE the network call, and the
- * rows are deleted only once Stripe has confirmed. On failure everything stays
- * exactly where it is, which is what makes the retry possible at all.
+ * `onOrgDelete`, and the body the sweeper's retry re-runs. Order is the point:
+ * the intent is durable BEFORE the network call, and the rows go only once
+ * Stripe confirms. On failure everything stays put, which is what makes the
+ * retry possible.
  */
 export async function cancelSubscriptionAndCleanUp(
   orgId: string,
@@ -123,7 +108,7 @@ export async function cancelSubscriptionAndCleanUp(
 }
 
 /** What one {@link retryPendingCancellations} pass did. */
-export interface PendingCancellationResult {
+interface PendingCancellationResult {
   /** Accounts still carrying an unconfirmed cancellation when the pass started. */
   pending: number;
   /** Of those, the ones Stripe confirmed — their rows are now gone. */
@@ -132,12 +117,8 @@ export interface PendingCancellationResult {
 
 /**
  * Retry every cancellation `onOrgDelete` could not confirm. Rides the billing
- * tick.
- *
- * Steady state is zero rows and zero work. A row here means a customer may still
- * be charged for an organization that no longer exists, so the pass runs until
- * Stripe answers — and each attempt is idempotent, because a subscription Stripe
- * has already cancelled counts as success.
+ * tick; steady state is zero rows and zero work. Each attempt is idempotent,
+ * because a subscription Stripe has already cancelled counts as success.
  */
 export async function retryPendingCancellations(): Promise<PendingCancellationResult> {
   const pending = await getEeDb()

@@ -51,12 +51,9 @@ export const billingAccounts = pgTable(
       .notNull()
       .default(sql`'{}'`),
     /**
-     * Set when org deletion asked Stripe to cancel this account's subscription
-     * and is not yet sure it happened. The row (and its `stripe_subscription_id`)
-     * SURVIVES a failed cancellation so the periodic sweeper can retry it — a
-     * subscription Stripe still bills must never lose its reference. NULL is the
-     * ordinary state; a non-NULL value on a live org means nothing, because the
-     * whole flow that sets it also deletes the row on success.
+     * Set while an org deletion's Stripe cancellation is unconfirmed, so the row
+     * — and the `stripe_subscription_id` on it — survives for the sweeper to
+     * retry. Rationale: `src/billing/org-cancellation.ts`.
      */
     cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -150,19 +147,8 @@ export const stripeEvents = pgTable("ee_stripe_events", {
 export const eeBilledLlmUsage = pgTable("ee_billed_llm_usage", {
   llmUsageId: integer("llm_usage_id").primaryKey(),
   /**
-   * The ledger row's `pricingStatus` at the moment it was claimed — what the
-   * claim is WORTH, not merely that it happened.
-   *
-   *   - `priced`   — billed in full;
-   *   - `partial`  — billed, but the amount is a FLOOR (cached input carried no
-   *     rate), so the org was under-charged by an unknown amount;
-   *   - `unpriced` — the platform could not price the call at all. Claimed for
-   *     0 credits so it is never billed twice, and stamped so the revenue it
-   *     represents is recoverable from this table instead of being lost;
-   *   - `unknown`  — the ledger row predates `pricingStatus`. Treated like
-   *     `unpriced` (0 credits) and kept distinct, because "could not price" and
-   *     "did not say" are different facts to an operator.
-   *
+   * What the claim is WORTH, not merely that it happened — the four stamps and
+   * why each is kept distinct: `PricingFaults` in `src/billing/usage-recorder.ts`.
    * `DEFAULT 'priced'` covers rows claimed before this column existed: every one
    * of them WAS billed on its full `cost_usd`.
    */
@@ -201,19 +187,10 @@ export const billingCursor = pgTable(
     lastLlmUsageId: integer("last_llm_usage_id").notNull(),
     /**
      * The settled frontier this cursor was SEEDED at — the cutover exclusion
-     * bound, written once by `ensureCursorSeeded` and never moved again.
-     *
-     * The watermark drifts forward and the sweep reads from
-     * `watermark − REPLAY_WINDOW`, so without a floor that read walks back BELOW
-     * the seed and bills the historical usage the cutover deliberately excluded.
-     * The scan therefore starts at `max(floor_id, watermark − REPLAY_WINDOW)`.
-     *
-     * `DEFAULT 0` is the honest value for a cursor that already existed when
-     * this column was added: its original frontier was not recorded, and
-     * inventing one would either re-open the exclusion (too low) or disable
-     * replay (too high). 0 preserves exactly the behaviour those deployments
-     * have today, and the replay window (≤ 500) bounds how far below the
-     * watermark they can reach anyway.
+     * bound, written once by `ensureCursorSeeded` and never moved. What it
+     * bounds: `ledgerScanStart` in `src/billing/usage-recorder.ts`. `DEFAULT 0`
+     * preserves the behaviour of a cursor that predates the column, whose
+     * original frontier was never recorded.
      */
     floorId: integer("floor_id").default(0).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

@@ -98,8 +98,17 @@ const DECLARED = declaredColumns();
  */
 export const EE_TABLES = [...DECLARED.keys()].sort();
 
-/** The part of a table name the two prefixes share: `ee_usage_records` → `usage_records`. */
-const LOGICAL = EE_TABLES.map((t) => t.slice("ee_".length));
+/**
+ * The part of a table name the two prefixes share: `ee_usage_records` →
+ * `usage_records`. A snapshot table without the prefix would be silently
+ * mangled into a source name that matches nothing, so it fails at load instead.
+ */
+const LOGICAL = EE_TABLES.map((t) => {
+  if (!t.startsWith("ee_")) {
+    throw new Error(`Snapshot table is not prefixed \`ee_\`: ${t}`);
+  }
+  return t.slice("ee_".length);
+});
 
 /** Rows read from the source per round trip — bounds memory on a large table. */
 const PAGE = 500;

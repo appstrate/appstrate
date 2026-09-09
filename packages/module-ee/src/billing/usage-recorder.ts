@@ -148,22 +148,17 @@ export interface CursorSeedResult {
  * First id a ledger read may start from (exclusive `afterId`), for BOTH the
  * periodic sweep and the org-deletion drain.
  *
- * ONE rule, one place. Two bounds meet here and they pull in opposite
- * directions:
+ * ONE rule, one place, because two bounds pull in opposite directions:
  *
  *   - the REPLAY WINDOW pulls the read BELOW the watermark, because a serial id
  *     is taken at INSERT and published at COMMIT: a row can commit under an
  *     already-advanced watermark and would otherwise be unreachable forever;
- *   - the FLOOR stops it, because everything at or below the seeded frontier is
- *     historical usage the cutover deliberately excluded. Without the floor the
- *     first pass bills nothing and the SECOND one walks back under the seed and
- *     bills the whole history — the exact failure the README's cutover paragraph
- *     promises cannot happen.
+ *   - the FLOOR stops it there, because everything at or below the seeded
+ *     frontier is historical usage the cutover excluded. Without it the second
+ *     pass walks back under the seed and bills the whole history.
  *
- * The drain shares it for the same reason it exists: a row of the deleted org
- * that committed late, below the watermark, is one the sweep would have replayed
- * — but the org and its ledger rows are about to cascade away, so the drain is
- * the last reader that will ever see it.
+ * The drain shares the rule: a row of the deleted org that committed late is one
+ * the sweep would have replayed, and the drain is its last reader.
  */
 export function ledgerScanStart(cursor: { lastLlmUsageId: number; floorId: number }): number {
   const replayWindow = getEeEnv().EE_RECONCILIATION_REPLAY_WINDOW;
@@ -210,9 +205,8 @@ export async function ensureCursorSeeded(
   const frontierId = await services.usage.settledFrontier();
   await db
     .insert(billingCursor)
-    // `floorId` is the same frontier as the watermark and NEVER moves again: it
-    // is what keeps every later read — the replay window included — out of the
-    // usage this cutover excluded.
+    // `floorId` is seeded at the same frontier and never moves — the bound
+    // {@link ledgerScanStart} holds every later read above.
     .values({ id: true, lastLlmUsageId: frontierId, floorId: frontierId })
     .onConflictDoNothing({ target: billingCursor.id });
   logger.info("billing cursor initialized at cutover", {
@@ -240,11 +234,8 @@ type ClaimPricingStatus = "priced" | "partial" | "unpriced" | "unknown";
 
 /**
  * How much of a ledger row's `costUsd` the platform could actually price.
- *
- * `null`/absent means the row predates the field and MUST NOT be read as
- * `priced` (core's `LlmUsageLedgerRow.pricingStatus` says so in as many words),
- * so it maps to its own `unknown` stamp rather than being folded into either
- * side.
+ * `null`/absent means the row predates the field and must not be read as
+ * `priced`, so it maps to its own `unknown` stamp.
  */
 function claimPricingStatus(row: LlmUsageLedgerRow): ClaimPricingStatus {
   return row.pricingStatus ?? "unknown";
@@ -417,9 +408,8 @@ export async function billLedgerRows(
   const wonIds = new Set(billedIds);
   const wonRows = billableRows.filter((r) => wonIds.has(r.id));
 
-  // Faults are counted on the WON slice only: a row an earlier pass claimed was
-  // already reported then, and re-reporting it every replay tick would turn the
-  // signal into noise.
+  // Counted on the WON slice only: an earlier pass already reported the rows it
+  // claimed, and re-reporting them every replay tick is noise.
   const pricing = pricingFaultsOf(wonRows);
 
   // Rows whose dollars may be turned into credits. `unpriced` and `unknown` rows
@@ -620,16 +610,14 @@ function noProgress(args: {
  * still absent it seeds it here (safety net) and bills nothing. Seeding at a
  * plain `MAX(id)` would strand any in-flight runner row that already holds a low
  * id; the settled frontier stops before the first unsettled row so none is lost.
- * The same frontier is written to `floor_id`, which is what makes "never
- * revisited" hold on the SECOND pass: the replay window reads below the
- * watermark, and without a floor it walks straight back under the seed.
+ * The same frontier is written to `floor_id` — the bound {@link ledgerScanStart}
+ * holds every read above.
  *
  * Rows already claimed (billed by the previous model) are never re-billed — the
  * claim table dedupes. The first sweep starts at the settled frontier, so
  * settled-but-unclaimed rows ABOVE it (the recent window since the oldest
  * in-flight run began) ARE billed on the first pass — deliberate, so an
- * in-flight run's revenue is not stranded; rows at or below the floor are never
- * revisited by any pass.
+ * in-flight run's revenue is not stranded.
  */
 export async function sweepLedgerBatch(
   batchSize: number,
@@ -644,11 +632,8 @@ export async function sweepLedgerBatch(
   //    bills nothing, exactly as init would have.
   const seed = await ensureCursorSeeded(services, db);
   if (seed.seeded) {
-    // Cutover: the watermark was just placed at the settled frontier and this
-    // pass bills nothing. No replay either — everything below a freshly seeded
-    // frontier is deliberately out of scope (see the cutover note above), and
-    // `floor_id` was written at the same value, so no LATER pass can reach it
-    // through the replay window either.
+    // Cutover: the watermark sits at the settled frontier, this pass bills
+    // nothing, and `floor_id` holds every later pass above it too.
     return noProgress({ cursorFrom: 0, cursorTo: seed.lastLlmUsageId });
   }
 
@@ -671,11 +656,8 @@ export async function sweepLedgerBatch(
   //    The window is a READ offset ONLY. `scanFromId` never becomes the
   //    watermark; the committed advance stays `GREATEST`-guarded below, so the
   //    watermark is still strictly monotonic.
-  //    The window is bounded BELOW by the cutover floor, through the one rule the
-  //    drain shares ({@link ledgerScanStart}): everything at or under the seeded
-  //    frontier is historical usage this deployment deliberately never bills, and
-  //    a plain `fromId − replayWindow` walks straight back into it on the second
-  //    pass.
+  //    It is bounded below by {@link ledgerScanStart}, the one rule the drain
+  //    shares.
   const scanFromId = ledgerScanStart(seed);
   const replaySpan = fromId - scanFromId;
 
