@@ -313,11 +313,23 @@ jobs:
 
   runtime-e2e:
     name: Runtime container e2e
-    # The runtime-pi file-provisioning spin only reproduces in the BUNDLED
-    # image, so `runtime-pi/test/provision-container.e2e.test.ts` needs the real
-    # `appstrate-pi` image built — which the fast `unit` job does not do (it
-    # would blow the 5-min budget), so that test SKIPS there. This job builds
-    # the image and runs it, giving the regression an actual gate. Same
+    # The only pre-merge job that runs the REAL runtime images, and it gates two
+    # regressions that live exclusively there:
+    #
+    #   1. The runtime-pi file-provisioning spin only reproduces in the BUNDLED
+    #      image (#882), so `provision-container.e2e.test.ts` needs a real
+    #      `appstrate-pi` built — which the fast `unit` job does not do (it would
+    #      blow the 5-min budget), so that test SKIPS there.
+    #   2. One inference turn driven through the built pi + sidecar PAIR against
+    #      a stub upstream (`inference-container.e2e.test.ts`), asserting the
+    #      Codex request shape and the zstd body's byte integrity (#1197). That
+    #      is the #1195 class: a MISMATCHED IMAGE PAIR, where each half is
+    #      correct on its own and only their combination fails — invisible to
+    #      every in-process test, because those wire the two halves together
+    #      from one source tree, the configuration that never breaks.
+    #
+    # Hence both images are built here, from the same checkout: a pair is only
+    # comparable when both halves come from the code under test. Same
     # label-OR-main policy as the other heavy jobs (opt-in pre-merge via the
     # `e2e` label, always post-merge on main).
     if: contains(github.event.pull_request.labels.*.name, 'e2e') || github.ref == 'refs/heads/main'
@@ -349,14 +361,20 @@ jobs:
       - name: Build appstrate-pi image
         run: docker build -t appstrate-pi:latest -f runtime-pi/Dockerfile .
 
+      # The pair's other half. Same tag family, and `appstrate-sidecar:latest` is
+      # the inference e2e's default `SIDECAR_IMAGE`; without it that suite gates
+      # nothing, it skips.
+      - name: Build appstrate-sidecar image
+        run: docker build -t appstrate-sidecar:latest -f runtime-pi/sidecar/Dockerfile .
+
       # The root bunfig preload boots the test docker-compose stack
       # unconditionally; start it so the preload is satisfied (the e2e itself
       # uses only its own in-process mock sink, not the DB).
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
-      - name: Run runtime container e2e
-        run: bun test runtime-pi/test/provision-container.e2e.test.ts
+      - name: Run runtime container e2e suites
+        run: bun test runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts
 
   e2e:
     name: E2E tests
