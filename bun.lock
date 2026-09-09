@@ -73,7 +73,7 @@
         "hono": "^4.13.7",
         "ioredis": "^6.0.0",
         "jose": "^6.2.12",
-        "nodemailer": "^9.0.3",
+        "nodemailer": "^10.0.0",
         "rate-limiter-flexible": "^11.2.0",
         "zod": "^4.5.4",
       },
@@ -268,7 +268,7 @@
         "@electric-sql/pglite": "^0.5.8",
         "better-auth": "1.7.3",
         "drizzle-orm": "^0.45.2",
-        "nodemailer": "^9.0.3",
+        "nodemailer": "^10.0.0",
         "postgres": "^3.4.9",
         "zod": "^4.5.4",
       },
@@ -2263,7 +2263,7 @@
 
     "node-releases": ["node-releases@2.0.36", "", {}, "sha512-TdC8FSgHz8Mwtw9g5L4gR/Sh9XhSP/0DEkQxfEFXOpiul5IiHgHan2VhYYb6agDSfp4KuvltmGApc8HMgUrIkA=="],
 
-    "nodemailer": ["nodemailer@9.0.3", "", {}, "sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw=="],
+    "nodemailer": ["nodemailer@10.0.0", "", {}, "sha512-wdv+hXBg0iIPIOf108FaZyTxqjQpCvQeAJt9pHHTooPy/y3vQtI9eiImM9AIVKR3e/0FeMA1oueNfBjFJcaK+Q=="],
 
     "normalize-path": ["normalize-path@3.0.0", "", {}, "sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA=="],
 

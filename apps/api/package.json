@@ -45,7 +45,7 @@
     "hono": "^4.13.7",
     "ioredis": "^6.0.0",
     "jose": "^6.2.12",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.0.0",
     "rate-limiter-flexible": "^11.2.0",
     "zod": "^4.5.4"
   },
