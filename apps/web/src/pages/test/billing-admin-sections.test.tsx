@@ -224,6 +224,9 @@ describe("billing managers section", () => {
     // The card is replaced by its error state, so it has no header to slice on.
     const section = html.slice(0, html.indexOf("Contact de facturation"));
     expect(section).toContain("Une erreur est survenue.");
+    // The generic heading alone would render over any failure, including one
+    // the card invented: the seeded reason has to reach the operator.
+    expect(section).toContain("Organization unavailable");
     // With no roster every saved manager reads as gone, the list reads dirty and
     // Save would PUT the empty set — so there must be no Save to press.
     expect(section).not.toContain("Enregistrer");

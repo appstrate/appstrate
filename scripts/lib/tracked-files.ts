@@ -3,64 +3,34 @@
 
 /**
  * "Which files does this gate look at?", answered once for every gate that
- * answers it with `git ls-files`.
+ * answers it with `git ls-files` — `scripts/lint.ts`,
+ * `scripts/lint-manifest-casing.ts`, `scripts/verify-compose-defaults.ts`. One
+ * spawn, one exit-code throw, one `split("\0")`, one "matched nothing, so this
+ * gate would pass vacuously" throw: three copies of that rule are three places
+ * for it to drift, silently in the direction that matters — a copy without the
+ * empty-set throw reports a clean run over zero files.
  *
- * Three gates drive their scan from the git INDEX rather than from the
- * filesystem — `scripts/lint.ts`, `scripts/lint-manifest-casing.ts` and
- * `scripts/verify-compose-defaults.ts` — and each of them had written out the
- * same spawn, the same exit-code throw, the same `split("\0")`, and the same
- * "matched nothing, so this gate would pass vacuously" throw. Three copies of a
- * rule is three places for it to drift, and the drift is silent in the
- * direction that matters: a copy that loses its empty-set throw reports a clean
- * run over zero files.
+ * The INDEX, not a filesystem walk: it is the repo's own statement of what
+ * belongs to it, while a walk also sees whatever sits on this developer's disk,
+ * so an untracked scratch file (a `zz-probe.ts`, a half-finished experiment)
+ * fails the gate, fails `bun run check`, and blocks a push nobody asked it to
+ * block. The converse is the property worth having: a NEW file is covered the
+ * day it is committed, with no roster to extend.
  *
- * ─── Why `git ls-files` and not a filesystem walk ────────────────────
- *
- * The index is the repo's own statement of what belongs to it. A filesystem
- * walk additionally sees whatever happens to be on this developer's disk, so an
- * untracked scratch file — a `zz-probe.ts`, a half-finished experiment — fails
- * the gate, fails `bun run check`, and blocks a push nobody asked it to block.
- * The converse property is the one worth having: a NEW file is covered the day
- * it is committed, with nothing to remember and no roster to extend.
- *
- * ─── The deleted-file allowance is a per-caller CHOICE ───────────────
- *
- * `git ls-files` lists what is in the INDEX, which can name a file already
- * removed from the working tree (a `git rm` not yet committed, a refactor in
- * flight). Every consumer then has to decide what to do about a path it cannot
- * read, and the three of them had decided differently — an `existsSync`
- * pre-filter, an `ENOENT` catch around the read, and nothing at all.
- *
- * Unifying that on a silent pre-filter was a mistake, and a measured one.
- * `verify-compose-defaults.ts` is the gate that OWNS the root
- * `docker-compose.yml`; before the pre-filter it crashed on a tracked compose
- * file missing from the worktree, which is loud and correct. After it:
- *
- *     $ rm docker-compose.yml && bun scripts/verify-compose-defaults.ts
- *     ✓ verify-compose-defaults: no duplicated env defaults across 8 compose files …
- *     EXIT=0
- *
- * The gate passed without reading the file it exists for, and the only trace
- * was `9` turning into `8` in a success line nobody diffs. An allowance that
- * one caller wants is not an allowance every caller wants, so `onMissing` is a
- * REQUIRED argument: there is no default to inherit by accident, and the choice
- * is written at the call site next to the reason for it.
- *
- *   - `"skip"` — a path in the index that is gone from disk is dropped.
- *     `lint.ts` and `lint-manifest-casing.ts` take this: a checkout mid-edit is
- *     not a lint finding.
- *   - `"fail"` — the same path throws, naming it. `verify-compose-defaults.ts`
- *     takes this: its file list IS its coverage, so losing one silently is the
- *     failure the gate is for.
- *
- * `lint-manifest-casing.ts` and `verify-compose-defaults.ts` reach the policy
- * through `trackedFiles`, which asks the index and applies the answer in one
- * call. `lint.ts` cannot: it needs the raw INDEX list first (its `KNOWN_IGNORED`
- * liveness check is a question about the index, not about the disk), and the
- * allowance applies only to what survives its ignore partition. So the policy
- * itself is `applyMissingFilePolicy`, exported, and `lint.ts` calls that —
- * rather than hand-rolling a fourth copy of the rule, which is what it did while
- * this comment claimed it was a caller.
+ * The index can also name a file already gone from the working tree (a `git rm`
+ * not yet committed, a refactor in flight), and what to do about a path that
+ * cannot be read is the caller's call — so `onMissing` is REQUIRED, with no
+ * default to inherit by accident. `"skip"` drops it, which `lint.ts` and
+ * `lint-manifest-casing.ts` take: a checkout mid-edit is not a lint finding.
+ * `"fail"` throws naming it, which `verify-compose-defaults.ts` takes: its file
+ * list IS its coverage, and skipping silently lets it pass without reading the
+ * root `docker-compose.yml` it exists for, the only trace being `9` turning
+ * into `8` in a success line nobody diffs. That pair reaches the policy through
+ * `trackedFiles`, which asks and applies in one call; `lint.ts` cannot, needing
+ * the raw index list first (its `KNOWN_IGNORED` liveness check asks about the
+ * index, not the disk) and applying the allowance only to what survives its
+ * ignore partition — so the policy itself is the exported
+ * `applyMissingFilePolicy`, which `lint.ts` calls.
  */
 
 import { existsSync } from "node:fs";

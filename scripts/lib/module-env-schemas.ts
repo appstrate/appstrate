@@ -4,10 +4,10 @@
  * The environment variables a workspace MODULE declares, for the two gates that
  * hold `docs/ENV.md`, `.env.example` and the compose files to a schema.
  *
- * Both gates read `packages/env`'s `envSchema` and nothing else, so a variable
- * added to `packages/module-ee/src/env.ts` was documented nowhere and passed
- * both: it is not in the platform schema, and neither gate knew another schema
- * existed. From an operator's side the distinction is invisible — the module
+ * Both gates union this with `packages/env`'s `envSchema`. Reading the platform
+ * schema alone would let a variable declared in `packages/module-ee/src/env.ts`
+ * pass both: it is in no platform schema, and neither gate would know another
+ * one exists. From an operator's side the distinction is invisible — the module
  * ships in the same image, reads the same `process.env`, and fails to boot with
  * the same "Required" if the variable is missing.
  *
@@ -23,12 +23,12 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** As much of a Zod field as these gates ask of it. */
-export interface ZodLikeField {
+interface ZodLikeField {
   safeParse(value: unknown): { success: boolean };
 }
 
 /** One module's env schema, as the gates consume it. */
-export interface ModuleEnvSchema {
+interface ModuleEnvSchema {
   /** Module id with `module-` stripped — `ee`. */
   id: string;
   /** Repo-relative path of the file that declares it. */

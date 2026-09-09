@@ -69,7 +69,7 @@ export function declaredTables(snapshot: DrizzleSnapshot): Set<string> {
 }
 
 /** One workspace module that carries a drizzle migration tree of its own. */
-export interface ModuleTables {
+interface ModuleTables {
   /** Module id with `module-` stripped — `ee`. */
   id: string;
   /** Repo-relative package directory — `packages/module-ee`. */

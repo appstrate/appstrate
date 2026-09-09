@@ -2,28 +2,16 @@
 
 /**
  * The `warn | fail | off` knob shared by the architecture gates
- * (`verify-module-isolation.ts`, `verify-module-contract.ts`).
- *
- * It exists because the value was previously read with a CAST:
- *
- *   const POLICY = (process.env.X ?? "fail") as "warn" | "fail" | "off";
- *
- * A cast asserts; it does not check. Both gates then exit with
- * `if (problems.length > 0 && POLICY === "fail") process.exit(1)`, so ANY value
- * that is not exactly `fail` — `FAIL`, `faill`, `1`, a trailing space — turned
- * the gate into a printer: it still listed every `❌` and still exited 0. The
- * failure is silent in the worst way, because the operator sees the findings
- * scroll past and the pipeline go green, and nothing in between says the two
- * disagree.
- *
- * Default-secure means rejecting garbage, not falling out of `fail`. An
- * unrecognised value throws here rather than degrading, which is the only
- * reading under which a typo is louder than the thing it was meant to control.
- *
- * The CI pin is applied AFTER validation, deliberately: a malformed value is
- * an operator error worth reporting wherever it is set, and a gate that
- * silently discards its input under CI teaches people the variable works when
- * it does not.
+ * (`verify-module-isolation.ts`, `verify-module-contract.ts`), CHECKED here
+ * rather than cast at the call site. Both exit on `problems.length > 0 && POLICY
+ * === "fail"`, so any value that is not exactly `fail` — `FAIL`, `faill`, `1`, a
+ * trailing space — makes the gate a printer: every `❌` listed, exit 0, findings
+ * scrolling past a green pipeline with nothing saying the two disagree. An
+ * unrecognised value THROWS instead of degrading into `fail`; default-secure
+ * means rejecting garbage, the only reading under which a typo is louder than
+ * the thing it controls. The CI pin applies AFTER validation: a malformed value
+ * is an operator error worth reporting wherever it is set, and a gate that
+ * silently discards its input teaches people it works.
  */
 
 const POLICIES = ["warn", "fail", "off"] as const;

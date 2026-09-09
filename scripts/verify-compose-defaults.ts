@@ -18,14 +18,14 @@
  * ─── The module half ─────────────────────────────────────────────────
  *
  * A module declares environment variables of its own
- * (`packages/module-ee/src/env.ts`), and this gate read `packages/env` alone:
- * a compose file could pin a default for one of them and nothing compared the
- * two values. Worse, `docker-compose.yml`'s pass-through block for those names
- * is a hand-maintained COPY of the module's schema — add a key there and forget
- * the block and the variable never reaches the container, with no error
- * anywhere. So the schema populations are unioned with every discovered module
- * schema, and a compose file that passes through SOME of a module's variables
- * must pass through all of them.
+ * (`packages/module-ee/src/env.ts`), and reading `packages/env` alone would
+ * compare none of them: a compose file pinning a default for one would have its
+ * value checked against nothing. `docker-compose.yml`'s pass-through block for
+ * those names is a hand-maintained COPY of the module's schema, so a key added
+ * to the schema and forgotten in the block never reaches the container, with no
+ * error anywhere. So the schema population is unioned with every discovered
+ * module schema, and a compose file that passes through SOME of a module's
+ * variables must pass through all of them.
  *
  * Usage: bun scripts/verify-compose-defaults.ts
  */
@@ -182,7 +182,7 @@ export function findTableGaps(
 }
 
 /** One compose file forwarding part of a module's environment and not the rest. */
-export interface PassThroughGap {
+interface PassThroughGap {
   file: string;
   /** Module id, `module-` stripped. */
   module: string;

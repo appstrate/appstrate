@@ -15,6 +15,7 @@ import { describe, it, expect } from "bun:test";
 import {
   findTableReferences,
   isSystemRelation,
+  reviewModuleSnapshot,
   reviewModuleSql,
   sqlText,
   type ScannedFile,
@@ -201,6 +202,29 @@ describe("findTableReferences — what is not a table", () => {
   it("ignores a set-returning function, which is a call and not a relation", () => {
     const sql = sqlText("const q = sql`SELECT 1 FROM generate_series(1, 10)`;");
     expect(findTableReferences(sql.text)).toEqual([]);
+  });
+});
+
+describe("reviewModuleSnapshot", () => {
+  it("POSITIVE CONTROL: refuses a journal whose snapshot declares no table", () => {
+    // With nothing owned, `isOwnTable` answers false for everything and every
+    // finding above becomes a problem — but the scan never gets that far: it is
+    // the SNAPSHOT that is broken, and a gate checking a module against an empty
+    // set of its own tables is checking nothing.
+    const problem = reviewModuleSnapshot({
+      id: "ee",
+      snapshot: "packages/module-ee/drizzle/migrations/meta/0003_snapshot.json",
+      tables: new Set(),
+    });
+    expect(problem).toContain("0003_snapshot.json");
+    expect(problem).toContain("declares zero");
+    expect(problem).toContain("vacuously");
+  });
+
+  it("NEGATIVE CONTROL: says nothing about a snapshot that declares one", () => {
+    expect(
+      reviewModuleSnapshot({ id: "ee", snapshot: "x/0003_snapshot.json", tables: OWN }),
+    ).toBeNull();
   });
 });
 
