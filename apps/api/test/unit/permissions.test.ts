@@ -195,8 +195,13 @@ describe("the `runner` preset", () => {
    *
    * `presetPermissions` answers the MERGED matrix — core plus whatever the
    * loaded modules contributed to `runner` — so each assertion here is scoped
-   * to `SPACE_LEVEL_PERMISSIONS`, the core space vocabulary. What the modules
-   * add is the subject of the last test in this block.
+   * to `SPACE_LEVEL_PERMISSIONS`, the core space vocabulary. The module half is
+   * NOT assertable from here: the contribution snapshot is a process-wide
+   * singleton that any test file may reset (`setModulePermissionsProvider`), so
+   * what this file observes of it is the file ordering of the run, not policy.
+   * Each module pins what it contributes in its own suite, next to the
+   * declaration — `packages/module-chat/test/rbac-contribution.test.ts` and the
+   * `rbac-contribution` tests under `src/modules/{mcp,webhooks}/test/unit/`.
    */
   const RUNNER_GRANTS: Permission[] = [
     "agents:run",
@@ -238,22 +243,6 @@ describe("the `runner` preset", () => {
     }
     // No core mutation at all: a runner starts what someone else authored.
     expect(coreGrants("runner").filter((p) => p.endsWith(":write"))).toEqual([]);
-  });
-
-  it("carries the module contributions that named it, and no others", () => {
-    // The friendly surfaces a non-builder uses — every write behind them is
-    // gated by the principal's own permissions, so they grant nothing the
-    // preset withholds. `webhooks` names admin/builder only and must stay out.
-    // Read as strings: `chat:*` is contributed by `@appstrate/module-chat`,
-    // a workspace whose `ModuleResources` declaration merge does not reach this
-    // project, so it is absent from `Permission` here while present in the set.
-    const runner: ReadonlySet<string> = presetPermissions("runner");
-    for (const held of ["chat:read", "chat:write", "mcp:read", "mcp:invoke"]) {
-      expect(runner.has(held), `runner holds ${held}`).toBe(true);
-    }
-    for (const withheld of ["webhooks:read", "webhooks:write"]) {
-      expect(runner.has(withheld), `runner holds ${withheld}`).toBe(false);
-    }
   });
 
   it("is what an explicit member holding it reaches, org half included", () => {
