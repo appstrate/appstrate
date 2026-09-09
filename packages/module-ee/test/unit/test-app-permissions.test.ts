@@ -2,36 +2,34 @@
 
 /**
  * The route harness authenticates by org role, so what it grants each role
- * decides which route tests can reach a route at all. This holds that answer
- * to the module's own `permissionsContribution()`: narrow a grant there and the
- * harness narrows with it, instead of the route tests passing against a copy
- * of the matrix that no longer matches what the platform aggregates.
+ * decides which route tests can reach a route at all. The matrix below is
+ * written out, not rebuilt from `permissionsContribution()` with the same
+ * expression `permissionsForRole` uses — an expected value derived from the
+ * code under test agrees with any grant, including a wrong one.
+ *
+ * Change a grant in `src/index.ts` and this fails: read the new matrix off the
+ * contribution, decide whether it is the intent, then write it here.
  */
 
 import { describe, expect, it } from "bun:test";
-import { ORG_ROLES } from "@appstrate/core/permissions";
-import eeModule from "../../src/index.ts";
+import { ORG_ROLES, type OrgRole } from "@appstrate/core/permissions";
 import { permissionsForRole } from "../helpers/app.ts";
 
+const EXPECTED: Record<OrgRole, string[]> = {
+  owner: ["billing:manage", "billing:read"],
+  admin: ["billing:manage", "billing:read"],
+  member: ["billing:read"],
+  // A guest is invited into one space and has no business reading what the
+  // organization spends.
+  guest: [],
+};
+
 describe("test app permissions", () => {
-  it("grants each org role exactly what the module contributes to it", () => {
-    const contribution = eeModule.permissionsContribution?.() ?? [];
-    expect(contribution.length).toBeGreaterThan(0);
-
-    const expected = Object.fromEntries(
-      ORG_ROLES.map((role) => [
-        role,
-        contribution
-          .filter((entry) => entry.level === "org" && entry.grantTo.includes(role))
-          .flatMap((entry) => entry.actions.map((action) => `${entry.resource}:${action}`))
-          .sort(),
-      ]),
-    );
-
+  it("grants each org role exactly the billing permissions the module declares", () => {
     const actual = Object.fromEntries(
       ORG_ROLES.map((role) => [role, [...permissionsForRole(role)].sort()]),
     );
 
-    expect(actual).toEqual(expected);
+    expect(actual).toEqual(EXPECTED);
   });
 });

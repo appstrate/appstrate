@@ -128,20 +128,19 @@ export async function onOrgDelete(orgId: string): Promise<void> {
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
 
-  // Already cleaned up. The platform may call this again after a deletion that
-  // failed further along, so a second call has to be a no-op rather than an
-  // error or a second Stripe request.
-  if (!account) return;
-
-  // Cancel, then delete — and only in that order. An unconfirmed cancellation
-  // KEEPS the rows so the sweeper can retry: dropping them here took the
-  // subscription id with them and left a customer being charged for an
-  // organization that no longer exists, with nothing left to name it.
-  const done = await cancelSubscriptionAndCleanUp(orgId, account.stripeSubscriptionId);
+  // Runs whether or not an account row exists — usage records and billing
+  // managers are written without one — and is idempotent, so the platform may
+  // call this again after a deletion that failed further along.
+  //
+  // Cancel, then delete, in that order: an unconfirmed cancellation KEEPS the
+  // rows for the sweeper to retry, because dropping them takes the subscription
+  // id with them and leaves a customer charged for an organization that is gone.
+  const subscriptionId = account?.stripeSubscriptionId ?? null;
+  const done = await cancelSubscriptionAndCleanUp(orgId, subscriptionId);
   if (!done) {
     logger.error("org deleted with its Stripe subscription still live — queued for retry", {
       orgId,
-      subscriptionId: account.stripeSubscriptionId,
+      subscriptionId,
     });
   }
 }

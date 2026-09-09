@@ -24,7 +24,7 @@ export const GIB = 1024 * 1024 * 1024;
  */
 export const PLAN_IDS = ["free", "starter", "pro"] as const;
 
-export type PlanId = (typeof PLAN_IDS)[number];
+type PlanId = (typeof PLAN_IDS)[number];
 
 /** Narrow a string of unknown provenance (a DB column, Stripe metadata) to a catalog id. */
 export function isPlanId(id: string): id is PlanId {
@@ -137,18 +137,11 @@ export const DEFAULT_QUOTE_RATES: QuoteRates = {
 };
 
 /**
- * Statuses at which Stripe still HOLDS a subscription object for this account.
- *
- * This is the set that decides whether a second Checkout would DOUBLE-BILL: a
- * Checkout only ever creates, so completing one while Stripe still holds a
- * subscription leaves the first running beside the second. `unpaid` and
- * `paused` are held — Stripe stopped collecting on them, it did not delete
- * them, and the way back is the Customer Portal, where the org fixes payment on
- * the subscription it already has. `incomplete` is held too: its first payment
- * is still pending, so Stripe may yet activate it.
- *
- * Outside this set Stripe holds nothing (`canceled`, `incomplete_expired`) or
- * the account never had one (`null`), and Checkout is the only way back.
+ * Statuses at which Stripe still HOLDS a subscription object for this account —
+ * the set a second Checkout would double-bill. `unpaid` and `paused` are held
+ * because Stripe stopped collecting on them rather than deleting them, and
+ * `incomplete` because its first payment is still pending. Outside the set
+ * Stripe holds nothing, whatever id the row carries.
  */
 export const HELD_SUBSCRIPTION_STATUSES = new Set([
   "active",
@@ -160,17 +153,40 @@ export const HELD_SUBSCRIPTION_STATUSES = new Set([
 ]);
 
 /**
- * Statuses at which the subscription can be MOVED between plans in place — a
- * strict subset of {@link HELD_SUBSCRIPTION_STATUSES}.
- *
- * `past_due` belongs here: Stripe is still retrying it, so swapping the price
- * item works and the retry collects the new amount. `unpaid` and `paused` do
- * not: Stripe has suspended collection, and a plan swap would change what the
- * org owes without restoring the payment that is actually blocking it.
- * `incomplete` does not either — its price item is bound to a payment intent
- * that has not settled.
+ * Statuses at which the subscription can be MOVED between plans in place — the
+ * ones Stripe is still collecting on, and a strict subset of
+ * {@link HELD_SUBSCRIPTION_STATUSES}. `unpaid`, `paused` and `incomplete` are
+ * excluded: a plan swap would change what the org owes without restoring the
+ * payment that is actually blocking it.
  */
 export const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
+
+/** Which endpoint a plan selection goes to — see {@link planAction}. */
+type PlanAction = "plan-change" | "portal" | "checkout";
+
+/**
+ * The one door open to an org that picks a plan, derived from the two sets above
+ * so the server's answer and the server's refusals cannot disagree:
+ *
+ *   - `plan-change` — `POST /api/billing/plan` swaps the price item in place;
+ *   - `portal` — Stripe holds the subscription but has stopped collecting on it,
+ *     so the Customer Portal is where the payment gets fixed;
+ *   - `checkout` — Stripe holds nothing, and `POST /api/billing/checkout` is the
+ *     only way in.
+ *
+ * Checkout only ever CREATES, so an org Stripe holds a subscription for never
+ * re-enters it: a second completed Checkout leaves the first running beside the
+ * second and bills the customer twice.
+ */
+export function planAction(account: {
+  stripeSubscriptionId: string | null;
+  subscriptionStatus: string | null;
+}): PlanAction {
+  const status = account.subscriptionStatus;
+  if (account.stripeSubscriptionId === null || status === null) return "checkout";
+  if (LIVE_SUBSCRIPTION_STATUSES.has(status)) return "plan-change";
+  return HELD_SUBSCRIPTION_STATUSES.has(status) ? "portal" : "checkout";
+}
 
 /** Subscription statuses that suspend all platform-funded usage, even when its quote is zero. */
 export const HARD_BLOCKED_STATUSES = new Set(["unpaid", "paused"]);

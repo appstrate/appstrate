@@ -4,30 +4,17 @@ import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { and, eq, isNull } from "drizzle-orm";
-import { getPlans, isPlanId, HELD_SUBSCRIPTION_STATUSES } from "../config.ts";
+import { getPlans, isPlanId, planAction } from "../config.ts";
 import { resolvePrimaryBillingEmail } from "../billing/contact.ts";
-import { subscriptionExists } from "../http-errors.ts";
+import { noBillingAccount, subscriptionExists } from "../http-errors.ts";
 
 /**
  * Start a Stripe Checkout for an org Stripe holds no subscription for.
  *
- * Checkout only ever CREATES: it never reads `stripe_subscription_id`, so
- * completing one while Stripe still holds a subscription leaves the first
- * running beside the second and charges the customer for both. The refusal is
- * here rather than in the dashboard because the dashboard's buttons are not what
- * protects a customer from a double charge.
- *
- * The test is {@link HELD_SUBSCRIPTION_STATUSES}, not the narrower set a plan
- * change accepts. An `unpaid` or `paused` org has a subscription Stripe is
- * holding but not collecting on: it cannot be moved between plans, and it must
- * not be duplicated either. Its way back is the Customer Portal, which the
- * dashboard offers for every account that carries a subscription.
- *
- * Below that set — `canceled`, `incomplete_expired`, or no status at all —
- * Stripe holds nothing, whatever id the account still carries: a
- * `customer.subscription.deleted` that never arrived leaves a dead id behind,
- * and refusing on the id alone would lock the org out of ever subscribing
- * again. The webhook handlers attach over such an id for the same reason.
+ * The test is {@link planAction}, the same predicate the billing snapshot
+ * reports and `changeSubscriptionPlan` refuses on. The refusal lives here rather
+ * than in the dashboard because a customer is protected from a double charge by
+ * the server, not by which button the SPA renders.
  */
 export async function createCheckoutSession(
   orgId: string,
@@ -50,15 +37,8 @@ export async function createCheckoutSession(
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
 
-  if (!account) throw new Error(`No billing account for org: ${orgId}`);
-
-  if (
-    account.stripeSubscriptionId !== null &&
-    account.subscriptionStatus !== null &&
-    HELD_SUBSCRIPTION_STATUSES.has(account.subscriptionStatus)
-  ) {
-    throw subscriptionExists();
-  }
+  if (!account) throw noBillingAccount();
+  if (planAction(account) !== "checkout") throw subscriptionExists();
 
   // Get or create Stripe customer (conditional update prevents race condition)
   let customerId = account.stripeCustomerId;

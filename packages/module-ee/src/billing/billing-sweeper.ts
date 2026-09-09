@@ -168,12 +168,11 @@ const DRAIN_TIMEOUT_MS = 60_000;
  * pass rolls back on its own, losing nothing; the reconcile is an idempotent
  * rewrite the next boot repeats).
  *
- * RE-READS AFTER EVERY WAIT. A single snapshot taken at entry was wrong by
- * construction: the tick STARTS the reconcile from inside the very promise the
- * snapshot is awaiting, so a drain entered mid-sweep saw `inFlightResync === null`,
- * returned the moment the sweep finished, and `closeEeDb()` ran under a reconcile
- * that had begun in between. Looping until both handles are null is what makes
- * "awaits the in-flight work" true rather than merely intended.
+ * RE-READS AFTER EVERY WAIT, because the tick starts the reconcile from inside
+ * the very promise this is awaiting. A drain entered mid-sweep therefore sees no
+ * reconcile at entry, and a single snapshot would return the moment the sweep
+ * finished — letting `closeEeDb()` run under one that began in between. The loop
+ * ends only when both handles are null.
  */
 export async function drainBillingSweeper(): Promise<void> {
   const deadline = Date.now() + DRAIN_TIMEOUT_MS;
@@ -268,11 +267,10 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
 
   maybeResyncEntitlements();
 
-  // Cancellations `onOrgDelete` could not confirm with Stripe. Steady state is
-  // zero rows and zero work; a row means a customer may still be charged for an
-  // organization that no longer exists, so it is retried every tick. Awaited
-  // (unlike the fleet-wide reconcile): it touches only the accounts that are
-  // actually pending, which is normally none.
+  // Cancellations `onOrgDelete` could not confirm. A pending row means a
+  // customer may still be charged for an organization that is gone, so it is
+  // retried every tick — and awaited, unlike the fleet-wide reconcile, because
+  // steady state is zero rows and zero work.
   try {
     await retryPendingCancellations();
   } catch (err) {
@@ -360,9 +358,8 @@ export async function runBillingSweep(): Promise<SweepResult> {
     replayed: totalReplayed,
     replayBilled: totalReplayBilled,
     orphanedOrgs: totalOrphanedOrgs,
-    // Rows claimed but not charged at their true price. Each pass already logged
-    // its own `error` line naming the orgs; restating the counts here keeps the
-    // one-line-per-tick summary honest about what was NOT collected.
+    // Rows claimed but not charged at their true price. Each pass logs its own
+    // `error` line naming the orgs; the counts keep the per-tick summary honest.
     partialPriced: totalPricing.partial,
     unpriced: totalPricing.unpriced,
     unknownPriced: totalPricing.unknown,

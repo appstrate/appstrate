@@ -22,6 +22,10 @@ describe("initEeDb", () => {
   });
 
   it("refuses a second database rather than stranding the first pool", () => {
+    // Opens the pool itself rather than inheriting the one the test above left:
+    // a test whose precondition is another test's side effect passes or fails on
+    // the order the runner happens to pick.
+    initEeDb(DATABASE_URL);
     const before = getEeDb();
     expect(() => initEeDb("postgres://elsewhere:5432/other")).toThrow(
       /different DATABASE_URL than the open pool/,

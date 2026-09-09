@@ -97,6 +97,28 @@ describe("quoteUsage", () => {
       expect(quote).toEqual({ modelCredits: 0, computeCredits: 0, totalCredits: 0 });
     });
 
+    it("quotes a remote SYSTEM run for the model only — the platform funds no compute", () => {
+      // The two components are independent facts: the org runs the work on its
+      // own compute, and the platform still pays for the inference.
+      const quote = quoteUsage(
+        {
+          orgId,
+          context: "run",
+          packageId: "@x/agent",
+          runningCount: 2,
+          credentialSource: "system",
+          executionPlane: "remote",
+          timeoutSeconds: 900,
+        },
+        WITH_COMPUTE,
+      );
+      expect(quote).toEqual({
+        modelCredits: 200 * 2,
+        computeCredits: 0,
+        totalCredits: 400,
+      });
+    });
+
     it("quotes a remote run with an undeterminable credential source at zero", () => {
       // A remote-origin run resolves its model on its own host; any inference
       // it later routes through the system proxy is admitted at that seam.

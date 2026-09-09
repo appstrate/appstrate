@@ -13,6 +13,11 @@ import { resetStripeMock, requests, setNextError } from "../../helpers/stripe.ts
 import { onOrgCreate, onOrgDelete } from "../../../src/onboarding/post-signup.ts";
 import { listBillingManagers } from "../../../src/billing/managers.ts";
 import { retryPendingCancellations } from "../../../src/billing/org-cancellation.ts";
+import {
+  drainBillingSweeper,
+  runBillingSweepTick,
+  _resetBillingSweeperForTests,
+} from "../../../src/billing/billing-sweeper.ts";
 import { billingAccounts, freeTierClaims, orgUsageRecords } from "../../../drizzle/schema.ts";
 import { useEeTestSeams } from "../../helpers/setup.ts";
 
@@ -233,6 +238,24 @@ describe("post-signup", () => {
       await expect(onOrgDelete(unknownOrg)).resolves.toBeUndefined();
     });
 
+    it("still removes the org's other rows when it has no billing account", async () => {
+      // Usage records and billing managers are written without an account row —
+      // a debt bucket from an orphaned org, a manager granted before checkout.
+      // Reading a missing account as "already cleaned up" strands both, with no
+      // organization left to name them.
+      const orphanOrg = "00000000-0000-4000-a000-000000000098";
+      await seedUsageRecord({ orgId: orphanOrg, contextId: "run-orphan", costCredits: 42 });
+      await seedBillingManager({ orgId: orphanOrg, userId: "user-orphan" });
+
+      await onOrgDelete(orphanOrg);
+
+      const db = getEeDb();
+      expect(
+        await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orphanOrg)),
+      ).toHaveLength(0);
+      expect(await listBillingManagers(orphanOrg)).toHaveLength(0);
+    });
+
     it("deletes all of the org's EE-owned rows (no FK cascade exists)", async () => {
       // EE runs its own DB — onOrgDelete is the ONLY thing that cleans up
       // an org's rows. Seed every org-keyed EE table, then assert empty.
@@ -344,6 +367,46 @@ describe("post-signup", () => {
       const row = await account();
       expect(row?.stripeSubscriptionId).toBe("sub_param_error");
       expect(row?.cancelRequestedAt).toBeInstanceOf(Date);
+    });
+
+    it("keeps the rows on a 400 that only CONTAINS the already-canceled sentence", async () => {
+      // The match is anchored at the start. A refusal that quotes the sentence
+      // after its own prose is a different failure, and reading it as success
+      // deletes the row holding the subscription id.
+      await seedBillingAccount({
+        orgId,
+        stripeSubscriptionId: "sub_quoted_sentence",
+        subscriptionStatus: "active",
+      });
+      setNextError(400, {
+        error: { type: "invalid_request_error", message: "Cannot proceed: A canceled subscription can only update its cancellation_details." }, // prettier-ignore
+      });
+
+      await onOrgDelete(orgId);
+
+      const row = await account();
+      expect(row?.stripeSubscriptionId).toBe("sub_quoted_sentence");
+      expect(row?.cancelRequestedAt).toBeInstanceOf(Date);
+    });
+
+    it("the billing tick is what runs the retry, not a direct call", async () => {
+      // `retryPendingCancellations` is only durable because something calls it
+      // on a schedule. Driving the tick is what proves the wiring.
+      await seedBillingAccount({
+        orgId,
+        stripeSubscriptionId: "sub_tick",
+        subscriptionStatus: "active",
+        cancelRequestedAt: new Date(),
+      });
+      _resetBillingSweeperForTests();
+
+      await runBillingSweepTick();
+      await drainBillingSweeper();
+
+      expect(
+        requests.filter((r) => r.method === "DELETE" && r.path === "/v1/subscriptions/sub_tick"),
+      ).toHaveLength(1);
+      expect(await account()).toBeNull();
     });
 
     it("treats Stripe's already-canceled 400 as done", async () => {

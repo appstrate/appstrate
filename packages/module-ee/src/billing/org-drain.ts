@@ -25,12 +25,10 @@
  *     and finds them already claimed (`ee_billed_llm_usage` is the arbiter),
  *     so it is a no-op for them. Nothing is rewound, and the drain can bill an
  *     org sitting behind another tenant's head-of-line stall.
- *   - It starts where the SWEEP starts, from the one shared `ledgerScanStart`:
- *     below the watermark by the replay window, never below the cutover floor.
- *     Starting strictly at the watermark loses exactly the rows the replay window
- *     exists for — a row of this org that committed late under an advanced
- *     watermark — and here that loss is final, because the org's ledger rows
- *     cascade away moments later and no sweep will ever replay them.
+ *   - It starts where the SWEEP starts, from the one shared `ledgerScanStart`.
+ *     Starting strictly at the watermark loses the rows the replay window exists
+ *     for, and here that loss is final: the org's ledger rows cascade away
+ *     moments later and no sweep will ever replay them.
  *   - Bounded: at most {@link MAX_DRAIN_BATCHES} reads of the configured batch
  *     size, and the scan is narrowed server-side to `credentialSource: "system"`
  *     (the only billable rows). A truncated drain is reported at `warn`.
@@ -88,9 +86,8 @@ export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
   const db = getEeDb();
   const batchSize = getEeEnv().EE_RECONCILIATION_BATCH_SIZE;
 
-  // Same selection policy as the sweep — replay window below the watermark,
-  // clamped at the cutover floor. Re-read rows an earlier pass already claimed
-  // cost nothing: the claim table, not the cursor, arbitrates what was billed.
+  // Same selection policy as the sweep. Re-reading rows an earlier pass claimed
+  // costs nothing: the claim table, not the cursor, arbitrates what was billed.
   const cursor = await ensureCursorSeeded(services, db);
 
   const result: OrgDrainResult = {

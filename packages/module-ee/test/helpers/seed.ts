@@ -31,6 +31,8 @@ export async function seedBillingAccount(overrides: {
   periodEnd?: Date | null;
   billingEmail?: string | null;
   billingCc?: string[];
+  /** Non-null models an org deletion whose Stripe cancellation is unconfirmed. */
+  cancelRequestedAt?: Date | null;
 }) {
   const db = getEeDb();
   const [account] = await db
@@ -47,6 +49,7 @@ export async function seedBillingAccount(overrides: {
       periodEnd: overrides.periodEnd ?? null,
       billingEmail: overrides.billingEmail ?? null,
       billingCc: overrides.billingCc ?? [],
+      cancelRequestedAt: overrides.cancelRequestedAt ?? null,
     })
     .returning();
   return account!;
