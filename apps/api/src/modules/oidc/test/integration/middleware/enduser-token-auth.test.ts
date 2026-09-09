@@ -673,8 +673,16 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   // EMPTY list rather than an error.
   // -------------------------------------------------------------------------
 
-  /** Publish an `agent_output` document on a fresh run in the given app. */
-  async function seedRunFile(opts: { endUserId?: string } = {}): Promise<{
+  /**
+   * Publish an `agent_output` document on a fresh run, attributed to the
+   * principal that will read it. `files:read` alone reaches the caller's OWN
+   * runs; an actor-less run would be visible to `runs:read-all` holders only,
+   * and no OIDC token can carry that scope.
+   */
+  async function seedRunFile(attribution: {
+    userId: string | null;
+    endUserId: string | null;
+  }): Promise<{
     runId: string;
     docId: string;
   }> {
@@ -686,19 +694,13 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       orgId,
       spaceId,
       status: "success",
-      endUserId: opts.endUserId ?? null,
+      ...attribution,
     });
-    const { row } = await createFileFromStream(
-      { orgId, spaceId },
-      runId,
-      { userId: null, endUserId: opts.endUserId ?? null },
-      null,
-      {
-        name: "deliverable.txt",
-        mime: "text/plain",
-        body: new Blob([new TextEncoder().encode("oidc deliverable")]).stream(),
-      },
-    );
+    const { row } = await createFileFromStream({ orgId, spaceId }, runId, attribution, null, {
+      name: "deliverable.txt",
+      mime: "text/plain",
+      body: new Blob([new TextEncoder().encode("oidc deliverable")]).stream(),
+    });
     return { runId, docId: row.id };
   }
 
@@ -707,9 +709,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     await db.insert(organizationMembers).values({ userId: authUserId, orgId, role });
   }
 
-  it("dashboard token carrying files:read reads the org's files", async () => {
+  it("dashboard token carrying files:read reads its own run's file", async () => {
     await addDashboardMembership();
-    const { docId } = await seedRunFile();
+    const { docId } = await seedRunFile({ userId: authUserId, endUserId: null });
 
     const token = await mintToken({
       sub: authUserId,
@@ -739,7 +741,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
 
   it("dashboard token without files:read is refused on every read route", async () => {
     await addDashboardMembership();
-    const { docId } = await seedRunFile();
+    const { docId } = await seedRunFile({ userId: authUserId, endUserId: null });
 
     // A token that requested a DIFFERENT, legitimate scope: the caller is a
     // real org admin (whose role grants `files:read`), so only the token's
@@ -765,7 +767,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   });
 
   it("end-user token carrying files:read reads its own run's file", async () => {
-    const { docId } = await seedRunFile({ endUserId });
+    const { docId } = await seedRunFile({ userId: null, endUserId });
 
     const token = await mintToken({
       sub: authUserId,

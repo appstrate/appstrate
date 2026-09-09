@@ -78,12 +78,19 @@ async function stageUpload(
   return up.id;
 }
 
-async function seedRunRow(scope: Scope): Promise<string> {
+/**
+ * A run attributed to the member that launched it, the way every launch path
+ * attributes one. An actor-less row (`user_id` and `end_user_id` both NULL)
+ * reaches `runs:read-all` holders only, so seeding one would hide the file
+ * from the very principal these cases read it with.
+ */
+async function seedRunRow(scope: Scope, userId: string): Promise<string> {
   const id = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
     spaceId: scope.spaceId,
+    userId,
     status: "running",
     runOrigin: "platform",
     sinkSecretEncrypted: "test-sink-secret",
@@ -93,8 +100,9 @@ async function seedRunRow(scope: Scope): Promise<string> {
   return id;
 }
 
-function publishStream(scope: Scope, runId: string, name: string, content: string) {
-  return createFileFromStream(scope, runId, { userId: null, endUserId: null }, null, {
+/** Publishing copies the run's attribution, as `runs-events.ts` does in production. */
+function publishStream(scope: Scope, runId: string, userId: string, name: string, content: string) {
+  return createFileFromStream(scope, runId, { userId, endUserId: null }, null, {
     name,
     mime: "text/plain",
     body: new Blob([new TextEncoder().encode(content)]).stream(),
@@ -116,7 +124,7 @@ describe("files storage parity — core flow (ambient backend)", () => {
 
   it("upload → materialize → download → delete → outbox purge round-trips on the active backend", async () => {
     const bytes = new TextEncoder().encode("parity payload bytes");
-    const runId = await seedRunRow(scope);
+    const runId = await seedRunRow(scope, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "parity.txt", bytes);
 
     // Materialize the staged upload into a durable file.
@@ -184,8 +192,14 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
   });
 
   it("GET /content 307-redirects to a presigned URL that serves the bytes from MinIO", async () => {
-    const runId = await seedRunRow(scope);
-    const published = await publishStream(scope, runId, "deliverable.txt", "presigned bytes ok");
+    const runId = await seedRunRow(scope, ctx.user.id);
+    const published = await publishStream(
+      scope,
+      runId,
+      ctx.user.id,
+      "deliverable.txt",
+      "presigned bytes ok",
+    );
 
     const res = await app.request(`/api/files/${published.row.id}/content`, {
       headers: authHeaders(ctx),
@@ -204,8 +218,14 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
   });
 
   it("MCP resources/read still returns the bytes on the presigned posture (307-regression guard)", async () => {
-    const runId = await seedRunRow(scope);
-    const published = await publishStream(scope, runId, "mcp-read.txt", "mcp reads bytes directly");
+    const runId = await seedRunRow(scope, ctx.user.id);
+    const published = await publishStream(
+      scope,
+      runId,
+      ctx.user.id,
+      "mcp-read.txt",
+      "mcp reads bytes directly",
+    );
 
     const mcpCtx: McpToolContext = {
       origin: "https://instance.example",
