@@ -64,7 +64,7 @@ export function RunsPage() {
       <RunList
         key={`${userTab}-${kindTab}`}
         pageSize={15}
-        user={canSeeEveryRun && userTab === "me" ? "me" : undefined}
+        user={userTab === "me" ? "me" : undefined}
         kind={kindTab}
       />
     </div>

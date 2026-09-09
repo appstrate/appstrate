@@ -215,11 +215,13 @@ export function useScheduleFormDeps(
   // detail arrives, so the only safe answer while it is in flight is "not yet".
   if (!packageId || !agentDetail) return { deps: null, error };
 
-  const integrationDeps = (agentDetail.dependencies?.integrations ?? []).map((d) => ({
+  const integrationDeps = agentDetail.dependencies.integrations.map((d) => ({
     id: d.id,
     ...(d.tools ? { tools: d.tools } : {}),
   }));
-  const skillDeps = (agentDetail.dependencies?.skills ?? []).map((s) => ({
+  // `skills` is the one optional group — a summary read (`agents:run` without
+  // `agents:read`) omits it rather than emptying it.
+  const skillDeps = (agentDetail.dependencies.skills ?? []).map((s) => ({
     id: s.id,
     ...(s.version ? { version: s.version } : {}),
     ...(s.name ? { name: s.name } : {}),

@@ -69,13 +69,6 @@ type DetailTab =
   | "content"
   | "usedBy";
 
-/**
- * The agent tabs an `agents:run` caller without `agents:read` is not served:
- * each is fed by a field the summary read omits (manifest, prompt, authoring
- * history) or by a route — versions, files — that answers 403 to them.
- */
-const SUMMARY_WITHHELD_TABS: readonly DetailTab[] = ["overview", "content", "versions", "diff"];
-
 /** A version that declares no parameters — distinct from "use the draft". */
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
@@ -217,18 +210,21 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } | null>(null);
 
   // ── State ──
+  // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
+  // falls back to the default tab for a hash naming anything outside the list
+  // and the panels below key on its answer. The tab bar renders a subset of it.
+  // Withheld from an `agents:run` caller without `agents:read`: each of the
+  // four is fed by a field the summary read omits (manifest, prompt, authoring
+  // history) or by a route — versions, files — that answers them 403.
   const allValidTabs: DetailTab[] = [
-    "overview",
     "connections",
     "runs",
     "configuration",
-    "schedules",
     "memory",
     "api",
-    "versions",
-    "diff",
-    "content",
     "usedBy",
+    ...(can("schedules:read") ? (["schedules"] as const) : []),
+    ...(fullRead ? (["overview", "content", "versions", "diff"] as const) : []),
   ];
   const hasModelsAvailable = !!orgModels && orgModels.length > 0;
   const hasProxiesAvailable = !!orgProxies && orgProxies.length > 0;
@@ -251,10 +247,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   useEffect(() => {
     if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
-    // A hash naming a withheld tab must not mount its panel: the tab bar hides
-    // it, and the panels below key on `tab`, not on what the bar renders.
-    if (!fullRead && SUMMARY_WITHHELD_TABS.includes(tab)) setTab(defaultTab);
-  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab, fullRead]);
+  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
 
   // ── Loading / Error ──

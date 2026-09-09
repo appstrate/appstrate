@@ -72,10 +72,11 @@ export function NavOrg() {
     { path: "/files", label: t("nav.files"), icon: FileText },
   ];
 
-  // Each entry asks for the permission its landing page's list route needs, so
-  // a caller who would land on a wall of 403s never sees the link. `agents` is
-  // the disjunction the route itself accepts: a `runner` launches agents it
-  // holds no `agents:read` on.
+  // Automation and Extensions below: each entry asks for the permission its
+  // landing page's list route needs, so a caller who would land on a wall of
+  // 403s never sees the link. `agents` is the disjunction the route itself
+  // accepts: a `runner` launches agents it holds no `agents:read` on. (Activité
+  // above is ungated — every principal in a space reaches those three.)
   const automationItems: NavItem[] = [
     ...(can("agents:read") || can("agents:run")
       ? [{ path: "/agents", label: t("nav.agents"), icon: Layers }]

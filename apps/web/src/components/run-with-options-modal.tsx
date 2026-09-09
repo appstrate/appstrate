@@ -113,7 +113,7 @@ function RunWithOptionsForm({
   // Version-pinned input wrapper / skills (fall back to the draft the parent
   // passed while the version-aware detail is still loading).
   const inputWrapper: SchemaWrapper = deps?.inputWrapper ?? agent.input;
-  const skills = deps?.skills ?? agent.dependencies?.skills ?? [];
+  const skills = deps?.skills ?? agent.dependencies.skills ?? [];
 
   const fire = (input: Record<string, unknown>) =>
     onSubmit({ input, version, overrides, dependencyOverrides });
