@@ -54,6 +54,7 @@ describe("readConfig", () => {
           email: "a@b.c",
           orgId: "o1",
           spaceId: "spc_1",
+          syncSpaces: ["spc_1", "spc_library"],
         },
         dev: { instance: "http://localhost:3000", userId: "u2", email: "x@y.z" },
       },
@@ -363,5 +364,26 @@ describe("resolveActiveProfileOrNull", () => {
   it("degrades an unparseable config file to null", async () => {
     await writeConfigFile("this is not [ valid toml");
     expect(await resolveActiveProfileOrNull(undefined)).toBeNull();
+  });
+});
+
+describe("sync space configuration validation", () => {
+  it("rejects malformed selections without rewriting the user's config", async () => {
+    await setProfile("default", {
+      instance: "https://app.example.com",
+      userId: "u_test",
+      email: "alice@example.com",
+      orgId: "org_1",
+      spaceId: "spc_active",
+    });
+    const { writeFile } = await import("node:fs/promises");
+    const path = join(configHome.dir(), "appstrate", "config.toml");
+    const valid = await readFile(path, "utf8");
+    for (const value of ['"spc_active"', '[""]', '["spc_active", 123]']) {
+      const malformed = `${valid}\nsyncSpaces = ${value}\n`;
+      await writeFile(path, malformed);
+      await expect(readConfig()).rejects.toThrow("Invalid syncSpaces");
+      expect(await readFile(path, "utf8")).toBe(malformed);
+    }
   });
 });
