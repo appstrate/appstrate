@@ -16,7 +16,12 @@
 
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
+import type { components } from "../../api/client.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+
+type BillingAccount = components["schemas"]["EeBillingAccount"];
+type Plan = components["schemas"]["EeBillingPlan"];
+type UpgradePlan = components["schemas"]["EeBillingUpgradePlan"];
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -36,19 +41,34 @@ await i18n.changeLanguage("fr");
 const ORG_ID = "org_a";
 const header = { "X-Org-Id": ORG_ID };
 
-const PLANS = [
-  { id: "free" as const, name: "Free", price: 0, credit_quota: 5000, file_storage_bytes: 1 },
-  {
-    id: "starter" as const,
-    name: "Starter",
-    price: 29,
-    credit_quota: 20000,
-    file_storage_bytes: 2,
-  },
-  { id: "pro" as const, name: "Pro", price: 99, credit_quota: 80000, file_storage_bytes: 3 },
-];
+// Typed against the generated wire schema, not cast into it: a field added to
+// the billing account or its plans stops these fixtures compiling, which is the
+// whole point of a fixture. `upgrades` takes the narrower checkout-target type,
+// so `free` cannot land there.
+const FREE: Plan = {
+  id: "free",
+  name: "Free",
+  price: 0,
+  credit_quota: 5000,
+  file_storage_bytes: 1,
+};
+const STARTER: UpgradePlan = {
+  id: "starter",
+  name: "Starter",
+  price: 29,
+  credit_quota: 20000,
+  file_storage_bytes: 2,
+};
+const PRO: UpgradePlan = {
+  id: "pro",
+  name: "Pro",
+  price: 99,
+  credit_quota: 80000,
+  file_storage_bytes: 3,
+};
+const PLANS: Plan[] = [FREE, STARTER, PRO];
 
-function renderPage(account: Record<string, unknown>): string {
+function renderPage(account: BillingAccount): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
@@ -104,7 +124,7 @@ describe("planSelectionRoute", () => {
 });
 
 describe("the billing page for a subscribed org", () => {
-  const subscribed = {
+  const subscribed: BillingAccount = {
     plan: { id: "starter", name: "Starter" },
     plans: PLANS,
     usage_percent: 25,
@@ -112,7 +132,7 @@ describe("the billing page for a subscribed org", () => {
     credit_quota: 20000,
     period_end: "2026-10-01T00:00:00Z",
     status: "active",
-    upgrades: [PLANS[2]],
+    upgrades: [PRO],
   };
 
   it("offers the subscription portal instead of a checkout upgrade in the header", () => {
@@ -132,7 +152,7 @@ describe("the billing page for a subscribed org", () => {
       ...subscribed,
       plan: { id: "free", name: "Free" },
       status: "none",
-      upgrades: [PLANS[1], PLANS[2]],
+      upgrades: [STARTER, PRO],
     });
     expect(html).toContain(">Passer à un plan supérieur<");
     expect(html).not.toContain("Gérer l'abonnement");

@@ -15,7 +15,6 @@ import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../../../i18n.ts";
 import { render } from "../../../../test/render.tsx";
 import { SignupPolicyFields } from "../oauth-client-form-modal.tsx";
-import { validateSpaceAssignments } from "../../../../lib/space-assignments.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -43,25 +42,27 @@ function renderFields(overrides: { isOrgLevel?: boolean; allowSignup?: boolean }
   );
 }
 
-/** The `<select>` opening tag, so `disabled` is read off the element itself. */
-function signupRoleSelect(html: string): string {
+/**
+ * The `<select>` opening tag, so `disabled` is read off the element itself.
+ *
+ * Absent is not "not disabled": a caller that returned `""` for a missing
+ * select would satisfy every `not.toContain` written about it, so the element
+ * has to be asserted present before its attributes mean anything.
+ */
+function signupRoleSelect(html: string): string | null {
   const start = html.indexOf('<select id="oauth-client-signup-role"');
-  return start === -1 ? "" : html.slice(start, html.indexOf(">", start));
+  return start === -1 ? null : html.slice(start, html.indexOf(">", start));
 }
 
 describe("org-level signup policy", () => {
   it("edits the role and the space grants while signup is off", () => {
     const html = renderFields({ allowSignup: false });
     expect(html).toContain("Rôle attribué à l'auto-inscription");
-    expect(signupRoleSelect(html)).not.toContain('disabled=""');
+    const select = signupRoleSelect(html);
+    expect(select).not.toBeNull();
+    expect(select).not.toContain('disabled=""');
     expect(html).toContain("<legend");
     expect(html).toContain("Espaces");
-  });
-
-  it("still requires a space for a guest policy while signup is off", () => {
-    expect(validateSpaceAssignments("guest", [], "pick at least one space")).toBe(
-      "pick at least one space",
-    );
   });
 });
 

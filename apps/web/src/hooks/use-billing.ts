@@ -58,7 +58,7 @@ export function useBillingKey() {
 }
 
 /** The effective billing status of an org, as the spec enumerates it. */
-export type BillingStatus = components["schemas"]["EeBillingAccount"]["status"];
+type BillingStatus = components["schemas"]["EeBillingAccount"]["status"];
 
 /**
  * Statuses at which the subscription can be MOVED between plans — the client

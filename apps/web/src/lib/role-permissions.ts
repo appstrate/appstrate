@@ -9,10 +9,10 @@ type VocabularyGroup = { resource: string; permissions: { permission: string }[]
  *
  * They stay selected on open rather than being dropped: a role is what it says
  * it is, and silently rewriting it the moment someone opens the editor is a
- * change nobody asked for. But the write route validates against this same
- * vocabulary and refuses the unknown string with a 400, so leaving them
- * invisible made the role unfixable — every save resent them, and no control
- * could take them out.
+ * change nobody asked for. They are named so the editor can offer a control
+ * that removes them: the write route validates against this same vocabulary and
+ * refuses an unknown string with a 400, so a selection with no control of its
+ * own is one no save can clear.
  */
 export function unavailablePermissions(
   selected: ReadonlySet<string>,
