@@ -18,19 +18,21 @@
  * same consumption is billed differently depending on where the run executed.
  * pi-ai's formula, reproduced exactly by {@link parseOpenAICompatibleUsage}:
  *
- *   cacheRead      = prompt_tokens_details.cached_tokens ?? prompt_cache_hit_tokens ?? 0
+ *   cacheRead      = prompt_tokens_details.cached_tokens
+ *                      ?? prompt_cache_hit_tokens ?? cached_tokens ?? 0
  *   cacheWrite     = prompt_tokens_details.cache_write_tokens ?? 0
  *   input          = max(0, prompt_tokens − cacheRead − cacheWrite)
  *
- * Two wire dialects feed the first line: OpenAI's nested
- * `prompt_tokens_details.cached_tokens` (`cached_tokens ⊂ prompt_tokens`) and
- * DeepSeek's top-level `prompt_cache_hit_tokens` (`prompt_tokens = hit + miss`).
- * The nested field wins when both are present — pi-ai's precedence.
+ * Three wire dialects feed the first line, in pi-ai's precedence order: OpenAI's
+ * nested `prompt_tokens_details.cached_tokens` (`cached_tokens ⊂ prompt_tokens`),
+ * DeepSeek's top-level `prompt_cache_hit_tokens` (`prompt_tokens = hit + miss`),
+ * and Kimi's top-level `usage.cached_tokens`, which pi-ai added in 0.85.0. The
+ * more specific field wins when several are present.
  *
  * `cache_write_tokens` is reported separately by OpenRouter-compatible
- * providers. Pi 0.84.2 treats `cached_tokens` as cache reads and does not
- * subtract writes from it. Appstrate must preserve that exact partition so a
- * call has identical persisted usage on the proxy and in-container run paths.
+ * providers. Pi treats `cached_tokens` as cache reads and does not subtract
+ * writes from it. Appstrate must preserve that exact partition so a call has
+ * identical persisted usage on the proxy and in-container run paths.
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
@@ -62,9 +64,11 @@ function parseOpenAICompatibleUsage(u: Record<string, unknown>): UpstreamUsage |
       : null;
 
   // `?? ` chain, not `||`: a genuine 0 from the more specific source must not
-  // fall through to the other dialect's field.
+  // fall through to the next dialect's field.
   const reportedCacheRead =
-    tokenCount(details?.["cached_tokens"]) ?? tokenCount(u["prompt_cache_hit_tokens"]);
+    tokenCount(details?.["cached_tokens"]) ??
+    tokenCount(u["prompt_cache_hit_tokens"]) ??
+    tokenCount(u["cached_tokens"]);
   const reportedCacheWrite = tokenCount(details?.["cache_write_tokens"]);
 
   const cacheWrite = reportedCacheWrite ?? 0;
