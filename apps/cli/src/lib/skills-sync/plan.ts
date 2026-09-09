@@ -323,7 +323,8 @@ export interface TargetPlan {
   removed: string[];
   /** Ledger slugs whose `SKILL.md` is on disk — asked by three rules below. */
   present: ReadonlySet<string>;
-  contextChanged?: boolean;
+  /** This target holds another connection's installation, being replaced whole. */
+  contextChanged: boolean;
 }
 
 export interface Catalogue {
@@ -341,10 +342,11 @@ export function ownedLedger(
   target: SyncTarget,
   state: SyncState,
   source: SkillSource,
+  context: SyncContext,
 ): TargetState {
   const previous = state.targets[target];
   const root = targetRoot(target);
-  return !previous || previous.root !== root ? emptyTargetState(source, root) : previous;
+  return !previous || previous.root !== root ? emptyTargetState(source, root, context) : previous;
 }
 
 export async function diffTarget(
@@ -352,14 +354,14 @@ export async function diffTarget(
   catalogue: Catalogue,
   state: SyncState,
   source: SkillSource,
-  context?: SyncContext,
+  context: SyncContext,
 ): Promise<TargetPlan> {
-  const ledger = ownedLedger(target, state, source);
+  const ledger = ownedLedger(target, state, source, context);
   // A ledger from a build whose materializer differs is stale, but still owned.
+  // An installation belonging to another connection is replaced whole, so its
+  // preparation is all-or-nothing rather than graded per skill.
   const contextChanged =
-    context !== undefined &&
-    state.targets[target]?.root === targetRoot(target) &&
-    !sameContext(ledger.context, context);
+    state.targets[target]?.root === targetRoot(target) && !sameContext(ledger.context, context);
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
   const present = new Set<string>();

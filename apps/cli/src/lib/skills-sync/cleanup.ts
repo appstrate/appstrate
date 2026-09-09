@@ -24,13 +24,13 @@ export async function cleanupProfileSkills(
     };
   const failures: string[] = [];
   let pluginReset = false;
-  let legacy = false;
   for (const target of SYNC_TARGETS) {
     const ledger = state.targets[target];
     if (!ledger || ledger.root !== targetRoot(target)) continue;
-    if (!ledger.context) legacy = true;
+    // One context per destination, so the target's own context answers for
+    // every directory under it — there is nothing to decide per entry.
+    if (ledger.context.profileName !== profileName) continue;
     if (target === "claude-plugin") {
-      if (ledger.context?.profileName !== profileName) continue;
       try {
         await writeSetupPlugin(
           ledger.root,
@@ -43,10 +43,7 @@ export async function cleanupProfileSkills(
       }
       continue;
     }
-    for (const [slug, entry] of Object.entries(ledger.managed)) {
-      const owner = entry.context === undefined ? ledger.context : entry.context;
-      if (!owner) legacy = true;
-      if (owner?.profileName !== profileName) continue;
+    for (const slug of Object.keys(ledger.managed)) {
       try {
         if (!/^[a-z0-9][a-z0-9-]*$/.test(slug))
           throw new Error("Invalid managed skill directory name");
@@ -56,14 +53,10 @@ export async function cleanupProfileSkills(
         failures.push(`Could not remove ${target}/${slug}: ${String(error)}`);
       }
     }
-    if (Object.keys(ledger.managed).length === 0 && ledger.context?.profileName === profileName) {
-      delete state.targets[target];
-    }
+    // A target whose removals all failed keeps its entries, so it keeps its
+    // ledger: ownership is what makes the retry able to finish the job.
+    if (Object.keys(ledger.managed).length === 0) delete state.targets[target];
   }
   await writeSyncState(state);
-  if (legacy)
-    failures.push(
-      "Some skills have unknown legacy ownership and were preserved. Reconnect and run skills sync successfully before logging out again to adopt and clean them",
-    );
   return { warnings: failures, pluginReset };
 }

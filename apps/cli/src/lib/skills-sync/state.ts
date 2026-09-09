@@ -20,8 +20,6 @@ import { getDataDir, type Profile } from "../config.ts";
 export const STATE_VERSION = 1;
 
 export interface ManagedSkill {
-  /** null preserves unproven legacy ownership after a failed removal. */
-  context?: SyncContext | null;
   packageId: string;
   /** Resolved version label — semver for `published`, `"draft"` for `draft`. */
   version: string;
@@ -29,6 +27,11 @@ export interface ManagedSkill {
   integrity: string;
 }
 
+/**
+ * Which connection an installation belongs to. One per destination: profiles do
+ * not accumulate installations, so every managed directory under a target was
+ * written by this context.
+ */
 export interface SyncContext {
   profileName: string;
   instance: string;
@@ -36,6 +39,18 @@ export interface SyncContext {
   orgId: string;
   spaceId: string;
 }
+
+/**
+ * `satisfies` makes this exhaustive in both directions, so a field added to
+ * `SyncContext` cannot slip past validation or comparison by being forgotten here.
+ */
+const CONTEXT_KEYS = Object.keys({
+  profileName: 0,
+  instance: 0,
+  userId: 0,
+  orgId: 0,
+  spaceId: 0,
+} satisfies Record<keyof SyncContext, 0>) as (keyof SyncContext)[];
 
 export function syncContext(profileName: string, profile: Profile): SyncContext {
   return {
@@ -47,12 +62,16 @@ export function syncContext(profileName: string, profile: Profile): SyncContext 
   };
 }
 
-export function sameContext(a: SyncContext | undefined, b: SyncContext): boolean {
-  return !!a && Object.entries(b).every(([key, value]) => a[key as keyof SyncContext] === value);
+export function sameContext(a: SyncContext, b: SyncContext): boolean {
+  return CONTEXT_KEYS.every((key) => a[key] === b[key]);
 }
 
 export interface TargetState {
-  context?: SyncContext;
+  /**
+   * Required: a ledger that does not name its context is not this format, and
+   * `isTargetState` refuses it rather than guessing whose directories these are.
+   */
+  context: SyncContext;
   source: "published" | "draft";
   /**
    * Recorded because `HOME` is not a constant — cron, launchd and devcontainers
@@ -75,8 +94,12 @@ function emptySyncState(): SyncState {
   return { version: STATE_VERSION, targets: {} };
 }
 
-export function emptyTargetState(source: TargetState["source"], root: string): TargetState {
-  return { source, root, managed: {} };
+export function emptyTargetState(
+  source: TargetState["source"],
+  root: string,
+  context: SyncContext,
+): TargetState {
+  return { context, source, root, managed: {} };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,8 +115,7 @@ function isManagedSkill(value: unknown): value is ManagedSkill {
     isRecord(value) &&
     isNonEmptyString(value.packageId) &&
     isNonEmptyString(value.version) &&
-    isNonEmptyString(value.integrity) &&
-    (value.context === undefined || value.context === null || isContext(value.context))
+    isNonEmptyString(value.integrity)
   );
 }
 
@@ -101,7 +123,7 @@ function isTargetState(value: unknown): value is TargetState {
   if (!isRecord(value)) return false;
   if (value.source !== "published" && value.source !== "draft") return false;
   if (!isNonEmptyString(value.root)) return false;
-  if (value.context !== undefined && !isContext(value.context)) return false;
+  if (!isContext(value.context)) return false;
   if (!isRecord(value.managed)) return false;
   return Object.values(value.managed).every(isManagedSkill);
 }
@@ -157,10 +179,5 @@ function sortState(state: SyncState): SyncState {
 }
 
 function isContext(value: unknown): value is SyncContext {
-  return (
-    isRecord(value) &&
-    ["profileName", "instance", "userId", "orgId", "spaceId"].every((key) =>
-      isNonEmptyString(value[key]),
-    )
-  );
+  return isRecord(value) && CONTEXT_KEYS.every((key) => isNonEmptyString(value[key]));
 }

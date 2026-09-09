@@ -11,7 +11,7 @@
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { resolveActiveProfile, type Profile } from "../lib/config.ts";
-import { listSpaces, resolveSpaceRef } from "../lib/spaces.ts";
+import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
 import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
@@ -147,7 +147,15 @@ export async function skillsSyncCommand(
         }
       };
       const spaceIds = await selectedSpaces(profileName, profile!, opts.space);
-      const catalogue = await resolveAll(profileName, source, state, targets, report, spaceIds);
+      const catalogue = await resolveAll(
+        profileName,
+        source,
+        state,
+        targets,
+        report,
+        spaceIds,
+        context,
+      );
       const plans = await Promise.all(
         targets.map((target) => diffTarget(target, catalogue, state, source, context)),
       );
@@ -253,6 +261,7 @@ async function resolveAll(
   targets: SyncTarget[],
   report: Report,
   spaceIds: string[],
+  context: SyncContext,
 ): Promise<Catalogue> {
   const origins = new Map<string, string>();
   for (const spaceId of spaceIds) {
@@ -291,7 +300,9 @@ async function resolveAll(
   // caused by nothing but a transient error.
   const reserved = new Set<string>();
   for (const target of targets) {
-    for (const [slug, managed] of Object.entries(ownedLedger(target, state, source).managed)) {
+    for (const [slug, managed] of Object.entries(
+      ownedLedger(target, state, source, context).managed,
+    )) {
       if (unresolved.has(managed.packageId)) reserved.add(slug);
     }
   }
@@ -339,20 +350,12 @@ async function executePlans(
       // not empty the ledger, or its directories become permanently unmanaged.
       const managed = new Map<string, ManagedSkill>();
       const carried: string[] = [];
-      const carry = (slug: string, verified = false): void => {
+      const carry = (slug: string): void => {
         carried.push(slug);
         const entry = plan.ledger.managed[slug];
-        if (entry)
-          managed.set(slug, {
-            ...entry,
-            context: verified
-              ? context
-              : entry.context === undefined
-                ? (plan.ledger.context ?? null)
-                : entry.context,
-          });
+        if (entry) managed.set(slug, entry);
       };
-      for (const slug of plan.keep) carry(slug, bySlug.has(slug));
+      for (const slug of plan.keep) carry(slug);
 
       const fresh: string[] = [];
       for (const slug of plan.write) {
@@ -369,8 +372,7 @@ async function executePlans(
       pluginOk = pluginOk && outcome.ok;
       if (!outcome.ok) continue;
       for (const slug of outcome.retained ?? []) carry(slug);
-      for (const slug of outcome.placed)
-        managed.set(slug, { ...ledgerEntry(bySlug.get(slug)!), context });
+      for (const slug of outcome.placed) managed.set(slug, ledgerEntry(bySlug.get(slug)!));
 
       const root = targetRoot(plan.target);
       const recorded = state.targets[plan.target];
@@ -541,6 +543,11 @@ function uniqueTargets(requested: SyncTarget[] | undefined): SyncTarget[] {
   return [...new Set(requested)];
 }
 
+/**
+ * Which spaces supply skills: explicit `--space` flags, else the profile's
+ * persisted list, else the pinned space. An explicit selection REPLACES the
+ * list — it never adds the pinned space back in.
+ */
 async function selectedSpaces(
   profileName: string,
   profile: Profile,
@@ -548,24 +555,31 @@ async function selectedSpaces(
 ): Promise<string[]> {
   const selected = explicit ?? profile.syncSpaces;
   if (selected === undefined) return [profile.spaceId!];
+  if (selected.length === 0) return [];
   const spaces = await listSpaces(profileName);
-  return [
-    ...new Set(
-      selected.map((ref) => {
-        if (explicit) {
-          const id = spaces.find((space) => space.id === ref.trim());
-          if (id) return id.id;
-          const named = spaces.filter((space) => space.name === ref.trim());
-          if (named.length > 1) throw new Error(`Ambiguous space name "${ref}": use a space ID.`);
-          return named[0]?.id ?? resolveSpaceRef(spaces, ref).id;
-        }
-        if (!spaces.some((space) => space.id === ref)) {
-          throw new Error(
-            `Configured sync space "${ref}" is not accessible in the active organization.`,
-          );
-        }
-        return ref;
-      }),
-    ),
-  ];
+  const ids = explicit
+    ? selected.map((ref) => explicitSpaceId(spaces, ref))
+    : selected.map((id) => configuredSpaceId(spaces, id));
+  return [...new Set(ids)];
+}
+
+/** A flag is typed by hand, so it takes an ID or an unambiguous exact name. */
+function explicitSpaceId(spaces: Space[], ref: string): string {
+  const trimmed = ref.trim();
+  if (spaces.some((space) => space.id === trimmed)) return trimmed;
+  const named = spaces.filter((space) => space.name === trimmed);
+  if (named.length > 1) throw new Error(`Ambiguous space name "${ref}": use a space ID.`);
+  // Nothing matched: `resolveSpaceRef` only throws here, and its message lists
+  // the spaces this profile can see.
+  return named[0]?.id ?? resolveSpaceRef(spaces, trimmed).id;
+}
+
+/**
+ * A persisted list holds IDs. One that the active organization does not contain
+ * is refused rather than silently syncing nothing from it.
+ */
+function configuredSpaceId(spaces: Space[], id: string): string {
+  if (!spaces.some((space) => space.id === id))
+    throw new Error(`Configured sync space "${id}" is not accessible in the active organization.`);
+  return id;
 }

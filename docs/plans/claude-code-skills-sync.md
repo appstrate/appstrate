@@ -64,9 +64,10 @@ Explicit logout removes the profile's managed shared skills and replaces its
 generated plugin with setup files without `.mcp.json`. Another profile's targets
 are preserved. Logout still removes local credentials when remote revocation or
 skill cleanup fails; cleanup failures retain ownership for a later retry. The
-same sync lock serializes cleanup and installation. A legacy ledger without a
-profile identity is preserved until a successful upgraded sync establishes its
-owner; logout reports this migration requirement rather than guessing.
+same sync lock serializes cleanup and installation. A ledger names its context,
+and one that does not is not this format: it is refused whole rather than read
+as "owner unknown", so no code path has to decide whose directories those are.
+The next sync re-materializes and owns them again.
 
 Cleanup changes the generated source immediately. Claude's installed cache and
 an active session are separate: the next command-source refresh, or

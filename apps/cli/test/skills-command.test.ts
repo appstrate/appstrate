@@ -1400,20 +1400,24 @@ describe("logout — managed skills", () => {
     expect(JSON.parse(await readText(getStatePath())).targets.codex).toBeUndefined();
   });
 
-  it("preserves legacy files until a successful sync proves their current context", async () => {
+  it("refuses a ledger that names no context, and owns the tree again after one sync", async () => {
     const { logoutCommand } = await import("../src/commands/logout.ts");
     createSkillServer(ONE_SKILL).install();
     await skillsSyncCommand({}, createMemoryIO().io);
-    const legacy = JSON.parse(await readText(getStatePath()));
-    delete legacy.targets["claude-plugin"].context;
-    for (const entry of Object.values(legacy.targets["claude-plugin"].managed))
-      delete (entry as { context?: unknown }).context;
-    await writeFile(getStatePath(), JSON.stringify(legacy));
+    // The shape written before a ledger carried its context. It is not this
+    // format, so it claims nothing — rather than being read as "owner unknown".
+    const contextless = JSON.parse(await readText(getStatePath()));
+    delete contextless.targets["claude-plugin"].context;
+    await writeFile(getStatePath(), JSON.stringify(contextless));
+
     const before = await snapshot(pluginRoot());
     await logoutCommand({}, createMemoryIO().io);
     expect(await snapshot(pluginRoot())).toEqual(before);
+
     await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
-    await skillsSyncCommand({}, createMemoryIO().io);
+    const { io, stderr } = createMemoryIO();
+    await skillsSyncCommand({}, io);
+    expect(stderr()).toContain("Sync state could not be used and has been ignored");
     await logoutCommand({}, createMemoryIO().io);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
   });

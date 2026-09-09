@@ -128,25 +128,31 @@ export async function readConfig(): Promise<Config> {
     ) {
       continue;
     }
-    if (
-      row.syncSpaces !== undefined &&
-      (!Array.isArray(row.syncSpaces) ||
-        !row.syncSpaces.every((id) => typeof id === "string" && id.trim().length > 0))
-    ) {
-      throw new Error(`Invalid syncSpaces for profile "${name}": expected space IDs.`);
-    }
     profiles[name] = {
       instance: row.instance,
       userId: row.userId,
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
       spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
-      ...(Array.isArray(row.syncSpaces)
-        ? { syncSpaces: [...new Set(row.syncSpaces as string[])] }
-        : {}),
+      ...(row.syncSpaces === undefined ? {} : { syncSpaces: readSyncSpaces(name, row.syncSpaces) }),
     };
   }
   return { defaultProfile, profiles };
+}
+
+/**
+ * Hand-edited, unlike every other field here, so a malformed value is a typo to
+ * report rather than a corrupt write to ignore: a skipped row would surface as
+ * "profile not configured" and send the user to `login`, which overwrites the
+ * pins they were editing. The message names the profile and the fix instead.
+ * Trimming and deduplicating here keeps the rest of the CLI comparing raw IDs.
+ */
+function readSyncSpaces(profileName: string, value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.trim().length > 0))
+    throw new Error(
+      `Invalid syncSpaces for profile "${profileName}" in ${getConfigPath()}: expected an array of space IDs, e.g. syncSpaces = ["spc_abc123"].`,
+    );
+  return [...new Set((value as string[]).map((id) => id.trim()))];
 }
 
 /** Overwrite the config file atomically (tmp + rename). */
