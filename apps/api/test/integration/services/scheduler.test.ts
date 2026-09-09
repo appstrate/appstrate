@@ -200,7 +200,11 @@ describeRequiresRedis("scheduler service", () => {
         cronExpression: "*/30 * * * *",
       });
 
-      const schedules = await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor);
+      const schedules = await listSchedules(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        actor,
+        undefined,
+      );
 
       expect(schedules).toHaveLength(2);
       const names = schedules.map((s) => s.name);
@@ -241,20 +245,29 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const schedules = await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor);
+      const schedules = await listSchedules(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        actor,
+        undefined,
+      );
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("My Schedule");
 
       const otherSchedules = await listSchedules(
         { orgId: otherOrg.id, spaceId: otherDefaultSpaceId },
         actor,
+        undefined,
       );
       expect(otherSchedules).toHaveLength(1);
       expect(otherSchedules[0]!.name).toBe("Other Schedule");
     });
 
     it("returns an empty array when no schedules exist", async () => {
-      const schedules = await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor);
+      const schedules = await listSchedules(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        actor,
+        undefined,
+      );
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -288,6 +301,7 @@ describeRequiresRedis("scheduler service", () => {
         { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
+        undefined,
       );
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("Agent 1 Schedule");
@@ -296,6 +310,7 @@ describeRequiresRedis("scheduler service", () => {
         { orgId: orgId, spaceId: defaultSpaceId },
         pkg2.id,
         actor,
+        undefined,
       );
       expect(schedules2).toHaveLength(1);
       expect(schedules2[0]!.name).toBe("Agent 2 Schedule");
@@ -306,6 +321,7 @@ describeRequiresRedis("scheduler service", () => {
         { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
+        undefined,
       );
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
@@ -327,7 +343,7 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const found = await getSchedule(created.id);
+      const found = await getSchedule(created.id, undefined, null, undefined);
 
       expect(found).not.toBeNull();
       expect(found!.id).toBe(created.id);
@@ -338,7 +354,7 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("returns null for a non-existent ID", async () => {
-      const found = await getSchedule("sched_nonexistent");
+      const found = await getSchedule("sched_nonexistent", undefined, null, undefined);
       expect(found).toBeNull();
     });
   });
@@ -356,9 +372,15 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const updated = await updateSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id, {
-        cronExpression: "*/5 * * * *",
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        created.id,
+        {
+          cronExpression: "*/5 * * * *",
+        },
+        null,
+        undefined,
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.cron_expression).toBe("*/5 * * * *");
@@ -377,9 +399,15 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const updated = await updateSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id, {
-        name: "Updated Name",
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        created.id,
+        {
+          name: "Updated Name",
+        },
+        null,
+        undefined,
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.name).toBe("Updated Name");
@@ -404,6 +432,8 @@ describeRequiresRedis("scheduler service", () => {
         { orgId: orgId, spaceId: defaultSpaceId },
         created.id,
         { cronExpression: "*/15 * * * *" },
+        null,
+        undefined,
       );
       expect(partialUpdate!.generation_config_override).toEqual({ reasoningLevel: "low" });
       expect(partialUpdate!.model_id_override).toBe("model_init");
@@ -411,12 +441,18 @@ describeRequiresRedis("scheduler service", () => {
       expect(partialUpdate!.version_override).toBe("1.0.0");
 
       // Explicit null clears the override (UI's "Inherit" sentinel).
-      const cleared = await updateSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id, {
-        generationConfigOverride: null,
-        modelIdOverride: null,
-        proxyIdOverride: null,
-        versionOverride: null,
-      });
+      const cleared = await updateSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        created.id,
+        {
+          generationConfigOverride: null,
+          modelIdOverride: null,
+          proxyIdOverride: null,
+          versionOverride: null,
+        },
+        null,
+        undefined,
+      );
       expect(cleared!.generation_config_override).toBeNull();
       expect(cleared!.model_id_override).toBeNull();
       expect(cleared!.proxy_id_override).toBeNull();
@@ -436,9 +472,15 @@ describeRequiresRedis("scheduler service", () => {
       expect(created.enabled).toBe(true);
       expect(created.next_run_at).not.toBeNull();
 
-      const updated = await updateSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id, {
-        enabled: false,
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        created.id,
+        {
+          enabled: false,
+        },
+        null,
+        undefined,
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(false);
@@ -455,13 +497,25 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      await updateSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id, {
-        enabled: false,
-      });
+      await updateSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        created.id,
+        {
+          enabled: false,
+        },
+        null,
+        undefined,
+      );
 
-      const updated = await updateSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id, {
-        enabled: true,
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        created.id,
+        {
+          enabled: true,
+        },
+        null,
+        undefined,
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(true);
@@ -480,9 +534,15 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const updated = await updateSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id, {
-        input: { key: "updated", extra: true },
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        created.id,
+        {
+          input: { key: "updated", extra: true },
+        },
+        null,
+        undefined,
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.input).toEqual({ key: "updated", extra: true });
@@ -495,6 +555,8 @@ describeRequiresRedis("scheduler service", () => {
         {
           cronExpression: "*/5 * * * *",
         },
+        null,
+        undefined,
       );
       expect(updated).toBeNull();
     });
@@ -516,7 +578,7 @@ describeRequiresRedis("scheduler service", () => {
       const deleted = await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id);
       expect(deleted).toBe(true);
 
-      const found = await getSchedule(created.id);
+      const found = await getSchedule(created.id, undefined, null, undefined);
       expect(found).toBeNull();
     });
 
@@ -550,7 +612,11 @@ describeRequiresRedis("scheduler service", () => {
 
       await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, schedule2.id);
 
-      const remaining = await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor);
+      const remaining = await listSchedules(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        actor,
+        undefined,
+      );
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
@@ -784,44 +850,70 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("does not list a schedule belonging to another space", async () => {
-      expect(await listSchedules({ orgId: orgId, spaceId: spaceBId }, actor)).toHaveLength(0);
+      expect(
+        await listSchedules({ orgId: orgId, spaceId: spaceBId }, actor, undefined),
+      ).toHaveLength(0);
       // Control: the same org, the owning space — still there.
-      expect(await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor)).toHaveLength(1);
+      expect(
+        await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor, undefined),
+      ).toHaveLength(1);
     });
 
     it("does not list a package's schedules from another space", async () => {
       expect(
-        await listPackageSchedules({ orgId: orgId, spaceId: spaceBId }, packageId, actor),
+        await listPackageSchedules(
+          { orgId: orgId, spaceId: spaceBId },
+          packageId,
+          actor,
+          undefined,
+        ),
       ).toHaveLength(0);
       expect(
-        await listPackageSchedules({ orgId: orgId, spaceId: defaultSpaceId }, packageId, actor),
+        await listPackageSchedules(
+          { orgId: orgId, spaceId: defaultSpaceId },
+          packageId,
+          actor,
+          undefined,
+        ),
       ).toHaveLength(1);
     });
 
     it("does not resolve a schedule by id from another space", async () => {
       expect(
-        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: spaceBId }, actor),
+        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: spaceBId }, actor, undefined),
       ).toBeNull();
       expect(
-        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: defaultSpaceId }, actor),
+        await getSchedule(
+          scheduleIdInA,
+          { orgId: orgId, spaceId: defaultSpaceId },
+          actor,
+          undefined,
+        ),
       ).not.toBeNull();
     });
 
-    // `updateSchedule` gates on its own `getSchedule(id, scope)` read and
+    // `updateSchedule` gates on its own `getSchedule(id, scope, null, undefined)` read and
     // returns null on a miss, so the UPDATE's `spaceId` predicate is
     // defence-in-depth BEHIND that read and cannot be reached independently
     // through this function. What this case pins is the caller-visible half:
     // a cross-space update is a null no-op, never a silent success.
     it("reports no update issued from another space, and the row is unchanged", async () => {
       expect(
-        await updateSchedule({ orgId: orgId, spaceId: spaceBId }, scheduleIdInA, {
-          name: "Hijacked",
-        }),
+        await updateSchedule(
+          { orgId: orgId, spaceId: spaceBId },
+          scheduleIdInA,
+          {
+            name: "Hijacked",
+          },
+          null,
+          undefined,
+        ),
       ).toBeNull();
       const survivor = await getSchedule(
         scheduleIdInA,
         { orgId: orgId, spaceId: defaultSpaceId },
         actor,
+        undefined,
       );
       expect(survivor?.name).toBe("Space A Schedule");
     });
@@ -829,7 +921,12 @@ describeRequiresRedis("scheduler service", () => {
     it("reports no delete from another space, and the row survives", async () => {
       expect(await deleteSchedule({ orgId: orgId, spaceId: spaceBId }, scheduleIdInA)).toBe(false);
       expect(
-        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: defaultSpaceId }, actor),
+        await getSchedule(
+          scheduleIdInA,
+          { orgId: orgId, spaceId: defaultSpaceId },
+          actor,
+          undefined,
+        ),
       ).not.toBeNull();
       // Control: the identical call from the OWNING space does delete, so
       // "false + survives" above is the predicate at work, not a broken id.

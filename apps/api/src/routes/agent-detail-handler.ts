@@ -2,6 +2,7 @@
 
 import type { Context } from "hono";
 import type { AgentManifest, AppEnv } from "../types/index.ts";
+import type { AgentDetail } from "@appstrate/shared-types";
 import {
   getPackage,
   getPackageWithAccess,
@@ -57,7 +58,7 @@ async function buildDependencyGroups(
   m: AgentManifest,
   orgId: string,
   opts: { versioned: boolean; summaryOnly: boolean },
-): Promise<Record<string, unknown>> {
+): Promise<AgentDetail["dependencies"]> {
   const integrations = parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
     id: e.id,
     version: e.version,

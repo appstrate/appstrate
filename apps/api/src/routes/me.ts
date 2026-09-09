@@ -398,16 +398,19 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // `agents:run` (otherwise the model would propose agents that 403 at invoke).
   // The list is space-scoped (same for every actor in the space), capped for prompt
   // size, and authoritative execution still re-checks RBAC at the run route.
-  // Skills, like agents, are only useful for building/configuring an agent run,
-  // so they share the `agents:run` gate. They aren't run directly — the model
-  // declares them under an agent manifest's `dependencies.skills`.
-  const canRun = (c.get("permissions") as Set<string> | undefined)?.has("agents:run") ?? false;
+  // Skills are a catalog read, not a runnable hint: naming them here is the same
+  // disclosure `GET /api/packages/skills` makes, so they answer to `skills:read`.
+  // A runner launches what someone else composed and never learns what it is
+  // composed of (RBAC spec §3.4, D-B4).
+  const permissions = c.get("permissions") as Set<string> | undefined;
+  const canRun = permissions?.has("agents:run") ?? false;
+  const canReadSkills = permissions?.has("skills:read") ?? false;
   const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
     listUsableIntegrationsForActor(scope, actor),
     canRun
       ? listRunnableAgents(scope)
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
-    canRun
+    canReadSkills
       ? listInstalledSkills(scope)
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
     // The caller's own recent runs (actor-scoped) — no extra permission needed.

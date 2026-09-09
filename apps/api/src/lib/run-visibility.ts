@@ -13,9 +13,15 @@
  * latter's `user_id IS NULL` arm matches every end-user's run for a member
  * actor, which is precisely the supervision `read-all` exists to gate.
  *
- * One semantic, three shapes — a WHERE fragment for the queries that list, an
- * ownership test for a loaded row, and the assertion that turns it into the
- * 404 a handler throws. Nothing re-derives ownership on its own.
+ * A published file copies its run's attribution (`runs-events.ts`,
+ * `getRunAttribution`), so the file row and the run row answer the same
+ * ownership question — which is why the file surfaces test whichever of the
+ * two they already have loaded rather than joining back to the other.
+ *
+ * One semantic, four shapes — the read-all test itself, a WHERE fragment for
+ * the queries that list, an ownership test for a loaded row, and the assertion
+ * that turns it into the 404 a handler throws. Nothing re-derives ownership on
+ * its own.
  */
 
 import type { Context } from "hono";
@@ -24,7 +30,36 @@ import type { Actor } from "@appstrate/connect";
 import { runs } from "@appstrate/db/schema";
 import { actorFilter, getActor } from "./actor.ts";
 import { notFound } from "./errors.ts";
+import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { AppEnv } from "../types/index.ts";
+
+/**
+ * Does this principal read the whole space's runs? Named for the question, not
+ * for the permission string, so the SSE auth result's `canReadEveryRun` and the
+ * subscriber filter's `readAll` each keep the name their own neighbours gave
+ * them (`canReadDebugLogs`, `isAdmin`) while asking this one predicate.
+ */
+export function canReadEveryRun(permissions: ReadonlySet<string> | undefined): boolean {
+  return permissions?.has("runs:read-all") ?? false;
+}
+
+/**
+ * The two permissions that open a run read surface.
+ *
+ * `read-all` is a superset of `read`, not a companion to it: a principal
+ * granted only the wide permission reads every run in the space, so it opens
+ * every surface `read` opens. Requiring `read` alone would make `read-all`
+ * inert on its own.
+ */
+const RUNS_READ_PERMISSIONS = ["runs:read", "runs:read-all"] as const;
+
+/** The guard on every surface `runs:read` opens — see {@link RUNS_READ_PERMISSIONS}. */
+export const requireRunsRead = requireAnyPermission(RUNS_READ_PERMISSIONS);
+
+/** The same disjunction for the SSE routes, which resolve permissions by hand. */
+export function canReadRuns(permissions: ReadonlySet<string>): boolean {
+  return RUNS_READ_PERMISSIONS.some((permission) => permissions.has(permission));
+}
 
 /** The in-memory twin of `actorFilter` on a loaded run row: did this principal launch it? */
 export function ownsRun(
@@ -36,7 +71,7 @@ export function ownsRun(
 
 /** WHERE fragment narrowing `runs` to what the caller may read; `undefined` = no narrowing. */
 export function runVisibilityFilter(c: Context<AppEnv>): SQL | undefined {
-  if (c.get("permissions")?.has("runs:read-all")) return undefined;
+  if (canReadEveryRun(c.get("permissions"))) return undefined;
   return actorFilter(getActor(c), { userId: runs.userId, endUserId: runs.endUserId });
 }
 
@@ -48,6 +83,6 @@ export function assertRunVisible(
   c: Context<AppEnv>,
   row: { userId: string | null; endUserId: string | null },
 ): void {
-  if (c.get("permissions")?.has("runs:read-all")) return;
+  if (canReadEveryRun(c.get("permissions"))) return;
   if (!ownsRun(getActor(c), row)) throw notFound("Run not found");
 }

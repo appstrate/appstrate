@@ -52,10 +52,10 @@ interface NotificationListResult {
  *  - actor-less run (owner-less org / system schedule, where the scheduler
  *    copied a null userId+endUserId onto the run) → org admins/owners only.
  *    Owned schedules carry the owner's userId onto the run, so they hit the
- *    first branch (one notification, no fan-out). Restricting the actor-less
- *    case to admins bounds row growth and avoids bell-spamming every member
- *    for a schedule nobody personally owns; plain members still see the run
- *    in the runs list.
+ *    first branch (one notification, no fan-out). An actor-less row is readable
+ *    only with `runs:read-all` (RBAC spec §3.4) — nobody else would find the
+ *    run behind the bell — which is why the fan-out targets org admins, and it
+ *    bounds row growth at the same time.
  *
  * Best-effort by contract: the caller wraps this in try/catch — the run is
  * already terminal, a notification write must never fail the run.

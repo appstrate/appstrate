@@ -92,7 +92,13 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -118,7 +124,13 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -146,7 +158,13 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -170,12 +188,18 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
 
     addSubscriber({
       id: "ours",
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send: sendOurs,
     });
     addSubscriber({
       id: "other",
-      filter: { orgId: "alien-org", spaceId: "alien-space", isAdmin: true },
+      filter: { readAll: true, orgId: "alien-org", spaceId: "alien-space", isAdmin: true },
       send: sendOther,
     });
 

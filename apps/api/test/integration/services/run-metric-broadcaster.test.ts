@@ -81,7 +81,13 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -119,7 +125,13 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -144,7 +156,13 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -181,12 +199,18 @@ describe("run-metric-broadcaster (integration)", () => {
 
     addSubscriber({
       id: "sub-ours",
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send: sendOurs,
     });
     addSubscriber({
       id: "sub-other",
-      filter: { orgId: "intruder-org", spaceId: "intruder-space", isAdmin: true },
+      filter: { readAll: true, orgId: "intruder-org", spaceId: "intruder-space", isAdmin: true },
       send: sendOther,
     });
 
@@ -205,7 +229,13 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -307,7 +337,13 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+        filter: {
+          readAll: true,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          runId,
+          isAdmin: true,
+        },
         send,
       });
 
@@ -338,7 +374,13 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+        filter: {
+          readAll: true,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          runId,
+          isAdmin: true,
+        },
         send,
       });
 
@@ -489,7 +531,13 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+        filter: {
+          readAll: true,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          runId,
+          isAdmin: true,
+        },
         send,
       });
 
@@ -537,7 +585,13 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+        filter: {
+          readAll: true,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          runId,
+          isAdmin: true,
+        },
         send,
       });
 
@@ -605,7 +659,13 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
@@ -665,7 +725,7 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, isAdmin: true },
+      filter: { readAll: true, orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, isAdmin: true },
       send,
     });
 

@@ -688,16 +688,17 @@ export async function parseRequestInput(
                     id,
                     c.get("permissions"),
                   );
-                  // Cross-actor ACL (S2): the container ACL already narrows a
-                  // run-contained output to the runs the caller may read
-                  // (`runs:read-all`, else its own), and the `download`
+                  // Cross-actor ACL (S2): the container ACL is the outer gate
+                  // and narrows a run-contained output to the runs the caller
+                  // may read (`runs:read-all`, else its own); the `download`
                   // capability adds the per-file rule on top — a `user_upload`
                   // is creator-only content, so a member must not deliver
                   // another member's private upload into their own run.
-                  // `download` is always true for an `agent_output` (freely
-                  // chainable, D6) but only for the creator of an upload. A
-                  // rejected ref is indistinguishable from missing (404),
-                  // matching the not-found shape above.
+                  // `download` is always true for an `agent_output` — chainable
+                  // within the container the outer gate already granted (D6) —
+                  // and true for an upload only for its creator. A rejected ref
+                  // is indistinguishable from missing (404), matching the
+                  // not-found shape above.
                   if (!doc || !doc.capabilities.download) throw notFound(`File '${id}' not found`);
                   return { ref, doc: doc.row };
                 }),

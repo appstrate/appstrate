@@ -221,6 +221,37 @@ describe("runner preset", () => {
     expect(await res.json()).toMatchObject({ modelId: null, generation: null });
   });
 
+  it("names the agents a runner may launch and none of the skills it may not read", async () => {
+    // `/api/me/context` is the caller context an AI agent reads — the chat
+    // module injects it into its system prompt and the MCP `get_me` tool
+    // returns it, both by dispatching THIS route in-process with the caller's
+    // headers, so there is one gate and it is here. Agents are a runnable hint
+    // (`agents:run`); the installed skills are a catalog read (`skills:read`),
+    // the same disclosure `GET /api/packages/skills` refuses a runner.
+    await seedInstalledPackage(owner.defaultSpaceId, SKILL_ID);
+
+    const contextFor = async (ctx: TestContext) => {
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      return (await res.json()) as {
+        agents: { package_id: string }[];
+        agents_total: number;
+        skills: { package_id: string }[];
+        skills_total: number;
+      };
+    };
+
+    const asRunner = await contextFor(runner);
+    expect(asRunner.agents.map((a) => a.package_id)).toContain(AGENT_ID);
+    expect(asRunner.skills).toEqual([]);
+    expect(asRunner.skills_total).toBe(0);
+
+    const asOperator = await contextFor(operator);
+    expect(asOperator.agents.map((a) => a.package_id)).toContain(AGENT_ID);
+    expect(asOperator.skills.map((sk) => sk.package_id)).toEqual([SKILL_ID]);
+    expect(asOperator.skills_total).toBe(1);
+  });
+
   it("403s every other agent and package read", async () => {
     const denied = [
       // The packages-router agent surfaces: listing, versions, the file explorer.

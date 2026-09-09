@@ -158,15 +158,22 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   carry only your runs, and the single-run stream refuses one you may not read)
   — and a run you may not read answers `404`, never `403`. Bulk-deleting an
   agent's runs takes `runs:read-all` alongside `runs:delete`: it spans the whole
-  space. One consequence runs the other way: an end-user now receives the log
-  and metric frames of its own runs, which those two channels used to drop
-  wholesale for want of an actor in their payload.
+  space. The three realtime channels now answer one uniform rule: the `run_log`
+  and `run_metric` payloads carry the run's actor, which the log channel had no
+  way to read before and so could not gate on at all.
   `GET /api/runs?user=me` is now strictly your own runs for every caller,
   end-user and actor-less runs included, whether or not you hold `read-all`.
   Attaching a file to a chat reads as wide as the gallery you picked it from:
   `ChatAttachmentRequest.permissions` (`@appstrate/core/chat-contract`) carries
   the caller's set, so a `runs:read-all` holder attaches a colleague's run
   output and everyone else attaches only their own.
+
+  **OPERATOR ACTIONS.** The `run_log` gate lives in a trigger body the API
+  installs at boot (`createNotifyTriggers`), not in a migration, so a replica
+  still running the previous version re-installs the actor-less body and the new
+  replicas then drop every `run_log` frame for a subscriber without
+  `runs:read-all` — silently, and fail-closed. Deploy every API replica in one
+  step; a single-replica deployment is unaffected.
 
 - **The commercial module stores its tables in the platform database.**
   `@appstrate/module-ee` does not run a PostgreSQL database of its own: it reads

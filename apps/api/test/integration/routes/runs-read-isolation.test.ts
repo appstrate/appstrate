@@ -205,6 +205,49 @@ describe("run read isolation between members", () => {
     expect(((await asOwner.json()) as RunList).data.map((r) => r.id)).toEqual([runAScheduled]);
   });
 
+  it("scopes a schedule's run counters to the runs the caller may read", async () => {
+    // The counters ride on the schedule DTO, which `schedules:read` hands to
+    // the whole space — so a colleague reads A's schedule row and must still
+    // read zeroes off it, or the card reports activity behind an empty list.
+    await seedRun({
+      packageId: AGENT_ID,
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      userId: operatorA.user.id,
+      scheduleId,
+      status: "running",
+      runNumber: 7,
+    });
+
+    interface ScheduleCounters {
+      id: string;
+      running_runs: number;
+      last_run_number: number;
+    }
+    const countersFor = async (ctx: TestContext) => {
+      const detail = await app.request(`/api/schedules/${scheduleId}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(detail.status).toBe(200);
+      const list = await app.request("/api/schedules", { headers: authHeaders(ctx) });
+      expect(list.status).toBe(200);
+      const row = ((await list.json()) as { data: ScheduleCounters[] }).data.find(
+        (sched) => sched.id === scheduleId,
+      );
+      const one = (await detail.json()) as ScheduleCounters;
+      // The detail and the list must not disagree — they are one query.
+      expect(row).toMatchObject({
+        running_runs: one.running_runs,
+        last_run_number: one.last_run_number,
+      });
+      return { running_runs: one.running_runs, last_run_number: one.last_run_number };
+    };
+
+    expect(await countersFor(operatorB)).toEqual({ running_runs: 0, last_run_number: 0 });
+    expect(await countersFor(operatorA)).toEqual({ running_runs: 1, last_run_number: 7 });
+    expect(await countersFor(owner)).toEqual({ running_runs: 1, last_run_number: 7 });
+  });
+
   it("404s detail, logs and cancel on every run a member does not own", async () => {
     for (const [label, runId] of [
       ["colleague", runB],
@@ -266,6 +309,15 @@ describe("run read isolation between members", () => {
     expect((await listedRuns(await headersFor(["runs:read", "runs:read-all"]))).sort()).toEqual(
       [runA, runB, runAScheduled, runEndUser, runLegacy].sort(),
     );
+
+    // `read-all` is the wider of the two, not a companion to `read`: a key
+    // minted with it alone opens every surface `read` opens.
+    const readAllOnly = await headersFor(["runs:read-all"]);
+    expect((await listedRuns(readAllOnly)).sort()).toEqual(
+      [runA, runB, runAScheduled, runEndUser, runLegacy].sort(),
+    );
+    const colleague = await app.request(`/api/runs/${runB}`, { headers: readAllOnly });
+    expect(colleague.status).toBe(200);
   });
 
   it("applies the persona's set under X-View-As, not the previewer's", async () => {

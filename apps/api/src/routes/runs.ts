@@ -24,7 +24,7 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
-import { runVisibilityFilter, assertRunVisible } from "../lib/run-visibility.ts";
+import { runVisibilityFilter, assertRunVisible, requireRunsRead } from "../lib/run-visibility.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
@@ -391,24 +391,19 @@ export function createRunsRouter() {
   );
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
-  router.get(
-    `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
-    requirePermission("runs", "read"),
-    requireAgent(),
-    async (c) => {
-      const agent = c.get("package");
-      const scope = getSpaceScope(c);
-      const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
-      const result = await listPackageRuns(scope, agent.id, {
-        limit,
-        offset,
-        actor: getActor(c),
-        visibility: runVisibilityFilter(c),
-      });
-      setOffsetLinkHeader({ c, limit, offset, total: result.total });
-      return c.json(result);
-    },
-  );
+  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), async (c) => {
+    const agent = c.get("package");
+    const scope = getSpaceScope(c);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+    const result = await listPackageRuns(scope, agent.id, {
+      limit,
+      offset,
+      actor: getActor(c),
+      visibility: runVisibilityFilter(c),
+    });
+    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    return c.json(result);
+  });
 
   // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
@@ -420,7 +415,7 @@ export function createRunsRouter() {
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
-  router.get("/runs", requirePermission("runs", "read"), async (c) => {
+  router.get("/runs", requireRunsRead, async (c) => {
     const actor = getActor(c);
     const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
@@ -477,7 +472,7 @@ export function createRunsRouter() {
   // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
   // services/run-wait.ts. Auth/scoping is identical to the plain call:
   // ownership is verified BEFORE any waiting starts.
-  router.get("/runs/:id", requirePermission("runs", "read"), async (c) => {
+  router.get("/runs/:id", requireRunsRead, async (c) => {
     const runId = c.req.param("id")!;
     const scope = getSpaceScope(c);
     // Validate the wait param before touching the DB so a malformed value
@@ -544,7 +539,7 @@ export function createRunsRouter() {
   // Rate limited at 120/min per identity (same budget as the inbound MCP
   // server) — the log history can be large and the CLI tail polls it in a
   // loop, so an unmetered caller could turn this read into a DB hammer.
-  router.get("/runs/:id/logs", requirePermission("runs", "read"), rateLimit(120), async (c) => {
+  router.get("/runs/:id/logs", requireRunsRead, rateLimit(120), async (c) => {
     const runId = c.req.param("id")!;
     const scope = getSpaceScope(c);
     const exec = await getRun(scope, runId);

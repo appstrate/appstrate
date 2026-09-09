@@ -53,12 +53,14 @@ type Subscriber = {
     userId?: string;
     endUserId?: string;
     /**
-     * Does the subscriber hold `runs:read-all` in the streamed space? Without
-     * it the run channels carry only the runs this principal launched. Absent
-     * on a subscriber with no principal identity at all — the in-process
-     * `run-wait` waker, whose route already checked the run's visibility.
+     * Does the subscriber read every run of the streamed space? Without it the
+     * run channels carry only the runs this principal launched. Required
+     * rather than optional: the run gate refuses a subscriber it cannot place,
+     * so every caller states the answer — an SSE stream from its principal's
+     * `runs:read-all` grant, the in-process `run-wait` waker from the
+     * visibility its route already checked.
      */
-    readAll?: boolean;
+    readAll: boolean;
   };
   send: (event: RealtimeEvent) => void;
 };
@@ -98,21 +100,21 @@ function anyAccepts(channel: RealtimeChannel): boolean {
 /**
  * Run-read gate (RBAC spec §3.4), applied to every run channel.
  *
- * `runs:read-all` is the whole space; without it a principal receives only the
- * frames of the runs it launched — `user_id` for a dashboard session or an API
- * key, `end_user_id` for an end-user. Strict: a frame whose actor column is
- * NULL (an end-user's run seen from a dashboard stream, or a row from a launch
- * path that predates #735) reaches `read-all` subscribers alone.
+ * `readAll` is the whole space; without it a principal receives only the frames
+ * of the runs it launched — `user_id` for a dashboard session or an API key,
+ * `end_user_id` for an end-user. Strict: a frame whose actor column is NULL (an
+ * end-user's run seen from a dashboard stream, or a row from a launch path that
+ * predates #735) reaches `readAll` subscribers alone.
  *
- * A subscriber carrying neither identity is not a principal — it is the
- * in-process `run-wait` waker, which subscribes on behalf of a route that has
- * already checked what the caller may read.
+ * Closed by default: a subscriber that declares neither `readAll` nor an
+ * identity to match the frame against is one this gate cannot place, so it
+ * receives nothing. Every subscriber therefore says which of the two it is.
  */
 function readsRun(sub: Subscriber, raw: Record<string, unknown>): boolean {
   if (sub.filter.readAll) return true;
   if (sub.filter.endUserId !== undefined) return raw.end_user_id === sub.filter.endUserId;
   if (sub.filter.userId !== undefined) return raw.user_id === sub.filter.userId;
-  return true;
+  return false;
 }
 
 /** Convert snake_case keys from PG NOTIFY to camelCase for API consistency. */
@@ -175,7 +177,9 @@ function handleRunLogInsert(payload: string): void {
       if (!sub.filter.isAdmin && raw.level === "debug") continue;
       // Run-read gate: `notify_run_log_insert()` resolves the run's actor
       // alongside its space, so a log frame is gated exactly like the
-      // `run_update` frame of the same run — an end-user included.
+      // `run_update` frame of the same run — one uniform rule across the three
+      // run channels, rather than this one dropping every frame for want of an
+      // actor in its payload.
       if (!readsRun(sub, raw)) continue;
       sub.send({ event: "run_log", data: parsed.data });
     }

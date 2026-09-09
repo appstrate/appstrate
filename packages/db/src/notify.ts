@@ -127,10 +127,15 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'type', NEW.type,
         'level', NEW.level,
         'event', NEW.event,
+        -- Payload budget: pg_notify raises above 8 000 bytes, and it raises
+        -- INSIDE this trigger, so an over-long frame aborts the run_logs INSERT
+        -- rather than merely losing a frame. The two caps below (2 000 for the
+        -- message, 5 000 for the data) plus the fixed keys, the two ids and the
+        -- two actor columns stay under that ceiling with room to spare.
         'message', LEFT(NEW.message, 2000),
         'data', CASE
           WHEN NEW.data IS NULL THEN NULL
-          WHEN octet_length(NEW.data::text) <= 6000 THEN NEW.data
+          WHEN octet_length(NEW.data::text) <= 5000 THEN NEW.data
           ELSE '"[payload too large]"'::jsonb
         END,
         'created_at', to_char(NEW.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')

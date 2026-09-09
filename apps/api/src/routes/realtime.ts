@@ -23,7 +23,7 @@ import {
   validateViewAs,
 } from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
-import { ownsRun } from "../lib/run-visibility.ts";
+import { canReadEveryRun, canReadRuns, ownsRun } from "../lib/run-visibility.ts";
 import {
   reportPermissionDenial,
   VIEW_AS_ACTIVE_HEADER,
@@ -97,9 +97,9 @@ interface SSEAuthResult {
    */
   canReadDebugLogs: boolean;
   /**
-   * `runs:read-all` in the streamed space. `runs:read` opens the stream for
-   * every principal but means "the runs I launched"; this is what widens the
-   * three run channels to the whole space (RBAC spec §3.4).
+   * `runs:read-all` in the streamed space. Either run-read permission opens the
+   * stream, and `runs:read` alone means "the runs I launched"; this is what
+   * widens the three run channels to the whole space (RBAC spec §3.4).
    */
   canReadEveryRun: boolean;
   spaceId: string;
@@ -142,7 +142,9 @@ async function resolveSpaceGrants(
  *
  * Both branches resolve permissions as the HTTP pipeline does (key: scopes ∩
  * creator's live authority in the key's space; session: org ∪ space) and both
- * must carry `runs:read`; 403 otherwise, never inherited admin.
+ * must carry a run-read permission — `runs:read` or the wider `runs:read-all`,
+ * the same disjunction `requireRunsRead` applies on the HTTP routes; 403
+ * otherwise, never inherited admin.
  *
  * ROLE PREVIEW arrives as `?view_as=` (same grammar and validation as
  * `X-View-As`): an `EventSource` cannot send a header, and the header guard
@@ -198,7 +200,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       orgPermissions: grants,
       scopeCeiling: new Set(keyInfo.scopes),
     });
-    if (!permissions.has("runs:read")) {
+    if (!canReadRuns(permissions)) {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
 
@@ -208,7 +210,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       // From the ceilinged set, not `grants`: the key's scopes bound debug-log
       // visibility and the span of runs the stream carries.
       canReadDebugLogs: permissions.has("runs:delete"),
-      canReadEveryRun: permissions.has("runs:read-all"),
+      canReadEveryRun: canReadEveryRun(permissions),
       spaceId: keyInfo.spaceId,
     };
   }
@@ -274,7 +276,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     });
   }
   // Same floor as the key branch; a session has no ceiling, so its effective set IS `grants`.
-  if (!grants.has("runs:read")) {
+  if (!canReadRuns(grants)) {
     throw forbidden("Caller does not have the 'runs:read' permission in this space");
   }
 
@@ -282,7 +284,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     userId: session.user.id,
     orgId,
     canReadDebugLogs: grants.has("runs:delete"),
-    canReadEveryRun: grants.has("runs:read-all"),
+    canReadEveryRun: canReadEveryRun(grants),
     spaceId,
   };
 }

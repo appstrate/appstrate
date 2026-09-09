@@ -202,6 +202,54 @@ describe("NOTIFY triggers (regression)", () => {
     });
   });
 
+  // The budget the trigger body documents: pg_notify raises above 8 000 bytes,
+  // and it raises INSIDE the trigger, so an over-long payload does not lose a
+  // frame — it aborts the `run_logs` INSERT. Both sides of the `data` cap are
+  // pinned here because the actor columns added to the payload spend part of
+  // the same 8 000.
+  it("notify_run_log_insert replaces oversized log data and keeps the INSERT", async () => {
+    const run = await seedRun({
+      packageId: "@notifyorg/trigger-agent",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      status: "running",
+    });
+
+    const received: Array<Record<string, unknown>> = [];
+    await listenClient.listen("run_log_insert", (raw) => {
+      try {
+        const payload = JSON.parse(raw) as Record<string, unknown>;
+        if (payload.run_id === run.id) received.push(payload);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // `{"blob":"…"}` — 12 bytes of JSON around the string, so 4 900 characters
+    // is comfortably under the 5 000-byte cap and 6 000 comfortably over it.
+    await seedRunLog({
+      runId: run.id,
+      orgId: ctx.orgId,
+      message: "small data",
+      data: { blob: "x".repeat(4_900) },
+    });
+    await seedRunLog({
+      runId: run.id,
+      orgId: ctx.orgId,
+      message: "large data",
+      data: { blob: "x".repeat(6_000) },
+    });
+    for (let i = 0; i < 40 && received.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    expect(received).toHaveLength(2);
+    expect(received[0]).toMatchObject({ message: "small data" });
+    expect((received[0]!.data as { blob: string }).blob).toHaveLength(4_900);
+    expect(received[1]).toMatchObject({ message: "large data", data: "[payload too large]" });
+  });
+
   // Drives the live "Reconnection required" badge end-to-end: trigger →
   // pg_notify → LISTEN → SSE event. The actor filter on the realtime
   // subscriber is exercised separately in services/realtime tests; here we

@@ -157,6 +157,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     addSubscriber({
       id: subId,
       filter: {
+        readAll: true,
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         isAdmin: true,
@@ -192,6 +193,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     addSubscriber({
       id: subId,
       filter: {
+        readAll: true,
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         isAdmin: true,
@@ -214,6 +216,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     addSubscriber({
       id: subId,
       filter: {
+        readAll: true,
         orgId: ctxOther.orgId,
         spaceId: ctxOther.defaultSpaceId,
         isAdmin: true,
@@ -238,6 +241,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     addSubscriber({
       id: subId,
       filter: {
+        readAll: true,
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         isAdmin: true,
@@ -258,6 +262,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     addSubscriber({
       id: subId,
       filter: {
+        readAll: true,
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         isAdmin: true,

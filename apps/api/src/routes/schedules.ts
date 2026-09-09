@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import { connectionOverridesSchema, dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import {
@@ -156,12 +157,15 @@ async function assertScheduleTargetValid(args: {
 
 /**
  * Load a schedule in the caller's scope, or 404 with the message the three
- * `/schedules/:id` routes have always answered. `viewer` is passed only by the
- * read route, whose visibility narrows to the actor's own schedules; the write
- * routes are admin-scoped and deliberately look up the whole space.
+ * `/schedules/:id` routes have always answered.
+ *
+ * The row is rendered for the CALLER: `unread_count` against their recipient
+ * tuple, `running_runs` and `last_run_number` against the runs they may read.
+ * The two write routes use it as an existence check and discard those counters,
+ * so the caller's scoping is the one rule here rather than a per-route choice.
  */
-async function loadScheduleOr404(id: string, scope: SpaceScope, viewer?: Actor) {
-  const schedule = await getSchedule(id, scope, viewer);
+async function loadScheduleOr404(c: Context<AppEnv>, id: string, scope: SpaceScope) {
+  const schedule = await getSchedule(id, scope, getActor(c), runVisibilityFilter(c));
   if (!schedule) {
     throw notFound(`Schedule '${id}' not found`);
   }
@@ -273,7 +277,7 @@ export function createSchedulesRouter() {
     const scope = getSpaceScope(c);
     // The caller is the VIEWER of the run counters (`unread_count` is
     // recipient-scoped), never the schedules' own execution actor.
-    const schedules = await listSchedules(scope, getActor(c));
+    const schedules = await listSchedules(scope, getActor(c), runVisibilityFilter(c));
     return c.json(listResponse(schedules));
   });
 
@@ -285,7 +289,12 @@ export function createSchedulesRouter() {
     async (c) => {
       const scope = getSpaceScope(c);
       const agent = c.get("package");
-      const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
+      const schedules = await listPackageSchedules(
+        scope,
+        agent.id,
+        getActor(c),
+        runVisibilityFilter(c),
+      );
       return c.json(listResponse(schedules));
     },
   );
@@ -368,7 +377,7 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id — get a single schedule
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
-    const schedule = await loadScheduleOr404(id, getSpaceScope(c), getActor(c));
+    const schedule = await loadScheduleOr404(c, id, getSpaceScope(c));
     return c.json(schedule);
   });
 
@@ -376,7 +385,7 @@ export function createSchedulesRouter() {
   router.put("/schedules/:id", requirePermission("schedules", "write"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
-    const existing = await loadScheduleOr404(id, scope);
+    const existing = await loadScheduleOr404(c, id, scope);
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -512,6 +521,7 @@ export function createSchedulesRouter() {
       // identity; the run counters in the response belong to whoever is
       // looking at it.
       getActor(c),
+      runVisibilityFilter(c),
     );
     // Mirror schedule.created: explicit camelCase keys (dominant audit
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
@@ -549,7 +559,7 @@ export function createSchedulesRouter() {
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
-    await loadScheduleOr404(id, scope);
+    await loadScheduleOr404(c, id, scope);
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
       action: "schedule.deleted",

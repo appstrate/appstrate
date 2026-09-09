@@ -35,9 +35,9 @@ const SSE_CHANNELS_DESCRIPTION =
  */
 const SSE_RUN_VISIBILITY_DESCRIPTION =
   "\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller " +
-  "may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched " +
-  "(an end-user principal receives its own runs' frames). The single-run stream refuses a run the " +
-  "caller may not read with 404, the same answer as `GET /api/runs/{id}`.";
+  "may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. " +
+  "The single-run stream refuses a run the caller may not read with 404, the same answer as " +
+  "`GET /api/runs/{id}`.";
 
 export const realtimePaths = {
   "/api/realtime/runs": {

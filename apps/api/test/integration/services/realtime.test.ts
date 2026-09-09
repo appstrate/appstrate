@@ -47,7 +47,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-lifecycle", spaceId: "space-lifecycle" },
+        filter: { readAll: true, orgId: "org-lifecycle", spaceId: "space-lifecycle" },
         send,
       });
 
@@ -84,7 +84,7 @@ describe("realtime service (integration)", () => {
       const id = "sub-org-match";
       trackSubscriber(id);
 
-      addSubscriber({ id, filter: { orgId: "org1", spaceId: "space1" }, send });
+      addSubscriber({ id, filter: { readAll: true, orgId: "org1", spaceId: "space1" }, send });
 
       await pgNotify("run_update", {
         org_id: "org1",
@@ -116,12 +116,12 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id: "sub-org1",
-        filter: { orgId: "org-alpha", spaceId: "space-alpha" },
+        filter: { readAll: true, orgId: "org-alpha", spaceId: "space-alpha" },
         send: sendOrg1,
       });
       addSubscriber({
         id: "sub-org2",
-        filter: { orgId: "org-beta", spaceId: "space-beta" },
+        filter: { readAll: true, orgId: "org-beta", spaceId: "space-beta" },
         send: sendOrg2,
       });
 
@@ -145,12 +145,12 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id: "sub-space1",
-        filter: { orgId: "org-shared", spaceId: "space-one" },
+        filter: { readAll: true, orgId: "org-shared", spaceId: "space-one" },
         send: sendSpace1,
       });
       addSubscriber({
         id: "sub-space2",
-        filter: { orgId: "org-shared", spaceId: "space-two" },
+        filter: { readAll: true, orgId: "org-shared", spaceId: "space-two" },
         send: sendSpace2,
       });
 
@@ -173,7 +173,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-ef", spaceId: "space-ef", runId: "target-exec" },
+        filter: { readAll: true, orgId: "org-ef", spaceId: "space-ef", runId: "target-exec" },
         send,
       });
 
@@ -206,7 +206,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-pf", spaceId: "space-pf", packageId: "target-pkg" },
+        filter: { readAll: true, orgId: "org-pf", spaceId: "space-pf", packageId: "target-pkg" },
         send,
       });
 
@@ -245,7 +245,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-log", spaceId: "space-log", isAdmin: false },
+        filter: { readAll: true, orgId: "org-log", spaceId: "space-log", isAdmin: false },
         send,
       });
 
@@ -281,7 +281,12 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-log-admin", spaceId: "space-log-admin", isAdmin: true },
+        filter: {
+          readAll: true,
+          orgId: "org-log-admin",
+          spaceId: "space-log-admin",
+          isAdmin: true,
+        },
         send,
       });
 
@@ -306,7 +311,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-lef", spaceId: "space-lef", runId: "target-log-exec" },
+        filter: { readAll: true, orgId: "org-lef", spaceId: "space-lef", runId: "target-log-exec" },
         send,
       });
 
@@ -341,7 +346,7 @@ describe("realtime service (integration)", () => {
       // isAdmin omitted (undefined) — should behave as non-admin.
       addSubscriber({
         id,
-        filter: { orgId: "org-default", spaceId: "space-default" },
+        filter: { readAll: true, orgId: "org-default", spaceId: "space-default" },
         send,
       });
 
@@ -376,7 +381,13 @@ describe("realtime service (integration)", () => {
       trackSubscriber(id);
       addSubscriber({
         id,
-        filter: { orgId: "org-m", spaceId: "space-m", runId: "exec-m", isAdmin: true },
+        filter: {
+          readAll: true,
+          orgId: "org-m",
+          spaceId: "space-m",
+          runId: "exec-m",
+          isAdmin: true,
+        },
         send,
       });
 
@@ -410,7 +421,13 @@ describe("realtime service (integration)", () => {
       trackSubscriber(id);
       addSubscriber({
         id,
-        filter: { orgId: "org-mr", spaceId: "space-mr", runId: "target", isAdmin: true },
+        filter: {
+          readAll: true,
+          orgId: "org-mr",
+          spaceId: "space-mr",
+          runId: "target",
+          isAdmin: true,
+        },
         send,
       });
 
@@ -444,6 +461,7 @@ describe("realtime service (integration)", () => {
       addSubscriber({
         id,
         filter: {
+          readAll: true,
           orgId: "org-mp",
           spaceId: "space-mp",
           packageId: "@scope/want",
@@ -482,12 +500,12 @@ describe("realtime service (integration)", () => {
       trackSubscriber("sub-metric-orgB");
       addSubscriber({
         id: "sub-metric-orgA",
-        filter: { orgId: "org-A", spaceId: "space-A", isAdmin: true },
+        filter: { readAll: true, orgId: "org-A", spaceId: "space-A", isAdmin: true },
         send: sendA,
       });
       addSubscriber({
         id: "sub-metric-orgB",
-        filter: { orgId: "org-B", spaceId: "space-B", isAdmin: true },
+        filter: { readAll: true, orgId: "org-B", spaceId: "space-B", isAdmin: true },
         send: sendB,
       });
 
@@ -629,6 +647,7 @@ describe("realtime service (integration)", () => {
       addSubscriber({
         id,
         filter: {
+          readAll: true,
           orgId: "org-ch",
           spaceId: "space-ch",
           isAdmin: true,
@@ -666,7 +685,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-ch2", spaceId: "space-ch2", isAdmin: true },
+        filter: { readAll: true, orgId: "org-ch2", spaceId: "space-ch2", isAdmin: true },
         send,
       });
 
@@ -708,6 +727,7 @@ describe("realtime service (integration)", () => {
       addSubscriber({
         id: "sub-ch-filtered",
         filter: {
+          readAll: true,
           orgId: "org-ch3",
           spaceId: "space-ch3",
           isAdmin: true,
@@ -717,7 +737,7 @@ describe("realtime service (integration)", () => {
       });
       addSubscriber({
         id: "sub-ch-unfiltered",
-        filter: { orgId: "org-ch3", spaceId: "space-ch3", isAdmin: true },
+        filter: { readAll: true, orgId: "org-ch3", spaceId: "space-ch3", isAdmin: true },
         send: unfiltered,
       });
 
@@ -791,7 +811,11 @@ describe("realtime service (integration)", () => {
       const id = "sub-idempotent";
       trackSubscriber(id);
 
-      addSubscriber({ id, filter: { orgId: "org-idem", spaceId: "space-idem" }, send });
+      addSubscriber({
+        id,
+        filter: { readAll: true, orgId: "org-idem", spaceId: "space-idem" },
+        send,
+      });
 
       await pgNotify("run_update", {
         org_id: "org-idem",
