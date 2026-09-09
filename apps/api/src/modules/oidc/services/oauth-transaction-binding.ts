@@ -20,13 +20,12 @@
  *      At the callback, `parseState()` consumes that row (single-use,
  *      10-min TTL, cookie double-check) and publishes the parsed data in
  *      BA's request-scoped OAuth state (`getOAuthState()` from
- *      `better-auth/api`, verified in better-auth 1.7.0-beta.4:
- *      `dist/oauth2/state.mjs` line 49 `setOAuthState(parsedData)`;
- *      `dist/api/to-auth-endpoints.mjs` line 189 wraps every endpoint in
- *      `runWithRequestState`). When the transaction's `callbackURL` resumes
- *      our OAuth authorize endpoint, its `client_id` is the client this
- *      social sign-in was initiated for — the browser cannot rewrite it
- *      after initiation.
+ *      `better-auth/api`: `setOAuthState(parsedData)` in
+ *      `dist/oauth2/state.mjs`, set inside the `runWithRequestState` scope
+ *      that `dist/api/to-auth-endpoints.mjs` wraps every endpoint in). When
+ *      the transaction's `callbackURL` resumes our OAuth authorize endpoint,
+ *      its `client_id` is the client this social sign-in was initiated for —
+ *      the browser cannot rewrite it after initiation.
  *
  *   2. Magic-link verify (`/magic-link/verify`): the emailed link's
  *      single-use `token` is the transaction identifier. At issuance time

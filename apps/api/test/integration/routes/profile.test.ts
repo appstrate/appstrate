@@ -6,6 +6,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
+import { flushRedis } from "../../helpers/redis.ts";
 import { user as userTable, account as accountTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
@@ -17,6 +18,10 @@ describe("Profile API", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // Better Auth caps `/sign-in*` at 3 per 10s per IP and every request
+    // here arrives from the same (absent) address — reset the budget so a
+    // test is never throttled by the one before it.
+    await flushRedis();
     ctx = await createTestContext();
   });
 

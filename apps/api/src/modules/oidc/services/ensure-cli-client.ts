@@ -13,8 +13,9 @@
  *     explicitly treats public-client identifiers as non-secret
  *     (RFC 9700 § 4.1); security rests on PKCE + consent + realm/audience
  *     gates, not on the id.
- *   - **Public client** — `type="native"`, `tokenEndpointAuthMethod="none"`,
- *     no stored `client_secret`. The device grant uses `client_id` alone at
+ *   - **Public client** — `tokenEndpointAuthMethod="none"` (which is what makes
+ *     it public; there is no separate flag), `applicationType="native"`, no
+ *     stored `client_secret`. The device grant uses `client_id` alone at
  *     `/cli/token` and relies on the server-enforced `device_code` as
  *     its proof-of-possession.
  *   - **Device + refresh grants only**. `authorization_code` is omitted
@@ -93,8 +94,7 @@ export async function ensureCliClient(): Promise<string> {
       allowSignup: false,
       signupRole: "member",
       disabled: false,
-      type: "native",
-      public: true,
+      applicationType: "native",
       tokenEndpointAuthMethod: "none",
       grantTypes: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
       // `responseTypes` is defined by RFC 6749 for the `authorization_code`

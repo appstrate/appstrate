@@ -19,19 +19,12 @@
  * Why we bypass `auth.api.adminCreateOAuthClient`: the plugin derives its
  * `reference_id` via `clientReference({ session })` which doesn't have
  * access to Appstrate's multi-tenant context. We write directly to the
- * Drizzle schema and stash the polymorphic fields into the plugin-readable
- * `metadata` JSON column so the `customAccessTokenClaims` closure can
- * branch on them at token-mint time.
+ * Drizzle schema.
  *
- * `metadata` shape (single source of truth readable by the plugin):
- *   {
- *     level: "instance" | "org" | "space",
- *     referencedOrgId?: string,
- *     referencedSpaceId?: string,
- *   }
- *
- * The same values are also persisted in dedicated SQL columns for query
- * performance + FK integrity. Writes keep both in lockstep.
+ * `level`, `referenced_org_id`, `referenced_space_id` and `self_service` are
+ * SQL columns, and the claim builder reads them off the row. The provider's
+ * `metadata` JSON is client-influenced — a registration body may set it — so no
+ * platform decision is taken from it.
  *
  * Secrets are generated as base64url-encoded random bytes, hashed with
  * SHA-256 at rest, and only returned in plaintext from `createClient` /
@@ -45,7 +38,7 @@ import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
-import { getAppstrateScopeSet, getSelfServiceScopes } from "../auth/scopes.ts";
+import { getAppstrateScopeSet } from "../auth/scopes.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import { assertSpaceAssignmentsValid } from "../../../services/space-assignments.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
@@ -138,6 +131,18 @@ function assertValidRedirectUris(uris: readonly string[]): void {
       `OIDC: redirectUri scheme or host not allowed: ${bad.join(", ")}`,
     );
   }
+}
+
+/**
+ * OIDC Dynamic Registration §2 application type, derived from the redirect URIs
+ * the caller registered. The provider validates every redirect URI against this
+ * value and only a `native` client may declare an `http://` loopback callback —
+ * which `isValidRedirectUri` admits, so hard-coding `web` here would refuse at
+ * authorization time what registration accepted. Same rule the DCR register
+ * hook applies (`auth/guards.ts`).
+ */
+function applicationTypeFor(redirectUris: readonly string[]): "web" | "native" {
+  return redirectUris.some((uri) => uri.startsWith("http://")) ? "native" : "web";
 }
 
 export interface OAuthClientRecord {
@@ -337,20 +342,6 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   const hashedSecret = await hashSecret(plaintextSecret);
   const now = new Date();
 
-  // `clientId` is stashed alongside the polymorphic fields so the
-  // `customAccessTokenClaims` closure can recover the client identity from
-  // its `metadata` argument (Better Auth's oauth-provider plugin does not
-  // pass `client.clientId` to the closure directly). Immutable — the unique
-  // `client_id` column never changes for the client's lifetime, so no
-  // drift with the SQL column.
-  const metadata: Record<string, unknown> = { level: input.level, clientId };
-  if (input.level === "org") {
-    metadata.referencedOrgId = input.referencedOrgId;
-  } else if (input.level === "space") {
-    metadata.referencedSpaceId = input.referencedSpaceId;
-  }
-  // instance: no FK fields in metadata
-
   // `signupRole` is only meaningful on org-level clients (role assigned on
   // auto-join). Space clients have no org membership to attach to;
   // instance clients have no fixed org to attach to either. Reject loudly
@@ -394,13 +385,12 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       level: input.level,
       referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
       referencedSpaceId: input.level === "space" ? input.referencedSpaceId : null,
-      metadata: JSON.stringify(metadata),
       skipConsent: input.isFirstParty ?? false,
       allowSignup,
       signupRole,
       signupSpaceAssignments,
       disabled: false,
-      type: "web",
+      applicationType: applicationTypeFor(input.redirectUris),
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -421,70 +411,24 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
  * Stamp a self-registered (RFC 7591 DCR or CIMD) OAuth client as a
  * self-service **instance** client.
  *
- * Self-registered clients are written WITHOUT the platform's polymorphic
- * `level` in their `metadata` (the native DCR insert and the CIMD plugin both
- * bypass `createClient`), so `customAccessTokenClaims` →
- * `buildClaimsForClient` would reject every token they request
- * (`metadata missing level`). This marks them `level: "instance"` so they mint
- * instance tokens — which the RFC 8707 audience confinement
- * (`protected-resources.ts`) then restricts to the single protected resource
- * the token was issued for (the only resource a self-service client may request
- * — enforced at `/oauth2/token`, see `oidcGuardsPlugin`). The token carries the
- * connecting user's authority but is usable ONLY at that resource.
+ * The native DCR insert and the CIMD plugin both bypass `createClient`, so the
+ * row arrives with no platform discriminator. `level = "instance"` lets it mint
+ * instance tokens; `self_service = true` is what `/oauth2/token` reads to
+ * confine those tokens to a single protected resource — the discriminator
+ * between an operator-provisioned instance client (the dashboard SPA / CLI,
+ * which may target the platform audience) and a self-registered one, which may
+ * not.
  *
- * `selfService: true` is also recorded so the token endpoint can recognise
- * these clients and enforce the resource restriction; it is the discriminator
- * between an admin-provisioned instance client (the dashboard SPA / CLI, which
- * may target the platform audience) and a self-registered one (which may not).
- *
- * Merges into any metadata the registration already wrote, and keeps the SQL
- * `level` column in lockstep. Idempotent: a CIMD client refreshed/re-resolved
- * is safely re-stamped. Best-effort cache invalidation so the next mint reads
- * the stamped row.
+ * Both are columns, never the `metadata` JSON: the provider owns that JSON and
+ * a registration body may set it, so a flag kept there is a flag the client can
+ * name. Idempotent — a refreshed CIMD client is re-stamped on every resolution.
  */
-export async function markClientSelfService(
-  clientId: string,
-): Promise<{ scopes: string[]; metadata: string } | undefined> {
-  const [row] = await db
-    .select({ metadata: oauthClient.metadata, scopes: oauthClient.scopes })
-    .from(oauthClient)
-    .where(eq(oauthClient.clientId, clientId))
-    .limit(1);
-  if (!row) return;
-
-  let metadata: Record<string, unknown> = {};
-  if (row.metadata) {
-    try {
-      const parsed = JSON.parse(row.metadata) as unknown;
-      if (parsed && typeof parsed === "object") metadata = parsed as Record<string, unknown>;
-    } catch {
-      // Corrupt metadata → overwrite with a clean self-service marker rather
-      // than carry the garbage forward.
-    }
-  }
-  metadata.level = "instance";
-  metadata.clientId = clientId;
-  metadata.selfService = true;
-
-  // Backfill the self-service scope ceiling when the client registered with
-  // none. A CIMD client whose metadata document declares no `scope` (e.g.
-  // Claude Code) is written with `scopes: []` — and `[]` is not nullish, so
-  // the authorize-time check `client.scopes ?? opts.scopes` keeps the empty
-  // set and rejects EVERY requested scope (`invalid_scope`). The DCR register
-  // path dodges this via `clientRegistrationDefaultScopes`, but the CIMD path
-  // bypasses it. Stamp the same ceiling a self-service DCR client gets
-  // (identity + module end-user-grantable scopes, e.g. mcp:read/mcp:invoke) so
-  // the client may request them. Only fill when empty — never widen a client
-  // that deliberately declared a narrower scope set.
-  const scopes = row.scopes?.length ? row.scopes : getSelfServiceScopes();
-  const stamped = { scopes, metadata: JSON.stringify(metadata) };
-
+export async function markClientSelfService(clientId: string): Promise<void> {
   await db
     .update(oauthClient)
-    .set({ ...stamped, level: "instance", updatedAt: new Date() })
+    .set({ selfService: true, level: "instance", updatedAt: new Date() })
     .where(eq(oauthClient.clientId, clientId));
   cacheInvalidate(clientId);
-  return stamped;
 }
 
 // ─── Update / delete / rotate ─────────────────────────────────────────────────
@@ -571,14 +515,6 @@ export async function updateClient(
     .returning();
   if (!row) return null;
   cacheInvalidate(clientId);
-  // No metadata re-sync needed: none of the `UpdateClientInput` fields
-  // (redirectUris, postLogoutRedirectUris, disabled, isFirstParty) feed
-  // into `metadata`, and `level` / `referenced*` columns are immutable
-  // (enforced by the `oauth_clients_level_immutable` DB trigger in
-  // migration 0001). The metadata JSON written at creation time is
-  // therefore frozen for the client's lifetime and cannot drift from
-  // the SQL columns — eliminating the read-modify-write race that the
-  // old `syncMetadata` helper introduced between mutations.
   return mapRow(row);
 }
 
@@ -757,7 +693,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
         clientId: oauthClient.clientId,
         redirectUris: oauthClient.redirectUris,
         postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
-        public: oauthClient.public,
         tokenEndpointAuthMethod: oauthClient.tokenEndpointAuthMethod,
         clientSecret: oauthClient.clientSecret,
       })
@@ -770,10 +705,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       const storedPostLogout = existing.postLogoutRedirectUris ?? [];
       const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
       const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
+      // `tokenEndpointAuthMethod === "none"` IS the public-client contract —
+      // it is the value the provider derives "public" from, and the one that
+      // makes it demand PKCE.
       const authMethodDrift =
-        existing.public !== true ||
-        existing.tokenEndpointAuthMethod !== "none" ||
-        existing.clientSecret !== null;
+        existing.tokenEndpointAuthMethod !== "none" || existing.clientSecret !== null;
 
       if (redirectDrift || postLogoutDrift || authMethodDrift) {
         await tx
@@ -783,7 +719,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
             postLogoutRedirectUris: expectedPostLogoutRedirectUris,
             ...(authMethodDrift
               ? {
-                  public: true,
                   tokenEndpointAuthMethod: "none" as const,
                   clientSecret: null,
                 }
@@ -800,8 +735,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
           redirectUrisTo: expectedRedirectUris,
           postLogoutRedirectUrisFrom: storedPostLogout,
           postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
-          publicFrom: existing.public,
-          publicTo: authMethodDrift ? true : existing.public,
           tokenEndpointAuthMethodFrom: existing.tokenEndpointAuthMethod,
           tokenEndpointAuthMethodTo: authMethodDrift ? "none" : existing.tokenEndpointAuthMethod,
           clientSecretCleared: authMethodDrift && existing.clientSecret !== null,
@@ -813,7 +746,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     const id = prefixedId("oac");
     const clientId = `oauth_${randomSecret().slice(0, 24)}`;
     const now = new Date();
-    const metadata = { level: "instance" as const, clientId };
 
     await tx.insert(oauthClient).values({
       id,
@@ -826,13 +758,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       level: "instance",
       referencedOrgId: null,
       referencedSpaceId: null,
-      metadata: JSON.stringify(metadata),
       skipConsent: true,
       allowSignup: true,
       signupRole: "member",
       disabled: false,
-      type: "web",
-      public: true,
+      applicationType: applicationTypeFor(expectedRedirectUris),
       tokenEndpointAuthMethod: "none",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -895,15 +825,6 @@ export async function createInstanceClientFromEnv(
   const hashedSecret = await hashSecret(input.clientSecretPlaintext);
   const now = new Date();
 
-  // Mirror `createClient()` — see oauth-admin.ts metadata shape for the
-  // rationale. `clientId` is stashed alongside `level` so
-  // `customAccessTokenClaims` in plugins.ts can dispatch to
-  // `buildInstanceLevelClaims` at token-mint time.
-  const metadata: Record<string, unknown> = {
-    level: "instance",
-    clientId: input.clientId,
-  };
-
   const inserted = await db
     .insert(oauthClient)
     .values({
@@ -917,12 +838,11 @@ export async function createInstanceClientFromEnv(
       level: "instance",
       referencedOrgId: null,
       referencedSpaceId: null,
-      metadata: JSON.stringify(metadata),
       skipConsent: input.skipConsent,
       allowSignup: input.allowSignup,
       signupRole: "member",
       disabled: false,
-      type: "web",
+      applicationType: applicationTypeFor(input.redirectUris),
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],

@@ -71,7 +71,7 @@
     "fflate": "^0.8.3",
     "mustache": "^4.2.0",
     "semver": "^7.8.4",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.2",

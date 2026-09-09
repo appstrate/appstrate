@@ -275,6 +275,9 @@ services:
       # Defaults live in `packages/env/src/index.ts`. Unset host env
       # falls back to the Zod schema's single source of truth.
       - APP_URL
+      # Hop count of the reverse proxy chain in front of this container. With
+      # an HTTPS APP_URL the schema refuses to boot on "false".
+      - TRUST_PROXY
       - LOG_LEVEL
       - MODULES
       # Firecracker execution backend (set by `appstrate install

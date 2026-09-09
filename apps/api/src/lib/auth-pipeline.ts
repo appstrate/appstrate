@@ -109,6 +109,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // endpoints (issue #165). Tracked in
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
+    // `CLIENT_IP_HEADER` is already on `c.req.raw` (the edge `clientIp()`
+    // middleware), and both rewrites below copy the inbound headers, so the
+    // address Better Auth reads survives them.
     const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
     return getAuth().handler(req);
   });

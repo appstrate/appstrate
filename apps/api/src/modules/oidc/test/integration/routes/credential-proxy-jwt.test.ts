@@ -37,7 +37,7 @@ import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
 import { deviceCode } from "@appstrate/db/schema";
-import { overrideJwksResolver } from "../../../services/enduser-token.ts";
+import { overrideJwks } from "../../../services/enduser-token.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -125,7 +125,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
-    overrideJwksResolver(null);
+    overrideJwks(null);
     await ensureCliClient();
   });
 

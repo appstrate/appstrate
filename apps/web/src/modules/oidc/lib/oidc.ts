@@ -112,9 +112,9 @@ async function initPkceFlow(
 
   // `resource` is required by `oidcGuardsPlugin` (RFC 8707) on both the
   // authorize and token endpoints. `config.issuer` is one of the server's
-  // `validAudiences` (`${APP_URL}/api/auth`). The SPA never consumes the
-  // minted tokens — the BA session cookie is the real auth — but the
-  // grant still has to succeed, so `resource` is non-negotiable.
+  // configured protected resources (`${APP_URL}/api/auth`). The SPA never
+  // consumes the minted tokens — the BA session cookie is the real auth — but
+  // the grant still has to succeed, so `resource` is non-negotiable.
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,
@@ -236,9 +236,9 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
     throw new Error("Missing code verifier — session may have expired");
   }
 
-  // `resource` MUST match one of the server's `validAudiences` — the
-  // `oidcGuardsPlugin` rejects any `authorization_code`/`refresh_token`
-  // grant without it (RFC 8707). `config.issuer` is that audience.
+  // `resource` MUST name one of the server's configured protected resources —
+  // the `oidcGuardsPlugin` rejects any `authorization_code`/`refresh_token`
+  // grant without it (RFC 8707). `config.issuer` is that resource.
   const tokenBody = new URLSearchParams({
     grant_type: "authorization_code",
     code,

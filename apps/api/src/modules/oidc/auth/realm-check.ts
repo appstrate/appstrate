@@ -5,7 +5,7 @@
  *
  * Extracted out of `plugins.ts` so `guards.ts` can reuse the same check
  * on paths that don't flow through `@better-auth/oauth-provider`'s
- * `customAccessTokenClaims` — notably Better Auth's `deviceAuthorization()`
+ * access-token claim extension — notably Better Auth's `deviceAuthorization()`
  * plugin at `/device/approve`, which mints BA sessions directly via the
  * internal adapter and bypasses oauth-provider entirely.
  *
@@ -24,25 +24,20 @@ import { user as userTable } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 
 /**
- * Subset of an OAuth client's `metadata` JSON blob relevant to realm
- * enforcement. The full shape is documented in `plugins.ts::ClientMetadata`;
- * this file only needs the level + referenced space id.
+ * The `oauth_clients` scoping columns realm enforcement reads.
  */
 export interface ClientAudienceMetadata {
   level?: "org" | "space" | "instance";
   referencedOrgId?: string;
   referencedSpaceId?: string;
-  clientId?: string;
 }
 
 /**
- * Given an OAuth client's metadata, compute the realm a user must have to
- * be allowed to mint a token for this client. Mirrors the dispatch in
- * `plugins.ts::buildClaimsForClient` so `/oauth2/token` and
+ * The realm a user must hold to mint a token for this client. Mirrors the
+ * dispatch in `plugins.ts::buildClaimsForClient` so `/oauth2/token` and
  * `/device/approve` apply the same audience-isolation rules.
  *
- * Throws on malformed metadata — rather than silently letting the mint
- * proceed — so drift between metadata and enforcement surfaces as a
+ * Throws on a scoping row that cannot name an audience, so drift surfaces as a
  * structured OAuth2 error instead of a realm-bypass bug.
  */
 export function expectedRealmForClient(metadata: ClientAudienceMetadata): string {
@@ -53,14 +48,14 @@ export function expectedRealmForClient(metadata: ClientAudienceMetadata): string
       throw new APIError("BAD_REQUEST", {
         error: "invalid_client",
         error_description:
-          "OAuth client metadata is malformed — space-level client is missing referencedSpaceId.",
+          "OAuth client is malformed — a space-level client is missing referencedSpaceId.",
       });
     }
     return `end_user:${metadata.referencedSpaceId}`;
   }
   throw new APIError("BAD_REQUEST", {
     error: "invalid_client",
-    error_description: "OAuth client metadata is missing level — cannot determine audience.",
+    error_description: "OAuth client is missing level — cannot determine audience.",
   });
 }
 

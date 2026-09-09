@@ -16,6 +16,7 @@ import { _resetCacheForTesting } from "@appstrate/env";
 import { _rebuildAuthForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
+import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedInvitation } from "../../helpers/seed.ts";
 
@@ -58,6 +59,10 @@ async function attemptSignup(email: string) {
 describe("Platform signup gate — issue #228", () => {
   beforeEach(async () => {
     await truncateAll();
+    // Better Auth caps `/sign-up*` at 3 per 10s per IP and every request
+    // here arrives from the same (absent) address, so the budget has to
+    // start fresh per test or the gate under test never gets a turn.
+    await flushRedis();
     setAuthEnv({
       AUTH_DISABLE_SIGNUP: undefined,
       AUTH_DISABLE_ORG_CREATION: undefined,

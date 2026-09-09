@@ -16,7 +16,7 @@
  *   - Idempotent 404 on already-revoked, unknown, or out-of-org families
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
@@ -34,8 +34,30 @@ import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
 import { cliRefreshToken, deviceCode } from "@appstrate/db/schema";
+import { _resetCacheForTesting } from "@appstrate/env";
+import { resetClientIpCache } from "../../../../../lib/client-ip.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
+
+// Better Auth caps `/sign-up*` at 3 per 10s per IP, and a single test here
+// registers up to six distinct people. `app.request()` carries no socket, so
+// each one states its own forwarded address and the platform resolves it —
+// which needs the proxy trusted for the duration of this file.
+const originalTrustProxy = process.env.TRUST_PROXY;
+let signupAddress = 0;
+
+beforeAll(() => {
+  process.env.TRUST_PROXY = "true";
+  _resetCacheForTesting();
+  resetClientIpCache();
+});
+
+afterAll(() => {
+  if (originalTrustProxy === undefined) delete process.env.TRUST_PROXY;
+  else process.env.TRUST_PROXY = originalTrustProxy;
+  _resetCacheForTesting();
+  resetClientIpCache();
+});
 
 interface SignupResult {
   cookie: string;
@@ -43,9 +65,13 @@ interface SignupResult {
 }
 
 async function signUp(email: string, name: string): Promise<SignupResult> {
+  signupAddress += 1;
   const res = await app.request("/api/auth/sign-up/email", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Forwarded-For": `198.51.100.${signupAddress}`,
+    },
     body: JSON.stringify({ email, password: "Sup3rSecretPass!", name }),
   });
   expect(res.status).toBe(200);

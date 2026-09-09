@@ -80,6 +80,10 @@ function resolveFromHeaders(headers: Headers): string | undefined {
 export function getClientIp(c: Context): string {
   const fromHeaders = resolveFromHeaders(c.req.raw.headers);
   if (fromHeaders) return fromHeaders;
+  // `middleware/client-ip.ts` already stored the socket address for this
+  // Request; reading it back keeps `getConnInfo` to one call per request.
+  const stored = requestIpStore.get(c.req.raw);
+  if (stored) return stored;
   try {
     const fromConn = getConnInfo(c).remote.address;
     if (fromConn) {
@@ -92,6 +96,23 @@ export function getClientIp(c: Context): string {
   }
   return "unknown";
 }
+
+/**
+ * Header stating the platform-resolved client IP on the inbound `Request`.
+ *
+ * Better Auth resolves the address for its rate limiter and its session
+ * tracking from headers alone, and the two trust models do not translate:
+ * `TRUST_PROXY` is a hop COUNT, while `advanced.ipAddress.trustedProxies`
+ * is a list of proxy addresses. So the platform resolves the address with
+ * its own model and states it here, and Better Auth reads this header and
+ * nothing else — it never walks a forwarded chain of its own.
+ *
+ * `middleware/client-ip.ts` is the one place that writes it, on the inbound
+ * `Request` at the edge: every downstream reader — `getAuth().handler` and
+ * every `getAuth().api.*` call handed `c.req.raw.headers` — inherits the
+ * platform's answer, and a caller-supplied value never survives that far.
+ */
+export const CLIENT_IP_HEADER = "x-appstrate-client-ip";
 
 /**
  * Resolve the client IP from a raw `Request`. Used inside contexts that do

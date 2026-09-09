@@ -353,7 +353,7 @@ const SEED = `
     ('wh_m0003_app', '${ORG}', '${APP_A}', 'application', 'https://a.m0003.test', ARRAY['run.success'], 's'),
     ('wh_m0003_org', '${ORG}', NULL,       'org',         'https://b.m0003.test', ARRAY['run.success'], 's');
 
-  INSERT INTO oauth_clients (id, client_id, name, level, referenced_space_id, scopes, redirect_uris, type, disabled) VALUES
+  INSERT INTO oauth_clients (id, client_id, name, level, referenced_space_id, scopes, redirect_uris, application_type, disabled) VALUES
     ('oc_m0003_a', 'cli_m0003_app',  'A', 'application', '${APP_A}',
      ARRAY['applications:read', 'openid', 'myapplications:read'], ARRAY['https://a.m0003.test/cb'], 'web', false),
     ('oc_m0003_i', 'cli_m0003_inst', 'I', 'instance',    NULL,

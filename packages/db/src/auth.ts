@@ -374,6 +374,54 @@ export function setAfterSignupHook(
 export type BetterAuthPluginList = NonNullable<Parameters<typeof betterAuth>[0]["plugins"]>;
 
 /**
+ * How module plugin contributions reach {@link createAuth}: as a THUNK, never
+ * as an already-built array.
+ *
+ * A Better Auth plugin object is single-use. Building an auth instance runs
+ * every plugin's `init(ctx)`, and an init may MUTATE a sibling plugin's
+ * options — `@better-auth/cimd` calls `extendOAuthProvider()`, which appends
+ * to `oauth-provider`'s `options.extensions`. Feeding the same objects to a
+ * second `betterAuth()` call appends a second time, and the provider's
+ * disjointness check then rejects the duplicate client-discovery id.
+ *
+ * A thunk makes each build produce fresh instances, so every build starts from
+ * a clean plugin state. It also means a rebuild re-reads the env at plugin
+ * construction time, which is the whole point of {@link _rebuildAuthForTesting}.
+ */
+export type BetterAuthPluginFactory = () => BetterAuthPluginList;
+
+/**
+ * Atomic check-and-increment backing Better Auth's built-in rate limiter.
+ * The implementation lives in `apps/api` (it needs the platform's limiter
+ * factory, which this package must not depend on) and reaches the auth
+ * builder through {@link CreateAuthOptions}.
+ */
+export type BetterAuthRateLimitStorage = NonNullable<
+  NonNullable<Parameters<typeof betterAuth>[0]["rateLimit"]>["customStorage"]
+>;
+
+/** Everything the platform supplies to {@link createAuth}. */
+export interface CreateAuthOptions {
+  /**
+   * Module-contributed plugins, as a THUNK — plugin objects are single-use
+   * (see {@link BetterAuthPluginFactory}), and the thunk is what lets
+   * {@link _rebuildAuthForTesting} mint a fresh set.
+   */
+  plugins: BetterAuthPluginFactory;
+  /** Shared storage for the built-in rate limiter. */
+  rateLimitStorage: BetterAuthRateLimitStorage;
+  /**
+   * Whether the built-in limiter is armed. Better Auth arms it in production
+   * only; the platform keeps that split so development and e2e are not held
+   * to rules such as three sign-ups per ten seconds per IP, and the test
+   * harness arms it to exercise the rules.
+   */
+  rateLimitEnabled: boolean;
+  /** Header the platform stamps with the resolved client IP. */
+  clientIpHeader: string;
+}
+
+/**
  * BA's OAuth callback endpoint path. Exposed as a constant so the create
  * hook and its unit tests reference the same string (if BA ever renames
  * the route, both sides fail together).
@@ -528,10 +576,11 @@ function buildBasePlugins(
 // needed. All consumers must call `getAuth()` at request time / post-boot
 // — never at module-evaluation time.
 //
-// Test harness: `test/setup/preload.ts` calls `createAuth([])` during
+// Test harness: `test/setup/preload.ts` calls `createAuth()` during
 // preload so module test runs boot cleanly.
 
-function buildAuth(extraPlugins: BetterAuthPluginList = []) {
+function buildAuth(options: CreateAuthOptions) {
+  const extraPlugins = options.plugins();
   const env = getEnv();
   const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
   // Tests set `SMTP_HOST=__test_json__` to exercise the SMTP-enabled BA flow
@@ -658,6 +707,14 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     },
 
     plugins: [...basePlugins, ...extraPlugins],
+
+    rateLimit: {
+      // Better Auth counts in per-process memory, so a fleet of replicas
+      // grants each caller one budget per replica. The shared platform
+      // limiter makes it one budget per caller.
+      enabled: options.rateLimitEnabled,
+      customStorage: options.rateLimitStorage,
+    },
 
     emailAndPassword: {
       enabled: true,
@@ -811,6 +868,19 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     trustedOrigins: env.TRUSTED_ORIGINS,
 
     advanced: {
+      ipAddress: {
+        // The platform resolves the client IP under its own `TRUST_PROXY`
+        // model (a hop COUNT, which `trustedProxies` — a list of proxy
+        // addresses — cannot express) and states the answer on this header.
+        // Naming it alone keeps Better Auth from parsing `x-forwarded-for`
+        // on its own, so its rate limiter and its session records key on the
+        // same address every other platform limiter does.
+        // One writer: the edge middleware `apps/api/src/middleware/client-ip.ts`
+        // overwrites the header on the inbound request, so the handler mount
+        // and every `auth.api.*` call passed `c.req.raw.headers` read the
+        // platform's answer and never a caller-supplied one.
+        ipAddressHeaders: [options.clientIpHeader],
+      },
       // Explicit per-cookie defaults — Better Auth applies these to the
       // session cookie + every plugin-issued cookie (CSRF, etc.). Pinning
       // them here removes "what does BA's default do?" from every
@@ -1061,7 +1131,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
 type AuthInstance = ReturnType<typeof buildAuth>;
 
 let _auth: AuthInstance | null = null;
-let _lastExtraPlugins: BetterAuthPluginList = [];
+let _options: CreateAuthOptions | null = null;
 
 /**
  * Construct the Better Auth singleton. Idempotent — subsequent calls are
@@ -1070,18 +1140,20 @@ let _lastExtraPlugins: BetterAuthPluginList = [];
  * are merged with `basePlugins`. Module tables already live in the core
  * schema, so the Drizzle adapter resolves them from the barrel directly.
  */
-export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
+export function createAuth(options: CreateAuthOptions): void {
   if (_auth) return;
-  _lastExtraPlugins = extraPlugins;
-  _auth = buildAuth(extraPlugins);
+  _options = options;
+  _auth = buildAuth(options);
 }
 
 /**
  * Test-only: rebuild the Better Auth singleton with the CURRENT env. Lets
  * tests flip SMTP / social / cookie-domain flags at runtime and verify the
  * resulting behavior (email-verification flow, social auto-verify hook,
- * …). The extra plugins + drizzle schemas passed to the most recent
- * `createAuth()` call are re-used so modules don't need to re-register.
+ * …). The plugin factory passed to `createAuth()` is re-invoked so modules
+ * don't need to re-register — and so the rebuild gets plugin instances of
+ * its own rather than re-initializing the ones the previous build already
+ * mutated.
  *
  * DO NOT call this from production code — it defeats the whole point of
  * the idempotent singleton. It exists solely so the module test preload
@@ -1089,7 +1161,10 @@ export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
  * having to reload the entire process.
  */
 export function _rebuildAuthForTesting(): void {
-  _auth = buildAuth(_lastExtraPlugins);
+  if (!_options) {
+    throw new Error("auth not initialized — createAuth() must run before a rebuild");
+  }
+  _auth = buildAuth(_options);
 }
 
 /** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */

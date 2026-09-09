@@ -95,6 +95,21 @@ describe("auth-challenge responder", () => {
     expect(res.headers.get("WWW-Authenticate")).toBe("Bearer step-up");
   });
 
+  it("falls back to the generic challenge when the matched builder declines", async () => {
+    // A resource that cannot name itself for this request (e.g. a path under
+    // its prefix carrying no resource id) returns undefined; the 401 still owes
+    // the client an RFC 6750 §3 challenge.
+    registerAuthChallenge("/api/mcp", () => undefined);
+    const res = await appWith(401).request("http://inst.test/api/mcp");
+    expect(res.headers.get("WWW-Authenticate")).toBe("Bearer");
+  });
+
+  it("leaves a 403 challenge-less when the matched builder declines", async () => {
+    registerAuthChallenge("/api/mcp", () => undefined);
+    const res = await appWith(403).request("http://inst.test/api/mcp");
+    expect(res.headers.get("WWW-Authenticate")).toBeNull();
+  });
+
   it("does not touch non-401/403 responses", async () => {
     registerAuthChallenge("/api/mcp", () => "Bearer x");
     const res = await appWith(200).request("http://inst.test/api/mcp");

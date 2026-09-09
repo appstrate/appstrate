@@ -275,8 +275,20 @@ export function useAuth() {
 
   const linkGithub = useCallback(() => linkSocial("github"), [linkSocial]);
 
-  const unlinkAccount = useCallback(async (providerId: string) => {
-    const result = await authClient.unlinkAccount({ providerId });
+  /**
+   * Unlink ONE linked account, named by the `id` of the row `listAccounts()`
+   * returned for it — Better Auth's `account.id` primary key.
+   *
+   * The wire field is called `accountId`, which is a different thing from the
+   * `accountId` on that same row: that one is the identifier AT THE PROVIDER
+   * (a Google `sub`, a GitHub numeric id) and the endpoint never looks at it.
+   * `/unlink-account` resolves the target as
+   * `findAccounts(session.user.id).find((a) => a.id === accountId)`, so
+   * feeding it the provider-side value simply misses and answers
+   * `ACCOUNT_NOT_FOUND`.
+   */
+  const unlinkAccount = useCallback(async (accountRowId: string) => {
+    const result = await authClient.unlinkAccount({ accountId: accountRowId });
     if (result.error) throw toUnlinkError(result.error);
   }, []);
 

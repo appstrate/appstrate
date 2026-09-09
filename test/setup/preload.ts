@@ -374,6 +374,10 @@ const {
 const { setModulePermissionsProvider, setPermissionDenialHandler } =
   await import("@appstrate/core/permissions");
 const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
+const { betterAuthRateLimitStorage } =
+  await import("../../apps/api/src/infra/rate-limit/better-auth-storage.ts");
+const { resetBetterAuthRateLimitBuckets } = await import("../../apps/api/test/helpers/redis.ts");
+const { CLIENT_IP_HEADER } = await import("../../apps/api/src/lib/client-ip.ts");
 
 // Register module RBAC contributions BEFORE the plugins are built — mirrors
 // boot.ts, where `loadModules()` runs ahead of `createAuth()`. Plugin
@@ -382,8 +386,36 @@ const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/
 const preloadRbacSnapshot = collectModulePermissions(importedModules);
 setModulePermissionsProvider(() => preloadRbacSnapshot);
 
-const contributions = collectModuleContributions(importedModules);
-createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
+// A thunk, not a list — same contract as boot.ts. `_rebuildAuthForTesting()`
+// re-invokes it, so a test that flips an env flag mid-suite gets plugin
+// instances built against the new env, and never re-initializes the ones the
+// previous build already mutated.
+//
+// The snapshot is re-installed INSIDE the thunk because plugin construction
+// reads it (OIDC's self-service scope ceiling is
+// `OIDC_IDENTITY_SCOPES ∪ getModuleEndUserAllowedScopes()`), and the live
+// provider is volatile in tests: `getTestApp({ modules })` re-installs a
+// snapshot narrowed to that file's module list on every call. In production
+// the ceiling is always the FULL loaded module set — `createAuth()` runs
+// after `loadModules()` — so a rebuild must see the full set too, not
+// whichever subset the last-loaded test file happened to leave behind. The
+// harness restores its own view on the next `getTestApp()` call, which is
+// already how it recovers from the resets `module-loader.test.ts` does.
+//
+// `rateLimitStorage` and `clientIpHeader` are the production values, not
+// stand-ins: the storage rides the same limiter factory (real Redis in tier3,
+// in-memory in tier0) so the tests exercise Better Auth's limiter for real.
+createAuth({
+  plugins: () => {
+    setModulePermissionsProvider(() => preloadRbacSnapshot);
+    return collectModuleContributions(importedModules).betterAuthPlugins as ReturnType<
+      Parameters<typeof createAuth>[0]["plugins"]
+    >;
+  },
+  rateLimitStorage: betterAuthRateLimitStorage(),
+  rateLimitEnabled: true,
+  clientIpHeader: CLIENT_IP_HEADER,
+});
 
 // Phase 3: run each module's `init(ctx)` — the same topo-sorted pipeline
 // production uses, via the entry point that exists for exactly this
@@ -419,18 +451,23 @@ setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
   }
 });
 
-// ─── Global auto-reset for RBAC audit handler ─────────────────
-// `setPermissionDenialHandler` writes a module-level singleton inside
-// `@appstrate/core/permissions`. A test that installs a custom handler
-// and forgets to clean up would leak it into every subsequent test file
-// in the same process — `bun test` runs the full suite as a single
-// process (see the "Testing" header in CLAUDE.md). Reset after every
-// test so no test needs to remember an `afterEach` of its own.
+// ─── Global auto-reset for process-wide singletons ────────────
+// Both resets below cover state that is process-wide, and `bun test` runs the
+// whole suite as a single process (see the "Testing" header in CLAUDE.md), so
+// leaving either to individual files means every file has to remember it.
 //
-// The handler comes from the single dynamic `@appstrate/core/permissions`
-// import above, which keeps this preload uncoupled from the core types at
-// top level.
+// `setPermissionDenialHandler` writes a module-level singleton inside
+// `@appstrate/core/permissions`. A test that installs a custom handler and
+// forgets to clean up would leak it into every subsequent test file. The
+// handler comes from the single dynamic `@appstrate/core/permissions` import
+// above, which keeps this preload uncoupled from the core types at top level.
+//
+// Better Auth's limiter is armed for the whole suite (`rateLimitEnabled` above)
+// and its built-in rule caps `/sign-in*` and `/sign-up*` at 3 per 10 s per
+// address — one address, shared by every test. Dropping the buckets after each
+// test is what lets a file sign a user in without budgeting for its neighbours.
 const { afterEach } = await import("bun:test");
-afterEach(() => {
+afterEach(async () => {
   setPermissionDenialHandler(null);
+  await resetBetterAuthRateLimitBuckets();
 });
