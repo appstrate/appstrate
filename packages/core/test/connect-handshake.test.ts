@@ -408,15 +408,19 @@ describe("completionMatches — the payloads the platform emits", () => {
   });
 
   it("delivers the context-less /connect/start errors to everyone", () => {
-    // integrations.ts:864/866/876/880/898/925 — popupHtmlError(msg, {}), emitted
+    // routes/integrations.ts `/connect/start` — popupHtmlError(msg, {}), emitted
     // before the token resolved a package or a state. This is the carve-out, and
     // it is the reason a surface with no context can still show an error at all.
+    // The last two are the OAuth `begin` refusals: the configuration detail an
+    // ApiError carries (#1263, rendered verbatim with its 4xx) and the generic
+    // 502 wording every other failure keeps.
     for (const msg of [
       "Missing connect token",
       "This connect link is invalid or expired.",
       "This integration is no longer available.",
       "This connect link has already been used.",
       "This integration cannot be connected.",
+      "Administrator must register OAuth client credentials for '@acme/gmail' auth 'primary' before connection",
       "Could not start the connection. Please try again.",
     ]) {
       const contextLess = detail({ ok: false, error: msg });

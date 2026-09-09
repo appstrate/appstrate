@@ -993,13 +993,21 @@ export const integrationsPaths = {
         // returns c.html(popupHtmlError(...), 400|410)), so each condition now
         // maps to exactly one status.
         "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
-        "400": { description: "Missing token (HTML error page)." },
+        "400": {
+          description:
+            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable.",
+        },
+        "403": {
+          description:
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint.",
+        },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
         "500": {
           description: "Integration cannot be connected / unexpected failure (HTML error page).",
         },
         "502": {
-          description: "Upstream provider failed to start the connection (HTML error page).",
+          description:
+            "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry.",
         },
       },
     },

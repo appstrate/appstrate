@@ -40,6 +40,7 @@
  */
 
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import {
   handleIntegrationOAuthCallback,
@@ -108,6 +109,7 @@ import {
   buildConnectUrl,
   readConnectToken,
   consumeJti,
+  releaseJti,
   setConnectPageCookie,
   readConnectPageCookie,
   clearConnectPageCookie,
@@ -920,13 +922,25 @@ export function createIntegrationsRouter() {
       if (!strategy.begin) {
         return c.html(popupHtmlError("This integration cannot be connected.", {}), 500);
       }
-      // `begin` can throw on a transient/structural fault (OAuth client removed
-      // between mint and click, provider discovery error, network). Without this
-      // guard the throw escapes to the global error handler, which renders raw
-      // `application/problem+json` inside the popup instead of the friendly
-      // popupHtmlError page every other failure path here returns. The jti is
-      // already burned, so the user re-mints (one click) — surface a readable
-      // error rather than a JSON blob.
+      // `begin` throws for two different reasons, and the popup must tell them
+      // apart (issue #1263). Without a guard at all the throw escapes to the
+      // global error handler, which renders raw `application/problem+json`
+      // inside the popup instead of the friendly popupHtmlError page every
+      // other failure path here returns.
+      //
+      //  1. A client-side `ApiError` (4xx): the space has no OAuth client for
+      //     this auth, auto-DCR against the provider was refused, the manifest
+      //     declares no issuer/endpoints. Permanent until someone acts, and the
+      //     `detail` names that action — the same message the programmatic
+      //     `POST …/connect/oauth2` already returns as its 403. Render it with
+      //     its own status, and hand the jti back: nothing was minted on the
+      //     strength of this click, so a retry once the admin has registered
+      //     the client can reuse the very same link instead of re-minting.
+      //  2. Anything else (provider discovery error, network, an unexpected
+      //     throw): transient or unknown. Keep the generic wording, keep the
+      //     502, keep the jti burned — an unknown failure may have gone half
+      //     way (a state row minted), and the burn is what stops a replay from
+      //     re-entering that flow. The user re-mints (one click).
       let result: Awaited<ReturnType<NonNullable<typeof strategy.begin>>>;
       try {
         result = await strategy.begin(
@@ -940,6 +954,19 @@ export function createIntegrationsRouter() {
           { scopes, forceAccountSelect: claims.force_account_select ?? false },
         );
       } catch (err) {
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+          logger.warn("Hosted connect OAuth begin refused", {
+            status: err.status,
+            code: err.code,
+            detail: err.message,
+            packageId: claims.package_id,
+            authKey: claims.auth_key,
+          });
+          await releaseJti(claims.jti);
+          // `err.message` is the problem `detail` — the public half of an
+          // ApiError by contract (never `cause`), and popupHtmlError escapes it.
+          return c.html(popupHtmlError(err.message, {}), err.status as ContentfulStatusCode);
+        }
         logger.error("Hosted connect OAuth begin failed", {
           err: String(err),
           packageId: claims.package_id,
