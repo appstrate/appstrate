@@ -14,6 +14,7 @@ import {
   CHECKOUT_PLAN_IDS,
   getPlans,
   LIVE_SUBSCRIPTION_STATUSES,
+  planAction,
   WARNING_STATUSES,
   type PlanDefinition,
 } from "../config.ts";
@@ -69,14 +70,12 @@ const KNOWN_STATUSES = new Set([
 /**
  * The status the dashboard reads, projected from the account row.
  *
- * `canceling` is the projection of `cancel_at_period_end`, and it is gated on
- * the underlying status being one a plan change accepts
- * (`LIVE_SUBSCRIPTION_STATUSES`). The SPA routes every changeable status to
- * `POST /api/billing/plan`, so projecting `canceling` over an `unpaid` or
- * `paused` subscription — Stripe suspends collection but keeps the cancel flag
- * — would send a call this API answers with 409 `no_active_subscription`. Those
- * accounts report their real status instead, which routes them to the Customer
- * Portal where the payment is what actually needs fixing.
+ * `canceling` projects `cancel_at_period_end`, gated on the underlying status
+ * being one a plan change accepts (`LIVE_SUBSCRIPTION_STATUSES`): Stripe keeps
+ * the cancel flag on an `unpaid` or `paused` subscription, and reporting
+ * `canceling` there would send the dashboard to `POST /api/billing/plan`, which
+ * answers 409. Those accounts report their real status, which is what routes
+ * them to the Customer Portal where the payment needs fixing.
  */
 function getBillingStatus(account: {
   stripeSubscriptionId: string | null;
@@ -178,6 +177,11 @@ function managerDetail(m: BillingManager) {
  * Shared by `GET /api/billing` and the answer to a plan change, so the dashboard
  * refreshes from the same shape it renders. `null` when the org has no billing
  * account.
+ *
+ * `plan_action` is the server's answer to "where does a plan selection go" —
+ * the same `planAction` predicate `createCheckoutSession` and
+ * `changeSubscriptionPlan` refuse on, so a dashboard that follows it never
+ * calls an endpoint this API is going to reject.
  */
 async function billingSnapshot(orgId: string) {
   const [account] = await getEeDb()
@@ -215,6 +219,7 @@ async function billingSnapshot(orgId: string) {
     credit_quota: account.creditQuota,
     period_end: account.periodEnd?.toISOString() ?? null,
     status: getBillingStatus(account),
+    plan_action: planAction(account),
     upgrades: upgradeOptions(allPlans, currentPlan?.tier ?? 0),
   };
 }
@@ -250,13 +255,12 @@ function stripeCallFailure(
 export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   const router = new Hono<EeEnv>();
 
-  // The permission guards and the body reader this router shares with the
-  // platform signal a refusal by THROWING an `ApiError`; only the module's own
-  // Stripe-facing failures return `problemJson` directly. Hono honours a
-  // mounted sub-app's error handler, so one handler here renders both halves as
-  // the same RFC 9457 body whether the router is mounted in the platform app or
-  // stood up alone (this module's tests). Anything that is not an `ApiError` is
-  // rethrown, so the platform's own handler still owns the 500 path.
+  // The shared permission guards and body reader signal a refusal by THROWING an
+  // `ApiError`; the module's own Stripe-facing failures return `problemJson`
+  // directly. Hono honours a mounted sub-app's error handler, so this one renders
+  // both halves as the same RFC 9457 body whether the router is mounted in the
+  // platform app or stood up alone (this module's tests). Anything else is
+  // rethrown, so the platform's handler still owns the 500 path.
   router.onError((err, c) => {
     if (err instanceof ApiError) return problemJson(c, err);
     throw err;

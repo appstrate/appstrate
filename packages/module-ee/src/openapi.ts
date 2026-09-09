@@ -112,6 +112,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         "credit_quota",
         "period_end",
         "status",
+        "plan_action",
         "upgrades",
       ],
       properties: {
@@ -143,6 +144,12 @@ export function openApiComponentSchemas(): Record<string, unknown> {
             "canceled",
             "canceling",
           ],
+        },
+        plan_action: {
+          type: "string",
+          description:
+            "Which endpoint a plan selection goes to: `plan-change` for `POST /api/billing/plan`, `portal` for `POST /api/billing/portal` when Stripe holds the subscription but has stopped collecting on it, `checkout` for `POST /api/billing/checkout`. Checkout only creates, so an org Stripe holds a subscription for never re-enters it — a second one would bill the customer twice.",
+          enum: ["plan-change", "portal", "checkout"],
         },
         upgrades: {
           type: "array",
@@ -227,6 +234,10 @@ export function openApiPaths(): Record<string, unknown> {
           },
           "403": {
             description: "Caller lacks `billing:manage`",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "404": {
+            description: "No billing account exists for this org",
             content: { "application/problem+json": { schema: errorProblemRef } },
           },
           "409": {

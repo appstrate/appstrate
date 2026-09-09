@@ -4,20 +4,18 @@ import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
-import { getPlans, isPlanId, LIVE_SUBSCRIPTION_STATUSES } from "../config.ts";
-import { noActiveSubscription } from "../http-errors.ts";
+import { getPlans, isPlanId, planAction } from "../config.ts";
+import { noActiveSubscription, noBillingAccount } from "../http-errors.ts";
 import { logger } from "../logger.ts";
 
 /**
  * Move an EXISTING Stripe subscription onto another plan, in place.
  *
- * The counterpart of `createCheckoutSession`, which refuses an org that already
- * has a subscription. Checkout only creates; taking an upgrade through it left
- * the first subscription running beside the second and charged the customer
- * twice. Here the subscription's single price item is swapped instead, with
- * `create_prorations` so the customer is credited for the unused remainder of
- * the plan they are leaving and charged the difference for the one they enter —
- * Stripe's own arithmetic, not ours.
+ * The counterpart of `createCheckoutSession`: both refuse on {@link planAction},
+ * so exactly one of the two doors is open to any account. The subscription's
+ * single price item is swapped with `create_prorations`, so the customer is
+ * credited for the unused remainder of the plan they leave and charged the
+ * difference for the one they enter — Stripe's arithmetic, not ours.
  *
  * The subscription's `metadata` is rewritten with the new `planId` in the same
  * call. It is not the source of truth (the price item is, everywhere it is read)
@@ -26,7 +24,7 @@ import { logger } from "../logger.ts";
  *
  * WHAT THIS DOES NOT DO: write the plan onto the billing account. Stripe answers
  * with `customer.subscription.updated`, and that handler — which resolves the
- * plan from the live price item and now writes only to the account carrying this
+ * plan from the live price item and writes only to the account carrying this
  * exact subscription — is the single place a plan transition is applied. Two
  * writers for one fact is how the account and Stripe drift apart.
  */
@@ -43,14 +41,10 @@ export async function changeSubscriptionPlan(orgId: string, planId: string): Pro
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
 
-  if (!account) throw new Error(`No billing account for org: ${orgId}`);
+  if (!account) throw noBillingAccount();
 
   const subscriptionId = account.stripeSubscriptionId;
-  if (
-    subscriptionId === null ||
-    account.subscriptionStatus === null ||
-    !LIVE_SUBSCRIPTION_STATUSES.has(account.subscriptionStatus)
-  ) {
+  if (subscriptionId === null || planAction(account) !== "plan-change") {
     throw noActiveSubscription();
   }
 

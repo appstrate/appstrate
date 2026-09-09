@@ -170,7 +170,6 @@ packages/module-ee/
 │   ├── openapi.ts            # OpenAPI 3.1 contribution: paths + tags + component schemas for billing routes
 │   ├── config.ts             # Plan definitions (free/starter/pro), credit quotas, DEFAULT_QUOTE_RATES (compute rates ship at 0)
 │   ├── env.ts                # Zod-validated EE env vars (Stripe keys)
-│   ├── types.ts              # Types mirrored from the platform (EE depends on neither @appstrate/db nor shared-types)
 │   ├── platform.ts           # Holder for the PlatformServices handle injected at init(ctx)
 │   ├── http-errors.ts        # ApiError → RFC 9457 problem+json, the envelope core routes emit
 │   ├── db.ts                 # Drizzle client + migrator (lazy init on DATABASE_URL, ee_migrations journal)
@@ -181,7 +180,7 @@ packages/module-ee/
 │   ├── billing/
 │   │   ├── managers.ts        # Billing managers: resolver, set replacement, principal-permission invalidation
 │   │   ├── contact.ts         # Billing contact: read/patch + Stripe customer email push
-│   │   ├── usage-quote.ts     # Pure quoteUsage(params, rates) → { modelCredits, computeCredits, totalCredits } + version-skew guard
+│   │   ├── usage-quote.ts     # Pure quoteUsage(params, rates) → { modelCredits, computeCredits, totalCredits }
 │   │   ├── quota-check.ts     # Account read + entitlement gate; balance rule in pure isAffordable() (throws QuotaExceededError)
 │   │   ├── usage-recorder.ts  # Cursor sweep pass: claim + debit + advance watermark (one txn) + billLedgerRows primitive
 │   │   ├── billing-sweeper.ts # Periodic timer driving the cursor sweep + tick observability + throttled entitlement resync
@@ -265,11 +264,21 @@ the returned snapshot may still name the previous plan while everything else in
 it is current. Downgrading to free is unchanged: it is a cancellation, taken
 through the Customer Portal.
 
+The SERVER also says which door the dashboard should use: the billing snapshot
+carries `plan_action` — `plan-change`, `portal` or `checkout` — computed by
+`planAction()` in `config.ts` from the same two status sets both endpoints refuse
+on. One predicate, three readers, so a dashboard that follows it never calls an
+endpoint this API is going to reject.
+
 ### Subscription identity
 
-Every subscription-scoped webhook writes only to the account that **currently carries that subscription id**. Stripe orders nothing, so an org that replaced `sub_old` with `sub_new` still receives `sub_old`'s tail of events, and `metadata.orgId` is identical on both — it says which org OWNS a subscription, never that the org is still on it. Matching on `orgId` alone let a `customer.subscription.deleted` for the dead subscription downgrade the live one to free with zero credits on an account Stripe was still charging; reversed order and late delivery are the same fault. The `ee_stripe_events` id dedupe does not help: each of those events is new and genuinely from Stripe.
+Every subscription-scoped webhook writes only to the account that **currently carries that subscription id**. Stripe orders nothing, so an org that replaced `sub_old` with `sub_new` still receives `sub_old`'s tail of events, and `metadata.orgId` is identical on both — it says which org OWNS a subscription, never that the org is still on it. Matching on `orgId` alone lets a `customer.subscription.deleted` for the dead subscription downgrade the live one to free with zero credits on an account Stripe is still charging; reversed order and late delivery are the same fault. The `ee_stripe_events` id dedupe does not help: each of those events is new and genuinely from Stripe.
 
-The three handlers whose job includes ATTACHING a subscription — `checkout.session.completed`, `customer.subscription.created` and `invoice.paid` — share one predicate: the account qualifies when it carries no subscription, when it carries THIS one, or when the id it carries names a subscription outside `HELD_SUBSCRIPTION_STATUSES`. That last arm is what a stale id needs — only `customer.subscription.deleted` nulls the column, so a lost or late one leaves a dead id behind, and pinning on the id alone dropped the org's next paid checkout as "superseded", leaving it charged with no plan and no quota. An account on a different subscription Stripe DOES hold is still excluded. The condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — that is the expected tail of a replacement, not a fault.
+The handlers that ATTACH a subscription share the "no held subscription" arms: an account qualifies when it carries no subscription id, or when the id it carries names a subscription outside `HELD_SUBSCRIPTION_STATUSES`. That second arm is what a stale id needs — only `customer.subscription.deleted` nulls the column, so a lost or late one leaves a dead id behind, and pinning on the id alone drops the org's next paid checkout as "superseded", leaving it charged with no plan and no quota. An account on a different subscription Stripe DOES hold is excluded.
+
+`checkout.session.completed` and `invoice.paid` add one arm: they also write the account already carrying THAT subscription, because both carry authoritative data for it and neither may depend on winning the ordering race against the other. `customer.subscription.created` does not — its payload is creation-time state (`incomplete` or `trialing`, `cancel_at_period_end: false`), so a late one would roll the live status and cancel flag back on the very subscription the account is on.
+
+The condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — the expected tail of a replacement, not a fault.
 
 ### Subscription status sync
 
