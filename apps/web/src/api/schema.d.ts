@@ -6263,6 +6263,16 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. */
+        RunAdmissionConflict: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Unexpected server error */
         InternalServerError: {
             headers: {
@@ -7500,7 +7510,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
+            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -9323,7 +9333,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -9332,6 +9342,13 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new billable work is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Rate limited (20/min per caller) */
             429: {
                 headers: {
@@ -12485,6 +12502,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new billable work is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
@@ -12555,6 +12581,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new billable work is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
@@ -12624,6 +12659,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new billable work is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
@@ -18897,7 +18941,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyInProgress"];
+            409: components["responses"]["RunAdmissionConflict"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {
@@ -19120,7 +19164,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyInProgress"];
+            409: components["responses"]["RunAdmissionConflict"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {

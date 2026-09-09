@@ -83,6 +83,16 @@ const baseResponses = {
       "method was used (cookie sessions and any unknown/unrecognized auth " +
       "strategy are rejected; bearer only).",
   },
+  "409": {
+    description:
+      "`org_deleting` — the organization's deletion is reserved, so no new " +
+      "billable work is admitted. RFC 9457 problem+json.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+      },
+    },
+  },
   "413": {
     description:
       "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced " +

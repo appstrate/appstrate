@@ -156,6 +156,50 @@ export const responses = {
       },
     },
   },
+  /**
+   * The 409 every run-creation operation answers with. Two causes share the
+   * status: the idempotency guard and the org-deletion reservation
+   * (`enforceOrgConcurrencyCap` → `refuseReservedForDeletion`, under the
+   * admission lock). Shared so a run-creation operation cannot document one
+   * and return the other.
+   */
+  RunAdmissionConflict: {
+    description:
+      "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being " +
+      "processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, " +
+      "so no new work is admitted and a retry will not succeed.",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        examples: {
+          idempotencyInProgress: {
+            summary: "Same Idempotency-Key still in flight",
+            value: {
+              type: "https://docs.appstrate.dev/errors/idempotency-in-progress",
+              title: "Idempotency In Progress",
+              status: 409,
+              detail:
+                "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
+              code: "idempotency_in_progress",
+              requestId: "req_abc123",
+            },
+          },
+          orgDeleting: {
+            summary: "The organization's deletion is reserved",
+            value: {
+              type: "https://docs.appstrate.dev/errors/org-deleting",
+              title: "Organization Is Being Deleted",
+              status: 409,
+              detail: "This organization is being deleted; no new work can be admitted.",
+              code: "org_deleting",
+              requestId: "req_abc123",
+            },
+          },
+        },
+      },
+    },
+  },
   InternalServerError: {
     description: "Unexpected server error",
     content: {
