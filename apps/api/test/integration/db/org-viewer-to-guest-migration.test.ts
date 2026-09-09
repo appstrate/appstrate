@@ -26,6 +26,15 @@ const SCRIPT = new URL(
   import.meta.url,
 ).pathname;
 
+/**
+ * `0008`'s companion: the invitations it deliberately leaves reading `viewer`,
+ * which the `org_role` narrowing (#1275) cannot cast.
+ */
+const SCRIPT_HISTORY = new URL(
+  "../../../../../scripts/migration/0012-org-invitation-history-viewer-to-guest.sql",
+  import.meta.url,
+).pathname;
+
 const ORG = "e0000000-0000-4000-8000-00000000d008";
 const SPACE_DEFAULT = "spc_d0080000-0000-4000-8000-000000000001";
 const SPACE_OTHER = "spc_d0080000-0000-4000-8000-000000000002";
@@ -307,5 +316,101 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     ).toBe(1);
     // …and the other three rows were still inserted.
     expect(await count(`SELECT count(*)::int AS n FROM space_members`)).toBe(4);
+  });
+});
+
+/**
+ * `scripts/migration/0012-org-invitation-history-viewer-to-guest.sql`.
+ *
+ * `0008` restricts its invitation UPDATE to `status = 'pending'` — the case
+ * above asserts an expired one keeps `viewer` — because only a pending row owes
+ * the `space_assignments` snapshot `0008`'s step 5 verifies. That leaves the
+ * rest as history reading a value the `org_role` narrowing (#1275) cannot cast,
+ * and this script is what clears it.
+ *
+ * The seed of the outer `describe` is reused, plus a cancelled row: `expired`
+ * and `cancelled` are two different non-pending statuses and the scope is
+ * written as `<> 'pending'`, not as a list.
+ */
+describe("scripts/migration/0012 — the invitations `0008` leaves as history", () => {
+  const CANCELLED = "inv_0012_cancelled";
+
+  beforeEach(async () => {
+    await truncateAll();
+    await seed();
+    await execScript(`
+      INSERT INTO org_invitations (id, token, email, org_id, role, status, expires_at) VALUES
+        ('${CANCELLED}', 'tok_0012_cancelled', 'x-0012@example.com', '${ORG}', 'viewer', 'cancelled', now() - interval '1 day');
+    `);
+  });
+
+  afterEach(async () => {
+    await truncateAll();
+  });
+
+  async function role(id: string): Promise<string | undefined> {
+    return toRows<{ role: string }>(
+      await db.execute(sql`SELECT role::text AS role FROM org_invitations WHERE id = ${id}`),
+    )[0]?.role;
+  }
+
+  it("moves every non-pending viewer invitation, whatever its status", async () => {
+    await execScript(await Bun.file(SCRIPT).text());
+    // What `0008` leaves behind, and the reason this file exists.
+    expect(await role("inv_0008_expired")).toBe("viewer");
+    expect(await role(CANCELLED)).toBe("viewer");
+
+    await execScript(await Bun.file(SCRIPT_HISTORY).text());
+
+    expect(await role("inv_0008_expired")).toBe("guest");
+    expect(await role(CANCELLED)).toBe("guest");
+    // `0008` had already moved the pending one; a non-viewer row is nobody's.
+    expect(await role("inv_0008_pending")).toBe("guest");
+    expect(await role("inv_0008_member")).toBe("member");
+  });
+
+  it("leaves a PENDING viewer invitation untouched — that row is `0008`'s", async () => {
+    // Run out of order, before `0008`. `status <> 'pending'` is load-bearing,
+    // not tidiness: a pending row swallowed here would become `guest` without
+    // the `space_assignments` snapshot that makes its acceptance equivalent,
+    // and `0008` would no longer match it on a later run.
+    await execScript(await Bun.file(SCRIPT_HISTORY).text());
+
+    expect(await role("inv_0008_pending")).toBe("viewer");
+    expect(
+      await count(
+        `SELECT jsonb_array_length(space_assignments)::int AS n
+           FROM org_invitations WHERE id = 'inv_0008_pending'`,
+      ),
+    ).toBe(0);
+    // And the org members are untouched too — this script owns one table.
+    expect(await count(`SELECT count(*)::int AS n FROM org_members WHERE role = 'viewer'`)).toBe(2);
+
+    // `0008` still finds it afterwards, snapshot and all.
+    await execScript(await Bun.file(SCRIPT).text());
+    expect(await role("inv_0008_pending")).toBe("guest");
+    expect(
+      await count(
+        `SELECT jsonb_array_length(space_assignments)::int AS n
+           FROM org_invitations WHERE id = 'inv_0008_pending'`,
+      ),
+    ).toBe(2);
+  });
+
+  it("is idempotent — a second run changes nothing", async () => {
+    const source = await Bun.file(SCRIPT_HISTORY).text();
+    await execScript(source);
+    const guests = await count(
+      `SELECT count(*)::int AS n FROM org_invitations WHERE role = 'guest'`,
+    );
+
+    await execScript(source);
+
+    expect(await count(`SELECT count(*)::int AS n FROM org_invitations WHERE role = 'guest'`)).toBe(
+      guests,
+    );
+    expect(
+      await count(`SELECT count(*)::int AS n FROM org_invitations WHERE role = 'viewer'`),
+    ).toBe(1); // the pending one, still `0008`'s
   });
 });

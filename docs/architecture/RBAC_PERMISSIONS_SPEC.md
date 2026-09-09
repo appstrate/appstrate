@@ -510,11 +510,13 @@ Doctrine: `NO_TRANSITIONAL_CODE.md`. Catalog changes are drizzle migrations; row
 
 Between `0056` and `0008` a member whose row still reads `viewer` resolves no permission set and its requests fail; the two are one maintenance window, not two deploys. Rollback is one-way from `0056`: the previous build inserts `chat_sessions` without `space_id`, which is now NOT NULL.
 
+**Rows — `scripts/migration/0012-org-invitation-history-viewer-to-guest.sql`:** the invitations `0008` deliberately leaves alone. `0008` restricts its invitation UPDATE to `status = 'pending'`, because a pending row also gets the `space_assignments` snapshot its step 5 verifies; an accepted, expired or cancelled one grants nothing and needs none. That leaves them as history reading `viewer`, which the type narrowing in §12 cannot cast — so `0012` maps them to `guest`, the successor `0008` chose for the same offers, and keeps `status <> 'pending'` as a load-bearing scope rather than a tidy one: a pending row swallowed there would lose its snapshot and become invisible to `0008` on a rerun.
+
 The `org_role` type keeps `viewer` because `ALTER TYPE … DROP VALUE` does not exist — see §12.
 
 The Drizzle snapshot includes the OAuth assignment column and matches the schema generator (`db:generate` reports no changes). Migration tests replay the OAuth rewrite and the invitation migration, including real invitation acceptance.
 
-**The runbook is `scripts/migration/README.md` → RBAC rollout**, and it is the only copy: rehearsal on a restored dump, the duplicate-pair pre-flight that decides whether `0009` runs, the order of the four files, and what to verify after each. Each migration file's own header is the authority on what it touches and what it deliberately leaves alone.
+**The runbook is `scripts/migration/README.md` → RBAC rollout**, and it is the only copy: rehearsal on a restored dump, the duplicate-pair pre-flight that decides whether `0009` runs, the order of the five files, and what to verify after each. Each migration file's own header is the authority on what it touches and what it deliberately leaves alone.
 
 ---
 
