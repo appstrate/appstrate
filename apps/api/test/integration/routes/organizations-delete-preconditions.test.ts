@@ -60,7 +60,7 @@ function moduleCtx(): ModuleInitContext {
   return {
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    getSendMail: async () => () => {},
+    getSendMail: async () => async () => {},
     getOrgOwnerEmails: async () => [],
     getOrgMembers: async () => [],
     getOrgName: async () => null,

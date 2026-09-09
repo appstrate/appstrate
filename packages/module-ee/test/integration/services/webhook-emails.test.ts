@@ -32,7 +32,7 @@ describe("webhook billing emails", () => {
     sentEmails.length = 0;
 
     initBillingEmail({
-      sendMail: (to, subject) => {
+      sendMail: async (to, subject) => {
         sentEmails.push({ to, subject });
       },
       getRecipients: async () => ["billing@test.com"],
@@ -294,7 +294,7 @@ describe("webhook billing emails", () => {
   describe("sends to every billing recipient", () => {
     it("sends one email per recipient", async () => {
       initBillingEmail({
-        sendMail: (to, subject) => {
+        sendMail: async (to, subject) => {
           sentEmails.push({ to, subject });
         },
         getRecipients: async () => ["billing@test.com", "cfo@test.com"],

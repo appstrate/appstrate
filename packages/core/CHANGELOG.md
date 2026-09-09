@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write touched, one call each; `@appstrate/module-ee`'s billing managers do
   exactly that. A caller passing one argument fails to compile.
 
+- **BREAKING: the mailer `ModuleInitContext.getSendMail` resolves is now
+  asynchronous** — `(to, subject, html) => Promise<void>` instead of
+  `=> void` (#1280). The platform always supplied an async mailer; the
+  declared type said otherwise, so `await ctx.getSendMail()(…)` awaited
+  nothing and no module could sequence on a send (send, then mark sent). It
+  also made the platform's own call site the one place needing an
+  `@typescript-eslint/no-misused-promises` suppression, for a contract defect
+  that was not local to it. A module that supplies its own `() => void` mailer
+  to a helper typed against this contract stops compiling; the fix is to make
+  that mailer `async`. Awaiting means the delivery ATTEMPT is over, not that
+  delivery succeeded: the platform's mailer logs transport failures and
+  settles. A module-supplied mailer MAY reject, so a caller fanning out over
+  several recipients should settle the fan-out rather than race to the first
+  rejection (`@appstrate/module-ee` does).
+
 - **BREAKING: `ModuleInitContext.getOrgAdminEmails` is REMOVED**, replaced by
   two narrower queries. `getOrgOwnerEmails(orgId)` returns the emails of the
   org's OWNERS only — the live fallback recipient for an unset billing contact,
