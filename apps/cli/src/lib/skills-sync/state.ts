@@ -9,7 +9,8 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import { getDataDir } from "../config.ts";
+import { normalizeInstance } from "../instance-url.ts";
+import { getDataDir, type Profile } from "../config.ts";
 
 /**
  * BUMP whenever PER-SKILL materialized output changes: the server-side digests
@@ -26,7 +27,53 @@ export interface ManagedSkill {
   integrity: string;
 }
 
+/**
+ * Which connection an installation belongs to. One per destination: profiles do
+ * not accumulate installations, so every managed directory under a target was
+ * written by this context.
+ *
+ * The pinned space is NOT part of it: it selects no skill (D14), it only fills
+ * the `X-Space-Id` header of the generated `.mcp.json` — content
+ * `pluginTreeMatches` already compares and rewrites. Switching space installs
+ * the same skills, so it is a property of the plugin, not a different owner.
+ */
+export interface SyncContext {
+  profileName: string;
+  instance: string;
+  userId: string;
+  orgId: string;
+}
+
+/**
+ * `satisfies` makes this exhaustive in both directions, so a field added to
+ * `SyncContext` cannot slip past validation or comparison by being forgotten here.
+ */
+const CONTEXT_KEYS = Object.keys({
+  profileName: 0,
+  instance: 0,
+  userId: 0,
+  orgId: 0,
+} satisfies Record<keyof SyncContext, 0>) as (keyof SyncContext)[];
+
+export function syncContext(profileName: string, profile: Profile): SyncContext {
+  return {
+    profileName,
+    instance: normalizeInstance(profile.instance),
+    userId: profile.userId,
+    orgId: profile.orgId!,
+  };
+}
+
+export function sameContext(a: SyncContext, b: SyncContext): boolean {
+  return CONTEXT_KEYS.every((key) => a[key] === b[key]);
+}
+
 export interface TargetState {
+  /**
+   * Required: a ledger that does not name its context is not this format, and
+   * `isTargetState` refuses it rather than guessing whose directories these are.
+   */
+  context: SyncContext;
   source: "published" | "draft";
   /**
    * Recorded because `HOME` is not a constant — cron, launchd and devcontainers
@@ -49,8 +96,12 @@ function emptySyncState(): SyncState {
   return { version: STATE_VERSION, targets: {} };
 }
 
-export function emptyTargetState(source: TargetState["source"], root: string): TargetState {
-  return { source, root, managed: {} };
+export function emptyTargetState(
+  source: TargetState["source"],
+  root: string,
+  context: SyncContext,
+): TargetState {
+  return { context, source, root, managed: {} };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,6 +125,7 @@ function isTargetState(value: unknown): value is TargetState {
   if (!isRecord(value)) return false;
   if (value.source !== "published" && value.source !== "draft") return false;
   if (!isNonEmptyString(value.root)) return false;
+  if (!isContext(value.context)) return false;
   if (!isRecord(value.managed)) return false;
   return Object.values(value.managed).every(isManagedSkill);
 }
@@ -123,7 +175,22 @@ function sortState(state: SyncState): SyncState {
     for (const slug of Object.keys(entry.managed).sort()) {
       managed[slug] = entry.managed[slug]!;
     }
-    targets[target] = { source: entry.source, root: entry.root, managed };
+    targets[target] = { ...entry, managed };
   }
   return { version: state.version, targets };
+}
+
+/**
+ * The key set is EXACT. A context carrying anything else — a `spaceId`, say —
+ * was written in a shape this CLI no longer produces, and reading it through a
+ * narrower comparison would be a second, untested code path for a format
+ * nothing writes. It is refused whole, exactly like a context-less ledger: the
+ * run reports the state as unusable and re-materializes everything.
+ */
+function isContext(value: unknown): value is SyncContext {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === CONTEXT_KEYS.length &&
+    CONTEXT_KEYS.every((key) => isNonEmptyString(value[key]))
+  );
 }

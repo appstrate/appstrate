@@ -529,17 +529,22 @@ spaceGroup
 
 const skillsGroup = program
   .command("skills")
-  .description("Sync the pinned space's skills to Claude Code and Codex");
+  .description("Sync the skills of every space you belong to, to Claude Code and Codex");
 
 skillsGroup
   .command("sync")
   .description(
-    "Materialize the pinned space's skills as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",
     `Destination to write (repeatable): ${SYNC_TARGETS.join(" | ")}. Default: claude-plugin.`,
     collectTarget,
+  )
+  .option(
+    "--space <space>",
+    "Narrow this sync to a space — ID or name (repeatable; overrides syncSpaces).",
+    (value: string, previous: string[] = []) => [...previous, value],
   )
   .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
   .option(
@@ -550,6 +555,7 @@ skillsGroup
   .action(
     async (opts: {
       target?: SyncTarget[];
+      space?: string[];
       source?: SkillSource;
       printPath?: boolean;
       dryRun?: boolean;
@@ -558,6 +564,7 @@ skillsGroup
       await skillsSyncCommand({
         profile: globalOpts.profile,
         target: opts.target,
+        space: opts.space,
         source: opts.source,
         printPath: opts.printPath,
         dryRun: opts.dryRun,

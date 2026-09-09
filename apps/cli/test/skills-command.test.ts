@@ -774,7 +774,7 @@ describe("skills sync — ledger ownership", () => {
     expect(await exists(join(codexRoot(), "pdf-tools", "SKILL.md"))).toBe(true);
   });
 
-  it("does not record a slug whose write failed", async () => {
+  it("retains ownership of a slug whose removal failed", async () => {
     createSkillServer([...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }]).install();
     const { io } = createMemoryIO();
     await skillsSyncCommand({ target: ["codex"] }, io);
@@ -794,7 +794,7 @@ describe("skills sync — ledger ownership", () => {
       targets: Record<string, { root: string; managed: Record<string, unknown> }>;
     };
     expect(state.targets.codex!.root).toBe(codexRoot());
-    expect(Object.keys(state.targets.codex!.managed)).toEqual(["pdf-tools"]);
+    expect(Object.keys(state.targets.codex!.managed)).toEqual(["notes", "pdf-tools"]);
   });
 
   it("keeps --print-path at exit 0 when only the passenger target failed to write", async () => {
@@ -1184,12 +1184,9 @@ describe("skills sync — fresh install", () => {
     await rm(staging);
     const { io, stdout } = createMemoryIO();
 
-    await expect(
-      skillsSyncCommand({ profile: "nope", printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
-
-    expect(stdout()).toBe("");
-    expect(await exists(pluginRoot())).toBe(false);
+    await skillsSyncCommand({ profile: "nope", printPath: true }, io);
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(await exists(setupSkill())).toBe(true);
     await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
     expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
   });
@@ -1240,3 +1237,347 @@ async function snapshot(root: string): Promise<Record<string, string>> {
   await walk(root, "");
   return out;
 }
+
+/** The caller's standing in a space, as `GET /api/spaces` reports it — a
+ * space listed without it is one this profile may only ask to join, and can
+ * therefore not be a skill source. */
+const MEMBER = { access: "member" as const, permissions: ["skills:read"] };
+
+describe("skills sync — multiple spaces", () => {
+  it("never sources a listed space this member never joined", async () => {
+    // The org lists its `closed` spaces to every member so they can ask to be
+    // added; the stub refuses every space-scoped read of one, as the server
+    // does, so selecting it would fail the whole run.
+    createSkillServer(ONE_SKILL, [
+      { id: "spc_1", name: "Active", isDefault: true },
+      { id: "spc_closed", name: "Closed", access: "none" },
+    ]).install();
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    expect(stderr()).not.toMatch(/not_a_space_member/);
+  });
+
+  it("unions selected spaces, scopes downloads, and keeps MCP in the active space", async () => {
+    const second = { id: "@acme/other", skillMd: skillMd("other", "Other skill.") };
+    createSkillServer([...ONE_SKILL, second]).install();
+    const serve = globalThis.fetch;
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      const space = new Headers(init?.headers).get("X-Space-Id");
+      if (path === "/api/spaces")
+        return Response.json({
+          data: [
+            { id: "spc_1", name: "Active", ...MEMBER },
+            { id: "spc_2", name: "Library", ...MEMBER },
+          ],
+        });
+      if (path === "/api/packages/skills")
+        return Response.json({
+          data:
+            space === "spc_1"
+              ? [{ id: ONE_SKILL[0]!.id }]
+              : [{ id: ONE_SKILL[0]!.id }, { id: second.id }],
+        });
+      if (path.includes("other")) expect(space).toBe("spc_2");
+      seen.push(path);
+      return serve(input, init);
+    }) as unknown as typeof fetch;
+    const { io } = createMemoryIO();
+    await skillsSyncCommand({ space: ["spc_1", "Library", "spc_2"] }, io);
+    expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
+    expect(
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
+        "X-Space-Id"
+      ],
+    ).toBe("spc_1");
+    expect(await exists(join(pluginRoot(), "skills", "other", "SKILL.md"))).toBe(true);
+  });
+});
+
+it("uses stored sync spaces, supports an empty selection, and explicit spaces replace it", async () => {
+  const { updateProfile } = await import("../src/lib/config.ts");
+  await updateProfile("default", { syncSpaces: [] });
+  createSkillServer(ONE_SKILL).install();
+  const serve = globalThis.fetch;
+  globalThis.fetch = (async (input, init) =>
+    new URL(String(input)).pathname === "/api/spaces"
+      ? Response.json({ data: [{ id: "spc_1", name: "Active", ...MEMBER }] })
+      : serve(input, init)) as typeof fetch;
+  const { io } = createMemoryIO();
+  await skillsSyncCommand({}, io);
+  expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
+  expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
+  await skillsSyncCommand({ space: ["spc_1"] }, io);
+  expect(await readdir(join(pluginRoot(), "skills"))).toHaveLength(1);
+  await updateProfile("default", { orgId: "org_2" });
+  const profile = await (await import("../src/lib/config.ts")).getProfile("default");
+  expect(profile?.syncSpaces).toBeUndefined();
+});
+
+describe("skills sync — active context replacement", () => {
+  it("preserves skills and MCP together when a new context download fails, then replaces on retry", async () => {
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    const { io } = createMemoryIO();
+    await skillsSyncCommand({}, io);
+    const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
+    const previousState = await readText(getStatePath());
+    // The organization is what an installation belongs to; the pinned space is
+    // `.mcp.json` content and switching it is not a switch of installation.
+    await updateProfile("default", { orgId: "org_2" });
+    const nextSkill = {
+      id: "@acme/new-context",
+      skillMd: skillMd("new-context", "New context skill."),
+    };
+    createSkillServer([{ ...nextSkill, corruptDownload: true }]).install();
+    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(previousMcp);
+    expect(await readText(getStatePath())).toBe(previousState);
+    createSkillServer([nextSkill]).install();
+    await skillsSyncCommand({}, io);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["new-context"]);
+    expect(
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
+    ).toBe("https://app.example.com/api/mcp/o/org_2");
+  });
+
+  it("rejects a context changed while downloading before writing any installation", async () => {
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    const serve = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/download")) {
+        await updateProfile("default", { orgId: "org_changed" });
+      }
+      return serve(input, init);
+    }) as unknown as typeof fetch;
+    const { io } = createMemoryIO();
+    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    expect(await exists(pluginRoot())).toBe(false);
+  });
+
+  it("rewrites the MCP space over a skill that cannot be resolved at all", async () => {
+    // A space switch installs the same skills, so it is NOT a context switch:
+    // the all-or-nothing rule does not apply and a package that persistently
+    // fails to resolve is kept, exactly as it is on any other run.
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const skillPath = join(pluginRoot(), "skills", "pdf-tools", "SKILL.md");
+    const before = await readText(skillPath);
+    await updateProfile("default", { spaceId: "spc_2" });
+    const server = createSkillServer([{ ...ONE_SKILL[0]!, resolveError: 500 }]);
+    server.install();
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({ printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toContain("Skipped @acme/pdf-tools");
+    expect(
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
+        "X-Space-Id"
+      ],
+    ).toBe("spc_2");
+    expect(await readText(skillPath)).toBe(before);
+    expect(server.downloads()).toBe(0);
+  });
+
+  it("rejects a pinned space changed while downloading and keeps the previous plugin", async () => {
+    // The pin is not part of the context, but `.mcp.json` was already built
+    // from it: swapping now would publish a header naming the previous space.
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
+    const serve = createSkillServer([
+      ...ONE_SKILL,
+      { id: "@acme/notes", skillMd: skillMd("notes") },
+    ]);
+    serve.install();
+    const passthrough = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/download")) {
+        await updateProfile("default", { spaceId: "spc_2" });
+      }
+      return passthrough(input, init);
+    }) as unknown as typeof fetch;
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("Active sync context changed");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(previousMcp);
+  });
+
+  it("refuses a ledger whose context carries a pinned space", async () => {
+    // The shape the previous commits of this branch wrote. It is not this
+    // format: there is no second, narrower comparison for it, so it claims
+    // nothing and the run re-materializes everything.
+    const server = createSkillServer(ONE_SKILL);
+    server.install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const pinned = JSON.parse(await readText(getStatePath()));
+    pinned.targets["claude-plugin"].context.spaceId = "spc_1";
+    await writeFile(getStatePath(), JSON.stringify(pinned));
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(stderr()).toContain("Sync state could not be used and has been ignored");
+    expect(server.downloads()).toBe(2);
+    expect(JSON.parse(await readText(getStatePath())).targets["claude-plugin"].context).toEqual({
+      profileName: "default",
+      instance: "https://app.example.com",
+      userId: "u_1",
+      orgId: "org_1",
+    });
+  });
+});
+
+it("aborts a strict context replacement when a staged skill cannot be written", async () => {
+  const { writePluginTree, pluginFixedFiles } = await import("../src/lib/skills-sync/targets.ts");
+  createSkillServer(ONE_SKILL).install();
+  await skillsSyncCommand({}, createMemoryIO().io);
+  const before = await snapshot(pluginRoot());
+  const bytes = new TextEncoder().encode("content");
+  await expect(
+    writePluginTree(
+      [{ slug: "broken", files: { file: bytes, "file/child": bytes } }],
+      [],
+      pluginRoot(),
+      pluginFixedFiles(),
+      true,
+    ),
+  ).rejects.toThrow("complete plugin");
+  expect(await snapshot(pluginRoot())).toEqual(before);
+});
+
+describe("logout — managed skills", () => {
+  it("cleans offline, preserves unmanaged files, and refreshes as setup after logout", async () => {
+    const { logoutCommand } = await import("../src/commands/logout.ts");
+    const { getProfile } = await import("../src/lib/config.ts");
+    const { loadTokens } = await import("../src/lib/keyring.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await mkdir(join(codexRoot(), "personal"));
+    await writeFile(join(codexRoot(), "personal", "SKILL.md"), "mine");
+    globalThis.fetch = (async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+    await logoutCommand({}, createMemoryIO().io);
+    expect(await getProfile("default")).toBeNull();
+    expect(await loadTokens("default")).toBeNull();
+    expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+    expect(await readdir(codexRoot())).toEqual(["personal"]);
+    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+  });
+
+  it("does not remove another profile's installation and retries failed removals without tokens", async () => {
+    const { logoutCommand } = await import("../src/commands/logout.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await seedLoggedInProfile("other", { orgId: "org_other", spaceId: "spc_other" });
+    const before = await snapshot(pluginRoot());
+    await logoutCommand({ profile: "other" }, createMemoryIO().io);
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    await rm(join(codexRoot(), "pdf-tools"), { recursive: true });
+    await writeFile(join(codexRoot(), "pdf-tools"), "blocks deletion");
+    await logoutCommand({ profile: "default" }, createMemoryIO().io);
+    expect(
+      JSON.parse(await readText(getStatePath())).targets.codex.managed["pdf-tools"],
+    ).toBeDefined();
+    await rm(join(codexRoot(), "pdf-tools"));
+    await mkdir(join(codexRoot(), "pdf-tools"));
+    await logoutCommand({ profile: "default" }, createMemoryIO().io);
+    expect(await exists(join(codexRoot(), "pdf-tools"))).toBe(false);
+    expect(JSON.parse(await readText(getStatePath())).targets.codex).toBeUndefined();
+  });
+
+  it("refuses a ledger that names no context, and owns the tree again after one sync", async () => {
+    const { logoutCommand } = await import("../src/commands/logout.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    // The shape written before a ledger carried its context. It is not this
+    // format, so it claims nothing — rather than being read as "owner unknown".
+    const contextless = JSON.parse(await readText(getStatePath()));
+    delete contextless.targets["claude-plugin"].context;
+    await writeFile(getStatePath(), JSON.stringify(contextless));
+
+    const before = await snapshot(pluginRoot());
+    await logoutCommand({}, createMemoryIO().io);
+    expect(await snapshot(pluginRoot())).toEqual(before);
+
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
+    const { io, stderr } = createMemoryIO();
+    await skillsSyncCommand({}, io);
+    expect(stderr()).toContain("Sync state could not be used and has been ignored");
+    await logoutCommand({}, createMemoryIO().io);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+  });
+});
+
+it("serializes logout behind an in-flight sync and leaves no connected installation", async () => {
+  const { logoutCommand } = await import("../src/commands/logout.ts");
+  const { getProfile } = await import("../src/lib/config.ts");
+  createSkillServer(ONE_SKILL).install();
+  const serve = globalThis.fetch;
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const downloading = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/download")) {
+      started();
+      await held;
+    }
+    if (path.endsWith("/cli/revoke")) return Response.json({ revoked: true });
+    return serve(input, init);
+  }) as unknown as typeof fetch;
+  const sync = skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+  await downloading;
+  const logout = logoutCommand({}, createMemoryIO().io);
+  release();
+  await Promise.all([sync, logout]);
+  expect(await getProfile("default")).toBeNull();
+  expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+  expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
+  expect(await exists(join(codexRoot(), "pdf-tools"))).toBe(false);
+});
+
+it("a sync queued during logout re-reads the disconnected profile under the lock", async () => {
+  const { logoutCommand } = await import("../src/commands/logout.ts");
+  createSkillServer(ONE_SKILL).install();
+  await skillsSyncCommand({}, createMemoryIO().io);
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const revoking = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  globalThis.fetch = (async () => {
+    started();
+    await held;
+    return Response.json({ revoked: true });
+  }) as unknown as typeof fetch;
+  const logout = logoutCommand({}, createMemoryIO().io);
+  await revoking;
+  const sync = skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+  release();
+  await Promise.all([logout, sync]);
+  expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
+  expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
+});

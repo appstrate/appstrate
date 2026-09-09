@@ -19,7 +19,14 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { collisionSlug, DROPPED_ENTRIES, SKILL_ENTRY, skillSlug } from "./materialize.ts";
-import { emptyTargetState, STATE_VERSION, type SyncState, type TargetState } from "./state.ts";
+import {
+  emptyTargetState,
+  STATE_VERSION,
+  sameContext,
+  type SyncContext,
+  type SyncState,
+  type TargetState,
+} from "./state.ts";
 import { destinationExists, skillDir, targetRoot, type SyncTarget } from "./targets.ts";
 
 export const MAX_CONCURRENCY = 8;
@@ -49,6 +56,7 @@ export interface FileIndexEntry {
 
 export interface ResolvedSkill {
   packageId: string;
+  spaceId?: string;
   version: string;
   /** SRI for a published artifact, ETag + `lock_version` for a draft. */
   integrity: string;
@@ -68,8 +76,8 @@ export interface PlannedSkill extends ResolvedSkill {
  * Sorted by package id, which is what makes collision resolution reproducible
  * rather than server-order dependent. System packages are the platform's.
  */
-export async function listSyncableSkills(profileName: string): Promise<string[]> {
-  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills");
+export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
+  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", { spaceId });
   return rows
     .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
     .map((row) => row.id)
@@ -81,15 +89,17 @@ export async function resolveSkill(
   profileName: string,
   packageId: string,
   source: SkillSource,
+  spaceId?: string,
 ): Promise<ResolvedSkill | null> {
   return source === "published"
-    ? resolvePublished(profileName, packageId)
-    : resolveDraft(profileName, packageId);
+    ? resolvePublished(profileName, packageId, spaceId)
+    : resolveDraft(profileName, packageId, spaceId);
 }
 
 async function resolvePublished(
   profileName: string,
   packageId: string,
+  spaceId?: string,
 ): Promise<ResolvedSkill | null> {
   interface VersionDetail {
     version?: unknown;
@@ -101,6 +111,7 @@ async function resolvePublished(
     detail = await apiFetch<VersionDetail>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+      { spaceId },
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
@@ -114,13 +125,18 @@ async function resolvePublished(
   }
   return {
     packageId,
+    ...(spaceId ? { spaceId } : {}),
     version: detail.version,
     integrity: detail.integrity,
     frontmatterName: frontmatterNameOf(detail.content),
   };
 }
 
-async function resolveDraft(profileName: string, packageId: string): Promise<ResolvedSkill | null> {
+async function resolveDraft(
+  profileName: string,
+  packageId: string,
+  spaceId?: string,
+): Promise<ResolvedSkill | null> {
   interface DraftDetail {
     content?: unknown;
     lock_version?: unknown;
@@ -130,6 +146,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
     detail = await apiFetch<DraftDetail>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}`,
+      { spaceId },
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
@@ -140,6 +157,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
   const res = await apiFetchRaw(
     profileName,
     `/api/packages/${encodePackageIdPath(packageId)}/files`,
+    { spaceId },
   );
   if (!res.ok) {
     throw new SkillSyncError(
@@ -152,6 +170,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
   const index = (await res.json()) as { entries?: FileIndexEntry[] };
   return {
     packageId,
+    ...(spaceId ? { spaceId } : {}),
     version: "draft",
     integrity: `draft:${lock}:${etag}`,
     frontmatterName: frontmatterNameOf(detail.content),
@@ -206,6 +225,7 @@ async function fetchPublishedFiles(
   const res = await apiFetchRaw(
     profileName,
     `/api/packages/${encodePackageIdPath(skill.packageId)}/${encodeURIComponent(skill.version)}/download`,
+    { spaceId: skill.spaceId },
   );
   if (!res.ok) {
     throw new SkillSyncError(
@@ -241,8 +261,13 @@ async function fetchDraftFiles(
   // snapshot that may have moved.
   const entries =
     skill.draftIndex ??
-    (await apiFetch<{ entries?: FileIndexEntry[] }>(profileName, `/api/packages/${encoded}/files`))
-      .entries ??
+    (
+      await apiFetch<{ entries?: FileIndexEntry[] }>(
+        profileName,
+        `/api/packages/${encoded}/files`,
+        { spaceId: skill.spaceId },
+      )
+    ).entries ??
     [];
 
   const wanted = entries
@@ -265,6 +290,7 @@ async function fetchDraftFiles(
     const res = await apiFetchRaw(
       profileName,
       `/api/packages/${encoded}/files/content?path=${encodeURIComponent(entry.path)}`,
+      { spaceId: skill.spaceId },
     );
     if (!res.ok) {
       throw new SkillSyncError(
@@ -297,6 +323,8 @@ export interface TargetPlan {
   removed: string[];
   /** Ledger slugs whose `SKILL.md` is on disk — asked by three rules below. */
   present: ReadonlySet<string>;
+  /** This target holds another connection's installation, being replaced whole. */
+  contextChanged: boolean;
 }
 
 export interface Catalogue {
@@ -314,10 +342,11 @@ export function ownedLedger(
   target: SyncTarget,
   state: SyncState,
   source: SkillSource,
+  context: SyncContext,
 ): TargetState {
   const previous = state.targets[target];
   const root = targetRoot(target);
-  return !previous || previous.root !== root ? emptyTargetState(source, root) : previous;
+  return !previous || previous.root !== root ? emptyTargetState(source, root, context) : previous;
 }
 
 export async function diffTarget(
@@ -325,9 +354,14 @@ export async function diffTarget(
   catalogue: Catalogue,
   state: SyncState,
   source: SkillSource,
+  context: SyncContext,
 ): Promise<TargetPlan> {
-  const ledger = ownedLedger(target, state, source);
+  const ledger = ownedLedger(target, state, source, context);
   // A ledger from a build whose materializer differs is stale, but still owned.
+  // An installation belonging to another connection is replaced whole, so its
+  // preparation is all-or-nothing rather than graded per skill.
+  const contextChanged =
+    state.targets[target]?.root === targetRoot(target) && !sameContext(ledger.context, context);
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
   const present = new Set<string>();
@@ -342,6 +376,7 @@ export async function diffTarget(
     blocked: [],
     removed: [],
     present,
+    contextChanged,
   };
 
   for (const [slug, skill] of catalogue.bySlug) {

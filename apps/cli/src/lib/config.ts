@@ -32,6 +32,7 @@ export interface Profile {
   email: string;
   orgId?: string;
   spaceId?: string;
+  syncSpaces?: string[];
 }
 
 export interface Config {
@@ -133,9 +134,25 @@ export async function readConfig(): Promise<Config> {
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
       spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
+      ...(row.syncSpaces === undefined ? {} : { syncSpaces: readSyncSpaces(name, row.syncSpaces) }),
     };
   }
   return { defaultProfile, profiles };
+}
+
+/**
+ * Hand-edited, unlike every other field here, so a malformed value is a typo to
+ * report rather than a corrupt write to ignore: a skipped row would surface as
+ * "profile not configured" and send the user to `login`, which overwrites the
+ * pins they were editing. The message names the profile and the fix instead.
+ * Trimming and deduplicating here keeps the rest of the CLI comparing raw IDs.
+ */
+function readSyncSpaces(profileName: string, value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.trim().length > 0))
+    throw new Error(
+      `Invalid syncSpaces for profile "${profileName}" in ${getConfigPath()}: expected an array of space IDs, e.g. syncSpaces = ["spc_abc123"].`,
+    );
+  return [...new Set((value as string[]).map((id) => id.trim()))];
 }
 
 /** Overwrite the config file atomically (tmp + rename). */
@@ -183,6 +200,7 @@ export async function updateProfile(name: string, patch: Partial<Profile>): Prom
     throw new Error(`Profile "${name}" missing from config — internal invariant broken.`);
   }
   const next: Profile = { ...existing, ...patch };
+  if ("orgId" in patch && patch.orgId !== existing.orgId) delete next.syncSpaces;
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) delete (next as unknown as Record<string, unknown>)[k];
   }

@@ -243,6 +243,8 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
 
 interface ApiFetchInit extends Omit<RequestInit, "headers"> {
   headers?: Record<string, string>;
+  /** Explicit space selection without changing the active profile. */
+  spaceId?: string;
 }
 
 /**
@@ -266,6 +268,7 @@ export async function apiFetchRaw(
   const profile = await resolveProfileOrThrow(profileName);
   const token = await resolveAccessToken(profileName, profile);
 
+  const { spaceId: explicitSpaceId, ...requestInit } = init;
   const doFetch = async (bearer: string): Promise<Response> => {
     const headers: Record<string, string> = {
       ...(init.headers ?? {}),
@@ -280,8 +283,9 @@ export async function apiFetchRaw(
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
-    if (profile.spaceId) headers["X-Space-Id"] = profile.spaceId;
-    return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...init, headers });
+    const spaceId = explicitSpaceId ?? profile.spaceId;
+    if (spaceId) headers["X-Space-Id"] = spaceId;
+    return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...requestInit, headers });
   };
 
   const res = await doFetch(token);

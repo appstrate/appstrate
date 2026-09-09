@@ -21,6 +21,12 @@
  *   - `POST /api/spaces` requires session auth (rejected for API
  *     keys server-side) — the CLI uses the device-flow JWT, so this is
  *     always fine.
+ *   - The listing answers what the caller may SEE, which is wider than what
+ *     it may USE: `isSpaceVisibleTo` also returns a `closed` space an org
+ *     member has not joined, so they can ask to be added. Each row carries
+ *     the caller's own standing (`access`, `permissions`); a consumer that
+ *     is going to send `X-Space-Id` must read them, or the server answers
+ *     403 `not_a_space_member`.
  */
 
 import { apiFetch, apiList } from "./api.ts";
@@ -31,6 +37,14 @@ export interface Space {
   name: string;
   isDefault: boolean;
   createdAt: string;
+  /**
+   * The caller's standing in the space. `"none"` is one it may KNOW about
+   * without being able to enter it — a `closed` space an org member has not
+   * joined, listed so they can ask to be added.
+   */
+  access: "member" | "none";
+  /** The caller's effective permissions IN that space, e.g. `skills:read`. */
+  permissions: string[];
 }
 
 export async function listSpaces(profileName: string): Promise<Space[]> {

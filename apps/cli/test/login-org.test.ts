@@ -28,7 +28,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { loadTokens } from "../src/lib/keyring.ts";
-import { readConfig } from "../src/lib/config.ts";
+import { readConfig, setProfile, updateProfile } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
 import type { Space } from "../src/lib/spaces.ts";
@@ -75,6 +75,8 @@ function spaceRow(overrides: Partial<Space> = {}): Space {
     name: "Default",
     isDefault: true,
     createdAt: "t",
+    access: "member",
+    permissions: ["skills:read"],
     ...overrides,
   };
 }
@@ -903,7 +905,7 @@ describe("login space-pin cascade", () => {
     expect(stderr()).toContain("Failed to list spaces");
   });
 
-  it("preserves a prior spaceId across same-user re-login when /api/spaces flakes", async () => {
+  it("preserves the active space and sync selection across same-user re-login when /api/spaces flakes", async () => {
     const { io } = createMemoryIO();
     // First login — default-path cascade pins spc_default via the
     // shared responder defaults.
@@ -928,6 +930,7 @@ describe("login space-pin cascade", () => {
     });
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
     expect(await readPinnedSpaceId()).toBe("spc_pinned");
+    await updateProfile("default", { syncSpaces: ["spc_pinned", "spc_library"] });
 
     // Second login — space fetch flakes. Without preservation we'd drop
     // the pin silently.
@@ -946,6 +949,10 @@ describe("login space-pin cascade", () => {
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedSpaceId()).toBe("spc_pinned");
+    expect((await readConfig()).profiles.default?.syncSpaces).toEqual([
+      "spc_pinned",
+      "spc_library",
+    ]);
   });
 
   it("does NOT preserve spaceId when re-logging-in as a different user", async () => {
@@ -972,6 +979,7 @@ describe("login space-pin cascade", () => {
     });
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
     expect(await readPinnedSpaceId()).toBe("spc_A");
+    await updateProfile("default", { syncSpaces: ["spc_A", "spc_library"] });
 
     // Second login — different user, network flakes. Preservation must not kick in.
     installDefaultResponders({
@@ -993,5 +1001,54 @@ describe("login space-pin cascade", () => {
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedSpaceId()).toBeUndefined();
+    expect((await readConfig()).profiles.default?.syncSpaces).toBeUndefined();
+  });
+});
+
+describe("login sync selection instance boundaries", () => {
+  it("does not carry pins or sync selection to another instance with the same user ID", async () => {
+    await setProfile("default", {
+      instance: "https://previous.example.com",
+      userId: "u_test",
+      email: "alice@example.com",
+      orgId: "org_previous",
+      spaceId: "spc_previous",
+      syncSpaces: ["spc_previous", "spc_library"],
+    });
+    installDefaultResponders({ listOrgs: () => new Response("unavailable", { status: 503 }) });
+
+    await loginCommand(
+      { profile: "default", instance: "https://app.example.com" },
+      createMemoryIO().io,
+    );
+
+    const profile = (await readConfig()).profiles.default;
+    expect(profile?.instance).toBe("https://app.example.com");
+    expect(profile?.userId).toBe("u_test");
+    expect(profile?.orgId).toBeUndefined();
+    expect(profile?.spaceId).toBeUndefined();
+    expect(profile?.syncSpaces).toBeUndefined();
+  });
+
+  it("preserves selection when the same instance differs only by a trailing slash", async () => {
+    await setProfile("default", {
+      instance: "https://app.example.com/",
+      userId: "u_test",
+      email: "alice@example.com",
+      orgId: "org_previous",
+      spaceId: "spc_previous",
+      syncSpaces: ["spc_previous", "spc_library"],
+    });
+    installDefaultResponders({ listOrgs: () => new Response("unavailable", { status: 503 }) });
+
+    await loginCommand(
+      { profile: "default", instance: "https://app.example.com" },
+      createMemoryIO().io,
+    );
+
+    const profile = (await readConfig()).profiles.default;
+    expect(profile?.orgId).toBe("org_previous");
+    expect(profile?.spaceId).toBe("spc_previous");
+    expect(profile?.syncSpaces).toEqual(["spc_previous", "spc_library"]);
   });
 });

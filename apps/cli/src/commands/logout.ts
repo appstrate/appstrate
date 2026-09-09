@@ -21,6 +21,8 @@ import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
 import { CLI_CLIENT_ID } from "../lib/cli-client.ts";
+import { withSyncLock } from "../lib/skills-sync/lock.ts";
+import { cleanupProfileSkills } from "../lib/skills-sync/cleanup.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 interface LogoutOptions {
@@ -36,47 +38,53 @@ export async function logoutCommand(
 
   intro(`Appstrate logout — profile "${profileName}"`, io);
 
-  const tokens = await loadTokens(profileName);
-  if (!tokens) {
-    // Already logged out — purge any lingering profile metadata and
-    // finish cleanly. This path covers recovery after a half-completed
-    // login where the config row was written but the keyring entry
-    // didn't make it (or vice-versa).
-    await deleteProfile(profileName);
-    outro("Already signed out.", io);
-    return;
-  }
-
-  // Hit `/cli/revoke` so the entire refresh-token family dies
-  // server-side.
-  try {
-    const profile = await getProfile(profileName);
-    if (profile) {
-      await revokeCliRefreshToken(
-        normalizeInstance(profile.instance),
-        CLI_CLIENT_ID,
-        tokens.refreshToken,
-      );
+  let hadTokens = false;
+  const clearCredentials = async (): Promise<void> => {
+    await _awaitRefreshQuiesce(profileName);
+    try {
+      await deleteTokens(profileName);
+    } finally {
+      await deleteProfile(profileName);
     }
+  };
+  let credentialsCleared = false;
+  try {
+    await withSyncLock(async () => {
+      try {
+        const tokens = await loadTokens(profileName);
+        hadTokens = !!tokens;
+        const profile = await getProfile(profileName);
+        if (tokens && profile) {
+          await revokeCliRefreshToken(
+            normalizeInstance(profile.instance),
+            CLI_CLIENT_ID,
+            tokens.refreshToken,
+          );
+        }
+      } catch (err) {
+        io.stderr.write(
+          `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
+        );
+      } finally {
+        await clearCredentials();
+        credentialsCleared = true;
+      }
+      const cleanup = await cleanupProfileSkills(profileName);
+      if (cleanup.pluginReset)
+        io.stderr.write(
+          "Appstrate plugin reset. Run `claude plugin update appstrate@appstrate` and restart Claude, or start a new session with automatic plugin refresh enabled.\n",
+        );
+      for (const failure of cleanup.warnings)
+        io.stderr.write(`warning: ${failure}. Retry appstrate logout --profile ${profileName}.\n`);
+    });
   } catch (err) {
-    // Non-fatal: the refresh-token family may already be revoked on
-    // the server (reuse detection, or a prior partial logout). The
-    // local wipe below returns us to a consistent clean state.
     io.stderr.write(
-      `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
+      `warning: could not complete skills cleanup (${formatError(err)}). Retry appstrate logout --profile ${profileName}.\n`,
     );
+  } finally {
+    // A lock failure cannot keep the user signed in. An in-flight sync checks
+    // its profile again before swapping, so deleting it also cancels stale work.
+    if (!credentialsCleared) await clearCredentials();
   }
-
-  // If a parallel apiFetchRaw is mid-rotation right now, its trailing
-  // `saveTokens` would otherwise write fresh credentials back to disk
-  // AFTER our deleteTokens ran. Wait for the refresh to settle — the
-  // server-side revoke above means that rotation will fail with
-  // `invalid_grant` anyway and wipe local state, but we still sequence
-  // our final delete last so the on-disk end state is deterministic.
-  await _awaitRefreshQuiesce(profileName);
-
-  await deleteTokens(profileName);
-  await deleteProfile(profileName);
-
-  outro(`Signed out of "${profileName}".`, io);
+  outro(hadTokens ? `Signed out of "${profileName}".` : "Already signed out.", io);
 }
