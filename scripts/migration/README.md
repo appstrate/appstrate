@@ -76,7 +76,9 @@ Apply all of it during the same maintenance window with application traffic stop
 
    **Four zeros** → `0008` and `0012` have nothing to do, and `0056` + `0057` + `0058` + `0059` ship together as one ordinary batch. Steps 5 and 6 are no-ops; run them anyway or skip them.
 
-   **Anything non-zero** → two releases. `0056` + `0008` + `0012` here, `0059` in the next one, because `0008` must READ `viewer` to compute the `space_members` rows that preserve those users' reach and cannot run before `0056` creates that table. Ship `0059` early and its guard fails the deploy — it writes no rows, so it can only refuse, never repair.
+   **`members`, `pending` or `history` non-zero** → two releases. `0056` + `0008` + `0012` here, `0059` in the next one, because `0008` must READ `viewer` to compute the `space_members` rows that preserve those users' reach and cannot run before `0056` creates that table. Ship `0059` early and its guard fails the deploy — it writes no rows, so it can only refuse, never repair.
+
+   **`clients` non-zero** → a different fault, and neither script clears it. `0056` section G is what flips `oauth_clients.signup_role`, and it validated a narrowed CHECK on its way out, so a surviving `viewer` means `0056` never applied here. Check the `drizzle.__drizzle_migrations` watermark — a corrupted one makes the migrator report nothing pending (see `0004-oauth-resources-watermark-drift.sql`) — before any of the steps below.
 
    Moving the rows off `viewer` by hand instead of running `0008` collapses the two releases into one, and costs those users their space access until it is restored: `guest` reaches nothing without an explicit `space_members` row, which is precisely what `0008` writes. Only worth it for a handful of accounts, and the restore belongs in this window, not in a follow-up.
 

@@ -285,6 +285,22 @@ describe("0059 — the RBAC rollout must have happened first", () => {
     expect(message).toContain("1 viewer member(s)");
   });
 
+  it("routes the signup-client arm to `0056`, not to the two row scripts", async () => {
+    // Neither named script writes `oauth_clients`: `0008` only ever reads
+    // `signup_role = 'guest'`, and `0012` touches `org_invitations` alone. An
+    // operator who met that count and ran both would get the identical refusal
+    // back — the loop the one-pass message exists to prevent. So the message
+    // has to say which of its four counts the scripts do NOT clear.
+    const failure = await applyMigration(pg).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    const message = `${failure?.message ?? ""}`;
+    expect(message).toContain("cleared by NEITHER script");
+    expect(message).toContain("0056_space_roles.sql did not apply");
+    expect(message).toContain("__drizzle_migrations");
+  });
+
   it("`0012` moves the historical invitations and nothing else, twice over", async () => {
     // Run TWICE: `0012`'s WHERE is exactly the condition it removes, so the
     // second pass must match zero rows. Both runs happen here, before `0008`
