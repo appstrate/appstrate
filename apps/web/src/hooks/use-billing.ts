@@ -47,8 +47,18 @@ export function useBilling(options?: { enabled?: boolean }) {
   );
 }
 
+/** Exact key of {@link useBilling} — what a plan change invalidates. */
+export function useBillingKey() {
+  const { header } = useOrgOnlyScope();
+  return $api.queryOptions("get", "/api/billing", { params: { header } }).queryKey;
+}
+
 export function useCheckout() {
   return $api.useMutation("post", "/api/billing/checkout");
+}
+
+export function useChangePlan() {
+  return $api.useMutation("post", "/api/billing/plan");
 }
 
 export function usePortal() {
@@ -57,7 +67,7 @@ export function usePortal() {
 
 /**
  * The two admin surfaces below are gated on `billing:manage` — the exact
- * permission `eeRequireAdmin()` checks — so a caller who can only READ billing
+ * permission the module's routes require, so a caller who can only READ billing
  * never fires a request the server would answer with 403.
  */
 

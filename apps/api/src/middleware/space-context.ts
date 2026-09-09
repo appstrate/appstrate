@@ -11,9 +11,8 @@ import {
 } from "../lib/space-lookup.ts";
 import { isInternalDispatch } from "../lib/internal-dispatch.ts";
 import { setSpaceContextApplier } from "@appstrate/core/permissions";
-import { effectivePermissions } from "../lib/permissions.ts";
-import { callerOrgRole, callerSpaceMember } from "../lib/view-as.ts";
-import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
+import { callerOrgRole, callerSpaceMember, effectiveInSpace } from "../lib/view-as.ts";
+import { resolveSpaceRole } from "../lib/space-role.ts";
 
 /**
  * Core route prefixes that require a space context (`X-Space-Id`,
@@ -89,14 +88,7 @@ export async function applySpacePermissions(
   }
 
   c.set("spaceRole", ref);
-  c.set(
-    "permissions",
-    effectivePermissions({
-      orgPermissions: c.get("orgPermissions") ?? new Set<string>(),
-      spacePermissions: spacePermissions(ref),
-      scopeCeiling: c.get("scopeCeiling"),
-    }),
-  );
+  c.set("permissions", effectiveInSpace(c, ref));
 }
 
 /**

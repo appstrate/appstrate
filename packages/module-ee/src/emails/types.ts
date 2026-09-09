@@ -1,50 +1,15 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * Local type definitions matching @appstrate/emails contracts.
- * EE doesn't depend on @appstrate/emails — these types mirror the
- * EmailRenderer/EmailPropsMap shapes so EE templates are self-contained.
+ * The prop type of every BILLING email, plus the `BillingEmailType` union the registry
+ * keys on. They have no OSS counterpart — `@appstrate/emails` knows nothing about
+ * subscriptions. The four templates this module OVERRIDES keep their props there, whose
+ * `EmailPropsMap` is what the platform calls the renderer with.
  */
 
-import type { OrgRole } from "../types.ts";
+import type { RenderedEmail, SupportedLocale } from "@appstrate/emails";
 
-export type SupportedLocale = "fr" | "en";
-
-export interface RenderedEmail {
-  subject: string;
-  html: string;
-}
-
-// ---------------------------------------------------------------------------
-// OSS email override types (verification + invitation)
-// ---------------------------------------------------------------------------
-
-export interface VerificationProps {
-  user: { name: string; email: string };
-  url: string;
-  locale: SupportedLocale;
-}
-
-export interface InvitationProps {
-  email: string;
-  inviteUrl: string;
-  orgName: string;
-  inviterName: string;
-  role: OrgRole;
-  locale: SupportedLocale;
-}
-
-export interface MagicLinkProps {
-  email: string;
-  url: string;
-  locale: SupportedLocale;
-}
-
-export interface ResetPasswordProps {
-  email: string;
-  url: string;
-  locale: SupportedLocale;
-}
+export type { RenderedEmail, SupportedLocale };
 
 // ---------------------------------------------------------------------------
 // Billing email types (EE-only — not in @appstrate/emails)
@@ -58,7 +23,6 @@ export type BillingEmailType =
   | "subscription-expired"
   | "plan-changed"
   | "quota-warning"
-  | "renewal-reminder"
   | "card-expiring";
 
 export interface SubscriptionConfirmedProps {
@@ -79,7 +43,6 @@ export interface PaymentReceiptProps {
 export interface PaymentFailedProps {
   planName: string;
   amount: number;
-  cardLast4: string | null;
   attemptNumber: number;
   updateUrl: string;
   locale: SupportedLocale;
@@ -113,14 +76,6 @@ export interface QuotaWarningProps {
   locale: SupportedLocale;
 }
 
-export interface RenewalReminderProps {
-  planName: string;
-  amount: number;
-  renewalDate: string; // ISO date
-  portalUrl: string;
-  locale: SupportedLocale;
-}
-
 export interface CardExpiringProps {
   cardLast4: string;
   expiryMonth: string; // "MM/YY"
@@ -136,7 +91,6 @@ export interface BillingEmailPropsMap {
   "subscription-expired": SubscriptionExpiredProps;
   "plan-changed": PlanChangedProps;
   "quota-warning": QuotaWarningProps;
-  "renewal-reminder": RenewalReminderProps;
   "card-expiring": CardExpiringProps;
 }
 

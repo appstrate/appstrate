@@ -13,8 +13,7 @@
  * Conversion factor: 1 dollar = this many credits. The ONLY conversion constant
  * — shared by {@link dollarsToCredits} and the cumulative-dollar delta billing
  * SQL in `billing/usage-recorder.ts` (which needs the same multiplier inside a
- * Postgres `round()` expression). Previously derived from a `CREDITS_PER_CENT`
- * constant that had no other consumer; the indirection is gone.
+ * Postgres `round()` expression).
  */
 export const CREDITS_PER_DOLLAR = 1000;
 

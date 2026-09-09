@@ -57,28 +57,15 @@ describe("getModuleRegistry", () => {
 });
 
 /**
- * The storage-limit capability is exposed under ONE name.
+ * The init context a module receives carries the storage-limit capability.
  *
- * `setDocumentStorageLimit` was kept beside it as a deprecated alias, because
- * out-of-tree modules bind this capability off the LIVE services object the
- * platform injects rather than off their pinned `PlatformServices` types — a
- * rename does not reach their read, it `TypeError`s their next boot. The alias
- * is gone and `@appstrate/module-ee` binds the canonical name in-tree, so a
- * rename reaches it and this test in the same commit.
- *
- * Asserted rather than deleted because a reintroduced alias is invisible: it
- * would typecheck, pass every other test, and quietly restore two names for
- * one capability.
+ * An out-of-tree module binds it off the LIVE services object, not off its
+ * pinned types, so a missing member is a boot-time `TypeError`, not a type error.
  */
 describe("buildModuleInitContext().services — storage-limit capability", () => {
-  it("exposes the canonical name", () => {
+  it("exposes setFileStorageLimit", () => {
     const { services } = buildModuleInitContext();
     expect(typeof services.setFileStorageLimit).toBe("function");
-  });
-
-  it("exposes no pre-#1177 alias beside it", () => {
-    const { services } = buildModuleInitContext();
-    expect(services).not.toHaveProperty("setDocumentStorageLimit");
   });
 });
 

@@ -226,7 +226,7 @@ const canonicalRunsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
+            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -598,7 +598,7 @@ const canonicalRunsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "409": { $ref: "#/components/responses/RunAdmissionConflict" },
         "413": {
           description:
             "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
@@ -1289,7 +1289,7 @@ const canonicalRunsPaths = {
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "409": { $ref: "#/components/responses/RunAdmissionConflict" },
         "412": {
           description: "Missing integration connection (`missing_integration_connection`)",
           content: {

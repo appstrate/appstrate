@@ -17,7 +17,7 @@ import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { apiKeySpaceScopeGuard } from "../middleware/guards.ts";
 import { ApiError, forbidden, invalidRequest, internalError, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -36,17 +36,16 @@ import {
   resolveOrgMemberEmail,
   saveSpaceMember,
 } from "../services/space-members.ts";
-import { effectivePermissions } from "../lib/permissions.ts";
 import {
   callerOrgRole,
   callerSpaceMember,
+  effectiveInSpace,
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
 import {
   loadSpaceMember,
   resolveSpaceRole,
-  spacePermissions,
   toSpaceRoleWire,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
@@ -104,13 +103,7 @@ function spaceWireForCaller(
     ...toSpaceWire(space),
     access: role ? ("member" as const) : ("none" as const),
     role: toSpaceRoleWire(role),
-    permissions: [
-      ...effectivePermissions({
-        orgPermissions: c.get("orgPermissions") ?? new Set<string>(),
-        spacePermissions: spacePermissions(role),
-        scopeCeiling: c.get("scopeCeiling"),
-      }),
-    ].sort(),
+    permissions: [...effectiveInSpace(c, role)].sort(),
   };
 }
 

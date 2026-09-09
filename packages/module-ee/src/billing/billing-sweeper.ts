@@ -2,8 +2,14 @@
 
 import { logger } from "../logger.ts";
 import { getEeEnv } from "../env.ts";
+import { retryPendingCancellations } from "./org-cancellation.ts";
 import { resyncAllStorageEntitlements } from "./storage-entitlement.ts";
-import { sweepLedgerBatch, type SweepResult } from "./usage-recorder.ts";
+import {
+  addPricingFaults,
+  noPricingFaults,
+  sweepLedgerBatch,
+  type SweepResult,
+} from "./usage-recorder.ts";
 
 /**
  * Periodic billing sweeper — the EE metering consumer.
@@ -146,30 +152,43 @@ function scheduleNext(intervalSec: number): void {
 }
 
 /**
- * Await the in-flight timer-driven work — the sweep, plus the entitlement
- * reconcile the tick may have started — bounded by `timeoutMs`. Called from
- * `shutdown()` AFTER `stopBillingSweeper()` clears the timer, so no new pass
- * starts while this drains. Best-effort: on timeout it returns and lets shutdown
- * proceed (a wedged pass rolls back on its own, losing nothing; the reconcile is
- * an idempotent rewrite the next boot repeats).
- *
- * The bound covers a full drain tick (`MAX_DRAIN_ITERATIONS` batches) instead of
- * the previous 5 s, which routinely expired mid-pass and let `closeEeDb()`
- * run underneath an open transaction.
+ * How long {@link drainBillingSweeper} waits for in-flight work at shutdown: a full drain
+ * tick, since a timeout expiring mid-pass lets `closeEeDb()` run under an open transaction.
  */
-export async function drainBillingSweeper(timeoutMs = 60_000): Promise<void> {
-  const pending = [inFlightSweep, inFlightResync].filter((p): p is Promise<unknown> => p !== null);
-  if (pending.length === 0) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      Promise.all(pending),
-      new Promise((resolve) => {
-        timer = setTimeout(resolve, timeoutMs);
+const DRAIN_TIMEOUT_MS = 60_000;
+
+/**
+ * Await the in-flight timer-driven work — the sweep, plus the entitlement
+ * reconcile the tick may have started. Called from `shutdown()` AFTER
+ * `stopBillingSweeper()` clears the timer, so no new pass starts while this
+ * drains. Best-effort: on timeout it returns and lets shutdown proceed (a wedged
+ * pass rolls back on its own, losing nothing; the reconcile is an idempotent
+ * rewrite the next boot repeats).
+ *
+ * RE-READS AFTER EVERY WAIT, because the tick starts the reconcile from inside the very
+ * promise this is awaiting: a single snapshot would return the moment the sweep finished,
+ * letting `closeEeDb()` run under a reconcile that began in between.
+ */
+export async function drainBillingSweeper(): Promise<void> {
+  const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+  for (;;) {
+    const pending = [inFlightSweep, inFlightResync].filter(
+      (p): p is Promise<unknown> => p !== null,
+    );
+    if (pending.length === 0) return;
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finished = await Promise.race([
+      Promise.all(pending).then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), remainingMs);
       }),
     ]);
-  } finally {
     if (timer) clearTimeout(timer);
+    if (!finished) return;
   }
 }
 
@@ -243,6 +262,17 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
 
   maybeResyncEntitlements();
 
+  // Cancellations `onOrgDelete` could not confirm: a pending row means a customer may
+  // still be charged for an organization that is gone. Awaited because steady state is
+  // zero rows and zero work.
+  try {
+    await retryPendingCancellations();
+  } catch (err) {
+    logger.error("retrying pending Stripe cancellations failed — will retry next tick", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   return result;
 }
 
@@ -273,11 +303,11 @@ export async function runBillingSweep(): Promise<SweepResult> {
   let totalReplayed = result.replayed;
   let totalReplayBilled = result.replayBilled;
   let totalOrphanedOrgs = result.orphanedOrgs;
+  let totalPricing = addPricingFaults(noPricingFaults(), result.pricing);
 
   while (
     result.processed >= batchSize &&
-    // Cursor progress, which this loop's contract has always claimed but never
-    // checked. It is load-bearing now that each pass also re-reads the replay
+    // Cursor progress — load-bearing because each pass also re-reads the replay
     // window: a pass that bills only below the watermark leaves the cursor
     // exactly where it was, and looping on it would re-read the same rows until
     // the iteration cap on every tick.
@@ -293,6 +323,7 @@ export async function runBillingSweep(): Promise<SweepResult> {
     totalReplayed += result.replayed;
     totalReplayBilled += result.replayBilled;
     totalOrphanedOrgs += result.orphanedOrgs;
+    totalPricing = addPricingFaults(totalPricing, result.pricing);
   }
 
   // One structured heartbeat per tick — a tick that logs nothing is
@@ -321,6 +352,10 @@ export async function runBillingSweep(): Promise<SweepResult> {
     replayed: totalReplayed,
     replayBilled: totalReplayBilled,
     orphanedOrgs: totalOrphanedOrgs,
+    // Rows claimed but not charged at their true price; each pass logs the orgs.
+    partialPriced: totalPricing.partial,
+    unpriced: totalPricing.unpriced,
+    unknownPriced: totalPricing.unknown,
     cursorTo: result.cursorTo,
     stalledOnId: result.stalledOnId,
     stalledBelowWatermark,

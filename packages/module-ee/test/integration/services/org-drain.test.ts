@@ -11,7 +11,7 @@
  *
  * The drain closes that window without ever moving the global watermark.
  */
-import { describe, expect, it, beforeEach } from "bun:test";
+import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
 import { seedBillingAccount, seedLlmUsage, seedBillingCursor } from "../../helpers/seed.ts";
@@ -20,9 +20,11 @@ import { onOrgDelete } from "../../../src/onboarding/post-signup.ts";
 import { runBillingSweep, _resetBillingSweeperForTests } from "../../../src/billing/billing-sweeper.ts"; // prettier-ignore
 import { _resetEeEnvForTests } from "../../../src/env.ts";
 import { billingAccounts, billingCursor, eeBilledLlmUsage } from "../../../drizzle/schema.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { logger } from "../../../src/logger.ts";
+import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
 
 useEeTestSeams();
+useEeReconciliationEnv();
 
 const orgId = "00000000-0000-4000-a000-000000000200";
 const otherOrgId = "00000000-0000-4000-a000-000000000201";
@@ -72,6 +74,32 @@ describe("final usage drain on org deletion", () => {
 
     expect(result).toMatchObject({ scanned: 2, billed: 2, credits: 120, truncated: false });
     expect(await creditsUsed(orgId)).toBe(120);
+  });
+
+  it("REGRESSION: bills a row of the org that committed late BELOW the watermark", async () => {
+    // The row the periodic sweep's replay window exists for — a low serial id published
+    // after the watermark passed it. Starting the drain strictly above the watermark
+    // debits 0, and the org's ledger row then cascades away: the loss is final.
+    await seedBillingCursor(3);
+    seedLlmUsage({ orgId, id: 2, costUsd: 0.05, contextId: "run-late-commit" });
+
+    const result = await drainOrgUsage(orgId);
+
+    expect(result.credits).toBe(50);
+    expect(await creditsUsed(orgId)).toBe(50);
+    expect(await cursorValue()).toBe(3); // still out of band
+  });
+
+  it("does not reach below the cutover floor", async () => {
+    // Same selection rule as the sweep, floor included: usage the cutover excluded is
+    // not billed by the deletion path either.
+    await seedBillingCursor(3, 3);
+    seedLlmUsage({ orgId, id: 2, costUsd: 0.05, contextId: "run-historical" });
+
+    const result = await drainOrgUsage(orgId);
+
+    expect(result).toMatchObject({ scanned: 0, billed: 0, credits: 0 });
+    expect(await creditsUsed(orgId)).toBe(0);
   });
 
   it("never moves the global watermark", async () => {
@@ -143,6 +171,38 @@ describe("final usage drain on org deletion", () => {
     expect(await creditsUsed(orgId)).toBe(50); // no double debit
     expect(await creditsUsed(otherOrgId)).toBe(20);
     expect(await cursorValue()).toBe(2);
+  });
+
+  it("claims an unpriced row at 0 credits and names the org in one error line", async () => {
+    // Claiming it stops a later sweep billing it twice; the 0 credits stops it being
+    // billed at a price nobody computed. The `error` line is the operator's only trace
+    // of the uncharged revenue, so it names the org and appears once for the drain.
+    await seedBillingCursor(0);
+    const id = seedLlmUsage({
+      orgId,
+      costUsd: 4.2,
+      contextId: "run-unpriced",
+      pricingStatus: "unpriced",
+    });
+
+    const errorSpy = spyOn(logger, "error");
+    let result: Awaited<ReturnType<typeof drainOrgUsage>>;
+    let pricingErrors: unknown[][];
+    try {
+      result = await drainOrgUsage(orgId);
+      pricingErrors = errorSpy.mock.calls.filter(
+        ([msg]) => typeof msg === "string" && msg.includes("could not price in full"),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(result!).toMatchObject({ scanned: 1, billed: 1, credits: 0 });
+    expect(result!.pricing.unpriced).toBe(1);
+    expect(await creditsUsed(orgId)).toBe(0);
+    expect(await claimedIds([id])).toEqual([id]);
+    expect(pricingErrors!).toHaveLength(1);
+    expect(pricingErrors![0]![1]).toMatchObject({ unpriced: 1, orgIds: [orgId] });
   });
 
   it("onOrgDelete drains BEFORE it deletes the account", async () => {

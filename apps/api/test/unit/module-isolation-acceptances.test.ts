@@ -23,6 +23,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   importSpecifiers,
+  isScannedSource,
   reviewCrossModuleImports,
   reviewPlatformModuleImports,
   type AcceptedCrossModuleImport,
@@ -207,5 +208,31 @@ describe("importSpecifiers", () => {
     // import behind it disappears from the scan.
     const source = ["const RE = /[\"']/g;", 'import "@appstrate/module-ee";'].join("\n");
     expect(importSpecifiers(source)).toEqual(["@appstrate/module-ee"]);
+  });
+});
+
+/**
+ * Which files each half of the scan reads. Two roots are easy to miss: a module's
+ * code outside `src`, and `scripts/test`, platform code the import ban covers.
+ */
+describe("isScannedSource", () => {
+  it("reads a module's production code outside src/", () => {
+    expect(isScannedSource("drizzle/schema.ts", false)).toBe(true);
+    expect(isScannedSource("drizzle/drizzle.config.ts", false)).toBe(true);
+    expect(isScannedSource("src/index.ts", false)).toBe(true);
+  });
+
+  it("skips tests unless the root asks for them — the scripts/ root does", () => {
+    for (const rel of ["test/tables.ts", "src/x/test/helper.ts", "src/a.test.ts"]) {
+      expect(isScannedSource(rel, false)).toBe(false);
+      expect(isScannedSource(rel, true)).toBe(true);
+    }
+  });
+
+  it("never reads an installed dependency, tests included", () => {
+    // A workspace's `node_modules` holds every module's source — reading it would
+    // report the platform as importing all of them.
+    expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", false)).toBe(false);
+    expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", true)).toBe(false);
   });
 });

@@ -24,7 +24,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimitByRunId, rateLimitRunFiles } from "../middleware/rate-limit.ts";
 import {
   verifyRunSignature,

@@ -47,7 +47,7 @@ import { user as userTable } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { ApiError } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { logger } from "../lib/logger.ts";
 import { getClientIp } from "../lib/client-ip.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";

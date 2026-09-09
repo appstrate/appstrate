@@ -14,7 +14,7 @@ import { assertCatalogPackageAccess, packageAccessSpaces } from "../lib/package-
 import { requireOrgAgent, requireMutableAgent, requirePackageInOrg } from "../middleware/guards.ts";
 import { buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { internalError, invalidRequest } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";

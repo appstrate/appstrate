@@ -407,6 +407,13 @@
       "when": 1787600600000,
       "tag": "0057_oauth_provider_1_7_3",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788888309265,
+      "tag": "0058_organization_deletion_reservation",
+      "breakpoints": true
     }
   ]
 }

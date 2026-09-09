@@ -30,6 +30,7 @@ function pageFor(
     name: "Inviter",
     slug: "inviter",
     role: "guest",
+    deleting_at: null,
     permissions: options.orgPermissions ?? [],
     createdAt: "2026-09-05T00:00:00Z",
   };

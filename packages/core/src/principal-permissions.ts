@@ -112,11 +112,9 @@ function warnUndeclared(moduleId: string, permission: string): void {
 }
 
 /**
- * Drop one principal's grants, or every principal of `orgId` (a full clear — the cache is
- * keyed, not prefixed), on all replicas. The granting module calls this from its own
- * writes; the platform cannot know when a module's table changed.
+ * Drop one principal's grants on all replicas. The granting module calls this
+ * from its own writes; the platform cannot know when a module's table changed.
  */
-export function invalidatePrincipalPermissions(orgId: string, userId?: string): void {
-  if (userId === undefined) cache.clear();
-  else cache.invalidate(keyOf(orgId, userId));
+export function invalidatePrincipalPermissions(orgId: string, userId: string): void {
+  cache.invalidate(keyOf(orgId, userId));
 }

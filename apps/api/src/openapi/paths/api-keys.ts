@@ -195,7 +195,14 @@ export const apiKeysPaths = {
       operationId: "revokeApiKey",
       tags: ["API Keys"],
       summary: "Revoke an API key",
-      description: "Revoke (soft-delete) an API key. The key will immediately stop working.",
+      description:
+        "Revoke (soft-delete) an API key. The key will immediately stop working. " +
+        "`api-keys:revoke` is required in the KEY's own space, not in the space the " +
+        "request carries. A caller who cannot reach that space gets the space's own " +
+        "wall: 404 when it is `private` (its existence must not leak through the id " +
+        "of a key inside it), 403 `not_a_space_member` when it is `open` or " +
+        "`closed`. An API-key caller reaching for a key of another space always " +
+        "answers 404 — a key delegates authority in exactly one space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

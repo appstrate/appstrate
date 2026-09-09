@@ -201,27 +201,35 @@ export async function listApiKeys(
 }
 
 /**
- * Revoke (soft-delete) an API key.
- *
- * Session callers (admins) pass `OrgScope` for org-wide reach; API-key
- * callers pass their own `SpaceScope` so a key in Space A can only revoke keys
- * within Space A. Issue #172 (extension): passing the wrong scope type is
- * now a compile-time error instead of a missing argument.
+ * The space a live key belongs to, or `null`. `api-keys:*` is space-level (RBAC
+ * spec §3.4), so the route reads this before it authorizes anything.
  */
-export async function revokeApiKey(scope: OrgScope | SpaceScope, keyId: string): Promise<boolean> {
-  const conditions = [
-    eq(apiKeys.id, keyId),
-    eq(apiKeys.orgId, scope.orgId),
-    isNull(apiKeys.revokedAt),
-  ];
-  if ("spaceId" in scope) {
-    conditions.push(eq(apiKeys.spaceId, scope.spaceId));
-  }
+export async function findApiKeySpace(scope: OrgScope, keyId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ spaceId: apiKeys.spaceId })
+    .from(apiKeys)
+    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, scope.orgId), isNull(apiKeys.revokedAt)))
+    .limit(1);
 
+  return row?.spaceId ?? null;
+}
+
+/**
+ * Revoke (soft-delete) an API key. `SpaceScope` only: an org-wide UPDATE would
+ * revoke a key in a space the caller holds no `api-keys:revoke` in.
+ */
+export async function revokeApiKey(scope: SpaceScope, keyId: string): Promise<boolean> {
   const rows = await db
     .update(apiKeys)
     .set({ revokedAt: new Date() })
-    .where(and(...conditions))
+    .where(
+      and(
+        eq(apiKeys.id, keyId),
+        eq(apiKeys.orgId, scope.orgId),
+        eq(apiKeys.spaceId, scope.spaceId),
+        isNull(apiKeys.revokedAt),
+      ),
+    )
     .returning({ id: apiKeys.id });
 
   return rows.length > 0;

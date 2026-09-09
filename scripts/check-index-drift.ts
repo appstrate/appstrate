@@ -31,9 +31,8 @@
  * `max(created_at)` in `drizzle.__drizzle_migrations` → the journal entry whose
  * `when` equals it → that entry's snapshot.
  *
- * Actual set: the indexes on the TABLES that snapshot declares. Everything else
- * in `public` belongs to a module with a migration tree of its own and is left
- * alone.
+ * Actual set: every index in `public` EXCEPT those on a table a workspace module owns, read from
+ * that module's own drizzle snapshot (`scripts/lib/drizzle-snapshots.ts`), never from a prefix.
  *
  * SCOPE — this compares index NAMES ONLY. An index that exists under the
  * expected name with a different definition (other columns, a lost partial
@@ -47,14 +46,22 @@
  * all. Undeclared indexes never fail the run.
  */
 
-const META_DIR = `${import.meta.dir}/../packages/db/drizzle/meta`;
+import {
+  declaredTables,
+  latestSnapshotName,
+  moduleOwnedTables,
+  snapshotNameForIdx,
+  type DrizzleJournal,
+  type DrizzleSnapshot,
+} from "./lib/drizzle-snapshots.ts";
+
+const REPO_ROOT = `${import.meta.dir}/..`;
+const META_DIR = `${REPO_ROOT}/packages/db/drizzle/meta`;
 
 /**
  * Actual indexes in the database, each with the table it sits on. Exported so
- * the migration-replay test runs the same query. The table comes back because
- * the comparison is restricted to the tables the platform snapshot declares:
- * a module-owned table (`ee_*`) carries its own migration journal and its own
- * indexes, which appear in no platform snapshot and are not this check's.
+ * the migration-replay test runs the same query. The table is what subtracts module-owned tables
+ * and what every reported index is named with — an index name alone is not enough to act on.
  */
 export const PUBLIC_INDEXES_QUERY =
   "SELECT indexname, tablename FROM pg_indexes WHERE schemaname = 'public'";
@@ -105,18 +112,8 @@ const CONSTRAINT_BACKED_INDEXES_QUERY = `
    WHERE n.nspname = 'public' AND con.contype IN ('p', 'u', 'x')
 `;
 
-/** The subset of `meta/_journal.json` this script reads. */
-export interface DrizzleJournal {
-  entries: { idx: number; tag: string; when: number }[];
-}
-
-/** The subset of `meta/NNNN_snapshot.json` this script reads. */
-export interface DrizzleSnapshot {
-  tables: Record<string, { schema?: string; indexes?: Record<string, unknown> }>;
-}
-
 /** One row of `PUBLIC_INDEXES_QUERY`. */
-export interface ActualIndex {
+interface ActualIndex {
   indexname: string;
   tablename: string;
 }
@@ -126,30 +123,6 @@ interface IndexDiff {
   missing: string[];
   /** Present in the database, absent from the snapshot — never a failure. */
   undeclared: string[];
-}
-
-/** Zero-padded to the 4 digits drizzle-kit uses: `40` → `0040_snapshot.json`. */
-function snapshotNameForIdx(idx: number): string {
-  return `${String(idx).padStart(4, "0")}_snapshot.json`;
-}
-
-/**
- * Snapshot filename of the highest `idx` in the journal — the newest schema on
- * disk. Used only to tell the operator how far ahead the repo is; the diff
- * itself runs against the watermark's snapshot.
- *
- * Journal entries are appended by `drizzle-kit generate` and are normally
- * contiguous and sorted, but neither is relied upon: only the maximum `idx`
- * matters.
- */
-export function latestSnapshotName(journal: DrizzleJournal): string {
-  let latest: number | null = null;
-  for (const entry of journal.entries) {
-    if (latest === null || entry.idx > latest) latest = entry.idx;
-  }
-  if (latest === null)
-    throw new Error("Drizzle journal has no entries — cannot resolve a snapshot");
-  return snapshotNameForIdx(latest);
 }
 
 /**
@@ -196,21 +169,6 @@ export function declaredIndexes(snapshot: DrizzleSnapshot): Set<string> {
     const schema = table.schema ?? "";
     if (schema !== "" && schema !== "public") continue;
     for (const name of Object.keys(table.indexes ?? {})) names.add(name);
-  }
-  return names;
-}
-
-/**
- * Table names DECLARED by a snapshot, in the public schema — the population the
- * diff is restricted to. Keys are `<schema>.<table>`; the schema filter is the
- * one `declaredIndexes` applies, for the same reason.
- */
-export function declaredTables(snapshot: DrizzleSnapshot): Set<string> {
-  const names = new Set<string>();
-  for (const [key, table] of Object.entries(snapshot.tables)) {
-    const schema = table.schema ?? "";
-    if (schema !== "" && schema !== "public") continue;
-    names.add(key.slice(key.indexOf(".") + 1));
   }
   return names;
 }
@@ -274,6 +232,9 @@ export async function runCheck(input: {
   watermark: number | null;
   actual: ActualIndex[];
   constraintBacked: Set<string>;
+  /** Table name → the module package that owns it; its indexes are in no platform snapshot, so
+   * subtracting by NAME leaves a platform table the schema stopped declaring in the comparison. */
+  moduleTables: ReadonlyMap<string, string>;
   loadSnapshot: (snapshotName: string) => Promise<DrizzleSnapshot>;
 }): Promise<{ exitCode: number; lines: string[] }> {
   const lines: string[] = [];
@@ -315,26 +276,57 @@ export async function runCheck(input: {
 
   const snapshot = await input.loadSnapshot(at.snapshotName);
   const declared = declaredIndexes(snapshot);
-  // A module-owned table (`ee_*`) migrates under a journal of its own, so its
-  // indexes are in no platform snapshot and every one of them would read as
-  // reverse drift. Only the tables this snapshot declares are compared.
   const tables = declaredTables(snapshot);
-  const actual = new Set(
-    input.actual.filter((row) => tables.has(row.tablename)).map((row) => row.indexname),
-  );
+
+  // Exactly the module-owned tables are subtracted, and no more (see `moduleTables`).
+  const skipped: ActualIndex[] = [];
+  const considered: ActualIndex[] = [];
+  for (const row of input.actual) {
+    // A table BOTH sides declare is compared as the platform's — the watermark resolved against it.
+    if (!tables.has(row.tablename) && input.moduleTables.has(row.tablename)) skipped.push(row);
+    else considered.push(row);
+  }
+  const tableOf = new Map(considered.map((row) => [row.indexname, row.tablename]));
+  const actual = new Set(considered.map((row) => row.indexname));
   const { missing, undeclared } = diffIndexes(declared, actual);
   const { expected, reverseDrift } = classifyUndeclared(undeclared, input.constraintBacked);
+  const undeclaredTables = [
+    ...new Set(considered.filter((row) => !tables.has(row.tablename)).map((r) => r.tablename)),
+  ].sort();
 
+  if (skipped.length > 0) {
+    const owners = [
+      ...new Set(skipped.map((row) => input.moduleTables.get(row.tablename)!)),
+    ].sort();
+    const onTables = new Set(skipped.map((row) => row.tablename));
+    lines.push(
+      `Skipped ${skipped.length} index(es) on ${onTables.size} table(s) owned by ` +
+        `${owners.join(", ")} — each migrates under a journal of its own.`,
+    );
+  }
+  if (undeclaredTables.length > 0) {
+    lines.push(`Tables in the database that ${at.snapshotName} does not declare, and no module`);
+    lines.push(`owns: ${undeclaredTables.length}`);
+    for (const name of undeclaredTables) lines.push(`  undeclared table  ${name}`);
+  }
   if (expected.length > 0) {
     lines.push(`Undeclared but constraint-backed (expected, not drift): ${expected.length}`);
   }
   if (reverseDrift.length > 0) {
     lines.push(`Undeclared and NOT constraint-backed: ${reverseDrift.length}`);
-    for (const name of reverseDrift) lines.push(`  possible reverse drift  ${name}`);
+    for (const name of reverseDrift) {
+      lines.push(`  possible reverse drift  ${name}  on ${tableOf.get(name)}`);
+    }
     lines.push("An index the schema no longer declares and no constraint owns — a squash may have");
     lines.push("dropped it without a forward DROP INDEX. Verify before removing it.");
   }
-  if (expected.length > 0 || reverseDrift.length > 0) lines.push("");
+  if (
+    skipped.length > 0 ||
+    undeclaredTables.length > 0 ||
+    expected.length > 0 ||
+    reverseDrift.length > 0
+  )
+    lines.push("");
 
   if (missing.length > 0) {
     lines.push(`Declared in ${at.snapshotName} but ABSENT from the database: ${missing.length}`);
@@ -347,7 +339,7 @@ export async function runCheck(input: {
 
   lines.push(
     `No missing index: all ${declared.size} indexes declared by ${at.snapshotName} are present ` +
-      `among the ${actual.size} on those tables in the database.`,
+      `among the ${actual.size} the database carries outside the module-owned tables.`,
   );
   lines.push(
     "Names only — index DEFINITIONS (columns, uniqueness, partial predicates) are not compared.",
@@ -402,12 +394,19 @@ async function main(): Promise<number> {
     await sql.close();
   }
 
+  // Discovered from the module trees on disk: `ee_%` would both over- and under-match.
+  const moduleTables = new Map<string, string>();
+  for (const module of await moduleOwnedTables(REPO_ROOT)) {
+    for (const table of module.tables) moduleTables.set(table, module.packageDir);
+  }
+
   const { exitCode, lines } = await runCheck({
     journal,
     trackingTableExists,
     watermark,
     actual,
     constraintBacked,
+    moduleTables,
     loadSnapshot: (snapshotName) => Bun.file(`${META_DIR}/${snapshotName}`).json(),
   });
   for (const line of lines) out(line);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import type { PaymentReceiptProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapEeLayout, ctaButton, formatDate } from "../layout.ts";
+import { ctaButton, formatDate, interpolate, wrapEeLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -23,10 +23,6 @@ const strings = {
     footer: "This receipt confirms payment for your Appstrate subscription.",
   },
 } as const;
-
-function interpolate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
 
 export function renderPaymentReceiptEmail(
   props: PaymentReceiptProps,

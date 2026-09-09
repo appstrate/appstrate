@@ -4,9 +4,15 @@ import { getStripe } from "./client.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { and, eq, isNull } from "drizzle-orm";
-import { getPlans, isPlanId } from "../config.ts";
+import { getPlans, isPlanId, planAction } from "../config.ts";
 import { resolvePrimaryBillingEmail } from "../billing/contact.ts";
+import { noBillingAccount, subscriptionExists } from "../http-errors.ts";
 
+/**
+ * Start a Stripe Checkout for an org Stripe holds no subscription for. The test is
+ * {@link planAction}, the same predicate the billing snapshot reports and
+ * `changeSubscriptionPlan` refuses on — a double charge is the server's to prevent.
+ */
 export async function createCheckoutSession(
   orgId: string,
   planId: string,
@@ -21,12 +27,15 @@ export async function createCheckoutSession(
   const [account] = await db
     .select({
       stripeCustomerId: billingAccounts.stripeCustomerId,
+      stripeSubscriptionId: billingAccounts.stripeSubscriptionId,
+      subscriptionStatus: billingAccounts.subscriptionStatus,
       billingEmail: billingAccounts.billingEmail,
     })
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
 
-  if (!account) throw new Error(`No billing account for org: ${orgId}`);
+  if (!account) throw noBillingAccount();
+  if (planAction(account) !== "checkout") throw subscriptionExists();
 
   // Get or create Stripe customer (conditional update prevents race condition)
   let customerId = account.stripeCustomerId;

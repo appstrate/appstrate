@@ -304,8 +304,11 @@ const config: KnipConfig = {
    *     `RealtimeEvent`, which every consumer reaches by narrowing on
    *     `event`), or one named only inside another tagged type
    *     (`SignupBlockReason`). Those are what the tag holds today.
+   *
+   *   `@gateImport` — loaded by a COMPUTED `import()` in a `scripts/` gate, so knip sees no
+   *     edge: `verify-module-isolation.ts` forbids a literal module specifier in platform code.
    */
-  tags: ["-openapiMirror", "-typeContract"],
+  tags: ["-openapiMirror", "-typeContract", "-gateImport"],
 
   /**
    * `packages/ui/src/components/*.tsx` holds vendored shadcn/ui component

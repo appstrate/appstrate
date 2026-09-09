@@ -115,6 +115,23 @@ describe("Invitation space assignments", () => {
       expect(body.detail).toContain(foreignRole.id);
     });
 
+    it("refuses a retired `app_` space id as malformed, not as missing", async () => {
+      // The pre-`spc_` shape resolves to no space, so without the shape check
+      // it reported "space not found" — the same silence `SPACE_ID_RE` exists
+      // to end, and the one answer that hides a stale id from its author.
+      const res = await invite({
+        email: "legacy-id@test.com",
+        role: "member",
+        space_assignments: [
+          { space_id: "app_2c9f7f60-6a4b-4a3f-9c1f-2f0a1f3c5d77", preset_role: "viewer" },
+        ],
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toContain("Malformed space id");
+    });
+
     it("accepts this org's own custom role (201)", async () => {
       const space = await seedSpace({ orgId: ctx.orgId, name: "Mine too" });
       const role = await seedSpaceRole({ orgId: ctx.orgId, key: "auditor" });

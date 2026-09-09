@@ -4,17 +4,14 @@
  * The two admin-only billing sections: who sees them, what they show, and what
  * a save puts on the wire.
  *
- * Gating is the interesting half. `eeRequireAdmin()` is `billing:manage`, so
- * that — not the org role — is what mounts the sections: a member who can only
- * READ billing gets the plan cards and nothing else.
+ * Gating is the interesting half. The module's admin routes require
+ * `billing:manage`, so that — not the org role — is what mounts the sections.
  *
  * The picker is a Radix `Popover`, which renders nothing under
  * `renderToStaticMarkup` — what it may offer is pinned in
- * `lib/test/billing-managers`, and the message a refused save produces in
- * `lib/test/billing-error`.
+ * `lib/test/billing-managers`.
  *
- * `window.__APP_CONFIG__` (the `billing` feature) is read at render and the
- * stores read `localStorage` at module init, so both globals are installed
+ * The stores read `localStorage` at module init, so the globals are installed
  * before the dynamic imports below.
  */
 
@@ -23,7 +20,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
-  __APP_CONFIG__: { features: { billing: true }, trustedOrigins: [] },
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
 const { $api } = await import("../../api/client.ts");
@@ -67,9 +64,10 @@ interface SeedOptions {
   permissions: string[];
   managers?: { user_id: string; added_by: string; created_at: string }[];
   contact?: { billing_email: string | null; billing_cc: string[] };
+  orgError?: boolean;
 }
 
-function seed({ permissions, managers = [], contact }: SeedOptions): QueryClient {
+function seed({ permissions, managers = [], contact, orgError }: SeedOptions): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
@@ -97,10 +95,21 @@ function seed({ permissions, managers = [], contact }: SeedOptions): QueryClient
       upgrades: [],
     },
   );
-  queryClient.setQueryData(
-    $api.queryOptions("get", "/api/orgs/{orgId}", { params: { path: { orgId: ORG_ID } } }).queryKey,
-    { id: ORG_ID, name: "Acme", members: MEMBERS, invitations: [] },
-  );
+  const orgKey = $api.queryOptions("get", "/api/orgs/{orgId}", {
+    params: { path: { orgId: ORG_ID } },
+  }).queryKey;
+  queryClient.setQueryData(orgKey, { id: ORG_ID, name: "Acme", members: MEMBERS, invitations: [] });
+  if (orgError) {
+    queryClient
+      .getQueryCache()
+      .find({ queryKey: orgKey })!
+      .setState({
+        data: undefined,
+        status: "error",
+        error: new Error("Organization unavailable"),
+        fetchStatus: "idle",
+      });
+  }
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/billing/managers", { params: { header } }).queryKey,
     { managers },
@@ -200,6 +209,24 @@ describe("billing managers section", () => {
     expect(html).toContain("n'est plus membre de l'organisation");
     // Save is what removes it, so it must be reachable with no edit made.
     expect(managersSection(html)).not.toContain('disabled="">Enregistrer</button>');
+  });
+
+  it("refuses to render a Save at all when the member roster failed to load", () => {
+    const html = renderPage({
+      permissions: ADMIN,
+      orgError: true,
+      managers: [
+        { user_id: "usr_member", added_by: "usr_owner", created_at: "2026-02-01T00:00:00Z" },
+      ],
+    });
+    // The card is replaced by its error state, so it has no header to slice on.
+    const section = html.slice(0, html.indexOf("Contact de facturation"));
+    expect(section).toContain("Une erreur est survenue.");
+    // The generic heading renders over any failure; the seeded reason must too.
+    expect(section).toContain("Organization unavailable");
+    // With no roster Save would PUT the empty set, so there must be no Save.
+    expect(section).not.toContain("Enregistrer");
+    expect(section).not.toContain("n'est plus membre de l'organisation");
   });
 });
 

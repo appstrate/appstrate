@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import type { CancellationConfirmedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapEeLayout, formatDate } from "../layout.ts";
+import { formatDate, interpolate, wrapEeLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -21,10 +21,6 @@ const strings = {
     footer: "Thank you for using Appstrate.",
   },
 } as const;
-
-function interpolate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
 
 export function renderCancellationConfirmedEmail(
   props: CancellationConfirmedProps,

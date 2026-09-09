@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import type { CardExpiringProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
+import { ctaButton, escapeHtml, interpolate, wrapEeLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -22,10 +22,6 @@ const strings = {
     footer: "This email is sent 30 days before your card expires.",
   },
 } as const;
-
-function interpolate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
 
 export function renderCardExpiringEmail(
   props: CardExpiringProps,

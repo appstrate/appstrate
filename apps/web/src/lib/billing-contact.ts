@@ -37,7 +37,7 @@ export function isBillingEmail(value: string): boolean {
  * separate, because a list of addresses is routinely pasted from a mail client
  * that joined it with any of them.
  */
-export function parseCcEntries(raw: string): string[] {
+function parseCcEntries(raw: string): string[] {
   return raw
     .split(/[\s,;]+/)
     .map((entry) => entry.trim())

@@ -8,6 +8,7 @@ import { sql } from "drizzle-orm";
 import postgres from "postgres";
 import { migrateEeDb, getEeDb } from "../../../src/db.ts";
 import * as schema from "../../../drizzle/schema.ts";
+import EE_TABLES from "../../tables.ts";
 
 /**
  * The migrator now writes into the PLATFORM database, so this file works on a
@@ -53,24 +54,8 @@ afterAll(async () => {
 // leaves `cloud_*` behind, so a blank slate has to drop both eras — plus the
 // legacy `cloud_pending_bills` that 0001 drops.
 const LEGACY_TABLES = [
-  "cloud_usage_records",
-  "cloud_billed_llm_usage",
-  "cloud_billing_cursor",
-  "cloud_stripe_events",
-  "cloud_free_tier_claims",
-  "cloud_billing_managers",
-  "cloud_billing_accounts",
+  ...EE_TABLES.map((table) => `cloud_${table.slice("ee_".length)}`),
   "cloud_pending_bills",
-];
-
-const EE_TABLES = [
-  "ee_usage_records",
-  "ee_billed_llm_usage",
-  "ee_billing_cursor",
-  "ee_stripe_events",
-  "ee_free_tier_claims",
-  "ee_billing_managers",
-  "ee_billing_accounts",
 ];
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../drizzle/migrations");
@@ -338,11 +323,11 @@ describe("isolation from the platform test database", () => {
       SELECT count(*)::int AS count FROM pg_class
       WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relname LIKE 'ee\\_%'
     `);
-    expect(tables?.count).toBe(7);
+    expect(tables?.count).toBe(EE_TABLES.length);
 
     const [applied] = await live.execute<{ count: number }>(sql`
       SELECT count(*)::int AS count FROM drizzle.ee_migrations
     `);
-    expect(applied?.count).toBe(6);
+    expect(applied?.count).toBe(7);
   });
 });

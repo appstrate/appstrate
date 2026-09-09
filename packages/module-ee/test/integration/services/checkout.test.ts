@@ -80,12 +80,13 @@ describe("createCheckoutSession", () => {
     );
   });
 
-  it("throws when no billing account exists for the org", async () => {
+  it("refuses an org with no billing account as a 404, not a retryable failure", async () => {
     const unknownOrg = "00000000-0000-4000-a000-000000000099";
 
-    await expect(createCheckoutSession(unknownOrg, "starter", appUrl)).rejects.toThrow(
-      "No billing account for org",
-    );
+    await expect(createCheckoutSession(unknownOrg, "starter", appUrl)).rejects.toMatchObject({
+      status: 404,
+      code: "no_billing_account",
+    });
   });
 
   it("throws when Stripe returns a session without a URL", async () => {
@@ -122,6 +123,64 @@ describe("createCheckoutSession", () => {
     const body = checkoutReq!.body!;
     expect(body["metadata[orgId]"]).toBe(orgId);
     expect(body["metadata[planId]"]).toBe("pro");
+  });
+
+  /**
+   * Which door a subscribing org goes through is decided by whether STRIPE still holds
+   * a subscription, not by whether the account row carries an id.
+   */
+  describe("an account that already carries a subscription id", () => {
+    it("refuses a checkout while Stripe still holds the subscription", async () => {
+      // `unpaid`: Stripe stopped collecting but the object is still there, so a second
+      // checkout would bill the org twice. The Customer Portal is the way back.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_held_001",
+        stripeSubscriptionId: "sub_held_001",
+        subscriptionStatus: "unpaid",
+      });
+
+      await expect(createCheckoutSession(orgId, "pro", appUrl)).rejects.toMatchObject({
+        status: 409,
+        code: "subscription_exists",
+      });
+      expect(requests.filter((r) => r.path === "/v1/checkout/sessions")).toHaveLength(0);
+    });
+
+    it("refuses a checkout while the first payment is still pending", async () => {
+      // `incomplete` is HELD: Stripe may yet activate it, so a second checkout can end
+      // with two live subscriptions on one org.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_incomplete_001",
+        stripeSubscriptionId: "sub_incomplete_001",
+        subscriptionStatus: "incomplete",
+      });
+
+      await expect(createCheckoutSession(orgId, "pro", appUrl)).rejects.toMatchObject({
+        status: 409,
+        code: "subscription_exists",
+      });
+      expect(requests.filter((r) => r.path === "/v1/checkout/sessions")).toHaveLength(0);
+    });
+
+    it("opens a checkout when the id names a subscription Stripe no longer holds", async () => {
+      // Same non-null id, terminal status: only `customer.subscription.deleted` nulls
+      // the column, so a lost one leaves this row behind and the org must still subscribe.
+      await seedBillingAccount({
+        orgId,
+        planId: "free",
+        stripeCustomerId: "cus_dead_001",
+        stripeSubscriptionId: "sub_dead_001",
+        subscriptionStatus: "canceled",
+      });
+
+      const url = await createCheckoutSession(orgId, "pro", appUrl);
+      expect(url).toBe("https://checkout.stripe.com/test");
+      expect(requests.filter((r) => r.path === "/v1/checkout/sessions")).toHaveLength(1);
+    });
   });
 
   it("creates checkout for pro plan", async () => {

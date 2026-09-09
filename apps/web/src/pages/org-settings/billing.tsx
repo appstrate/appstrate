@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
-import { useBilling, useCheckout, usePortal, type CheckoutPlanId } from "../../hooks/use-billing";
+import {
+  useBilling,
+  useBillingKey,
+  useChangePlan,
+  useCheckout,
+  usePortal,
+  type CheckoutPlanId,
+} from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
@@ -17,6 +22,7 @@ import { BillingManagersSection } from "../../components/billing-managers-sectio
 import { BillingContactSection } from "../../components/billing-contact-section";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { formatDateField } from "../../lib/format-date";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 // Keyed on the status enum the spec declares, not on `string`: a status added
@@ -26,6 +32,7 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
   past_due: "billing.statusPastDue",
   unpaid: "billing.statusUnpaid",
   paused: "billing.statusPaused",
+  incomplete: "billing.statusIncomplete",
   canceling: "billing.statusCanceling",
   canceled: "billing.statusCanceled",
   active: "billing.statusActive",
@@ -35,31 +42,25 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
 
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { features } = useAppConfig();
   const { can } = usePermissions();
-  // Gate the fetch on the feature flag (mirrors sidebar-billing) so a build
-  // without `@appstrate/module-ee` never fires the `/billing` request (404).
-  // The line-below <Navigate> still handles the visible redirect.
-  const { data: billing, isLoading, error } = useBilling({ enabled: features.billing });
+  // The route is mounted behind `RequirePermission permission="billing:read"`,
+  // which only `@appstrate/module-ee` contributes, so `/api/billing` answers.
+  const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();
+  const changePlanMutation = useChangePlan();
   const portalMutation = usePortal();
+  const queryClient = useQueryClient();
+  const billingKey = useBillingKey();
 
   // Storage entitlement — core data (organizations.files_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit when
-  // billing is on. Same source (useOrgStorage) as the org-settings/general
-  // storage section. Gated on the billing flag to mirror the credit fetch above.
-  const {
-    storage,
-    limitBytes: storageLimit,
-    percent: storagePercent,
-  } = useOrgStorage({ enabled: features.billing });
+  // billing is on. Same source (useOrgStorage) as org-settings/general.
+  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
 
-  // The two admin sections below are MOUNTED on the exact condition
-  // `eeRequireAdmin()` checks (`billing:manage`), not merely hidden by it — so
-  // their queries never fire for a caller the routes would answer with 403.
-  const canManageBilling = !!features.billing && can("billing:manage");
+  // The two admin sections below are MOUNTED on `billing:manage`, not merely
+  // hidden by it, so their queries never fire for a caller the routes would 403.
+  const canManageBilling = can("billing:manage");
 
-  if (!features.billing) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!billing) {
@@ -79,18 +80,8 @@ export function OrgSettingsBillingPage() {
   // offers the first one.
   const firstUpgradeId = upgradeIds[0];
 
-  const handleUpgrade = (planId: CheckoutPlanId) => {
-    checkoutMutation.mutate(
-      { body: { plan_id: planId, return_url: "/org-settings/billing" } },
-      {
-        onSuccess: ({ url }) => {
-          window.location.href = url;
-        },
-        onError: (err) => {
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
-        },
-      },
-    );
+  const onMutationError = (err: unknown) => {
+    toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
   };
 
   const handleManage = () => {
@@ -100,11 +91,45 @@ export function OrgSettingsBillingPage() {
         onSuccess: ({ url }) => {
           window.location.href = url;
         },
-        onError: (err) => {
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
-        },
+        onError: onMutationError,
       },
     );
+  };
+
+  /**
+   * The server reports the door as `plan_action`; the page follows it instead of
+   * re-deriving it (a second Checkout beside a live subscription bills twice).
+   * The plan lands through the Stripe webhook, so the page refetches.
+   */
+  const handleSelectPlan = (planId: CheckoutPlanId) => {
+    switch (billing.plan_action) {
+      case "portal":
+        handleManage();
+        return;
+      case "plan-change":
+        changePlanMutation.mutate(
+          { body: { plan_id: planId } },
+          {
+            onSuccess: () => {
+              toast.success(t("billing.planChangeRequested"));
+              void queryClient.invalidateQueries({ queryKey: billingKey });
+            },
+            onError: onMutationError,
+          },
+        );
+        return;
+      case "checkout":
+        checkoutMutation.mutate(
+          { body: { plan_id: planId, return_url: "/org-settings/billing" } },
+          {
+            onSuccess: ({ url }) => {
+              window.location.href = url;
+            },
+            onError: onMutationError,
+          },
+        );
+        return;
+    }
   };
 
   return (
@@ -127,7 +152,7 @@ export function OrgSettingsBillingPage() {
               {t("billing.manage")}
             </Button>
           ) : firstUpgradeId ? (
-            <Button size="sm" onClick={() => handleUpgrade(firstUpgradeId)}>
+            <Button size="sm" onClick={() => handleSelectPlan(firstUpgradeId)}>
               {t("billing.upgrade")}
             </Button>
           ) : null}
@@ -226,8 +251,8 @@ export function OrgSettingsBillingPage() {
             plans={billing.plans}
             currentPlanId={billing.plan.id}
             upgrades={upgradeIds}
-            disabled={checkoutMutation.isPending}
-            onSelect={handleUpgrade}
+            disabled={checkoutMutation.isPending || changePlanMutation.isPending}
+            onSelect={handleSelectPlan}
           />
         </div>
       )}

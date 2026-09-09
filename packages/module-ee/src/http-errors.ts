@@ -53,51 +53,39 @@ export function rateLimited(retryAfterSeconds: number): ApiError {
   });
 }
 
+/**
+ * 409 — the org already has a subscription Stripe is holding, so Checkout is the wrong
+ * door: completing it would create a SECOND subscription and bill the organization twice.
+ * `POST /api/billing/plan` modifies the one that exists.
+ */
+export function subscriptionExists(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "subscription_exists",
+    title: "Conflict",
+    detail:
+      "This organization already has an active subscription. Change its plan instead of starting a new checkout.",
+  });
+}
+
+/**
+ * 409 — a plan change on an account with no subscription to change; the way in is
+ * Checkout.
+ */
+export function noActiveSubscription(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "no_active_subscription",
+    title: "Conflict",
+    detail: "This organization has no active subscription to change. Start a checkout instead.",
+  });
+}
+
 export function paymentServiceUnavailable(): ApiError {
   return new ApiError({
     status: 503,
     code: "payment_service_unavailable",
     title: "Service Unavailable",
     detail: "Payment service unavailable. Please try again later.",
-  });
-}
-
-/**
- * 409 — this deployment pairs `@appstrate/module-ee` with a platform that does not
- * report the execution facts admission is priced from (see
- * `assertExecutionFacts`). Permanent until an operator changes the deployment.
- *
- * The status is chosen for what the three admission seams DO with it, not only
- * for its prose:
- *
- *  - It must be an `ApiError` at all. The scheduler branches on exactly that
- *    (`apps/api/src/services/scheduler.ts`): an `ApiError` becomes a FAILED RUN
- *    ROW plus an `onRunStatusChange` the dashboard renders, while anything else
- *    falls through to an outer catch that logs one line and lets the BullMQ job
- *    COMPLETE — no run row, no event, `nextRunAt` re-armed. A schedule that
- *    looks healthy while silently doing nothing is the exact degrade this
- *    refusal exists to remove, one seam over.
- *  - It must be 4xx. `/api/llm-proxy` renders a non-`ApiError` as a 500, and the
- *    Pi SDK retries 429/5xx natively — so a 5xx (or a 429) turns one permanent
- *    misconfiguration into an unbounded retry storm against the credential.
- *    A terminal 4xx stops on the first response.
- *  - 409 rather than 402/403: this is not a quota rejection (402 means "top up",
- *    and the org's balance is irrelevant here) and not an authorization denial.
- *    RFC 9110 §15.5.10 — a conflict with the current state of the resource — is
- *    what an unserviceable platform/module version pair is, and 409 is the one
- *    4xx core exposes with a caller-chosen `code` (`conflict()`).
- *
- * `detail` is deliberately value-free (#50): it reaches API consumers as the
- * RFC 9457 `detail` AND is written verbatim onto the failed run row above. The
- * values that diagnose it are logged, structured, at the point of refusal.
- */
-export function platformVersionUnsupported(): ApiError {
-  return new ApiError({
-    status: 409,
-    code: "platform_version_unsupported",
-    // Matches core's own 409 title so the shared status reads uniformly.
-    title: "Conflict",
-    detail:
-      "Billing cannot admit this operation: this deployment runs an unsupported platform version. Contact your administrator.",
   });
 }

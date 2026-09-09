@@ -113,6 +113,7 @@ export const invitationsPaths = {
                 role: "member",
                 permissions: ["org:read", "spaces:read"],
                 createdAt: "2026-01-10T08:00:00Z",
+                deleting_at: null,
               },
             },
           },

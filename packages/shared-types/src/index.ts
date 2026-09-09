@@ -422,6 +422,8 @@ export interface OrganizationWithRole {
   role: OrgRole;
   /** Org-level effective set in this org, ceiling-applied (RBAC spec §6.5). */
   permissions: string[];
+  /** When this organization's deletion was reserved, or null; repeat the DELETE to recover. */
+  deleting_at: string | null;
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see

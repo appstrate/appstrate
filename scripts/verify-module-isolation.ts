@@ -19,7 +19,7 @@
  *   differently-licensed tree into the Apache-2.0 one. The loader's computed
  *   `import(specifier)` is invisible to a specifier scan; a literal one is not.
  * `apps/web` is out of scope of that rule (the SPA imports a module's UI on
- * purpose); test files are, in both.
+ * purpose). Test files are exempt module→module, but not platform→module under `scripts/`.
  *
  * Override via env: `MODULE_ISOLATION_POLICY=warn|fail|off`.
  */
@@ -27,6 +27,7 @@
 import { Glob } from "bun";
 import { resolve, dirname, relative, sep } from "node:path";
 import { readGatePolicy } from "./lib/policy-env.ts";
+import { REGEX_PRECEDERS, scanQuoted } from "./lib/ts-lexer.ts";
 
 // Under CI the override is ignored, so a green pipeline can never be bought
 // with `MODULE_ISOLATION_POLICY=off` — same pin `verify-module-contract.ts`
@@ -95,15 +96,6 @@ const IMPORT_RE =
   /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*[`"']([^`"'$]+)[`"']|\bimport\s+["']([^"']+)["']/g;
 
 /**
- * Characters after which a `/` opens a regex literal rather than a division.
- * `<` and `>` are left out on purpose: this scan reads `.tsx`, where `</div>`
- * would otherwise open a phantom regex that blanks the rest of the file and
- * hides — or falsely reports — whatever follows. The cost is a regex literal
- * written directly after a comparison operator, which nothing here does.
- */
-const REGEX_PRECEDERS = new Set("(,=:[!&|?{};+-*%~^");
-
-/**
  * Blank the comments out: a commented-out import is not one. Strings are walked
  * over so a `//` inside a specifier opens no comment, and so are regex literals
  * — an unclosed `["']` would swallow the code behind it.
@@ -127,10 +119,9 @@ function stripComments(source: string): string {
     const opensRegex = ch === "/" && (prev === "" || REGEX_PRECEDERS.has(prev));
     if (ch === '"' || ch === "'" || ch === "`" || opensRegex) {
       const close = opensRegex ? "/" : ch;
-      let j = i + 1;
-      while (j < source.length && source[j] !== close) j += source[j] === "\\" ? 2 : 1;
-      out += source.slice(i, j + 1);
-      i = j + 1;
+      const end = scanQuoted(source, i, close);
+      out += source.slice(i, end);
+      i = end;
       prev = close;
       continue;
     }
@@ -236,17 +227,19 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
   return problems;
 }
 
-/** Every non-test source file under `root` — one definition of "source", not two. */
-async function sourceFilesUnder(root: string): Promise<string[]> {
+/** Is `rel` (relative to a scan root) source this gate reads? Exported so a test pins it. */
+export function isScannedSource(rel: string, includeTests: boolean): boolean {
+  if (rel.includes("node_modules/")) return false;
+  if (includeTests) return true;
+  return !(rel.includes("/test/") || rel.startsWith("test/") || /\.test\.tsx?$/.test(rel));
+}
+
+/** Every source file under `root` — one definition of "source", not two. */
+async function sourceFilesUnder(root: string, includeTests = false): Promise<string[]> {
   const files: string[] = [];
   const glob = new Glob("**/*.{ts,tsx}");
   for await (const rel of glob.scan({ cwd: root })) {
-    if (rel.includes("/test/") || rel.startsWith("test/") || /\.test\.tsx?$/.test(rel)) continue;
-    // `apps/api/src` and `packages/*/src` hold none, but `runtime-pi`, `e2e`
-    // and `apps/cli` are workspace roots — scanning their dependency tree
-    // would read every module's published source as platform source.
-    if (rel.includes("node_modules/")) continue;
-    files.push(rel);
+    if (isScannedSource(rel, includeTests)) files.push(rel);
   }
   return files;
 }
@@ -278,11 +271,13 @@ if (import.meta.main) {
       process.exit(1);
     }
   }
-  // Workspace npm modules (packages/module-*/src).
+  // Workspace npm modules — root is the PACKAGE dir, since module code lives outside `src/` too.
   {
-    const glob = new Glob("module-*/src");
-    for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
-      const id = rel.split("/")[0]!.replace(/^module-/, "");
+    const glob = new Glob("module-*/package.json");
+    for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages") })) {
+      if (rel.includes("node_modules/")) continue;
+      const dir = rel.slice(0, rel.indexOf("/"));
+      const id = dir.replace(/^module-/, "");
       // Refuse a collision rather than overwrite. This loop runs SECOND and wrote
       // into the same map as the built-in discovery above, so extracting a
       // built-in to `packages/module-<same-id>` would silently drop the built-in's
@@ -292,17 +287,19 @@ if (import.meta.main) {
       if (MODULE_ROOTS[id]) {
         console.error(
           `❌ module id \`${id}\` is claimed twice: ${MODULE_ROOTS[id]} and ` +
-            `${resolve(ROOT, "packages", rel)}. One would shadow the other and ` +
+            `${resolve(ROOT, "packages", dir)}. One would shadow the other and ` +
             `un-scan it in silence — rename one.`,
         );
         process.exit(1);
       }
-      MODULE_ROOTS[id] = resolve(ROOT, "packages", rel);
+      MODULE_ROOTS[id] = resolve(ROOT, "packages", dir);
     }
   }
 
   const problems: string[] = [];
   const crossModuleImports: CrossModuleImport[] = [];
+  const scannedFiles: string[] = [];
+  const verbose = process.argv.includes("--verbose");
   let filesScanned = 0;
 
   for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
@@ -310,6 +307,7 @@ if (import.meta.main) {
       const filePath = resolve(root, rel);
       const source = await Bun.file(filePath).text();
       filesScanned++;
+      scannedFiles.push(relative(ROOT, filePath).split(sep).join("/"));
 
       for (const spec of importSpecifiers(source)) {
         // Relative import → resolve and check the owning module.
@@ -348,30 +346,32 @@ if (import.meta.main) {
   // platform import. `scripts/` stays in scope: `scripts/lib/module-openapi.ts`
   // loads modules by a computed `import(entry)`, the form this gate deliberately
   // cannot see, and nothing there names a module in a literal specifier.
-  const platformRoots: string[] = [
-    resolve(ROOT, "apps/api/src"),
-    resolve(ROOT, "apps/cli/src"),
-    resolve(ROOT, "runtime-pi"),
-    resolve(ROOT, "scripts"),
-    resolve(ROOT, "e2e"),
+  // `scripts/test/**` is platform code; the other roots' tests drive a module on purpose.
+  const platformRoots: { dir: string; includeTests: boolean }[] = [
+    { dir: resolve(ROOT, "apps/api/src"), includeTests: false },
+    { dir: resolve(ROOT, "apps/cli/src"), includeTests: false },
+    { dir: resolve(ROOT, "runtime-pi"), includeTests: false },
+    { dir: resolve(ROOT, "scripts"), includeTests: true },
+    { dir: resolve(ROOT, "e2e"), includeTests: false },
   ];
   {
     const glob = new Glob("*/src");
     for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
       if (rel.startsWith("module-")) continue;
-      platformRoots.push(resolve(ROOT, "packages", rel));
+      platformRoots.push({ dir: resolve(ROOT, "packages", rel), includeTests: false });
     }
   }
 
   const platformImports: PlatformImport[] = [];
   let platformFilesScanned = 0;
-  for (const root of platformRoots) {
-    for (const rel of await sourceFilesUnder(root)) {
+  for (const { dir: root, includeTests } of platformRoots) {
+    for (const rel of await sourceFilesUnder(root, includeTests)) {
       const filePath = resolve(root, rel);
       if (ownerOf(filePath)) continue;
       const source = await Bun.file(filePath).text();
       platformFilesScanned++;
       const file = relative(ROOT, filePath).split(sep).join("/");
+      scannedFiles.push(file);
       for (const spec of importSpecifiers(source)) {
         const resolved = spec.startsWith(".")
           ? relative(ROOT, resolve(dirname(filePath), spec))
@@ -383,6 +383,8 @@ if (import.meta.main) {
     }
   }
   problems.push(...reviewPlatformModuleImports(platformImports));
+
+  if (verbose) for (const file of scannedFiles.sort()) console.log(`   scanned: ${file}`);
 
   for (const p of problems) console.error(`❌ ${p}`);
 

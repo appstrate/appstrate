@@ -20,7 +20,7 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { createUpload, writeProxyUploadContent } from "../services/uploads.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { invalidRequest, unauthorized } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor, actorInsert } from "../lib/actor.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
 import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";

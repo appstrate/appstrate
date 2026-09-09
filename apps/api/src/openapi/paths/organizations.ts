@@ -50,6 +50,7 @@ export const organizationsPaths = {
                     role: "owner",
                     permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
+                    deleting_at: null,
                   },
                 ],
               },

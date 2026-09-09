@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
-import type { InvitationProps, RenderedEmail } from "../types.ts";
-import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
+import type { EmailPropsMap, RenderedEmail } from "@appstrate/emails";
+import { ctaButton, escapeHtml, interpolate, wrapEeLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -22,11 +22,7 @@ const strings = {
   },
 } as const;
 
-function interpolate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
-
-export function renderEeInvitationEmail(props: InvitationProps): RenderedEmail {
+export function renderEeInvitationEmail(props: EmailPropsMap["invitation"]): RenderedEmail {
   const { inviteUrl, orgName, inviterName, role, locale } = props;
   const s = strings[locale] ?? strings.fr;
 

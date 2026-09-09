@@ -288,11 +288,17 @@ export type OrgRole = (typeof ORG_ROLES)[number];
  * Space-role presets (RBAC spec §3.3). Constants, not rows. In core so modules can name
  * them in `ModulePermissionContribution.presets`; the preset → permission mapping is
  * policy and stays in `apps/api/src/lib/permissions.ts`.
+ * Ordered strongest first — `assertPresetsUpwardClosed` reads the tuple in order.
  */
 export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as const;
 
 /** Space-role preset union — `"admin" | "builder" | "operator" | "viewer"`. */
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
+
+/** Org roles holding every org-level permission in every space, without a `space_members` row. */
+export const ORG_ROLES_WITH_FULL_ACCESS = ["owner", "admin"] as const;
+
+export type OrgRoleWithFullAccess = (typeof ORG_ROLES_WITH_FULL_ACCESS)[number];
 
 /**
  * Space visibility (RBAC spec §3.1): `open` — every org `member` is an implicit member
@@ -321,10 +327,13 @@ export interface SpaceAssignment {
 // ignored.
 // ---------------------------------------------------------------------------
 
-/** Org roles a preview may take. `owner`/`admin` excluded: a preview only removes. */
-export const VIEW_AS_ORG_ROLES = ["member", "guest"] as const;
+/** Org roles a preview may take — the complement of {@link ORG_ROLES_WITH_FULL_ACCESS}. */
+export type ViewAsOrgRole = Exclude<OrgRole, OrgRoleWithFullAccess>;
 
-export type ViewAsOrgRole = (typeof VIEW_AS_ORG_ROLES)[number];
+export const VIEW_AS_ORG_ROLES: readonly [ViewAsOrgRole, ...ViewAsOrgRole[]] = ORG_ROLES.filter(
+  (role): role is ViewAsOrgRole =>
+    !(ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(role),
+) as [ViewAsOrgRole, ...ViewAsOrgRole[]];
 
 /** HTTP carrier: `org_role=…; space=…; role=preset:…|custom:…`. */
 export const VIEW_AS_HEADER = "X-View-As";

@@ -141,6 +141,9 @@ export async function drainAudits(
  * spaceId derivation is a safe superset for org routes (both are unset
  * there).
  *
+ * A route acting on a resource in another space re-enters that space before it
+ * writes, so the spaceId read here is already the resource's. No per-call override.
+ *
  * Under a role preview the persona goes into `after.view_as`; the actor stays
  * the administrator, which is who they were.
  */

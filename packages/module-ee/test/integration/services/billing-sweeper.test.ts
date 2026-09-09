@@ -44,9 +44,10 @@ import {
   billingCursor,
   eeBilledLlmUsage,
 } from "../../../drizzle/schema.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
 
 useEeTestSeams();
+useEeReconciliationEnv();
 
 const orgId = "00000000-0000-4000-a000-000000000010";
 
@@ -718,8 +719,19 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
   it("seeds an absent cursor at the settled frontier and reports it seeded", async () => {
     // Empty ledger at boot → frontier 0.
     const seed = await ensureCursorSeeded(mockPlatformServices, getEeDb());
-    expect(seed).toEqual({ seeded: true, lastLlmUsageId: 0 });
+    expect(seed).toEqual({ seeded: true, lastLlmUsageId: 0, floorId: 0 });
     expect(await cursorValue()).toBe(0);
+  });
+
+  it("records the seeded frontier as the cutover floor", async () => {
+    // The floor keeps the replay window out of the excluded history, so it must be
+    // written at seed time — not derived from a watermark that has since moved.
+    seedLlmUsage({ orgId, costUsd: 0.25 });
+    seedLlmUsage({ orgId, costUsd: 0.5 });
+
+    const seed = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+
+    expect(seed).toEqual({ seeded: true, lastLlmUsageId: 2, floorId: 2 });
   });
 
   it("bills usage recorded AFTER the init seed but BEFORE the first sweep tick", async () => {
@@ -745,14 +757,14 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
   it("is idempotent — a second call leaves an existing watermark untouched (no rewind)", async () => {
     await seedBillingCursor(7); // an already-advanced watermark
     const first = await ensureCursorSeeded(mockPlatformServices, getEeDb());
-    expect(first).toEqual({ seeded: false, lastLlmUsageId: 7 });
+    expect(first).toEqual({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
     expect(await cursorValue()).toBe(7);
 
     // Even with a higher frontier now available, a second call never reseeds or
     // rewinds — it is a pure no-op on an existing cursor.
     seedLlmUsage({ orgId, costUsd: 0.5 }); // would move the frontier if reseeded
     const second = await ensureCursorSeeded(mockPlatformServices, getEeDb());
-    expect(second).toEqual({ seeded: false, lastLlmUsageId: 7 });
+    expect(second).toEqual({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
     expect(await cursorValue()).toBe(7);
   });
 });
@@ -1276,4 +1288,166 @@ describe("billing sweep — serial-visibility replay window", () => {
     const rows = await db.select({ id: eeBilledLlmUsage.llmUsageId }).from(eeBilledLlmUsage);
     return rows.map((r) => r.id).sort((a, b) => a - b);
   }
+});
+
+describe("billing sweep — cutover exclusion floor", () => {
+  beforeEach(async () => {
+    await truncateEeTables();
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
+    _resetEeEnvForTests();
+    _resetBillingSweeperForTests();
+    await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
+  });
+
+  it("REGRESSION: historical usage stays excluded on the SECOND sweep too", async () => {
+    // The cutover promise is "rows below the seeded frontier are never revisited".
+    // Without the floor the second pass reads from `watermark − REPLAY_WINDOW`, walks
+    // back under the seed and bills the whole excluded history.
+    seedLlmUsage({ orgId, costUsd: 0.25, contextId: "run-old" });
+    seedLlmUsage({ orgId, costUsd: 0.5, contextId: "run-older" });
+
+    const seeding = await runBillingSweep();
+    expect(seeding.cursorTo).toBe(2);
+    expect(await creditsUsed()).toBe(0);
+
+    const second = await runBillingSweep();
+    expect(second.replayed).toBe(0);
+    expect(second.billed).toBe(0);
+    expect(await creditsUsed()).toBe(0);
+    expect(await claimCount()).toBe(0);
+  });
+
+  it("still replays a row that commits late ABOVE the floor", async () => {
+    // The floor bounds the replay window, it does not disable it: a row that took a low
+    // id before the watermark passed but committed after must still be caught.
+    seedLlmUsage({ orgId, costUsd: 0.25, id: 1, contextId: "run-old" });
+    seedLlmUsage({ orgId, costUsd: 0.5, id: 2, contextId: "run-older" });
+    await runBillingSweep(); // seeds watermark AND floor at 2
+
+    seedLlmUsage({ orgId, costUsd: 0.04, id: 4, contextId: "run-4" }); // 40 credits
+    await runBillingSweep();
+    expect(await cursorValue()).toBe(4);
+    expect(await creditsUsed()).toBe(40);
+
+    // id 3 finally commits: below the watermark, above the floor.
+    seedLlmUsage({ orgId, costUsd: 0.06, id: 3, contextId: "run-3" }); // 60 credits
+    const third = await runBillingSweep();
+
+    expect(third.replayBilled).toBe(1);
+    expect(await creditsUsed()).toBe(100);
+    expect(await claimedIds()).toEqual([3, 4]); // 1 and 2 stay excluded
+  });
+
+  async function claimCount(): Promise<number> {
+    const db = getEeDb();
+    return (await db.select().from(eeBilledLlmUsage)).length;
+  }
+
+  async function claimedIds(): Promise<number[]> {
+    const db = getEeDb();
+    const rows = await db.select({ id: eeBilledLlmUsage.llmUsageId }).from(eeBilledLlmUsage);
+    return rows.map((r) => r.id).sort((a, b) => a - b);
+  }
+});
+
+describe("billing sweep — rows the platform could not price", () => {
+  const otherOrgId = "00000000-0000-4000-a000-000000000011";
+
+  beforeEach(async () => {
+    await truncateEeTables();
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
+    _resetEeEnvForTests();
+    _resetBillingSweeperForTests();
+    await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
+    await seedBillingAccount({ orgId: otherOrgId, creditsUsed: 0, creditQuota: 2_000_000 });
+    await seedBillingCursor(0, 0);
+  });
+
+  async function claimStamp(llmUsageId: number): Promise<string> {
+    const db = getEeDb();
+    const [row] = await db
+      .select({ pricingStatus: eeBilledLlmUsage.pricingStatus })
+      .from(eeBilledLlmUsage)
+      .where(eq(eeBilledLlmUsage.llmUsageId, llmUsageId));
+    return row!.pricingStatus;
+  }
+
+  it("bills a `partial` row on its floor and stamps the claim", async () => {
+    const id = seedLlmUsage({ orgId, costUsd: 0.05, pricingStatus: "partial" });
+
+    const result = await runBillingSweep();
+
+    expect(await creditsUsed()).toBe(50); // the floor IS charged
+    expect(await claimStamp(id)).toBe("partial");
+    expect(result.pricing).toMatchObject({ partial: 1, unpriced: 0, unknown: 0 });
+  });
+
+  it("claims an `unpriced` row for 0 credits instead of settling it as free", async () => {
+    // cost 0 + `unpriced` means "could not price this call", NOT "free": claiming it
+    // stops a double bill, the stamp keeps the uncollected revenue findable.
+    const id = seedLlmUsage({ orgId, costUsd: 0, pricingStatus: "unpriced" });
+
+    const result = await runBillingSweep();
+
+    expect(await creditsUsed()).toBe(0);
+    expect(await claimStamp(id)).toBe("unpriced");
+    expect(result.billed).toBe(1);
+    expect(result.pricing).toMatchObject({ unpriced: 1, orgIds: [orgId] });
+  });
+
+  it("never reads a null pricing status as priced", async () => {
+    // A row predating the field: claimed at 0 credits and stamped `unknown`, a
+    // different fact from `unpriced` that an operator diagnoses differently.
+    const id = seedLlmUsage({ orgId, costUsd: 0.05, pricingStatus: null });
+
+    const result = await runBillingSweep();
+
+    expect(await creditsUsed()).toBe(0);
+    expect(await claimStamp(id)).toBe("unknown");
+    expect(result.pricing).toMatchObject({ unknown: 1 });
+  });
+
+  it("emits ONE error line per pass naming every affected org", async () => {
+    seedLlmUsage({ orgId, costUsd: 0.05, pricingStatus: "partial" });
+    seedLlmUsage({ orgId, costUsd: 0, pricingStatus: "unpriced" });
+    seedLlmUsage({ orgId: otherOrgId, costUsd: 0.05, pricingStatus: null });
+    seedLlmUsage({ orgId, costUsd: 0.05 }); // priced — never in the report
+
+    const errorSpy = spyOn(logger, "error");
+    try {
+      await runBillingSweep();
+      const faults = errorSpy.mock.calls.filter(
+        ([msg]) => typeof msg === "string" && msg.includes("could not price in full"),
+      );
+      expect(faults).toHaveLength(1);
+      expect(faults[0]![1]).toMatchObject({ partial: 1, unpriced: 1, unknown: 1 });
+      expect((faults[0]![1] as { orgIds: string[] }).orgIds.sort()).toEqual(
+        [orgId, otherOrgId].sort(),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(await creditsUsed()).toBe(100); // partial + priced only
+    expect(await creditsUsed(otherOrgId)).toBe(0);
+  });
+
+  it("stays silent when every row is priced", async () => {
+    seedLlmUsage({ orgId, costUsd: 0.05 });
+
+    const errorSpy = spyOn(logger, "error");
+    try {
+      const result = await runBillingSweep();
+      expect(result.pricing).toMatchObject({ partial: 0, unpriced: 0, unknown: 0, orgIds: [] });
+      expect(
+        errorSpy.mock.calls.filter(
+          ([msg]) => typeof msg === "string" && msg.includes("could not price in full"),
+        ),
+      ).toHaveLength(0);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });

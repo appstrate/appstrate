@@ -45,7 +45,6 @@ describe("sendBillingEmail", () => {
     sendBillingEmail("org-123", "payment-failed", {
       planName: "Pro",
       amount: 99,
-      cardLast4: "4242",
       attemptNumber: 2,
       updateUrl: "/billing",
       locale: "en",
@@ -55,7 +54,7 @@ describe("sendBillingEmail", () => {
 
     expect(sentEmails).toHaveLength(1);
     expect(sentEmails[0]!.subject).toContain("Payment failed");
-    expect(sentEmails[0]!.html).toContain("4242");
+    expect(sentEmails[0]!.html).toContain("Update payment method");
   });
 
   it("does nothing when the org has no billing recipient", async () => {

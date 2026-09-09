@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { AppWindow, Users } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
@@ -59,6 +60,9 @@ import { ViewAsDialog } from "../../../components/view-as-dialog";
 import { OrgInvitationsList } from "../../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
+
+/** Owners and admins reach every space by role; a space-member row adds nothing. */
+const FULL_ACCESS_ORG_ROLES: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
 
 function memberLabel(member: SpaceMemberObject): string {
   return member.name || member.email || member.userId;
@@ -427,8 +431,10 @@ function AddSpaceMemberModal({
     { params: { path: { orgId: orgId ?? "" } } },
     { enabled: open && !!orgId && selectingUser },
   );
+  // Owners and admins reach every space through their org role, so adding one
+  // as a space member grants nothing and the route refuses it (409).
   const candidates = (orgData?.members ?? []).filter(
-    (m) => m.role !== "owner" && m.role !== "admin" && !excludedUserIds.has(m.userId),
+    (m) => !FULL_ACCESS_ORG_ROLES.has(m.role) && !excludedUserIds.has(m.userId),
   );
   const effectiveRole =
     role ||

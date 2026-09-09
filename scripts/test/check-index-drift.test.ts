@@ -12,14 +12,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { declaredIndexes, runCheck } from "../check-index-drift.ts";
 import {
-  latestSnapshotName,
-  declaredIndexes,
   declaredTables,
-  runCheck,
+  latestSnapshotName,
   type DrizzleJournal,
   type DrizzleSnapshot,
-} from "../check-index-drift.ts";
+} from "../lib/drizzle-snapshots.ts";
 
 const index = (name: string) => ({
   name,
@@ -67,6 +66,7 @@ const check = (over: {
   watermark?: number | null;
   actual?: [string, string][];
   constraintBacked?: string[];
+  moduleTables?: Record<string, string>;
   snapshots?: Record<string, DrizzleSnapshot>;
 }) =>
   runCheck({
@@ -75,6 +75,7 @@ const check = (over: {
     watermark: over.watermark === undefined ? whenOf(1) : over.watermark,
     actual: (over.actual ?? []).map(([indexname, tablename]) => ({ indexname, tablename })),
     constraintBacked: new Set(over.constraintBacked ?? []),
+    moduleTables: new Map(Object.entries(over.moduleTables ?? {})),
     loadSnapshot: async (name) => {
       const found = (over.snapshots ?? { "0001_snapshot.json": snapshot({}) })[name];
       if (!found) throw new Error(`test asked for an unstubbed snapshot: ${name}`);
@@ -132,7 +133,7 @@ describe("runCheck — undeclared indexes never fail the run", () => {
     expect(lines.join("\n")).not.toContain("runs_pkey");
   });
 
-  it("names an index no constraint owns as possible reverse drift, still exit 0", async () => {
+  it("names an index no constraint owns as possible reverse drift, with its table", async () => {
     // The mirror of #1182: a squash dropped `idx_runs_legacy` from the schema
     // without a forward DROP INDEX, so pre-squash production still carries it.
     const { exitCode, lines } = await check({
@@ -145,24 +146,43 @@ describe("runCheck — undeclared indexes never fail the run", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(lines.join("\n")).toContain("possible reverse drift  idx_runs_legacy");
+    expect(lines.join("\n")).toContain("possible reverse drift  idx_runs_legacy  on runs");
   });
 
-  it("ignores an index on a table the snapshot does not declare", async () => {
-    // `@appstrate/module-ee` migrates its `ee_*` tables under a journal of its
-    // own, so its five indexes are in no platform snapshot. Comparing all of
-    // `public` reported every one of them as reverse drift.
+  it("ignores an index on a table a MODULE owns", async () => {
+    // A module's tables migrate under a journal of its own: no platform snapshot declares them.
     const { exitCode, lines } = await check({
       snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
       actual: [
         ["idx_runs_schedule_id", "runs"],
         ["idx_ee_usage_records_org_id", "ee_usage_records"],
       ],
+      moduleTables: { ee_usage_records: "packages/module-ee" },
     });
 
     expect(exitCode).toBe(0);
     expect(lines.join("\n")).not.toContain("idx_ee_usage_records_org_id");
-    expect(lines.join("\n")).toContain("all 1 indexes declared");
+    expect(lines.join("\n")).toContain("Skipped 1 index(es) on 1 table(s) owned by");
+    expect(lines.join("\n")).toContain("packages/module-ee");
+  });
+
+  it("REPORTS an index on a table NO module owns, naming the table", async () => {
+    // Subtracting by "table the snapshot declares" instead would also drop a platform table the
+    // schema stopped declaring — the reverse-drift class this script exists for.
+    const { exitCode, lines } = await check({
+      snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
+      actual: [
+        ["idx_runs_schedule_id", "runs"],
+        ["idx_dropped_thing_org", "dropped_thing"],
+      ],
+      moduleTables: { ee_usage_records: "packages/module-ee" },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(lines.join("\n")).toContain("undeclared table  dropped_thing");
+    expect(lines.join("\n")).toContain(
+      "possible reverse drift  idx_dropped_thing_org  on dropped_thing",
+    );
   });
 });
 

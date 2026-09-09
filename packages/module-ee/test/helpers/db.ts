@@ -11,23 +11,15 @@ import { sql } from "drizzle-orm";
 import { resetMockLedger } from "./mock-platform.ts";
 import { resetOrgDirectory } from "./org-queries.ts";
 import { resetLlmUsageIdSeq } from "./seed.ts";
+import EE_TABLES from "../tables.ts";
 
 export { getEeDb };
 
-// EE-owned tables only — the module writes nothing else, even though its
-// tables now share the platform database. The platform `llm_usage` ledger is
-// read through the mock `PlatformServices` (see `mock-platform.ts`), reset
-// alongside the rows.
-const EE_TABLES = [
-  "ee_usage_records",
-  "ee_billed_llm_usage",
-  "ee_billing_cursor",
-  "ee_stripe_events",
-  "ee_free_tier_claims",
-  "ee_billing_managers",
-  "ee_billing_accounts",
-] as const;
-
+/**
+ * Clear the EE-owned tables — the module writes nothing else, even though its tables
+ * share the platform database. The platform `llm_usage` ledger is read through the mock
+ * `PlatformServices` (`mock-platform.ts`), reset alongside the rows.
+ */
 export async function truncateEeTables(): Promise<void> {
   const db = getEeDb();
   for (const table of EE_TABLES) {

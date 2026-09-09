@@ -2,7 +2,16 @@
 
 import { z } from "zod";
 
-const eeEnvSchema = z.object({
+/**
+ * This module's environment contract. Exported for one reader no import graph shows: the
+ * platform's env gates (`scripts/verify-env-docs.ts`, `scripts/verify-compose-defaults.ts`)
+ * glob `packages/module-<id>/src/env.ts` and load it through a COMPUTED `import()` — a
+ * literal specifier would be an Apache-2.0 file naming this package, which
+ * `verify-module-isolation.ts` refuses.
+ *
+ * @gateImport
+ */
+export const eeEnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
   STRIPE_PRICE_ID_STARTER: z.string().min(1),

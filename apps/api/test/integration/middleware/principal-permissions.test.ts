@@ -21,7 +21,7 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedSpaceMember } from "../../helpers/seed.ts";
+import { seedApiKey, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
 import { invalidatePrincipalPermissions } from "@appstrate/core/principal-permissions";
 import type { AppstrateModule } from "@appstrate/core/module";
 
@@ -228,5 +228,55 @@ describe("per-principal org permissions", () => {
       headers: headersFor(ctx, granted.cookie),
     });
     expect(resolverCalls).toContain(`${ctx.orgId}:${granted.id}`);
+  });
+
+  /**
+   * The SSE routes resolve the caller's set themselves, so they are a second
+   * implementation of the same rule. Its gates are space-level while a principal
+   * grant is org-level, so what discriminates is whether the module's resolver
+   * is CONSULTED — it is for a session, it is not for a key.
+   */
+  describe("the SSE transport resolves the same org half", () => {
+    /** A space role with no `runs:read`, so SSE auth refuses after the grants are resolved. */
+    async function joinWithoutRunsRead(userId: string): Promise<void> {
+      const role = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["agents:read"] });
+      await seedSpaceMember({
+        spaceId: ctx.defaultSpaceId,
+        userId,
+        presetRole: null,
+        customRoleId: role.id,
+      });
+    }
+
+    it("asks the module for the principal on a session stream", async () => {
+      await joinWithoutRunsRead(granted.id);
+      resolverCalls.length = 0;
+
+      const res = await app.request(
+        `/api/realtime/runs?orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}`,
+        { headers: { Cookie: granted.cookie, Accept: "text/event-stream" } },
+      );
+
+      expect(res.status).toBe(403);
+      expect(resolverCalls).toContain(`${ctx.orgId}:${granted.id}`);
+    });
+
+    it("never asks it for an API key stream", async () => {
+      // The refusal below comes from the key's scopes, not from a missing role.
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["agents:read"],
+      });
+      resolverCalls.length = 0;
+
+      const res = await app.request(`/api/realtime/runs?token=${key.rawKey}`, {
+        headers: { Accept: "text/event-stream" },
+      });
+
+      expect(res.status).toBe(403);
+      expect(resolverCalls).toEqual([]);
+    });
   });
 });

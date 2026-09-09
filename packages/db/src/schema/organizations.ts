@@ -64,6 +64,9 @@ export const organizations = pgTable(
     // billing-neutral: this is a technical byte ceiling, never a plan or price.
     // bigint (mode: number) — mirrors `files_bytes_used` above.
     filesBytesLimit: bigint("files_bytes_limit", { mode: "number" }),
+    // When a deletion was reserved, NULL otherwise. Set before `onOrgDelete`, so a DELETE that
+    // failed in a hook finds the reservation standing and resumes.
+    deletingAt: timestamp("deleting_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

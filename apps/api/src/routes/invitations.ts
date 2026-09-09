@@ -193,6 +193,7 @@ router.post("/:token/accept", async (c) => {
     role: claimed.invitation.role,
     permissions: listedOrgPermissions(claimed.invitation.role),
     createdAt: org.createdAt,
+    deleting_at: org.deletingAt,
   });
 });
 

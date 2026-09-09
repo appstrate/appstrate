@@ -8,8 +8,22 @@
  * real Better Auth sessions.
  */
 import { Hono } from "hono";
+import eeModule from "../../src/index.ts";
 import { createBillingRoutes } from "../../src/routes/billing.ts";
-import type { OrgRole } from "../../src/types.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
+
+/**
+ * The permissions the platform's RBAC aggregation grants `orgRole` from this module's own
+ * contribution — read from the module, never restated, so this harness matches production.
+ */
+export function permissionsForRole(orgRole: OrgRole): ReadonlySet<string> {
+  const granted = new Set<string>();
+  for (const entry of eeModule.permissionsContribution?.() ?? []) {
+    if (entry.level !== "org" || !entry.grantTo.includes(orgRole)) continue;
+    for (const action of entry.actions) granted.add(`${entry.resource}:${action}`);
+  }
+  return granted;
+}
 
 type EeTestEnv = {
   Variables: {
@@ -41,12 +55,7 @@ export function getTestApp(): Hono<EeTestEnv> {
     // read a variable production never populates.
     const userId = c.req.header("X-Test-User-Id") ?? "user-test";
     c.set("user", { id: userId, email: `${userId}@test.local`, name: userId });
-    // Mirror the platform RBAC grant matrix (permissionsContribution in
-    // src/index.ts): `billing:read` is granted to owner/admin/member;
-    // `billing:manage` only to owner/admin. A `guest` gets neither.
-    const permissions = new Set<string>();
-    if (orgRole !== "guest") permissions.add("billing:read");
-    if (orgRole === "owner" || orgRole === "admin") permissions.add("billing:manage");
+    const permissions = new Set<string>(permissionsForRole(orgRole));
     // The platform unions each module's `principalPermissions` answer into the
     // same set — the header stands in for EE's billing-manager resolver, so
     // a non-admin manager reaches the routes exactly as they would in production.

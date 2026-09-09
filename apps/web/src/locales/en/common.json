@@ -88,6 +88,8 @@
   "library.column.package": "Package",
   "library.system": "System",
   "library.systemAlwaysActive": "System package, always active",
+  "library.cannotInstall": "You do not have permission to install this package in this space",
+  "library.cannotUninstall": "You do not have permission to remove this package from this space",
   "library.empty": "No packages available",
   "pagination.previous": "Previous",
   "pagination.next": "Next",

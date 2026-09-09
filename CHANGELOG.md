@@ -178,9 +178,11 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   `CLOUD_RECONCILIATION_*` keys `EE_RECONCILIATION_*` or they silently revert to
   the defaults (`300`, `200`, `100`); the four `STRIPE_*` keys are unchanged.
   `EE_DATABASE_URL` never existed in a release — do not set it, nothing reads
-  it. Deploy, then check the boot log for `Module loaded` with `"id":"ee"`,
-  `billing sweeper started` and NO `no billing account exists` warning, and
-  `select count(*) from drizzle.ee_migrations` on the platform database. Keep
+  it. The cutover is verified by the script's own per-table count table, which
+  must read source = target on every row. Deploy, then check the boot log for
+  `Module loaded` with `"id":"ee"` and `billing sweeper started`, and that
+  `select count(*) from drizzle.ee_migrations` on the platform database counts
+  every file in `packages/module-ee/drizzle/migrations` (7 today). Keep
   the old database read-only (`REVOKE`) for a week, then `DROP DATABASE`; until
   that drop the rollback is the previous image with `CLOUD_DATABASE_URL`
   restored, losing only writes made on the platform copy after the cutover.
@@ -536,6 +538,184 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Deleting an organization reserves the deletion before any module tears
+  anything down (migration `0058`).** `DELETE /api/orgs/:orgId` checked
+  deletability without a lock, emitted `onOrgDelete` — where modules cancel a
+  Stripe subscription and drop rows of their own — and only then opened the
+  transaction that re-checks in-progress runs and refuses when it finds any. A
+  run admitted in that window turned the refusal into a surviving organization
+  stripped of what the handlers had already destroyed, with no repair path. The
+  check and a `organizations.deleting_at` stamp now commit together under the
+  per-org advisory key run admission takes, and `createRun` refuses a reserved
+  organization (409 `org_deleting`), so the decision cannot be invalidated
+  behind the modules' back. Chat admission and `/api/llm-proxy` refuse a reserved
+  organization with the same 409, because a chat turn is not a `runs` row and
+  the deletability count never saw it — usage admitted there would be
+  cascade-deleted unbilled. A DELETE that fails after the reservation leaves it
+  standing and can simply be retried; module `onOrgDelete` handlers must
+  therefore tolerate a second call for the same organization. The reservation is
+  visible: `deleting_at` is on the organization wire object (`GET
+/api/orgs/{orgId}` and the listing), null on every organization not being
+  deleted. The migration is one nullable column and rewrites no row.
+
+  **OPERATOR ACTIONS.** None, unless a DELETE was abandoned. The platform never
+  lifts a reservation — retrying the DELETE is the recovery, and it is the only
+  one, because module handlers that already ran cannot be undone. An operator
+  who decides to abandon a deletion instead can clear the stamp with
+  `UPDATE organizations SET deleting_at = NULL WHERE id = '<org-uuid>';`. That
+  is safe ONLY when no `onOrgDelete` handler ran — i.e. the DELETE failed at the
+  reservation itself, which answers `400 delete_failed` with `runs are in
+progress` and emits nothing. Once a handler has run the organization is
+  already gutted (the subscription is cancelled, the billing rows are gone) and
+  clearing the stamp returns a broken organization to service; finish the
+  deletion instead.
+
+- **Revoking an API key requires `api-keys:revoke` in the key's own space.**
+  The guard answered for the space the request carried and the service then
+  updated org-wide, so a delegated administrator of one space could revoke a
+  key of a private sibling space, given only its id. A key whose space the
+  caller cannot reach now answers with that space's own wall (404 for a private
+  one, 403 `not_a_space_member` otherwise). An API key still revokes only inside
+  the space it is pinned to. The request re-enters the key's space before it
+  writes, so the audit row names the KEY's space, not the space the request came
+  in through.
+
+- **Integration OAuth clients are `integrations:configure`, not
+  `integrations:install`.** Registering, rotating, deleting a BYO OAuth client
+  and choosing the default one are governance (RBAC spec §3.4), and `install`
+  is API-key-grantable — so a key could swap the OAuth application a whole
+  space authenticates through. The four routes now require the session-only
+  permission the SPA already gated them on. **OPERATOR ACTION: an API key that
+  registered, rotated or deleted a BYO OAuth client, or set the default one, now
+  gets 403 on those four routes — do that work from a session.**
+
+- **The realtime streams resolve the same org half as HTTP.** SSE runs outside
+  the auth pipeline and rebuilt the caller's org permissions without the grants a
+  module makes to one named principal, so an ee billing manager reached every
+  HTTP route their grant opens and none of the streams. The stream now reads
+  `principalGrants` exactly as the pipeline does, and its audit rows name the
+  session transport rather than the credential the query parameter carried.
+
+- **A malformed `space_id` in a space assignment answers 400, not 404.**
+  `space_assignments[].space_id` on an invitation and on an OAuth signup policy
+  is shape-checked (`spc_` + a UUID); anything else is `400 Malformed space id`
+  instead of a 404 that reads as "that space was deleted".
+
+- **Billing: deleting an org with no billing account still clears its billing
+  state (`@appstrate/module-ee`).** The handler returned as soon as it found no
+  account row, leaving the org's usage buckets and its billing managers behind —
+  rows naming an organization that no longer exists. The cleanup now runs for
+  every org, and the account row is only what decides whether Stripe is called.
+
+- **Billing: `POST /api/billing/checkout` and `/plan` answer 404 for an org with
+  no billing account (`@appstrate/module-ee`).** They answered 503, which tells a
+  client to retry something no retry can fix.
+
+- **A disabled install checkbox in the library says why.** The row now names the
+  reason — a system package, or the permission the caller lacks — and shows
+  nothing at all while permissions are still loading, rather than a bare disabled
+  box that reads as a broken control.
+
+- **The billing managers card no longer clears itself when the member roster
+  fails to load.** Without the roster every saved manager read as "no longer a
+  member", which made the list dirty and turned Save into a `PUT` of the empty
+  set. The card stops at an error state instead.
+
+- **The models page stops asking for credentials a member cannot read.** The
+  credentials list and the provider registry are both behind
+  `model-provider-credentials:read`; they are now fetched only when the caller
+  holds it, instead of collecting two guaranteed 403s per visit.
+
+- **A role can be repaired after a module is unloaded.** The role editor
+  rendered only the permissions it could name, kept the rest selected
+  invisibly, and resent them on every save, which the server refused with a 400
+  no control could clear. Permissions the platform no longer knows are now
+  listed as unavailable, with a way to remove them.
+
+- **Billing: a Stripe cancellation that fails on org deletion is now retried
+  instead of forgotten (`@appstrate/module-ee`).** `onOrgDelete` logged the
+  failure and deleted the billing account anyway, so the subscription id died
+  with the row: a Stripe blip left a subscription charging a customer every month
+  for an organization that no longer existed, with nothing able to name it. The
+  intent is now stamped on `ee_billing_accounts.cancel_requested_at` before the
+  call, the rows survive an unconfirmed cancellation, and every billing tick
+  retries them until Stripe confirms — a subscription Stripe no longer has counts
+  as confirmed, and a second `onOrgDelete` for the same org is a no-op.
+
+- **Billing: the shutdown drain no longer closes the database under a running
+  storage reconcile (`@appstrate/module-ee`).** It snapshotted the in-flight
+  sweep and reconcile once, at entry, but the tick starts the reconcile from
+  inside the very promise that snapshot awaits — so a shutdown entered mid-sweep
+  returned the moment the sweep ended and `closeEeDb()` ran underneath a
+  reconcile that had begun in between. It now re-reads both handles after every
+  wait, and its timeout is a constant rather than a parameter no caller passed.
+
+- **Billing: upgrading a paying organization no longer creates a second
+  subscription (`@appstrate/module-ee`).** The plan picker always opened Stripe
+  Checkout, and Checkout only ever CREATES — so an org that already subscribed
+  came out of an upgrade with two live subscriptions and two charges.
+  `POST /api/billing/checkout` now refuses an account whose subscription is one
+  Stripe still HOLDS — `active`, `trialing`, `past_due`, `unpaid`, `paused` or
+  `incomplete` (`409 subscription_exists`) — because Checkout only creates, and
+  Stripe holds all six. The new `POST /api/billing/plan` (`billing:manage`,
+  5/min) moves the existing subscription's price item onto the chosen plan with
+  proration. Which door a plan click opens is the server's answer, not the
+  dashboard's guess: `GET /api/billing` carries a `plan_action` field
+  (`checkout` | `plan-change` | `portal`) and the SPA follows it. Downgrading to
+  free is unchanged — it is a cancellation, taken through the Customer Portal.
+
+- **Billing: an old subscription's events no longer destroy the active one
+  (`@appstrate/module-ee`).** Every subscription-scoped Stripe webhook matched on
+  `metadata.orgId` alone, which says which org OWNS a subscription and not that
+  the org is still on it — so a `customer.subscription.deleted` for a replaced
+  `sub_old` downgraded the live `sub_new` account to free with zero credits while
+  Stripe kept charging it. Reversed order and late delivery did the same through
+  `customer.subscription.updated` and `invoice.paid`, and a superseded
+  subscription's dunning notice reached the customer as if their current plan
+  were failing. Each handler now writes only to the account carrying that exact
+  subscription id, and an event about any other subscription is logged and
+  ignored. The three handlers whose job includes ATTACHING one — checkout
+  completion, subscription creation and the first paid invoice — also accept an
+  account with no subscription, and one whose id names a subscription Stripe no
+  longer HOLDS: only `customer.subscription.deleted` nulls the column, so an org
+  sitting at `canceled` (or one whose `deleted` event was lost) still carries a
+  dead id, and pinning on the id alone dropped its next paid checkout as
+  "superseded" — charged, with no plan and no quota.
+  `customer.subscription.created` additionally never rewrites an account already
+  on that subscription: a creation event delivered late carries creation-time
+  status and plan, and replaying it over a subscription that has since moved
+  puts the account back where it started.
+
+- **Billing: the usage the cutover excluded is no longer billed on the second
+  sweep (`@appstrate/module-ee`).** The cursor was seeded at the platform's
+  settled frontier and the first pass billed nothing — as documented — but every
+  later pass reads `EE_RECONCILIATION_REPLAY_WINDOW` ids BELOW the watermark to
+  catch rows that commit late, and that read walked straight back under the seed
+  and debited the whole history. `ee_billing_cursor.floor_id` records the seeded
+  frontier once and never moves, and both the sweep and the org-deletion drain
+  now select from `max(floor_id, watermark − replay window)` through one shared
+  rule. `floor_id` defaults to `0` for a cursor that predates it: its original
+  frontier was never recorded, and 0 is exactly the behaviour those deployments
+  already had.
+
+- **Billing: a ledger row the platform could not price is no longer settled as
+  free (`@appstrate/module-ee`).** The sweep summed `cost_usd` blind, so a row
+  whose `pricing_status` is `unpriced` (cost 0 because no rates were available —
+  not because the call was free) was claimed as zero spend and could never be
+  recovered. Rows are now claimed with their status stamped on
+  `ee_billed_llm_usage.pricing_status`: `priced` is billed, `partial` is billed
+  on its floor and counted, and `unpriced` or an absent status is claimed for 0
+  credits so it is never double-billed and stays auditable. Each sweep pass and
+  each org drain emits one `error` line with the counts and the affected orgs,
+  and the counts ride the per-tick heartbeat.
+
+- **Billing: the final drain on org deletion no longer misses a late-committed
+  row (`@appstrate/module-ee`).** It started strictly above the global watermark,
+  so a row of the org that took a low serial id and committed after the watermark
+  passed it was debited 0 — and unlike the periodic sweep, the drain has no
+  second chance: the org's ledger rows cascade away moments later. It now uses
+  the same selection rule as the sweep.
+
 - **Unit tests green again after the 2026-09-07 LiteLLM catalog refresh
   (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
   `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor
@@ -756,24 +936,20 @@ skills sync is running` and kept the stale plugin. The lock is now
   parameter, because the resolver only leaves it unset for system mcp-servers,
   which the route answers before it reads the query at all.
 
-- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired — `scripts/bootstrap.sh`
-  now refuses to run while it is set.** The variable was a fourth trigger for a
-  decision three live signals already make (`--yes`, `CI=true|1|yes`, stdout is
-  not a TTY), and its only justification was preserving the pre-two-step
-  "always auto-install" default for IaC written against it. Its only in-repo
-  writer was the CI scenario covering the legacy path itself.
+- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired.**
+  `scripts/bootstrap.sh` does not read it at all — nothing in the repository
+  does. It was a fourth trigger for a decision three live signals already make
+  (`--yes`, `CI=true|1|yes`, stdout is not a TTY), and its only justification
+  was preserving the pre-two-step "always auto-install" default for IaC written
+  against it.
 
-  It is a hard failure, not a silent ignore, because silence is the expensive
-  answer here: an Ansible / cloud-init run that still exports it would fall
-  through to the two-step path and exit 0 having dropped the binary and
-  installed nothing — a provisioning run that reports success and provisions
-  no instance. The guard runs before the first download and names the
-  replacement. **Replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
-  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`); CI runners and
+  **OPERATOR ACTION: replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
+  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`). An Ansible /
+  cloud-init run that still exports it takes the two-step path and exits 0
+  having dropped the binary and installed nothing, with no message naming the
+  variable — so fix the caller rather than waiting for one. CI runners and
   non-TTY contexts already select unattended mode on their own and need no
-  change. An explicitly blanked `APPSTRATE_AUTO_INSTALL=` carries no intent and
-  stays a no-op, matching `RETIRED_ENV_RENAMES` in `@appstrate/env`.
-  `APPSTRATE_NO_LAUNCH=1` is untouched.
+  change. `APPSTRATE_NO_LAUNCH=1` is untouched.
 
 ### Fixed
 

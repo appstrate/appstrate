@@ -13,14 +13,16 @@ import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { effectivePermissions } from "../lib/permissions.ts";
-import {
-  loadSpaceMember,
-  resolveSpaceRole,
-  spacePermissions,
-  type SpaceMemberRow,
-} from "../lib/space-role.ts";
+import { loadSpaceMember, resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
 import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
-import { orgHalfFor, personaFor, personaSpaceMember, validateViewAs } from "../lib/view-as.ts";
+import {
+  effectiveInSpace,
+  orgHalfFor,
+  personaFor,
+  personaSpaceMember,
+  validateViewAs,
+} from "../lib/view-as.ts";
+import { principalGrants } from "../lib/principal-permissions.ts";
 import {
   reportPermissionDenial,
   VIEW_AS_ACTIVE_HEADER,
@@ -102,20 +104,24 @@ interface SSEAuthResult {
  * the API key's ceiling, which the caller intersects afterwards. `null` when
  * the principal has no role in that space. `memberRow` is the persona's overlay
  * under a role preview, so it is passed in rather than loaded.
+ *
+ * The org half folds in `principalGrants` exactly as the HTTP pipeline does, so
+ * the stream answers the same caller every other transport does.
  */
-function resolveSpaceGrants(
+async function resolveSpaceGrants(
   c: Context<AppEnv>,
   orgId: string,
   realRole: OrgRole,
   space: SpaceContextRow,
   memberRow: SpaceMemberRow | null,
-): ReadonlySet<string> | null {
+): Promise<ReadonlySet<string> | null> {
   const ref = resolveSpaceRole(personaFor(c, orgId)?.orgRole ?? realRole, space, memberRow);
   if (!ref) return null;
-  return new Set<string>([
-    ...orgHalfFor(c, orgId, realRole).orgPermissions,
-    ...spacePermissions(ref),
-  ]);
+  return effectiveInSpace(
+    c,
+    ref,
+    orgHalfFor(c, orgId, realRole, await principalGrants(c, orgId)).orgPermissions,
+  );
 }
 
 /**
@@ -171,7 +177,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     if (!keySpace) return null;
 
     // Creator's LIVE authority in the key's space (RBAC spec §7.1).
-    const grants = resolveSpaceGrants(
+    const grants = await resolveSpaceGrants(
       c,
       keyInfo.orgId,
       keyInfo.creatorRole,
@@ -224,6 +230,8 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   });
   c.set("orgId", orgId);
   c.set("orgRole", role);
+  // `principalGrants` is session-shaped, and the denial audit names the transport.
+  c.set("authMethod", "session");
 
   const persona = await validateViewAs({
     raw: viewAsRaw,
@@ -235,7 +243,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   if (persona) c.set("viewAs", persona);
 
   // Same as `applySpacePermissions`: being in the org is not being in the space.
-  const grants = resolveSpaceGrants(
+  const grants = await resolveSpaceGrants(
     c,
     orgId,
     role,

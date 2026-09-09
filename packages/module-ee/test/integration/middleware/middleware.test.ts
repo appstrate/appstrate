@@ -3,8 +3,7 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import { flushEeRedis } from "../../helpers/redis.ts";
-import { eeRateLimit, eeRequireAdmin } from "../../../src/middleware.ts";
-import type { OrgRole } from "../../../src/types.ts";
+import { eeRateLimit } from "../../../src/middleware.ts";
 import { useEeTestSeams } from "../../helpers/setup.ts";
 
 useEeTestSeams();
@@ -98,64 +97,6 @@ describe("middleware", () => {
       const retryAfter = res.headers.get("Retry-After");
       expect(retryAfter).toBeDefined();
       expect(Number(retryAfter)).toBeGreaterThan(0);
-    });
-  });
-
-  describe("eeRequireAdmin", () => {
-    function createAdminApp() {
-      const app = new Hono<{
-        Variables: { orgRole: OrgRole; permissions: ReadonlySet<string> };
-      }>();
-      app.use("/admin", async (c, next) => {
-        const role = c.req.header("X-Role") as OrgRole | undefined;
-        if (role) c.set("orgRole", role);
-        // Simulate platform RBAC: admin/owner roles get billing:manage permission
-        const permissions =
-          role === "owner" || role === "admin" ? new Set(["billing:manage"]) : new Set<string>();
-        c.set("permissions", permissions);
-        await next();
-      });
-      app.use("/admin", eeRequireAdmin());
-      app.get("/admin", (c) => c.json({ ok: true }));
-      return app;
-    }
-
-    it("allows owner role", async () => {
-      const app = createAdminApp();
-
-      const res = await app.request("/admin", {
-        headers: { "X-Role": "owner" },
-      });
-      expect(res.status).toBe(200);
-    });
-
-    it("allows admin role", async () => {
-      const app = createAdminApp();
-
-      const res = await app.request("/admin", {
-        headers: { "X-Role": "admin" },
-      });
-      expect(res.status).toBe(200);
-    });
-
-    it("rejects member role with 403", async () => {
-      const app = createAdminApp();
-
-      const res = await app.request("/admin", {
-        headers: { "X-Role": "member" },
-      });
-      expect(res.status).toBe(403);
-      expect(res.headers.get("content-type")).toContain("application/problem+json");
-      const body = (await res.json()) as { code: string; status: number };
-      expect(body.code).toBe("forbidden");
-      expect(body.status).toBe(403);
-    });
-
-    it("rejects when no role is set with 403", async () => {
-      const app = createAdminApp();
-
-      const res = await app.request("/admin");
-      expect(res.status).toBe(403);
     });
   });
 });

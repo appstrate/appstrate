@@ -6,20 +6,23 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, internalError, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { validateScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
 import {
   generateApiKey,
   hashApiKey,
   extractKeyPrefix,
   createApiKeyRecord,
+  findApiKeySpace,
   listApiKeys,
   revokeApiKey,
 } from "../services/api-keys.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getSpaceScope, getOrgScope } from "../lib/scope.ts";
+import { validateSpaceInOrg } from "../lib/space-lookup.ts";
+import { applySpacePermissions } from "../middleware/space-context.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createApiKeySchema = z
@@ -118,14 +121,32 @@ export function createApiKeysRouter() {
   // DELETE /api/api-keys/:id — revoke a key (soft-delete)
   router.delete("/:id", requirePermission("api-keys", "revoke"), async (c) => {
     const keyId = c.req.param("id")!;
-    // Issue #172 (extension): API keys may only revoke keys within their
-    // own bound space. Sessions retain org-wide reach (admins manage
-    // all spaces from the dashboard) — the scope's shape encodes the intent
-    // at the type level.
-    const scope = c.get("authMethod") === "api_key" ? getSpaceScope(c) : getOrgScope(c);
+    // `api-keys:revoke` is held PER SPACE (spec §3.4) and the key may live in a
+    // different space from the one this request entered, so authority is decided
+    // in the key's own space — behind that space's wall (404 when private).
+    const orgScope = getOrgScope(c);
+    const keySpaceId = await findApiKeySpace(orgScope, keyId);
+    if (!keySpaceId) {
+      throw notFound("API key not found or already revoked");
+    }
+    if (keySpaceId !== c.get("spaceId")) {
+      // A key delegates authority in exactly one space (spec §7.1).
+      if (c.get("authMethod") === "api_key") {
+        throw notFound("API key not found or already revoked");
+      }
+      const keySpace = await validateSpaceInOrg(keySpaceId, orgScope.orgId);
+      if (!keySpace) {
+        throw notFound("API key not found or already revoked");
+      }
+      await applySpacePermissions(c, keySpace);
+      // Downstream readers (the audit row, any later guard) must name the space
+      // the revocation acts in, not the one the request entered from.
+      c.set("spaceId", keySpaceId);
+      assertPermission(c, "api-keys", "revoke");
+    }
 
     try {
-      const revoked = await revokeApiKey(scope, keyId);
+      const revoked = await revokeApiKey({ ...orgScope, spaceId: keySpaceId }, keyId);
       if (!revoked) {
         throw notFound("API key not found or already revoked");
       }

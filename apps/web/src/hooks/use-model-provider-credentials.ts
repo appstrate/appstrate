@@ -34,24 +34,25 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
     >
   >;
 
-export function useModelProviderCredentials() {
+/** Gated by `model-provider-credentials:read`; `enabled` skips a sure 403. */
+export function useModelProviderCredentials(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials",
     { params: { header: scope.header } },
-    { enabled: scope.enabled, select: (e) => e.data },
+    { enabled: enabled && scope.enabled, select: (e) => e.data },
   );
 }
 
-export function useProvidersRegistry() {
+export function useProvidersRegistry(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials/registry",
     { params: { header: scope.header } },
     {
-      enabled: scope.enabled,
+      enabled: enabled && scope.enabled,
       staleTime: 5 * 60 * 1000,
       // This hook never sends `?fields=`, so the server returns full entries —
       // narrow the projection-loosened wire type to the full catalog shape.

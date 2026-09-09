@@ -2,7 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
-import { toISORequired } from "../lib/date-helpers.ts";
+import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import {
   organizations,
   organizationMembers,
@@ -53,6 +53,8 @@ interface OrgResult {
    * detail endpoint can report the raw override alongside the effective limit.
    */
   filesBytesLimit: number | null;
+  /** When deletion was reserved (`organizations.deleting_at`), or null. */
+  deletingAt: string | null;
 }
 
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
@@ -65,6 +67,7 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     updatedAt: toISORequired(row.updatedAt),
     filesBytesUsed: row.filesBytesUsed,
     filesBytesLimit: row.filesBytesLimit,
+    deletingAt: toISO(row.deletingAt),
   };
 }
 
@@ -471,7 +474,7 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
 }
 
 /**
- * Pre-flight: is this organization deletable at all?
+ * Reserve the deletion of this organization.
  *
  * MUST be awaited by callers BEFORE anything observes the deletion —
  * concretely, before the route emits `onOrgDelete`. The ordering is
@@ -486,36 +489,41 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
  * consumed free-tier claim does not come back). So: refuse first, notify
  * second, delete third.
  *
- * This is a precondition, NOT the race guard. It reads outside any
- * transaction, so a run admitted between here and the delete slips through;
- * the in-transaction check in `deleteOrganization` (which holds the per-org
- * run-admission advisory lock) is what closes that window. Keep both.
+ * The check and the stamp commit TOGETHER under the per-org advisory key
+ * `createRun` takes, so no run can be admitted behind the modules' back.
+ * Idempotent: a standing reservation is the state a retried DELETE finds.
  *
  * Throws the same `Error` messages the transaction would, so the route maps
  * either failure onto the same `400 delete_failed` response.
  */
-export async function assertOrgDeletable(orgId: string): Promise<void> {
-  const [org] = await db
-    .select({ id: organizations.id })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  if (!org) throw new Error("Failed to delete organization: not found");
+export async function reserveOrgDeletion(orgId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(orgId)})::bigint)`,
+    );
 
-  if ((await countInProgressRuns(db, orgId)) > 0) {
-    throw new Error("Cannot delete organization: runs are in progress");
-  }
+    const [org] = await tx
+      .select({ id: organizations.id, deletingAt: organizations.deletingAt })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+      .for("update");
+    if (!org) throw new Error("Failed to delete organization: not found");
+
+    if ((await countInProgressRuns(tx, orgId)) > 0) {
+      throw new Error("Cannot delete organization: runs are in progress");
+    }
+
+    if (org.deletingAt) return;
+    await tx
+      .update(organizations)
+      .set({ deletingAt: new Date() })
+      .where(eq(organizations.id, orgId));
+  });
 }
 
 export async function deleteOrganization(orgId: string): Promise<void> {
-  // Delete in FK-safe order within a transaction. The in-progress-runs check
-  // lives INSIDE the transaction (was previously a separate read before it):
-  // outside, a run could transition pending/running in the window between the
-  // check and the delete (TOCTOU), so we'd cascade-delete a live run's rows.
-  // Doing the count in the same transaction as the deletes — which take row
-  // locks on the runs being removed — closes that window. `assertOrgDeletable`
-  // is the caller-facing precondition, not a replacement for this check: it
-  // reads without the lock, so only the count below is race-free.
+  // Delete in FK-safe order within a transaction.
   await db.transaction(async (tx) => {
     // Serialize against concurrent run admission. `createRun` acquires this
     // same per-org advisory lock before its count + INSERT. Taking it here

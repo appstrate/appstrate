@@ -28,17 +28,19 @@ import { getOrgQueries } from "../platform-org-queries.ts";
 import { logger } from "../logger.ts";
 
 /** Product cap on the CC list — see the schema comment for why it is not a CHECK. */
-export const MAX_BILLING_CC = 5;
+const MAX_BILLING_CC = 5;
 
 /**
  * Wire shape of `PATCH /api/billing/contact`. Both fields are optional so a
  * caller may set one without restating the other; `billing_email: null` is the
  * explicit way to clear the contact and go back to the owner fallback.
  */
-export const billingContactPatchSchema = z.object({
-  billing_email: z.email().nullable().optional(),
-  billing_cc: z.array(z.email()).max(MAX_BILLING_CC).optional(),
-});
+export const billingContactPatchSchema = z
+  .object({
+    billing_email: z.email().nullable().optional(),
+    billing_cc: z.array(z.email()).max(MAX_BILLING_CC).optional(),
+  })
+  .strict();
 
 export interface BillingContact {
   billingEmail: string | null;

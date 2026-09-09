@@ -53,7 +53,7 @@ import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/cor
 import { TERMINAL_RUN_STATUSES, runStatusValues } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
 
 /**

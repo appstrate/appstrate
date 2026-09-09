@@ -4,7 +4,6 @@ import type { Context, Next } from "hono";
 import { getEeRedis } from "./redis.ts";
 import { logger } from "./logger.ts";
 import { problemJson, rateLimited } from "./http-errors.ts";
-import { forbidden } from "@appstrate/core/api-errors";
 
 const WINDOW_MS = 60_000;
 
@@ -59,24 +58,4 @@ export function eeRateLimit(maxPerMinute: number, keyFn: (c: Context) => string)
 
     return next();
   };
-}
-
-/**
- * RBAC guard for EE billing routes. Checks the `permissions` Set from Hono
- * context (populated by the platform's RBAC middleware). Emits RFC 9457
- * problem+json on denial, matching the platform's core error contract.
- */
-export function eeRequirePermission(permission: string) {
-  return async (c: Context, next: Next) => {
-    const permissions = c.get("permissions") as ReadonlySet<string> | undefined;
-    if (!permissions || !permissions.has(permission)) {
-      return problemJson(c, forbidden(`Insufficient permissions: ${permission} required`));
-    }
-    return next();
-  };
-}
-
-/** Admin-tier guard — billing mutations (checkout / portal) require `billing:manage`. */
-export function eeRequireAdmin() {
-  return eeRequirePermission("billing:manage");
 }

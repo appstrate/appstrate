@@ -9,7 +9,7 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 | `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                                       |
 | `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                                         |
 | `bun test`               | Run all tests (bun:test framework, requires Docker)                                                                                                        |
-| `bun run check`          | The quality gate — 19 task names, NOT 4. `CLAUDE.md` § "Development Workflow" lists them and says how to count the turbo fan-out; do not re-list them here |
+| `bun run check`          | The quality gate — 20 task names, NOT 4. `CLAUDE.md` § "Development Workflow" lists them and says how to count the turbo fan-out; do not re-list them here |
 | `bun run build`          | Build everything (turbo build)                                                                                                                             |
 | `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                                            |
 | `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                                         |

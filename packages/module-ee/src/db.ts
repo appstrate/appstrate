@@ -18,6 +18,15 @@ export type EeTx = Parameters<Parameters<EeDb["transaction"]>[0]>[0];
 
 let eeDb: EeDb | null = null;
 let eeSql: ReturnType<typeof postgres> | null = null;
+let eeDatabaseUrl: string | null = null;
+
+/**
+ * Connection options shared by the module's pool and its migrator. `onnotice`:
+ * postgres.js prints server NOTICEs to stdout, bypassing the platform's JSON logger.
+ * `max`: without one, postgres.js opens up to ten connections per replica on the
+ * PLATFORM database, beside the platform's own pool.
+ */
+const EE_POOL_OPTIONS = { max: 5, onnotice: () => {} } as const;
 
 export function getEeDb(): EeDb {
   if (!eeDb) throw new Error("EE DB not initialized. Call init() on the EE module first.");
@@ -30,10 +39,23 @@ export function getEeDb(): EeDb {
  * {@link migrateEeDb}. It is still a pool of its own rather than the platform's:
  * the module reads platform rows through `ctx.services`, and sharing the handle
  * (for an atomic org deletion, say) is a contract change, not a connection one.
+ *
+ * Idempotent: a second call for the same URL keeps the open pool; a call for a DIFFERENT
+ * one throws, since replacing the handle strands the first pool's sockets.
  */
 export function initEeDb(databaseUrl: string): void {
-  eeSql = postgres(databaseUrl);
+  if (eeSql) {
+    if (databaseUrl !== eeDatabaseUrl) {
+      throw new Error(
+        "initEeDb called with a different DATABASE_URL than the open pool. A process serves one " +
+          "platform database; re-pointing it would leave the previous pool open and unreachable.",
+      );
+    }
+    return;
+  }
+  eeSql = postgres(databaseUrl, EE_POOL_OPTIONS);
   eeDb = drizzle(eeSql, { schema });
+  eeDatabaseUrl = databaseUrl;
 }
 
 /**
@@ -46,6 +68,7 @@ export async function closeEeDb(): Promise<void> {
     await eeSql.end();
     eeSql = null;
     eeDb = null;
+    eeDatabaseUrl = null;
   }
 }
 
@@ -84,10 +107,9 @@ export async function migrateEeDb(databaseUrl: string): Promise<void> {
     "../drizzle/migrations",
   );
   // max: 1 — the lock and the migration must run on the SAME connection for the
-  // session-level advisory lock to guard the migration.
-  // `onnotice`: postgres.js prints server notices to stdout by default, and the
-  // migrator's `CREATE SCHEMA IF NOT EXISTS` raises one on every boot.
-  const sqlClient = postgres(databaseUrl, { max: 1, onnotice: () => {} });
+  // session-level advisory lock to guard the migration. Everything else is the pool's
+  // own options, so a setting added there reaches the migrator too.
+  const sqlClient = postgres(databaseUrl, { ...EE_POOL_OPTIONS, max: 1 });
   try {
     await sqlClient`SELECT pg_advisory_lock(${MIGRATION_ADVISORY_LOCK_KEY})`;
     try {

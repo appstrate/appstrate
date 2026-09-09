@@ -25,7 +25,6 @@ import {
   toBillingContactDraft,
   type BillingContactDraft,
 } from "../lib/billing-contact";
-import { billingSaveErrorMessage } from "../lib/billing-error";
 import { LoadingState, ErrorState } from "./page-states";
 import { SectionCard } from "./section-card";
 import { Spinner } from "./spinner";
@@ -33,8 +32,9 @@ import { Spinner } from "./spinner";
 /**
  * Where invoices, receipts and dunning mail go instead of every owner's inbox.
  *
- * Mounted only where `features.billing && can("billing:manage")` holds — the
- * condition `eeRequireAdmin()` checks. An empty primary address is not a
+ * Mounted only where `can("billing:manage")` holds — the condition the module's
+ * admin routes check; the route around it already requires `billing:read`, a
+ * permission only `@appstrate/module-ee` contributes. An empty primary address is not a
  * missing value: it is the org asking for the owners fallback, which is why
  * the form can clear the field and why the save sends `null` for it.
  *
@@ -115,9 +115,7 @@ export function BillingContactSection() {
           toast.success(t("billingContact.saveSuccess"));
         },
         onError: (err) =>
-          toast.error(
-            billingSaveErrorMessage(err, (message) => t("error.prefix", { ns: "common", message })),
-          ),
+          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
       },
     );
   };

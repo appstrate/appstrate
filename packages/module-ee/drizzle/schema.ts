@@ -50,6 +50,9 @@ export const billingAccounts = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'`),
+    /** Set while an org deletion's Stripe cancellation is unconfirmed, so the row
+     * survives for the sweeper to retry. See `src/billing/org-cancellation.ts`. */
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -140,6 +143,10 @@ export const stripeEvents = pgTable("ee_stripe_events", {
  */
 export const eeBilledLlmUsage = pgTable("ee_billed_llm_usage", {
   llmUsageId: integer("llm_usage_id").primaryKey(),
+  /** What the claim is WORTH: `PricingFaults` in `src/billing/usage-recorder.ts`. */
+  pricingStatus: text("pricing_status", { enum: ["priced", "partial", "unpriced", "unknown"] })
+    .default("priced")
+    .notNull(),
   billedAt: timestamp("billed_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -170,6 +177,9 @@ export const billingCursor = pgTable(
   {
     id: boolean("id").primaryKey().default(true),
     lastLlmUsageId: integer("last_llm_usage_id").notNull(),
+    /** The settled frontier this cursor was SEEDED at, written once and never moved.
+     * What it bounds: `ledgerScanStart` in `src/billing/usage-recorder.ts`. */
+    floorId: integer("floor_id").default(0).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [check("ee_billing_cursor_single_row", sql`${table.id}`)],

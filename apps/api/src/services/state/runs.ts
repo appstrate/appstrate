@@ -468,6 +468,7 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<vo
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
   );
+  await refuseReservedForDeletion(tx, scope.orgId);
   const [row] = await tx
     .select({ active: count() })
     .from(runs)
@@ -485,6 +486,45 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<vo
       detail: `Organization concurrent run limit reached (${cap}). Wait for in-flight runs to complete.`,
     });
   }
+}
+
+/**
+ * Is this organization's deletion reserved (`organizations.deleting_at`)?
+ * Exact under the per-org admission lock; the proxy and chat seams read
+ * unlocked and may admit one call that races the stamp.
+ */
+export async function isOrgDeletionReserved(
+  executor: DbTx | typeof db,
+  orgId: string,
+): Promise<boolean> {
+  const [org] = await executor
+    .select({ deletingAt: organizations.deletingAt })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  return org?.deletingAt != null;
+}
+
+/** The refusal every admission seam answers a reserved organization with. */
+export function orgDeletingError(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "org_deleting",
+    title: "Organization Is Being Deleted",
+    detail: "This organization is being deleted; no new work can be admitted.",
+  });
+}
+
+/**
+ * Refuse admission into an organization whose deletion is reserved. Called by
+ * every seam that admits metered usage: work admitted after the reservation is
+ * cascade-deleted with the org, taking its unread `llm_usage` rows with it.
+ */
+export async function refuseReservedForDeletion(
+  executor: DbTx | typeof db,
+  orgId: string,
+): Promise<void> {
+  if (await isOrgDeletionReserved(executor, orgId)) throw orgDeletingError();
 }
 
 interface CreateRunParams {

@@ -31,6 +31,7 @@ import {
   useUpdateRole,
   type RoleObject,
 } from "../../hooks/use-roles";
+import { unavailablePermissions } from "../../lib/role-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Modal } from "../../components/modal";
 import { ViewAsDialog } from "../../components/view-as-dialog";
@@ -248,6 +249,43 @@ function RoleCard({
   );
 }
 
+/** The unavailable half of the picker: named, explained, and removable. */
+export function UnavailablePermissions({
+  permissions,
+  onRemove,
+  disabled,
+}: {
+  permissions: readonly string[];
+  onRemove: (permission: string) => void;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  if (permissions.length === 0) return null;
+  return (
+    <div className="border-destructive/40 rounded-lg border p-3">
+      <p className="mb-1 font-mono text-xs font-semibold">{t("roles.unavailableGroup")}</p>
+      <p className="text-muted-foreground mb-2 text-xs">{t("roles.unavailableHint")}</p>
+      <ul className="flex flex-col gap-2">
+        {permissions.map((permission) => (
+          <li key={permission} className="flex items-center justify-between gap-2">
+            <span className="font-mono text-xs">{permission}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              aria-label={t("roles.unavailableRemove", { permission })}
+              onClick={() => onRemove(permission)}
+            >
+              {t("btn.remove", { ns: "common" })}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const { data: vocabulary, isLoading, error: vocabularyError, refetch } = useRoleVocabulary();
@@ -313,6 +351,13 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       ),
     }))
     .filter((group) => group.permissions.length > 0);
+  // Only meaningful once the vocabulary answered: before that, everything is
+  // unknown for the wrong reason.
+  const unavailable = vocabulary
+    ? unavailablePermissions(selected, vocabulary).filter((permission) =>
+        permission.toLowerCase().includes(query),
+      )
+    : [];
 
   return (
     <Modal
@@ -421,40 +466,47 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
               </Button>
             </div>
           ) : (
-            groups.map((group) => (
-              <div key={group.resource} className="border-border rounded-lg border p-3">
-                <p className="mb-2 font-mono text-xs font-semibold">{group.resource}</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {group.permissions.map((entry) => (
-                    <label
-                      key={entry.permission}
-                      className="flex items-start gap-2 text-sm"
-                      htmlFor={`perm-${entry.permission}`}
-                    >
-                      <Checkbox
-                        id={`perm-${entry.permission}`}
-                        disabled={isPending}
-                        checked={selected.has(entry.permission)}
-                        onCheckedChange={() => toggle(entry.permission)}
-                        className="mt-0.5"
-                      />
-                      <span className="flex flex-col">
-                        <span className="font-mono text-xs">{entry.action}</span>
-                        {!entry.api_key_grantable && (
-                          <span className="text-muted-foreground text-xs">
-                            {t("roles.sessionOnly")}
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
+            <>
+              <UnavailablePermissions
+                permissions={unavailable}
+                onRemove={toggle}
+                disabled={isPending}
+              />
+              {groups.map((group) => (
+                <div key={group.resource} className="border-border rounded-lg border p-3">
+                  <p className="mb-2 font-mono text-xs font-semibold">{group.resource}</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {group.permissions.map((entry) => (
+                      <label
+                        key={entry.permission}
+                        className="flex items-start gap-2 text-sm"
+                        htmlFor={`perm-${entry.permission}`}
+                      >
+                        <Checkbox
+                          id={`perm-${entry.permission}`}
+                          disabled={isPending}
+                          checked={selected.has(entry.permission)}
+                          onCheckedChange={() => toggle(entry.permission)}
+                          className="mt-0.5"
+                        />
+                        <span className="flex flex-col">
+                          <span className="font-mono text-xs">{entry.action}</span>
+                          {!entry.api_key_grantable && (
+                            <span className="text-muted-foreground text-xs">
+                              {t("roles.sessionOnly")}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </>
           )}
         </fieldset>
 
-        {!isLoading && !vocabularyError && groups.length === 0 && (
+        {!isLoading && !vocabularyError && groups.length === 0 && unavailable.length === 0 && (
           <p className="text-muted-foreground text-sm">{t("roles.noMatchingPermissions")}</p>
         )}
         {formError && (

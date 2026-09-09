@@ -10,7 +10,7 @@
 
 // ─── Request recording ──────────────────────────────────────────
 
-export interface RecordedRequest {
+interface RecordedRequest {
   method: string;
   path: string;
   body: Record<string, unknown> | null;
@@ -32,6 +32,11 @@ export function setCheckoutResponse(response: Record<string, unknown>): void {
   checkoutOverride = response;
 }
 
+/**
+ * Answer the next `GET /v1/subscriptions/:id` (retrieve) with `response`. Retrieve ONLY:
+ * the in-place plan change retrieves then updates the same subscription, so an override
+ * both verbs consumed would be spent by the retrieve and never reach the update.
+ */
 export function setSubscriptionResponse(response: Record<string, unknown>): void {
   subscriptionOverride = response;
 }
@@ -182,6 +187,13 @@ export function startStripeMock(): { port: number } {
         const response = subscriptionOverride ?? defaultSubscriptionResponse(id);
         subscriptionOverride = null;
         return Response.json(response);
+      }
+
+      // POST /v1/subscriptions/:id — subscription update (in-place plan change).
+      // Never reads the retrieve override; see `setSubscriptionResponse`.
+      if (method === "POST" && path.startsWith("/v1/subscriptions/")) {
+        const id = path.split("/").pop()!;
+        return Response.json(defaultSubscriptionResponse(id));
       }
 
       // DELETE /v1/subscriptions/:id

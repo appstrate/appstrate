@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getEnv, _resetCacheForTesting } from "../src/index.ts";
 
+/** Every variable a test below mutates — `restore()` cleans only what is named here. */
 const TRACKED = [
   "BETTER_AUTH_SECRET",
   "BETTER_AUTH_ACTIVE_KID",
@@ -20,10 +21,6 @@ const TRACKED = [
   "PI_IMAGE",
   "SIDECAR_IMAGE",
   "APP_VERSION",
-  // The retired names and their replacements. Both halves are tracked:
-  // `restore()` only cleans what is listed here, so a test that sets a retired
-  // name would otherwise leave it set for every test after it — which is
-  // exactly how the control below first failed.
   "FILE_MAX_BYTES",
   "FILE_RETENTION_DAYS",
   "RUN_MAX_FILES",

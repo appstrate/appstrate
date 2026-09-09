@@ -15,10 +15,7 @@ import type {
   ModelFormSubmitOutcome,
 } from "../lib/model-form-payload";
 import { toCreateModelBody } from "../lib/model-form-payload";
-import {
-  useCreateModelProviderCredential,
-  useModelProviderCredentials,
-} from "./use-model-provider-credentials";
+import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -179,8 +176,6 @@ export function useModelFormHandler(opts: {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
   const createCredential = useCreateModelProviderCredential();
-  // Kept warm for the modal's credential picker.
-  useModelProviderCredentials();
 
   // Spans the whole submission: the per-mutation flags drop between calls.
   const [submitPending, setSubmitPending] = useState(false);

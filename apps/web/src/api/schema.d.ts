@@ -535,7 +535,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke (soft-delete) an API key. The key will immediately stop working.
+         * @description Revoke (soft-delete) an API key. The key will immediately stop working. `api-keys:revoke` is required in the KEY's own space, not in the space the request carries. A caller who cannot reach that space gets the space's own wall: 404 when it is `private` (its existence must not leak through the id of a key inside it), 403 `not_a_space_member` when it is `open` or `closed`. An API-key caller reaching for a key of another space always answers 404 — a key delegates authority in exactly one space.
          */
         delete: operations["revokeApiKey"];
         options?: never;
@@ -959,6 +959,26 @@ export interface paths {
          */
         put: operations["replaceEeBillingManagers"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the plan of the existing subscription
+         * @description Moves the organization's EXISTING Stripe subscription onto another plan, in place, with proration — the door for an org that already subscribes, where `POST /api/billing/checkout` would create a second subscription and bill it twice. Admin-only (`billing:manage`). Rate-limited to 5/min per org. Returns the billing snapshot; the new plan itself is applied when Stripe's `customer.subscription.updated` arrives, so the returned `plan` may still name the previous one.
+         */
+        post: operations["changeEeBillingPlan"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1573,7 +1593,7 @@ export interface paths {
         get?: never;
         /**
          * Set the default OAuth client for an integration auth
-         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Admin only.
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["setDefaultIntegrationClient"];
         post?: never;
@@ -1594,7 +1614,7 @@ export interface paths {
         put?: never;
         /**
          * Register a custom OAuth client for an integration auth
-         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Admin only.
+         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.
          */
         post: operations["createIntegrationOAuthClient"];
         delete?: never;
@@ -1712,13 +1732,13 @@ export interface paths {
         get?: never;
         /**
          * Rotate a custom OAuth client's credentials
-         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Admin only.
+         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["rotateIntegrationOAuthClient"];
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Admin only.
+         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
@@ -5122,10 +5142,15 @@ export interface components {
             /** Format: date-time */
             period_end: string | null;
             /**
-             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` during the period-end grace window, otherwise mirrors Stripe's `subscription.status`.
+             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` while a subscription Stripe still collects on is set to end at the period boundary, otherwise mirrors Stripe's `subscription.status`.
              * @enum {string}
              */
-            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceled" | "canceling";
+            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "incomplete" | "canceled" | "canceling";
+            /**
+             * @description Which endpoint a plan selection goes to: `plan-change` for `POST /api/billing/plan`, `portal` for `POST /api/billing/portal` when Stripe holds the subscription but has stopped collecting on it, `checkout` for `POST /api/billing/checkout`. Checkout only creates, so an org Stripe holds a subscription for never re-enters it — a second one would bill the customer twice.
+             * @enum {string}
+             */
+            plan_action: "plan-change" | "portal" | "checkout";
             /** @description Plans the org can upgrade into — empty when on the highest plan. */
             upgrades: components["schemas"]["EeBillingUpgradePlan"][];
         };
@@ -5398,6 +5423,11 @@ export interface components {
             slug?: string;
             /** Format: date-time */
             createdAt?: string;
+            /**
+             * Format: date-time
+             * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
+             */
+            deleting_at?: string | null;
             /** @description Durable-file storage consumption for this organization. `used_bytes` is the running total of stored file bytes; `limit_bytes` is the raw per-org limit override (`files_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
             storage?: {
                 /** @description Bytes of durable files stored. */
@@ -5569,6 +5599,11 @@ export interface components {
              * @description Creation timestamp
              */
             createdAt: string;
+            /**
+             * Format: date-time
+             * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
+             */
+            deleting_at: string | null;
         };
         PackageFileEntry: {
             /** @description Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`) */
@@ -6230,6 +6265,16 @@ export interface components {
                  *       "requestId": "req_abc123"
                  *     }
                  */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. */
+        RunAdmissionConflict: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
@@ -7470,7 +7515,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
+            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8797,6 +8842,15 @@ export interface operations {
                     "application/json": components["schemas"]["EeBillingAccount"];
                 };
             };
+            /** @description Caller lacks `billing:read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description No billing account exists for this org */
             404: {
                 headers: {
@@ -8851,6 +8905,24 @@ export interface operations {
             };
             /** @description Caller lacks `billing:manage` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The organization already has a subscription (`subscription_exists`) — change its plan with `POST /api/billing/plan` instead of starting a second one. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9057,6 +9129,89 @@ export interface operations {
             };
         };
     };
+    changeEeBillingPlan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                };
+            };
+        };
+        responses: {
+            /** @description Billing snapshot after the change was sent to Stripe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingAccount"];
+                };
+            };
+            /** @description Validation error or invalid Stripe plan configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The organization has no subscription to change (`no_active_subscription`) — start a checkout instead. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     createEeBillingPortalSession: {
         parameters: {
             query?: never;
@@ -9210,7 +9365,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -9219,6 +9374,13 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Rate limited (20/min per caller) */
             429: {
                 headers: {
@@ -12372,6 +12534,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
@@ -12442,6 +12613,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
@@ -12511,6 +12691,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
@@ -14878,7 +15067,8 @@ export interface operations {
                      *             "org:update",
                      *             "members:invite"
                      *           ],
-                     *           "createdAt": "2026-01-10T08:00:00Z"
+                     *           "createdAt": "2026-01-10T08:00:00Z",
+                     *           "deleting_at": null
                      *         }
                      *       ]
                      *     }
@@ -18783,7 +18973,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyInProgress"];
+            409: components["responses"]["RunAdmissionConflict"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {
@@ -19006,7 +19196,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyInProgress"];
+            409: components["responses"]["RunAdmissionConflict"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {
@@ -22299,7 +22489,8 @@ export interface operations {
                      *         "org:read",
                      *         "spaces:read"
                      *       ],
-                     *       "createdAt": "2026-01-10T08:00:00Z"
+                     *       "createdAt": "2026-01-10T08:00:00Z",
+                     *       "deleting_at": null
                      *     }
                      */
                     "application/json": components["schemas"]["Organization"];

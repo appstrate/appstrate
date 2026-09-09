@@ -38,9 +38,12 @@ const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { toViewAsPersona } = await import("../../stores/view-as-store.ts");
 const { render } = await import("../../test/render.tsx");
-const { i18nReady } = await import("../../i18n.ts");
+const { default: i18n, i18nReady } = await import("../../i18n.ts");
 
 await i18nReady;
+// The assertions below quote the French bundle: pin the language rather than
+// leaning on whichever one the detector settles on.
+await i18n.changeLanguage("fr");
 
 const ORG_ID = "org_a";
 const SPACE_ID = "spc_1";
@@ -93,6 +96,7 @@ function seed(orgRole: OrgRole, options: SeedOptions = {}): QueryClient {
     name: "Acme",
     slug: "acme",
     role: orgRole,
+    deleting_at: null,
     permissions: [
       "roles:read",
       "members:read",

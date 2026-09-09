@@ -403,9 +403,16 @@
     // `commitlint.config.ts` are named individually because no glob in that
     // list reaches them at all.
     //
-    // `scripts/verify-env-docs.ts` and `scripts/lib/tracked-files.ts` are the
-    // gate's own code; an edit to either changes the verdict without touching
-    // any of the three populations above.
+    // `packages/module-*/src/env.ts` is the FOURTH population, added when the
+    // gate stopped reading `packages/env` alone: a module declares environment
+    // variables of its own and `docs/ENV.md` is now held to those too. It is a
+    // glob rather than the one file that exists today for the same reason the
+    // discovery in the script is — the next module must not need an edit here
+    // to be covered, because the failure of forgetting one is a cached GREEN.
+    //
+    // `scripts/verify-env-docs.ts`, `scripts/lib/tracked-files.ts` and
+    // `scripts/lib/module-env-schemas.ts` are the gate's own code; an edit to
+    // any of them changes the verdict without touching a population above.
     //
     // Probe when changing it: `turbo run '//#verify:env-docs' --dry=json`, EDIT
     // one of these files (turbo hashes content — `touch` moves nothing and
@@ -414,9 +421,11 @@
       "inputs": [
         "docs/ENV.md",
         "packages/env/src/index.ts",
+        "packages/module-*/src/env.ts",
         "**/.env.example",
         "scripts/verify-env-docs.ts",
         "scripts/lib/tracked-files.ts",
+        "scripts/lib/module-env-schemas.ts",
         "package.json"
       ]
     },
@@ -499,6 +508,15 @@
       "cache": false
     },
     "//#verify:module-isolation": {
+      "cache": false
+    },
+    // `cache: false` for the reason every `verify:*` sibling carries it, plus
+    // one of its own: this gate reads a module's newest drizzle SNAPSHOT to
+    // learn which tables that module owns, and the snapshot it picks is chosen
+    // at runtime from the journal. No `inputs` list names that file, so a
+    // cached replay would check the module's SQL against a table set from
+    // before its last migration.
+    "//#verify:module-sql-boundary": {
       "cache": false
     },
     // `cache: false` like its `verify:*` siblings, and for the reason

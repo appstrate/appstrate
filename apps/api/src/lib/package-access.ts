@@ -12,9 +12,9 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import { getOrgMember } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
-import { effectivePermissions, type Permission } from "./permissions.ts";
-import { callerOrgRole, callerSpaceMemberships } from "./view-as.ts";
-import { resolveSpaceRole, spacePermissions } from "./space-role.ts";
+import type { Permission } from "./permissions.ts";
+import { callerOrgRole, callerSpaceMemberships, effectiveInSpace } from "./view-as.ts";
+import { resolveSpaceRole } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { forbidden, notFound, invalidRequest } from "./errors.ts";
 
@@ -105,11 +105,7 @@ export async function packageAccessSpaces(
     return [
       {
         ...space,
-        permissions: effectivePermissions({
-          orgPermissions: c.get("orgPermissions") ?? new Set<string>(),
-          spacePermissions: spacePermissions(ref),
-          scopeCeiling: c.get("scopeCeiling"),
-        }),
+        permissions: effectiveInSpace(c, ref),
       },
     ];
   });

@@ -18,7 +18,7 @@
 
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { truncateEeTables } from "../../helpers/db.ts";
-import { seedBillingAccount } from "../../helpers/seed.ts";
+import { seedBillingAccount, seedBillingCursor } from "../../helpers/seed.ts";
 import { resetStripeMock, generateWebhookEvent } from "../../helpers/stripe.ts";
 import { mockStorageLimitCalls, resetMockStorageLimits } from "../../helpers/mock-platform.ts";
 import { setMockStorageLimitError, setMockStorageLimitHook } from "../../helpers/mock-platform.ts";
@@ -35,14 +35,18 @@ import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import {
   runBillingSweepTick,
   drainBillingSweeper,
+  startBillingSweeper,
+  stopBillingSweeper,
   _resetBillingSweeperForTests,
 } from "../../../src/billing/billing-sweeper.ts";
+import { setMockLedgerListHook } from "../../helpers/mock-platform.ts";
 import { logger } from "../../../src/logger.ts";
 import { getPlans, GIB } from "../../../src/config.ts";
 import { _resetEeEnvForTests } from "../../../src/env.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
 
 useEeTestSeams();
+useEeReconciliationEnv();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -365,5 +369,69 @@ describe("storage entitlement", () => {
       expect(failureErrors!).toHaveLength(1);
       expect(failureErrors![0]![1]).toMatchObject({ synced: 0, failed: 1 });
     });
+  });
+});
+
+describe("shutdown drain", () => {
+  const orgId = "00000000-0000-4000-a000-000000000062";
+
+  beforeEach(async () => {
+    await truncateEeTables();
+    resetMockStorageLimits();
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "1";
+    _resetEeEnvForTests();
+    _resetBillingSweeperForTests();
+  });
+
+  it("REGRESSION: waits for a reconcile the tick started while the drain was already waiting", async () => {
+    // The tick STARTS the reconcile from inside the very promise a drain entered
+    // mid-sweep is awaiting, so a drain that snapshotted [sweep, resync] once would
+    // return the instant the sweep finished and let `closeEeDb()` run under it.
+    await seedBillingAccount({ orgId, planId: "starter" });
+    // Seed the cursor so the FIRST tick reads the ledger (and blocks in the hook below)
+    // instead of returning early to seed it, leaving the reconcile un-started.
+    await seedBillingCursor(0);
+
+    let releaseSweep!: () => void;
+    let sweepEntered!: () => void;
+    const inSweep = new Promise<void>((resolve) => (sweepEntered = resolve));
+    const sweepGate = new Promise<void>((resolve) => (releaseSweep = resolve));
+    setMockLedgerListHook(async () => {
+      sweepEntered();
+      await sweepGate;
+    });
+
+    let releaseResync!: () => void;
+    const resyncGate = new Promise<void>((resolve) => (releaseResync = resolve));
+    setMockStorageLimitHook(() => resyncGate);
+
+    try {
+      startBillingSweeper();
+      await inSweep;
+
+      // Shutdown order: clear the timer, then drain. The tick is inside the sweep and
+      // has NOT yet started the reconcile.
+      stopBillingSweeper();
+      let drained = false;
+      const drain = drainBillingSweeper().then(() => {
+        drained = true;
+      });
+
+      releaseSweep();
+      // The tick finishes the sweep, starts the reconcile, and returns; the reconcile
+      // is still blocked, so the drain must still be waiting.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(drained).toBe(false);
+
+      releaseResync();
+      await drain;
+      expect(drained).toBe(true);
+      expect(mockStorageLimitCalls).toEqual([{ orgId, bytes: 20 * GIB }]);
+    } finally {
+      stopBillingSweeper();
+      setMockLedgerListHook(null);
+      setMockStorageLimitHook(null);
+    }
   });
 });

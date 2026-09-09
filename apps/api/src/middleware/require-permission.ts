@@ -36,6 +36,21 @@ export function requirePermission<R extends Resource>(resource: R, action: Actio
 }
 
 /**
+ * Assert a permission from inside a handler — same audit hook and same 403 as
+ * {@link requirePermission}, for a check that can only run once a row is loaded.
+ */
+export function assertPermission<R extends Resource>(
+  c: Context<AppEnv>,
+  resource: R,
+  action: Action<R>,
+): void {
+  const required = `${resource as string}:${action as string}`;
+  if (c.get("permissions")?.has(required)) return;
+  reportPermissionDenial(c, required);
+  throw forbidden(`Insufficient permissions: ${required} required`);
+}
+
+/**
  * Middleware factory: require ANY ONE of several permissions.
  *
  * A single `makePermissionGuard` cannot express a disjunction, so the denial

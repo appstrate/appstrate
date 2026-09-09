@@ -80,20 +80,6 @@ describe("resolvePrincipalPermissions", () => {
     expect(calls).toBe(2);
   });
 
-  it("invalidates the whole org when no user is named", async () => {
-    let answer: string[] = ["x:read"];
-    setPrincipalPermissionsProviders([provider("a", ["x:read"], async () => answer)]);
-    const other = { orgId: "org_1", userId: "usr_2" };
-
-    await resolvePrincipalPermissions(PRINCIPAL);
-    await resolvePrincipalPermissions(other);
-    answer = [];
-    invalidatePrincipalPermissions(PRINCIPAL.orgId);
-
-    expect((await resolvePrincipalPermissions(PRINCIPAL)).size).toBe(0);
-    expect((await resolvePrincipalPermissions(other)).size).toBe(0);
-  });
-
   it("does not touch the cache when no module declares the surface", async () => {
     setPrincipalPermissionsProviders([]);
     const one = await resolvePrincipalPermissions(PRINCIPAL);

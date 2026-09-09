@@ -112,6 +112,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         "credit_quota",
         "period_end",
         "status",
+        "plan_action",
         "upgrades",
       ],
       properties: {
@@ -131,7 +132,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         status: {
           type: "string",
           description:
-            "Effective billing status. `none` when no Stripe subscription is attached, `canceling` during the period-end grace window, otherwise mirrors Stripe's `subscription.status`.",
+            "Effective billing status. `none` when no Stripe subscription is attached, `canceling` while a subscription Stripe still collects on is set to end at the period boundary, otherwise mirrors Stripe's `subscription.status`.",
           enum: [
             "none",
             "active",
@@ -139,9 +140,16 @@ export function openApiComponentSchemas(): Record<string, unknown> {
             "past_due",
             "unpaid",
             "paused",
+            "incomplete",
             "canceled",
             "canceling",
           ],
+        },
+        plan_action: {
+          type: "string",
+          description:
+            "Which endpoint a plan selection goes to: `plan-change` for `POST /api/billing/plan`, `portal` for `POST /api/billing/portal` when Stripe holds the subscription but has stopped collecting on it, `checkout` for `POST /api/billing/checkout`. Checkout only creates, so an org Stripe holds a subscription for never re-enters it — a second one would bill the customer twice.",
+          enum: ["plan-change", "portal", "checkout"],
         },
         upgrades: {
           type: "array",
@@ -167,6 +175,10 @@ export function openApiPaths(): Record<string, unknown> {
           "200": {
             description: "Billing snapshot",
             content: { "application/json": { schema: billingAccountSchemaRef } },
+          },
+          "403": {
+            description: "Caller lacks `billing:read`",
+            content: { "application/problem+json": { schema: errorProblemRef } },
           },
           "404": {
             description: "No billing account exists for this org",
@@ -222,6 +234,69 @@ export function openApiPaths(): Record<string, unknown> {
           },
           "403": {
             description: "Caller lacks `billing:manage`",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "404": {
+            description: "No billing account exists for this org",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "409": {
+            description:
+              "The organization already has a subscription (`subscription_exists`) — change its plan with `POST /api/billing/plan` instead of starting a second one.",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "429": {
+            description: "Rate-limited (5/min per org) or Stripe-side rate limit",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "503": {
+            description: "Stripe unavailable",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+        },
+      },
+    },
+    "/api/billing/plan": {
+      post: {
+        operationId: "changeEeBillingPlan",
+        tags: ["Billing"],
+        summary: "Change the plan of the existing subscription",
+        description:
+          "Moves the organization's EXISTING Stripe subscription onto another plan, in place, with proration — the door for an org that already subscribes, where `POST /api/billing/checkout` would create a second subscription and bill it twice. Admin-only (`billing:manage`). Rate-limited to 5/min per org. Returns the billing snapshot; the new plan itself is applied when Stripe's `customer.subscription.updated` arrives, so the returned `plan` may still name the previous one.",
+        parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["plan_id"],
+                additionalProperties: false,
+                properties: { plan_id: checkoutPlanIdRef },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Billing snapshot after the change was sent to Stripe",
+            content: { "application/json": { schema: billingAccountSchemaRef } },
+          },
+          "400": {
+            description: "Validation error or invalid Stripe plan configuration",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "403": {
+            description: "Caller lacks `billing:manage`",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "404": {
+            description: "No billing account exists for this org",
+            content: { "application/problem+json": { schema: errorProblemRef } },
+          },
+          "409": {
+            description:
+              "The organization has no subscription to change (`no_active_subscription`) — start a checkout instead.",
             content: { "application/problem+json": { schema: errorProblemRef } },
           },
           "429": {

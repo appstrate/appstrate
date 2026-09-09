@@ -7,13 +7,7 @@
  * the phase-2 behaviour — compute billing enabled — without `mock.module()`.
  */
 import { describe, expect, it } from "bun:test";
-import {
-  quoteUsage,
-  assertExecutionFacts,
-  type QuoteRates,
-} from "../../src/billing/usage-quote.ts";
-import type { BeforeUsageParams } from "@appstrate/core/module";
-import { ApiError } from "@appstrate/core/api-errors";
+import { quoteUsage, type QuoteRates } from "../../src/billing/usage-quote.ts";
 import { DEFAULT_QUOTE_RATES } from "../../src/config.ts";
 
 const orgId = "00000000-0000-4000-a000-0000000009a0";
@@ -101,6 +95,28 @@ describe("quoteUsage", () => {
         WITH_COMPUTE,
       );
       expect(quote).toEqual({ modelCredits: 0, computeCredits: 0, totalCredits: 0 });
+    });
+
+    it("quotes a remote SYSTEM run for the model only — the platform funds no compute", () => {
+      // The two components are independent facts: the org runs the work on its
+      // own compute, and the platform still pays for the inference.
+      const quote = quoteUsage(
+        {
+          orgId,
+          context: "run",
+          packageId: "@x/agent",
+          runningCount: 2,
+          credentialSource: "system",
+          executionPlane: "remote",
+          timeoutSeconds: 900,
+        },
+        WITH_COMPUTE,
+      );
+      expect(quote).toEqual({
+        modelCredits: 200 * 2,
+        computeCredits: 0,
+        totalCredits: 400,
+      });
     });
 
     it("quotes a remote run with an undeterminable credential source at zero", () => {
@@ -285,145 +301,5 @@ describe("quoteUsage", () => {
       expect(quote.modelCredits).toBe(0);
       expect(quote.totalCredits).toBe(0);
     });
-  });
-
-  describe("execution-fact refusal", () => {
-    /**
-     * The wire shape a platform below this module's declared `@appstrate/core`
-     * floor produces. The fields are typed as required, so building it needs a
-     * cast — legitimate here because these tests pin that the shape is REFUSED.
-     * A cast that pinned it WORKING is what would keep a compatibility branch
-     * alive; there is no longer one to keep.
-     */
-    function unrecognizedRun(overrides: Record<string, unknown> = {}): BeforeUsageParams {
-      return {
-        orgId,
-        context: "run",
-        packageId: "@x/agent",
-        runningCount: 2,
-        ...overrides,
-      } as unknown as BeforeUsageParams;
-    }
-
-    /** Run `fn`, returning whatever it threw. Fails if it threw nothing. */
-    function thrownBy(fn: () => void): unknown {
-      try {
-        fn();
-      } catch (err) {
-        return err;
-      }
-      throw new Error("expected a refusal, got none");
-    }
-
-    it("refuses with an ApiError when the platform sent no execution facts", () => {
-      // The CLASS is the assertion that matters, not the wording: the scheduler
-      // branches on `instanceof ApiError` to record a failed run, and the HTTP
-      // error handler branches on it to preserve the status. A bare `Error`
-      // passes a message-only assertion while degrading on both seams.
-      const err = thrownBy(() => assertExecutionFacts(unrecognizedRun()));
-      expect(err).toBeInstanceOf(ApiError);
-      expect((err as ApiError).code).toBe("platform_version_unsupported");
-    });
-
-    it("refuses with a terminal 4xx, so the Pi SDK's 429/5xx retry does not storm it", () => {
-      const err = thrownBy(() => assertExecutionFacts(unrecognizedRun())) as ApiError;
-      expect(err.status).toBe(409);
-      expect(err.status).toBeGreaterThanOrEqual(400);
-      expect(err.status).toBeLessThan(500);
-      expect(err.status).not.toBe(429);
-    });
-
-    it("refuses values outside the documented unions, not only missing ones", () => {
-      const err = thrownBy(() =>
-        assertExecutionFacts(
-          unrecognizedRun({ credentialSource: "bogus", executionPlane: "sandbox" }),
-        ),
-      ) as ApiError;
-      expect(err.code).toBe("platform_version_unsupported");
-    });
-
-    it("keeps the received values off the wire — they are logged, not surfaced (#50)", () => {
-      // `message` becomes the RFC 9457 `detail`, and the scheduler writes it
-      // verbatim onto a failed run row an org member reads.
-      const err = thrownBy(() =>
-        assertExecutionFacts(
-          unrecognizedRun({ credentialSource: "bogus", executionPlane: "sandbox" }),
-        ),
-      ) as ApiError;
-      expect(err.message).not.toContain("bogus");
-      expect(err.message).not.toContain("sandbox");
-      expect(err.message).not.toContain("credentialSource");
-      expect(err.message).not.toContain("9.0.0");
-    });
-
-    it("refuses a chat turn the same way", () => {
-      const chat = {
-        orgId,
-        context: "chat",
-        sessionId: "sess-1",
-        // `null` is legal on a run and NOT on chat, whose unions are narrower.
-        credentialSource: null,
-        executionPlane: "platform",
-      } as unknown as BeforeUsageParams;
-      const err = thrownBy(() => assertExecutionFacts(chat));
-      expect(err).toBeInstanceOf(ApiError);
-      expect((err as ApiError).code).toBe("platform_version_unsupported");
-    });
-
-    it("refuses a remote plane on chat, which only ever executes in-process", () => {
-      const chat = {
-        orgId,
-        context: "chat",
-        sessionId: "sess-2",
-        credentialSource: "org",
-        executionPlane: "remote",
-      } as unknown as BeforeUsageParams;
-      expect(() => assertExecutionFacts(chat)).toThrow(ApiError);
-    });
-  });
-
-  describe("execution facts a current platform reports", () => {
-    // Every combination the two unions admit, so a narrowing of the accepted
-    // set cannot pass as a passing suite. The run variant takes three credential
-    // sources across two planes; chat takes two sources on the platform plane
-    // only. `timeoutSeconds` is not validated here — it is quoted, not asserted.
-    const runCases: Array<["system" | "org" | null, "platform" | "remote"]> = [
-      ["system", "platform"],
-      ["system", "remote"],
-      ["org", "platform"],
-      ["org", "remote"],
-      [null, "platform"],
-      [null, "remote"],
-    ];
-
-    for (const [credentialSource, executionPlane] of runCases) {
-      it(`admits a run with credentialSource=${JSON.stringify(credentialSource)} on the ${executionPlane} plane`, () => {
-        expect(() =>
-          assertExecutionFacts({
-            orgId,
-            context: "run",
-            packageId: "@x/agent",
-            runningCount: 1,
-            credentialSource,
-            executionPlane,
-            timeoutSeconds: 300,
-          }),
-        ).not.toThrow();
-      });
-    }
-
-    for (const credentialSource of ["system", "org"] as const) {
-      it(`admits a chat turn with credentialSource=${credentialSource} on the platform plane`, () => {
-        expect(() =>
-          assertExecutionFacts({
-            orgId,
-            context: "chat",
-            sessionId: null,
-            credentialSource,
-            executionPlane: "platform",
-          }),
-        ).not.toThrow();
-      });
-    }
   });
 });

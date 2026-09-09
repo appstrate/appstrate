@@ -24,8 +24,9 @@ const orgLabels: Record<SupportedLocale, string> = {
 };
 
 /**
- * Appstrate Cloud-branded email layout — Appstrate logo, light theme with transparent background.
- * Works in both light and dark mode email clients.
+ * The billing emails' shared chrome: a white rounded card on a transparent page with a
+ * plain-text `appstrate.com` link. No image, so nothing depends on a client loading
+ * remote content, and the transparent body works in light and dark mail clients.
  */
 export function wrapEeLayout({ locale, content, footer, orgName }: LayoutProps): string {
   const trimmedOrgName = orgName?.trim();
@@ -105,6 +106,14 @@ export function formatDate(iso: string, locale: string): string {
  */
 export function billingSettingsUrl(appUrl: string): string {
   return `${appUrl}/org-settings/billing`;
+}
+
+/**
+ * Substitute `{name}` placeholders in a localized string. An unknown key is left as
+ * written rather than blanked, so a typo shows up instead of deleting its sentence.
+ */
+export function interpolate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
 }
 
 export function ctaButton(label: string, url: string): string {

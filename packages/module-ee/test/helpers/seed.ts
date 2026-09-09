@@ -31,6 +31,8 @@ export async function seedBillingAccount(overrides: {
   periodEnd?: Date | null;
   billingEmail?: string | null;
   billingCc?: string[];
+  /** Non-null models an org deletion whose Stripe cancellation is unconfirmed. */
+  cancelRequestedAt?: Date | null;
 }) {
   const db = getEeDb();
   const [account] = await db
@@ -47,6 +49,7 @@ export async function seedBillingAccount(overrides: {
       periodEnd: overrides.periodEnd ?? null,
       billingEmail: overrides.billingEmail ?? null,
       billingCc: overrides.billingCc ?? [],
+      cancelRequestedAt: overrides.cancelRequestedAt ?? null,
     })
     .returning();
   return account!;
@@ -109,6 +112,11 @@ export function seedLlmUsage(overrides: {
   contextId?: string | null;
   credentialSource?: "system" | "org" | null;
   settled?: boolean;
+  /**
+   * How much of `costUsd` the platform could price. Omitted defaults to `"priced"`; pass
+   * `null` for a row predating the field, which the billing rules must NOT read as priced.
+   */
+  pricingStatus?: "priced" | "partial" | "unpriced" | null;
 }): number {
   const id = overrides.id ?? _llmUsageIdSeq++;
   const contextType = overrides.contextType === undefined ? "run" : overrides.contextType;
@@ -127,6 +135,7 @@ export function seedLlmUsage(overrides: {
     contextId,
     credentialSource:
       overrides.credentialSource === undefined ? "system" : overrides.credentialSource,
+    pricingStatus: overrides.pricingStatus === undefined ? "priced" : overrides.pricingStatus,
     settled: overrides.settled ?? true,
   };
   mockLedger.push(row);
@@ -149,13 +158,16 @@ export async function markLlmUsageBilled(args: {
   });
 }
 
-/** Seed the singleton billing cursor at a given watermark. */
-export async function seedBillingCursor(lastLlmUsageId: number): Promise<void> {
+/**
+ * Seed the singleton billing cursor at a given watermark. `floorId` defaults to the
+ * column's own 0, so a test that cares about the exclusion bound has to state it.
+ */
+export async function seedBillingCursor(lastLlmUsageId: number, floorId = 0): Promise<void> {
   const db = getEeDb();
   await db
     .insert(billingCursor)
-    .values({ id: true, lastLlmUsageId })
-    .onConflictDoUpdate({ target: billingCursor.id, set: { lastLlmUsageId } });
+    .values({ id: true, lastLlmUsageId, floorId })
+    .onConflictDoUpdate({ target: billingCursor.id, set: { lastLlmUsageId, floorId } });
 }
 
 /** Grant `billing:*` to a user through the EE-owned billing-manager table. */

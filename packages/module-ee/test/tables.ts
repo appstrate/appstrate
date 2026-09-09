@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * The module's tables, for the root harness `truncateAll()` — they live in the
- * platform database now, so a core test that seeds an org and a billing account
- * has to see them cleared like every other table. No foreign keys run between
- * them; the order mirrors `test/helpers/db.ts`.
+ * The module's tables, and the one list of them the tests read: the root harness
+ * (`truncateAll()`), `test/helpers/db.ts` and the migration chain test. No foreign keys
+ * run between them, so the order is free; it stays children-first because
+ * `truncateAll()` deletes in it.
  */
 export default [
   "ee_usage_records",

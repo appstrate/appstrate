@@ -3,11 +3,13 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedSpace } from "../../helpers/seed.ts";
 import {
   generateApiKey,
   hashApiKey,
   extractKeyPrefix,
   createApiKeyRecord,
+  findApiKeySpace,
   validateApiKey,
   listApiKeys,
   revokeApiKey,
@@ -177,7 +179,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      await revokeApiKey({ orgId: ctx.orgId }, keyId);
+      await revokeApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, keyId);
 
       const result = await validateApiKey(rawKey);
       expect(result).toBeNull();
@@ -287,7 +289,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      await revokeApiKey({ orgId: ctx.orgId }, keyId);
+      await revokeApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, keyId);
 
       const keys = await listApiKeys({ orgId: ctx.orgId });
 
@@ -406,7 +408,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const result = await revokeApiKey({ orgId: ctx.orgId }, keyId);
+      const result = await revokeApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, keyId);
 
       expect(result).toBe(true);
 
@@ -416,7 +418,10 @@ describe("api-keys service", () => {
     });
 
     it("returns false for a non-existent key ID", async () => {
-      const result = await revokeApiKey({ orgId: ctx.orgId }, crypto.randomUUID());
+      const result = await revokeApiKey(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        crypto.randomUUID(),
+      );
 
       expect(result).toBe(false);
     });
@@ -435,7 +440,7 @@ describe("api-keys service", () => {
       });
 
       // Attempt to revoke with the wrong orgId
-      const result = await revokeApiKey({ orgId: ctx.orgId }, keyId);
+      const result = await revokeApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, keyId);
 
       expect(result).toBe(false);
 
@@ -455,11 +460,29 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const first = await revokeApiKey({ orgId: ctx.orgId }, keyId);
+      const first = await revokeApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, keyId);
       expect(first).toBe(true);
 
-      const second = await revokeApiKey({ orgId: ctx.orgId }, keyId);
+      const second = await revokeApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, keyId);
       expect(second).toBe(false);
+    });
+
+    it("returns false when the key lives in a sibling space", async () => {
+      const sibling = await seedSpace({ orgId: ctx.orgId, name: "Sibling" });
+      const rawKey = generateApiKey();
+      const keyId = await createApiKeyRecord({
+        scope: { orgId: ctx.orgId, spaceId: sibling.id },
+        name: "Sibling Key",
+        keyHash: await hashApiKey(rawKey),
+        keyPrefix: extractKeyPrefix(rawKey),
+        createdBy: ctx.user.id,
+        expiresAt: null,
+      });
+
+      const result = await revokeApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, keyId);
+
+      expect(result).toBe(false);
+      expect(await findApiKeySpace({ orgId: ctx.orgId }, keyId)).toBe(sibling.id);
     });
   });
 });

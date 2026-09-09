@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import { getEeDb } from "../db.ts";
-import { billingAccounts, freeTierClaims, orgUsageRecords } from "../../drizzle/schema.ts";
+import { billingAccounts, freeTierClaims } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { getPlans } from "../config.ts";
-import { getStripe } from "../stripe/client.ts";
 import { syncOrgStorageEntitlement } from "../billing/storage-entitlement.ts";
 import { drainOrgUsageOnDelete } from "../billing/org-drain.ts";
-import { deleteBillingManagers } from "../billing/managers.ts";
+import { cancelSubscriptionAndCleanUp } from "../billing/org-cancellation.ts";
 import { logger } from "../logger.ts";
 
 /**
@@ -129,28 +128,16 @@ export async function onOrgDelete(orgId: string): Promise<void> {
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
 
-  if (account?.stripeSubscriptionId) {
-    try {
-      await getStripe().subscriptions.cancel(account.stripeSubscriptionId);
-      logger.info("Stripe subscription canceled on org deletion", {
-        orgId,
-        subscriptionId: account.stripeSubscriptionId,
-      });
-    } catch (err) {
-      logger.error("Failed to cancel Stripe subscription on org deletion", {
-        orgId,
-        subscriptionId: account.stripeSubscriptionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  // Runs whether or not an account row exists and is idempotent, so the platform may call
+  // it again after a deletion that failed further along. Cancel, THEN delete: an
+  // unconfirmed cancellation keeps the rows for the sweeper to retry, because dropping
+  // them takes the subscription id with them.
+  const subscriptionId = account?.stripeSubscriptionId ?? null;
+  const done = await cancelSubscriptionAndCleanUp(orgId, subscriptionId);
+  if (!done) {
+    logger.error("org deleted with its Stripe subscription still live — queued for retry", {
+      orgId,
+      subscriptionId,
+    });
   }
-
-  // No EE table carries an FK to the OSS `organizations` table, so nothing
-  // cascades. Delete the org's EE-owned rows explicitly.
-  // (`ee_billed_llm_usage` is keyed by ledger id, not org; its rows are
-  // harmless billed-markers and are left in place. `ee_billing_cursor` is a
-  // global singleton, never per-org.)
-  await deleteBillingManagers(orgId);
-  await db.delete(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
-  await db.delete(billingAccounts).where(eq(billingAccounts.orgId, orgId));
 }

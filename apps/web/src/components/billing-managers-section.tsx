@@ -33,7 +33,6 @@ import {
   sameBillingManagers,
   type BillingManagerStatus,
 } from "../lib/billing-managers";
-import { billingSaveErrorMessage } from "../lib/billing-error";
 import { LoadingState, ErrorState } from "./page-states";
 import { SectionCard } from "./section-card";
 import { Spinner } from "./spinner";
@@ -47,8 +46,8 @@ const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, str
 /**
  * Who may act on billing without running the organization (RBAC spec §10).
  *
- * Mounted only where `features.billing && can("billing:manage")` holds — the
- * exact condition `eeRequireAdmin()` checks.
+ * Mounted only where `can("billing:manage")` holds — the exact condition the
+ * module's admin routes check, so no query fires for a caller they would 403.
  *
  * A save is a `PUT` of the whole set, so it is refused wholesale over one stale
  * id — a manager since promoted to admin, or since removed from the org. Those
@@ -80,6 +79,8 @@ export function BillingManagersSection() {
 
   if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
   if (managersQuery.error) return <ErrorState message={getErrorMessage(managersQuery.error)} />;
+  // Without the roster every saved manager reads as gone, so Save would PUT {}.
+  if (orgQuery.error) return <ErrorState message={getErrorMessage(orgQuery.error)} />;
 
   const saved = (managersQuery.data?.managers ?? []).map((m) => m.user_id);
   const selected = draft ?? saved;
@@ -101,9 +102,7 @@ export function BillingManagersSection() {
           toast.success(t("billingManagers.saveSuccess"));
         },
         onError: (err) =>
-          toast.error(
-            billingSaveErrorMessage(err, (message) => t("error.prefix", { ns: "common", message })),
-          ),
+          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
       },
     );
   };

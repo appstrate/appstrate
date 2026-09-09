@@ -13,7 +13,7 @@ import {
   getUserOrganizations,
   getOrgById,
   updateOrganization,
-  assertOrgDeletable,
+  reserveOrgDeletion,
   deleteOrganization,
   getOrgMembers,
   getOrgMember,
@@ -33,7 +33,7 @@ import {
   isVersionSupported,
   unsupportedApiVersion,
 } from "../lib/api-versions.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,
@@ -135,6 +135,7 @@ router.get("/", async (c) => {
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,
+            deleting_at: o.deletingAt,
           };
         }),
       ),
@@ -240,6 +241,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     name: org.name,
     slug: org.slug,
     createdAt: org.createdAt,
+    deleting_at: org.deletingAt,
     storage: {
       used_bytes: org.filesBytesUsed,
       limit_bytes: org.filesBytesLimit ?? null,
@@ -314,7 +316,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
   const orgId = c.req.param("orgId")!;
 
   try {
-    // Refuse FIRST, notify SECOND, delete THIRD — the order is load-bearing,
+    // Reserve FIRST, notify SECOND, delete THIRD — the order is load-bearing,
     // do not reorder.
     //
     // `onOrgDelete` handlers do destructive work outside this database and
@@ -322,14 +324,13 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
     // billing then cancels the Stripe subscription and drops the billing
     // account; the mcp module drops the org from the RFC 8707 audience
     // allowlist). `deleteOrganization` refuses — from inside its transaction —
-    // when runs are in progress. With the emit first, that refusal left a
-    // surviving-but-gutted organization no repair path can rebuild. Asserting
-    // deletability up front means modules only ever observe a deletion the
-    // platform has already committed to.
+    // when runs are in progress. The reservation closes that window: it stamps
+    // `deleting_at` under the per-org lock run admission takes, so a repeat of
+    // this DELETE resumes and the hooks tolerate a second `onOrgDelete`.
     //
     // Both calls throw plain Errors, and both land on the same 400
     // `delete_failed` below — the wire contract is unchanged.
-    await assertOrgDeletable(orgId);
+    await reserveOrgDeletion(orgId);
 
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
     await emitEvent("onOrgDelete", orgId);

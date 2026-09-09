@@ -30,9 +30,11 @@ import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
+import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
+import { db } from "@appstrate/db/client";
 
 /**
  * Resolve the chosen chat model preset to its real upstream binding for one
@@ -237,7 +239,8 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     inline in the platform's process, so the platform funds its compute and a
  *     module gating on subscription status must be able to refuse it.
  *
- * Returns null when no module provides the hook (OSS mode allows everything).
+ * Returns null when no module provides the hook (OSS mode allows everything),
+ * except for a reserved deletion, which refuses whatever the deployment loads.
  */
 export async function checkUsageAllowed(args: {
   orgId: string;
@@ -245,6 +248,10 @@ export async function checkUsageAllowed(args: {
   sessionId: string | null;
   subscription: boolean;
 }): Promise<UsageRejection | null> {
+  // Returned, not thrown: this seam renders a rejection as the problem response.
+  const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
+  if (err) return { code: err.code, message: err.message, status: err.status };
+
   if (!hasHook("beforeUsage")) return null;
   // Fail-closed on a caller that omits `subscription` — the flag became
   // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built

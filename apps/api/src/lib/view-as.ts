@@ -33,7 +33,7 @@ import {
 import type { OrgRole, SpaceRolePreset, ViewAsOrgRole } from "@appstrate/core/permissions";
 import { ApiError } from "./errors.ts";
 import { isSpaceRoleId, SPACE_ID_RE } from "./ids.ts";
-import { effectivePermissions, orgPermissions } from "./permissions.ts";
+import { effectivePermissions, orgPermissions, type Permission } from "./permissions.ts";
 import {
   loadSpaceMember,
   loadSpaceMemberships,
@@ -383,6 +383,22 @@ export function orgHalfFor(
     orgPermissions: org,
     effective: effectivePermissions({ orgPermissions: org, scopeCeiling: c.get("scopeCeiling") }),
   };
+}
+
+/**
+ * The caller's effective set IN one space, under the credential ceiling.
+ * `orgHalf` defaults to the half the auth pipeline wrote; SSE passes its own.
+ */
+export function effectiveInSpace(
+  c: Context<AppEnv>,
+  ref: SpaceRoleRef | null,
+  orgHalf: ReadonlySet<string> = c.get("orgPermissions") ?? new Set<string>(),
+): Set<Permission> {
+  return effectivePermissions({
+    orgPermissions: orgHalf,
+    spacePermissions: spacePermissions(ref),
+    scopeCeiling: c.get("scopeCeiling"),
+  });
 }
 
 export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRole {

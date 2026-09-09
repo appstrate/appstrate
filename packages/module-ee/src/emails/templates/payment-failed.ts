@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import type { PaymentFailedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapEeLayout, ctaButton } from "../layout.ts";
+import { ctaButton, interpolate, wrapEeLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -16,7 +16,6 @@ const strings = {
       2: 'Nous avons tente une deuxieme fois de prelever <strong style="color:#1a1a1a;">{amount}\u00a0$</strong> pour votre plan <strong style="color:#1a1a1a;">{planName}</strong>, sans succes. Votre service reste actif pour le moment.',
       3: 'C\'est notre derniere tentative pour prelever <strong style="color:#1a1a1a;">{amount}\u00a0$</strong>. Sans mise a jour de votre moyen de paiement, votre abonnement <strong style="color:#1a1a1a;">{planName}</strong> sera suspendu.',
     } as Record<number, string>,
-    card: "Carte concernee : **** {cardLast4}",
     button: "Mettre a jour le paiement",
     footer: "Si vous avez des questions, contactez notre support.",
   },
@@ -32,15 +31,10 @@ const strings = {
       2: 'We tried a second time to charge <strong style="color:#1a1a1a;">${amount}</strong> for your <strong style="color:#1a1a1a;">{planName}</strong> plan without success. Your service remains active for now.',
       3: 'This is our final attempt to charge <strong style="color:#1a1a1a;">${amount}</strong>. Without a payment update, your <strong style="color:#1a1a1a;">{planName}</strong> subscription will be suspended.',
     } as Record<number, string>,
-    card: "Card on file: **** {cardLast4}",
     button: "Update payment method",
     footer: "If you have any questions, contact our support team.",
   },
 } as const;
-
-function interpolate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
 
 function clampAttempt(n: number): 1 | 2 | 3 {
   if (n <= 1) return 1;
@@ -52,27 +46,21 @@ export function renderPaymentFailedEmail(
   props: PaymentFailedProps,
   context?: BillingEmailContext,
 ): RenderedEmail {
-  const { planName, amount, cardLast4, attemptNumber, updateUrl, locale } = props;
+  const { planName, amount, attemptNumber, updateUrl, locale } = props;
   const s = strings[locale] ?? strings.fr;
   const attempt = clampAttempt(attemptNumber);
 
   const vars = {
     planName,
     amount: amount.toFixed(2),
-    cardLast4: cardLast4 ?? "????",
   };
 
   const heading = s.heading[attempt] ?? s.heading[1]!;
   const body = s.body[attempt] ?? s.body[1]!;
 
-  const cardLine = cardLast4
-    ? `<p style="margin:16px 0 0;font-size:13px;color:#737373;">${interpolate(s.card, vars)}</p>`
-    : "";
-
   const content = `
 <h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#1a1a1a;">${heading}</h1>
 <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#525252;">${interpolate(body, vars)}</p>
-${cardLine}
 ${ctaButton(s.button, updateUrl)}`;
 
   return {

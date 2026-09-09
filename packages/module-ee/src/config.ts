@@ -24,7 +24,7 @@ export const GIB = 1024 * 1024 * 1024;
  */
 export const PLAN_IDS = ["free", "starter", "pro"] as const;
 
-export type PlanId = (typeof PLAN_IDS)[number];
+type PlanId = (typeof PLAN_IDS)[number];
 
 /** Narrow a string of unknown provenance (a DB column, Stripe metadata) to a catalog id. */
 export function isPlanId(id: string): id is PlanId {
@@ -135,6 +135,45 @@ export const DEFAULT_QUOTE_RATES: QuoteRates = {
   computeCreditsPerRunSecond: COMPUTE_CREDITS_PER_RUN_SECOND,
   computeCreditsPerChatTurn: COMPUTE_CREDITS_PER_CHAT_TURN,
 };
+
+/**
+ * Statuses at which Stripe still HOLDS a subscription object for this account — the set
+ * a second Checkout would double-bill. Outside it Stripe holds nothing, whatever id the row carries.
+ */
+export const HELD_SUBSCRIPTION_STATUSES = new Set([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "paused",
+  "incomplete",
+]);
+
+/**
+ * Statuses at which the subscription can be MOVED between plans in place — the ones
+ * Stripe is still collecting on, a strict subset of {@link HELD_SUBSCRIPTION_STATUSES}.
+ * A plan swap elsewhere would change what the org owes without unblocking the payment.
+ */
+export const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
+
+/** Which endpoint a plan selection goes to — see {@link planAction}. */
+type PlanAction = "plan-change" | "portal" | "checkout";
+
+/**
+ * The one door open to an org that picks a plan, derived from the two sets above so the
+ * server's answer and its refusals cannot disagree: `plan-change` swaps the price item,
+ * `portal` fixes a held-but-uncollected payment, `checkout` is the only way in when
+ * Stripe holds nothing — and it only ever CREATES, so a second one double-bills.
+ */
+export function planAction(account: {
+  stripeSubscriptionId: string | null;
+  subscriptionStatus: string | null;
+}): PlanAction {
+  const status = account.subscriptionStatus;
+  if (account.stripeSubscriptionId === null || status === null) return "checkout";
+  if (LIVE_SUBSCRIPTION_STATUSES.has(status)) return "plan-change";
+  return HELD_SUBSCRIPTION_STATUSES.has(status) ? "portal" : "checkout";
+}
 
 /** Subscription statuses that suspend all platform-funded usage, even when its quote is zero. */
 export const HARD_BLOCKED_STATUSES = new Set(["unpaid", "paused"]);

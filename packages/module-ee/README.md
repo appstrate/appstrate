@@ -170,52 +170,52 @@ packages/module-ee/
 │   ├── openapi.ts            # OpenAPI 3.1 contribution: paths + tags + component schemas for billing routes
 │   ├── config.ts             # Plan definitions (free/starter/pro), credit quotas, DEFAULT_QUOTE_RATES (compute rates ship at 0)
 │   ├── env.ts                # Zod-validated EE env vars (Stripe keys)
-│   ├── types.ts              # Types mirrored from the platform (EE depends on neither @appstrate/db nor shared-types)
 │   ├── platform.ts           # Holder for the PlatformServices handle injected at init(ctx)
 │   ├── http-errors.ts        # ApiError → RFC 9457 problem+json, the envelope core routes emit
 │   ├── db.ts                 # Drizzle client + migrator (lazy init on DATABASE_URL, ee_migrations journal)
 │   ├── redis.ts              # ioredis client (lazy init, ee: prefix)
 │   ├── logger.ts             # Creates and exports a pino logger instance via @appstrate/core/logger createLogger()
-│   ├── middleware.ts          # Rate limiting + admin guard for EE routes
-│   ├── platform-org-queries.ts # The two org queries EE needs from the platform + EeInitContext
+│   ├── middleware.ts          # Rate limiting for EE routes (RBAC is core's requireModulePermission)
+│   ├── platform-org-queries.ts # Holder for the two ModuleInitContext org queries EE keeps after init()
 │   ├── billing/
 │   │   ├── managers.ts        # Billing managers: resolver, set replacement, principal-permission invalidation
 │   │   ├── contact.ts         # Billing contact: read/patch + Stripe customer email push
-│   │   ├── usage-quote.ts     # Pure quoteUsage(params, rates) → { modelCredits, computeCredits, totalCredits } + version-skew guard
+│   │   ├── usage-quote.ts     # Pure quoteUsage(params, rates) → { modelCredits, computeCredits, totalCredits }
 │   │   ├── quota-check.ts     # Account read + entitlement gate; balance rule in pure isAffordable() (throws QuotaExceededError)
 │   │   ├── usage-recorder.ts  # Cursor sweep pass: claim + debit + advance watermark (one txn) + billLedgerRows primitive
 │   │   ├── billing-sweeper.ts # Periodic timer driving the cursor sweep + tick observability + throttled entitlement resync
 │   │   ├── org-drain.ts       # Bounded final drain of ONE org's usage on deletion (never moves the watermark)
+│   │   ├── org-cancellation.ts # Durable, retried Stripe cancellation + EE row cleanup on org deletion
 │   │   ├── repair-account.ts  # Re-provision a missing billing account and apply its recorded debt
 │   │   └── storage-entitlement.ts # Plan → platform file-storage limit projection (setFileStorageLimit)
 │   ├── stripe/
 │   │   ├── client.ts         # Stripe SDK singleton
-│   │   ├── checkout.ts       # Stripe Checkout session creation
+│   │   ├── checkout.ts       # Stripe Checkout session creation (refuses a second subscription)
+│   │   ├── plan.ts           # In-place plan change of an existing subscription (prorated)
 │   │   ├── portal.ts         # Stripe Customer Portal session creation
 │   │   └── webhooks.ts       # Webhook processing (idempotent, handles subscription lifecycle)
 │   ├── credits.ts            # Dollar-to-credits conversion (centralized, will evolve)
 │   ├── emails/
-│   │   ├── types.ts          # Local type definitions (mirrors @appstrate/emails contracts)
-│   │   ├── layout.ts         # EE-branded layout (dark theme, logo, footer)
+│   │   ├── types.ts          # Template prop types + the BillingEmailType union
+│   │   ├── layout.ts         # Shared chrome: white card, optional footer, text link
 │   │   ├── recipients.ts     # Who a billing email goes to (contact ∪ CC ∪ managers)
 │   │   ├── registry.ts       # BillingEmailType → renderer map (the one place a template is named)
 │   │   ├── send.ts           # Render + fan out to the recipients, via the platform mailer injected at init()
-│   │   └── templates/        # 13 templates. Billing lifecycle: subscription-confirmed, subscription-expired,
+│   │   └── templates/        # 12 templates. Billing lifecycle: subscription-confirmed, subscription-expired,
 │   │                         #   cancellation-confirmed, plan-changed, payment-receipt, payment-failed,
-│   │                         #   card-expiring, renewal-reminder, quota-warning. Platform overrides
+│   │                         #   card-expiring, quota-warning. Platform overrides
 │   │                         #   (via emailOverrides): verification, invitation, magic-link, reset-password
 │   ├── onboarding/
 │   │   └── post-signup.ts    # Free tier credit allocation + final drain / Stripe cancel on org deletion
 │   ├── scripts/
 │   │   └── repair-account.ts # CLI: bun run repair:account -- <orgId> <ownerEmail>
 │   └── routes/
-│       └── billing.ts        # GET /billing, POST /checkout, POST /portal, POST /webhooks,
+│       └── billing.ts        # GET /billing, POST /checkout, POST /plan, POST /portal, POST /webhooks,
 │                              #   GET|PUT /billing/managers, GET|PATCH /billing/contact
 ├── drizzle/
 │   ├── schema.ts             # Billing tables (Drizzle ORM)
 │   ├── drizzle.config.ts     # Drizzle Kit config (tablesFilter: ee_* tables only)
 │   └── migrations/           # SCHEMA only — incremental & re-runnable (production data exists)
-├── scripts/migration/        # One-off data repairs, run by an operator — never replayed
 ├── test/                     # Runs under the repository's test harness — see "Testing"
 ├── LICENSE                   # Appstrate Commercial License — NOT Apache-2.0
 ├── package.json
@@ -234,6 +234,52 @@ Plans define quotas in **integer credits** (not floats, not dollars). All DB col
 
 Each plan has a `tier` (0/1/2) for upgrade ordering and a `name` for display.
 
+### Upgrading: checkout creates, `POST /api/billing/plan` moves
+
+Stripe Checkout only ever CREATES a subscription — it never reads
+`stripe_subscription_id`. Completing one for an org Stripe already holds a
+subscription for leaves both running and bills the customer twice. So the two
+doors are separate and the SERVER enforces which one an org may use, not the
+dashboard's buttons:
+
+- `POST /api/billing/checkout` refuses an account whose subscription status is
+  one Stripe still HOLDS the object at (`HELD_SUBSCRIPTION_STATUSES`: `active`,
+  `trialing`, `past_due`, `unpaid`, `paused`, `incomplete`) — `409
+subscription_exists`. An `unpaid` or `paused` org fixes its payment through
+  the Customer Portal, which the dashboard offers for every account that carries
+  a subscription. Outside that set — `canceled`, `incomplete_expired`, or no
+  status — Stripe holds nothing whatever id the row still carries, and the
+  checkout goes through;
+- `POST /api/billing/plan` (`billing:manage`, 5/min) moves the EXISTING
+  subscription's single price item onto the new plan with
+  `proration_behavior: "create_prorations"`, and refuses an account with no live
+  subscription — `409 no_active_subscription`. The item id travels with the
+  price: `items: [{ price }]` alone ADDS a second priced item instead of
+  replacing the first, which is the same double charge in a smaller package.
+
+The route writes nothing to `ee_billing_accounts`. Stripe answers with
+`customer.subscription.updated`, and that handler — which resolves the plan from
+the live price item — remains the single place a plan transition is applied, so
+the returned snapshot may still name the previous plan while everything else in
+it is current. Downgrading to free is unchanged: it is a cancellation, taken
+through the Customer Portal.
+
+The SERVER also says which door the dashboard should use: the billing snapshot
+carries `plan_action` — `plan-change`, `portal` or `checkout` — computed by
+`planAction()` in `config.ts` from the same two status sets both endpoints refuse
+on. One predicate, three readers, so a dashboard that follows it never calls an
+endpoint this API is going to reject.
+
+### Subscription identity
+
+Every subscription-scoped webhook writes only to the account that **currently carries that subscription id**. Stripe orders nothing, so an org that replaced `sub_old` with `sub_new` still receives `sub_old`'s tail of events, and `metadata.orgId` is identical on both — it says which org OWNS a subscription, never that the org is still on it. Matching on `orgId` alone lets a `customer.subscription.deleted` for the dead subscription downgrade the live one to free with zero credits on an account Stripe is still charging; reversed order and late delivery are the same fault. The `ee_stripe_events` id dedupe does not help: each of those events is new and genuinely from Stripe.
+
+The handlers that ATTACH a subscription share the "no held subscription" arms: an account qualifies when it carries no subscription id, or when the id it carries names a subscription outside `HELD_SUBSCRIPTION_STATUSES`. That second arm is what a stale id needs — only `customer.subscription.deleted` nulls the column, so a lost or late one leaves a dead id behind, and pinning on the id alone drops the org's next paid checkout as "superseded", leaving it charged with no plan and no quota. An account on a different subscription Stripe DOES hold is excluded.
+
+`checkout.session.completed` and `invoice.paid` add one arm: they also write the account already carrying THAT subscription, because both carry authoritative data for it and neither may depend on winning the ordering race against the other. `customer.subscription.created` does not — its payload is creation-time state (`incomplete` or `trialing`, `cancel_at_period_end: false`), so a late one would roll the live status and cancel flag back on the very subscription the account is on.
+
+The condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — the expected tail of a replacement, not a fault.
+
 ### Subscription status sync
 
 The `subscriptionStatus` field caches Stripe's status while a subscription is attached; `customer.subscription.deleted` normalizes it to `null`, the canonical free/no-subscription state, without re-granting credits. Admission distinguishes hard service blocks (`unpaid`, `paused`) from ended paid entitlements (`canceled`, `incomplete_expired`). Hard blocks reject every quote. Ended entitlements still admit an exact-zero quote (for example platform BYOK while compute is unbilled) but reject any positive quote with `subscription_blocked`. `past_due` remains allowed as a grace period during Stripe dunning retries. These sets are centralized in `config.ts` (`HARD_BLOCKED_STATUSES`, `ENDED_SUBSCRIPTION_STATUSES`, `WARNING_STATUSES`).
@@ -247,9 +293,6 @@ beforeUsage(params)                              // returns rejection or null
           timeoutSeconds: number|null }          // effective, post-ceiling
   chat: { orgId, context:"chat", sessionId, credentialSource, executionPlane:"platform" }
 
-  → VERSION-SKEW GUARD (first, before everything): facts absent or out-of-union
-      → log at error level and rewrite to the WORST case (system credential +
-        platform compute). Never short-circuit and never quote on unusable facts
   → SELF-FUNDED SHORT-CIRCUIT: credentialSource !== "system" && executionPlane
       !== "platform" (a remote BYOK run) → return null BEFORE any billing DB
       read — such an org may legitimately have no billing account at all
@@ -284,11 +327,13 @@ billing sweeper (periodic, cursor over llm_usage.id):
       one tick, not one batch per interval) — keep sweeping while the last pass
       filled its batch AND advanced the cursor, bounded by MAX_DRAIN_ITERATIONS
       (50) so the tick stays finite; a short batch or a head-of-line stall stops it
-  → services.usage.list({ afterId: cursor − REPLAY_WINDOW }) — one batch per pass,
-      id ASC. Scans BELOW the watermark (clamped at 0) because a serial id is taken
+  → services.usage.list({ afterId: max(floor_id, cursor − REPLAY_WINDOW) }) — one
+      batch per pass, id ASC. Scans BELOW the watermark because a serial id is taken
       at INSERT and published at COMMIT: a row can commit below an already-advanced
-      watermark and would otherwise be unreachable forever. READ offset only — the
-      watermark itself never rewinds. The replay span is read ON TOP of the batch
+      watermark and would otherwise be unreachable forever. Clamped at floor_id, the
+      frontier the cursor was seeded at, so the window never walks back into the
+      history the cutover excluded. READ offset only — the watermark itself never
+      rewinds. The replay span is read ON TOP of the batch
       (limit = span + batch, ≤ 1000, the platform's usage.list hard cap), so the
       forward slice keeps its full EE_RECONCILIATION_BATCH_SIZE
   → frontier = leading rows the watermark may pass: settled rows always; an
@@ -299,7 +344,13 @@ billing sweeper (periodic, cursor over llm_usage.id):
       recovered): intended — the stall is what keeps it inside the replay window
       until it settles. stalledBelowWatermark tells the two apart.
   → for each SETTLED row with credentialSource === "system":
-      claim into ee_billed_llm_usage (ON CONFLICT DO NOTHING)
+      claim into ee_billed_llm_usage (ON CONFLICT DO NOTHING), stamping the row's
+        pricing_status — priced | partial | unpriced | unknown (a null pricingStatus
+        is NEVER read as priced)
+      CHARGE only priced and partial rows. partial is a floor, so billing it
+        under-charges by an unknown amount; unpriced/unknown are claimed for 0
+        credits — a cost of 0 there means "could not price", not "free" — and one
+        `error` line per pass names the counts and the orgs
       per (context_type, context_id): cost_usd += cost_usd; debit the DELTA
       dollarsToCredits(new cost_usd) − prior cost_credits (remainder carries forward)
       null-context rows join the org's DURABLE (unattributed, orgId) bucket, so
@@ -308,7 +359,8 @@ billing sweeper (periodic, cursor over llm_usage.id):
       with its id, pass commits (see `repair:account`) — never fatal
   → advance ee_billing_cursor in the SAME transaction; on error nothing advances (retry next tick)
   → one structured heartbeat per tick: processed / billed / alreadyBilled /
-      replayed / replayBilled / orphanedOrgs / cursorTo / stalledOnId /
+      replayed / replayBilled / orphanedOrgs / partialPriced / unpriced /
+      unknownPriced / cursorTo / stalledOnId /
       stalledBelowWatermark (a cursorTo that stands still across ticks is the
       "billing is behind" signal;
       replayBilled > 0 warns — revenue recovered from below the watermark;
@@ -318,11 +370,18 @@ billing sweeper (periodic, cursor over llm_usage.id):
 
 org deletion (onOrgDelete, awaited by the platform BEFORE its cascade):
   → bounded final drain of that org's settled system rows, out of band
-      (never moves the global watermark; the sweep later finds them claimed)
-  → then Stripe subscription cancel + delete the org's EE rows
+      (never moves the global watermark; the sweep later finds them claimed).
+      Starts at the SAME max(floor_id, cursor − REPLAY_WINDOW) the sweep uses —
+      one shared rule — because a row of this org that committed late below the
+      watermark has no second chance: its ledger row cascades away next
+  → stamp cancel_requested_at, THEN ask Stripe to cancel. The rows are deleted
+      only once Stripe confirms (a subscription it no longer has counts as
+      confirmed); an unconfirmed cancellation keeps them, and the sweeper's tick
+      retries every account with cancel_requested_at set until it clears
+  → a second call for the same org is a no-op — the account is already gone
 ```
 
-Only platform-provided models (`credentialSource === "system"`) are billed; org-credential (BYOK) and null-credential rows advance the watermark but are never debited. **Runner rows are cumulative** (one growing row per run) and only settle at a terminal run status — the sweep never advances past an unsettled _system_ row, so a mid-run system row is billed only once it is final. Cutover: the cursor is seeded to the platform's **settled frontier** (`usage.settledFrontier()` — the highest id below which every row is settled, NOT a plain max id, which would strand an in-flight runner row already holding a low id) **synchronously in the module's `init()`, at boot before the server takes traffic** (`ensureCursorSeeded`, shared with an in-sweep safety-net fallback). Seeding at init rather than at the first sweep tick closes the loss window: usage recorded between boot and that first tick (~5 min) is billed by the tick instead of falling below a watermark only set at the tick. Rows already claimed by the previous model are never re-billed — the claim table dedupes. But because the first sweep starts at the settled frontier, settled-but-unclaimed rows ABOVE it (the recent window since the oldest in-flight run began) ARE billed on the first pass — deliberate, so an in-flight run's revenue is not stranded; rows below the frontier are never revisited.
+Only platform-provided models (`credentialSource === "system"`) are billed; org-credential (BYOK) and null-credential rows advance the watermark but are never debited. **Runner rows are cumulative** (one growing row per run) and only settle at a terminal run status — the sweep never advances past an unsettled _system_ row, so a mid-run system row is billed only once it is final. Cutover: the cursor is seeded to the platform's **settled frontier** (`usage.settledFrontier()` — the highest id below which every row is settled, NOT a plain max id, which would strand an in-flight runner row already holding a low id) **synchronously in the module's `init()`, at boot before the server takes traffic** (`ensureCursorSeeded`, shared with an in-sweep safety-net fallback). That same frontier is written to `ee_billing_cursor.floor_id` and never moves again: the watermark drifts forward and every pass reads `REPLAY_WINDOW` ids below it, so without the floor the second pass walks back under the seed and bills the very history the cutover excluded. `floor_id` defaults to `0` for a cursor that predates the column — its original frontier was never recorded, and 0 is exactly the behaviour those deployments already have. Seeding at init rather than at the first sweep tick closes the loss window: usage recorded between boot and that first tick (~5 min) is billed by the tick instead of falling below a watermark only set at the tick. Rows already claimed by the previous model are never re-billed — the claim table dedupes. But because the first sweep starts at the settled frontier, settled-but-unclaimed rows ABOVE it (the recent window since the oldest in-flight run began) ARE billed on the first pass — deliberate, so an in-flight run's revenue is not stranded; rows at or below the floor are never revisited.
 
 #### Known over-quote on the system-proxy seam (accepted)
 
@@ -400,9 +459,29 @@ Two consumers:
 `getOrgOwnerEmails(orgId)` and `getOrgMembers(orgId, userIds)` — the latter
 resolves ids to `{ userId, email, role }` and simply OMITS an id that is not a
 member of that org, which is what makes one call serve both the membership
-refusal above and the manager address book. `src/platform-org-queries.ts`
-declares them and narrows `init`'s parameter to `EeInitContext`, so the
-requirement sits in the signature rather than in a comment.
+refusal above and the manager address book. `src/platform-org-queries.ts` holds
+the pair captured at `init(ctx)`, typed as a `Pick` of `ModuleInitContext` so
+the shape stays core's to define.
+
+### Org deletion and the Stripe cancellation
+
+Calling `subscriptions.cancel`, logging a failure and deleting the billing
+account regardless would take the subscription id down with the row, so a Stripe
+blip would leave a subscription charging a customer every month for an
+organization that is gone, with nothing in the system able to name it. A log
+line is a diagnosis, not a recovery.
+
+The intent is therefore written down first —
+`ee_billing_accounts.cancel_requested_at` — and the row survives a failed
+cancellation, `stripe_subscription_id` included. Rows are deleted only after
+Stripe confirms; a subscription Stripe does not have
+(`resource_missing`/404, or a 400 carrying its one already-canceled sentence,
+`A canceled subscription can only update its cancellation_details`, matched
+anchored so an unrelated 400 is a real failure) counts as confirmed, because the
+response to an earlier attempt may simply have been lost. Every billing tick calls `retryPendingCancellations`, which re-runs
+the same body for each account still carrying a `cancel_requested_at` and
+removes its rows on success. Steady state is zero rows and zero work, and a
+second `onOrgDelete` for the same org is a no-op — the account is already gone.
 
 ### Storage-entitlement reconcile
 
@@ -413,7 +492,9 @@ transition syncs that failed. It rides the billing tick on an hourly throttle,
 awaiting a fleet-wide pass here would delay billing. The pass is
 concurrency-bounded internally (8 orgs at a time) and a pass that left orgs
 unrepaired logs at `error`; the next window simply repeats the idempotent
-rewrite. `shutdown()` drains it along with the sweep.
+rewrite. `shutdown()` drains it along with the sweep — re-reading both handles
+after every wait, because the tick starts the reconcile from inside the very
+promise the drain is awaiting, and a single snapshot taken at entry missed it.
 
 ### Operator recovery
 
@@ -444,8 +525,8 @@ migration level `0003`: this package and the move into the platform database
 ship in the same release, so no deployment ever ran `0004` (billing managers,
 `billing_email`, `billing_cc`) or `0005` (the rename to `ee_*`) against a
 database of its own. The copy therefore takes the columns the two sides share —
-a target-only column takes its default, a source table the target's schema
-predates copies nothing — and every check runs BEFORE the target is migrated.
+a target-only column takes its default, a table only the TARGET declares
+(`ee_billing_managers`, absent from a `cloud_*` source) copies nothing — and every check runs BEFORE the target is migrated.
 
 It refuses, exit `1` and nothing written, a source that mixes both prefixes, an
 `ee_`/`cloud_` table it does not move, a source column the target does not
@@ -460,14 +541,22 @@ copy first — the CHANGELOG entry carries the full order.
 
 `drizzle/migrations/*.sql` describes the **schema** and is replayed on every
 platform database this module is enabled on, forever. A one-off rewrite of row
-**contents** is not schema — it goes in `scripts/migration/<NNNN>-<slug>.{sql,ts}` and is run deliberately by an
-operator (see that directory's README; `docs/NO_TRANSITIONAL_CODE.md` §2 at the
-repository root is the authority). The root `bun run verify:no-migration-dml`
+**contents** is not schema — it goes in `scripts/migration/<NNNN>-<slug>.{sql,ts}`
+at the REPOSITORY root, beside the platform's own, and is run deliberately by an
+operator (`docs/NO_TRANSITIONAL_CODE.md` §2 there is the authority). The root
+`bun run verify:no-migration-dml`
 scans this directory alongside the platform's and fails a new migration that
 writes rows unless a `SET NOT NULL` / `CHECK` / `VALIDATE CONSTRAINT` on the
 **same table** in the same file licences it. `0001_cursor_billing` and
 `0003_normalize_free_subscription_status` predate the gate and are listed in
 `EE_GRANDFATHERED` — that list may shrink, never grow.
+
+Money is what these tables hold. A task that touches `credits_used`,
+`credit_quota`, `cost_credits` or `cost_usd` is rehearsed against a restored
+copy, never reasoned about in the abstract — the billing sweep derives each
+debit as a **delta** against the stored cumulative
+(`src/billing/usage-recorder.ts`), so a rewritten cumulative silently re-bills or
+under-bills the next pass.
 
 ## Testing
 

@@ -103,6 +103,12 @@ tree, no `__drizzle_migrations_<id>` table.
    (`drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`).
    It still reads platform data through `ctx.services`
    (e.g. `services.usage.list`), never a SQL join across the licence boundary.
+   `bun run verify:module-sql-boundary` (in `bun run check`) enforces that last
+   sentence: because those tables sit in the platform database, a `SELECT …
+FROM organizations` written in the module compiles, runs and returns rows, so
+   the gate refuses any import of the platform's drizzle schema from such a
+   module and any table named in its raw SQL that its own drizzle snapshot does
+   not declare.
 
 ## Permissions
 
@@ -236,13 +242,14 @@ their own role gives them.
 
 **Invalidation is yours.** Results are cached per `(orgId, userId)` with a 10s
 TTL. The platform cannot know when your table changed, so call
-`invalidatePrincipalPermissions(orgId, userId?)` from
+`invalidatePrincipalPermissions(orgId, userId)` from
 `@appstrate/core/principal-permissions` after every write the resolver reads.
-The cache is keyed by `(orgId, userId)`, not prefixed by org, so the `userId`-less
-form clears **every** cached principal on every replica, not just this org's —
-correct but blunt, which is why the per-user form is the one to reach for. The
-TTL is only the backstop for a lost bus broadcast, not the invalidation
-mechanism.
+Both arguments are required and it drops exactly that one principal on every
+replica: a write that changes N principals calls it N times, naming each. There
+is no org-wide form — the cache is keyed by the pair, not prefixed by org, so a
+blanket clear would drop every organization's principals to save the caller a
+loop. The TTL is only the backstop for a lost bus broadcast, not the
+invalidation mechanism.
 
 ### A space-level resource on a route the platform does not space-scope
 
@@ -368,6 +375,13 @@ to accept only their own half, so the wrong-mode call does not compile.
   `onRunConnectionMissing`, `onOrgCreate`, `onOrgDelete`. Handlers run for side
   effects only; errors in one handler are **isolated** and do not block others —
   that isolation is the difference from a broadcast hook.
+
+`onOrgDelete` must be **idempotent**. The platform reserves the deletion
+(`organizations.deleting_at`) before it emits, so the organization cannot be
+saved by a concurrent run and the operator can simply repeat the DELETE when a
+later step fails — which emits the event again for the same org id. Tear down
+what is still there, and treat what is already gone as success; never make the
+second call throw, and never make it charge, refund or cancel anything twice.
 
 Names are defined in `packages/core/src/module.ts` (`FirstMatchHooks` /
 `BroadcastHooks` / `ModuleHooks`, `ModuleEvents`). To add a new hook or event,

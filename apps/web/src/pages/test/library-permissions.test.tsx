@@ -5,9 +5,10 @@ import { QueryClient } from "@tanstack/react-query";
 import { $api, type components, type paths } from "../../api/client.ts";
 import { render } from "../../test/render.tsx";
 import { LibraryPage } from "../library-page.tsx";
-import { i18nReady } from "../../i18n.ts";
+import i18n, { i18nReady } from "../../i18n.ts";
 
 await i18nReady;
+await i18n.changeLanguage("fr");
 
 type Space = components["schemas"]["SpaceObject"];
 type Package = components["schemas"]["LibraryPackageList"][number];
@@ -36,6 +37,19 @@ function packageRow(type: Package["type"], installed_in: string[], source = "loc
   return { id: "@org/example", name: "Example", description: "", type, source, installed_in };
 }
 
+/**
+ * Which explanation a disabled checkbox carries, from the sentence it renders.
+ * Install and uninstall are named apart; an unmapped title comes back verbatim.
+ */
+function hintOf(element: string): string | null {
+  const title = /\stitle="([^"]*)"/.exec(element)?.[1];
+  if (title === undefined) return null;
+  if (title === i18n.t("library.systemAlwaysActive")) return "system";
+  if (title === i18n.t("library.cannotInstall")) return "install";
+  if (title === i18n.t("library.cannotUninstall")) return "uninstall";
+  return title;
+}
+
 function checkboxes(spaces: Space[] | undefined, pkg: Package) {
   const qc = new QueryClient();
   // Zustand's server snapshot has no selected org; seed that real query key.
@@ -60,17 +74,18 @@ function checkboxes(spaces: Space[] | undefined, pkg: Package) {
   return [...html.matchAll(/<button\b[^>]*role="checkbox"[^>]*>/g)].map(([element]) => ({
     checked: element.includes('aria-checked="true"'),
     disabled: /\sdisabled(?:=|\s|>)/.test(element),
-    systemHint: element.includes("title="),
+    // `null` when the box is live, and while the permission set is loading.
+    hint: hintOf(element),
   }));
 }
 
 describe("library installation controls", () => {
-  it("shows actual installation state to a viewer, without a system-package hint", () => {
+  it("shows actual installation state to a viewer, explained as a missing permission", () => {
     expect(
       checkboxes([space("spc_a", []), space("spc_b", [])], packageRow("agent", ["spc_a"])),
     ).toEqual([
-      { checked: true, disabled: true, systemHint: false },
-      { checked: false, disabled: true, systemHint: false },
+      { checked: true, disabled: true, hint: "uninstall" },
+      { checked: false, disabled: true, hint: "install" },
     ]);
   });
 
@@ -81,8 +96,8 @@ describe("library installation controls", () => {
         packageRow("agent", []),
       ),
     ).toEqual([
-      { checked: false, disabled: true, systemHint: false },
-      { checked: false, disabled: false, systemHint: false },
+      { checked: false, disabled: true, hint: "install" },
+      { checked: false, disabled: false, hint: null },
     ]);
   });
 
@@ -98,22 +113,23 @@ describe("library installation controls", () => {
         packageRow("integration", ["spc_installer", "spc_remover"], "system"),
       ),
     ).toEqual([
-      { checked: true, disabled: true, systemHint: false },
-      { checked: true, disabled: false, systemHint: false },
-      { checked: false, disabled: true, systemHint: false },
-      { checked: false, disabled: false, systemHint: false },
+      { checked: true, disabled: true, hint: "uninstall" },
+      { checked: true, disabled: false, hint: null },
+      { checked: false, disabled: true, hint: "install" },
+      { checked: false, disabled: false, hint: null },
     ]);
   });
 
   it("keeps system agents always active and immutable", () => {
     expect(
       checkboxes([space("spc_a", ["agents:configure"])], packageRow("agent", [], "system")),
-    ).toEqual([{ checked: true, disabled: true, systemHint: true }]);
+    ).toEqual([{ checked: true, disabled: true, hint: "system" }]);
   });
 
-  it("keeps writes disabled while permissions load without changing the installed state", () => {
+  it("keeps writes disabled while permissions load, blaming nobody for it", () => {
+    // Nothing is known about the caller yet, so the box claims no reason.
     expect(checkboxes(undefined, packageRow("integration", []))).toEqual([
-      { checked: false, disabled: true, systemHint: false },
+      { checked: false, disabled: true, hint: null },
     ]);
   });
 });

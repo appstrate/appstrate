@@ -16,7 +16,12 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { findTableGaps, readSchemaDefaults, suppliesValue } from "../verify-compose-defaults.ts";
+import {
+  findPassThroughGaps,
+  findTableGaps,
+  readSchemaDefaults,
+  suppliesValue,
+} from "../verify-compose-defaults.ts";
 import { analyzeComposeDefaults, CODE_DEFAULTS } from "../../apps/cli/src/lib/compose-defaults.ts";
 import { envSchema } from "../../packages/env/src/index.ts";
 
@@ -242,10 +247,13 @@ describe("verify-compose-defaults as a process", () => {
     return { code: run.exitCode ?? 1, output: run.stdout.toString() + run.stderr.toString() };
   }
 
-  it("passes over the real repo", () => {
+  it("passes over the real repo, having actually read a module schema", () => {
     const { code, output } = runGate();
     expect(code).toBe(0);
     expect(output).toContain("no duplicated env defaults");
+    // A discovery that found nothing prints the same tick; the count line is where they differ.
+    expect(output).not.toContain("0 module schema(s)");
+    expect(output).toMatch(/from \d+ module schema\(s\)/);
   });
 
   it("fails when a tracked compose file is missing from the worktree", () => {
@@ -261,5 +269,43 @@ describe("verify-compose-defaults as a process", () => {
     } finally {
       writeFileSync(COMPOSE, original);
     }
+  });
+});
+
+/**
+ * The module env pass-through block: `docker-compose.yml` lists the module's variables by hand,
+ * and a key added to the schema but forgotten there never reaches the container.
+ */
+describe("findPassThroughGaps", () => {
+  const MODULE = [
+    { id: "ee", file: "packages/module-ee/src/env.ts", keys: ["ALPHA", "BETA", "GAMMA"] },
+  ];
+  const compose = (names: string[]): string =>
+    ["services:", "  api:", "    environment:", ...names.map((n) => `      - ${n}`)].join("\n");
+
+  it("POSITIVE CONTROL: reports the names a partial block omits", () => {
+    const gaps = findPassThroughGaps(compose(["APP_URL", "ALPHA", "GAMMA"]), MODULE);
+    expect(gaps).toEqual([
+      {
+        module: "ee",
+        declaredIn: "packages/module-ee/src/env.ts",
+        missing: ["BETA"],
+        present: 2,
+      },
+    ]);
+  });
+
+  it("NEGATIVE CONTROL: a complete block is not a gap", () => {
+    expect(findPassThroughGaps(compose(["ALPHA", "BETA", "GAMMA"]), MODULE)).toEqual([]);
+  });
+
+  it("leaves a file that forwards NONE of them alone", () => {
+    // The self-hosting templates do not run the module, so the block is not demanded there.
+    expect(findPassThroughGaps(compose(["APP_URL", "DATABASE_URL"]), MODULE)).toEqual([]);
+  });
+
+  it("counts a `- NAME=${VAR}` entry as forwarded, the other spelling of the same thing", () => {
+    const content = compose(["ALPHA", "BETA"]) + "\n      - GAMMA=${GAMMA:-1}\n";
+    expect(findPassThroughGaps(content, MODULE)).toEqual([]);
   });
 });
