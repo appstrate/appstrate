@@ -57,7 +57,7 @@ function spaceWire(fixture: SpaceFixture) {
     name: fixture.name,
     isDefault: fixture.isDefault ?? false,
     access,
-    role: access === "member" ? { kind: "preset", key: "editor", name: "editor" } : null,
+    role: access === "member" ? { kind: "preset", key: "builder", name: "builder" } : null,
     permissions: fixture.permissions ?? (access === "member" ? MEMBER_PERMISSIONS : []),
     ...SPACE_STAMP,
   };
