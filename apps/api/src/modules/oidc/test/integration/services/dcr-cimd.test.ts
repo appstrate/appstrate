@@ -13,7 +13,9 @@
  *    scope is rejected.
  *
  * CIMD first authorization also exercises the real resolver with an in-process
- * metadata response, ensuring our self-service stamp reaches that request.
+ * metadata response, ensuring our self-service stamp reaches that request —
+ * including the exact request Claude Code sends (module scopes + `resource`,
+ * issue #1269), which must complete on its FIRST resolution, never on a retry.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, spyOn } from "bun:test";
@@ -63,6 +65,153 @@ async function register(body: Record<string, unknown>) {
     status: res.status,
     json: (await res.json().catch(() => ({}))) as Record<string, unknown>,
   };
+}
+
+/**
+ * The per-org MCP protected-resource family the mcp module registers at init.
+ * Registered directly so the self-service audience guards
+ * (`isProtectedResourceUri`) have a family to compare against without loading
+ * the full mcp dispatch surface.
+ */
+function registerMcpOrgFamily(): void {
+  resetProtectedResources();
+  registerProtectedResourceFamily({
+    prefix: "/api/mcp/o",
+    deriveUri: (path) => {
+      const prefix = "/api/mcp/o/";
+      if (!path.startsWith(prefix)) return undefined;
+      const orgId = path.slice(prefix.length).split("/")[0] ?? "";
+      return orgId.length === 0 ? undefined : getMcpOrgResourceUri(orgId);
+    },
+    ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+  });
+}
+
+function base64url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function challengeFor(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return base64url(new Uint8Array(digest));
+}
+
+async function signUpPlatformUser(email: string): Promise<string> {
+  const res = await app.request("/api/auth/sign-up/email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: "Sup3rSecretPass!", name: "Operator" }),
+  });
+  expect(res.status).toBe(200);
+  const setCookie = res.headers.get("set-cookie") ?? "";
+  const match = setCookie.match(/better-auth\.session_token=([^;]+)/);
+  if (!match) throw new Error(`no session cookie: ${setCookie}`);
+  return `better-auth.session_token=${match[1]}`;
+}
+
+interface AuthorizationCodeFlowInput {
+  cookie: string;
+  clientId: string;
+  redirectUri: string;
+  scope: string;
+  resource: string;
+}
+
+interface AuthorizationCodeFlowResult {
+  /** Whether the consent screen stood between authorize and the code. */
+  consentShown: boolean;
+  /** The `/oauth2/token` JSON response. */
+  token: Record<string, unknown>;
+  /** The decoded access token. */
+  claims: Record<string, unknown>;
+}
+
+/**
+ * Full authorization-code + PKCE exchange as a signed-in platform user:
+ * authorize → consent (unless a stored consent short-circuits it) → token.
+ */
+async function authorizationCodeFlow(
+  input: AuthorizationCodeFlowInput,
+): Promise<AuthorizationCodeFlowResult> {
+  const { cookie, clientId, redirectUri, scope, resource } = input;
+  const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+  const authorizeQuery = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope,
+    state: "authorization-code-flow",
+    code_challenge: await challengeFor(verifier),
+    code_challenge_method: "S256",
+    resource,
+  });
+  const authorized = await app.request(`/api/auth/oauth2/authorize?${authorizeQuery}`, {
+    headers: { cookie, accept: "text/html" },
+    redirect: "manual",
+  });
+  expect(authorized.status).toBe(302);
+  const authorizeTarget = new URL(authorized.headers.get("location")!, "http://localhost");
+  // An `error` here is the provider bouncing the request back to the client
+  // (`invalid_scope`, `invalid_target`, …) — name it instead of failing on the
+  // missing code below.
+  expect(authorizeTarget.searchParams.get("error")).toBeNull();
+
+  // A stored consent short-circuits the consent screen and the authorization
+  // response comes straight back on the callback.
+  const consentShown = authorizeTarget.pathname === "/api/oauth/consent";
+  let callback = authorizeTarget;
+  if (consentShown) {
+    const consentPage = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
+      headers: { cookie, accept: "text/html" },
+    });
+    expect(consentPage.status).toBe(200);
+    const csrfCookie = (consentPage.headers.get("set-cookie") ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("oidc_csrf="))!
+      .split(";")[0]!;
+    const csrfToken = (await consentPage.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    const consented = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
+      method: "POST",
+      headers: {
+        cookie: `${cookie}; ${csrfCookie}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+        origin: "http://localhost:3000",
+      },
+      body: new URLSearchParams({ _csrf: csrfToken, accept: "true" }).toString(),
+      redirect: "manual",
+    });
+    expect([200, 302]).toContain(consented.status);
+    const location = consented.headers.get("location");
+    callback = location
+      ? new URL(location, redirectUri)
+      : new URL(String(((await consented.json()) as { url?: string }).url));
+  }
+  expect(callback.searchParams.get("error")).toBeNull();
+  const code = callback.searchParams.get("code");
+  expect(code).toBeTruthy();
+
+  const tokenRes = await app.request("/api/auth/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: code!,
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+      resource,
+    }).toString(),
+  });
+  const token = (await tokenRes.json()) as Record<string, unknown>;
+  expect(token).not.toHaveProperty("error");
+  expect(tokenRes.status).toBe(200);
+  const claims = decodeJwt(String(token.access_token)) as Record<string, unknown>;
+  return { consentShown, token, claims };
 }
 
 describe("authorization-server discovery — DCR + CIMD", () => {
@@ -228,6 +377,142 @@ describe("CIMD first authorization", () => {
     });
     expect(token.status).toBe(400);
     expect(await token.json()).toMatchObject({ error: "invalid_target" });
+  });
+});
+
+describe("CIMD first authorization — the request Claude Code sends (#1269)", () => {
+  // Claude Code identifies by a CIMD URL and publishes a document WITHOUT
+  // `scope`. Its very first `/authorize` asks for exactly what the protected
+  // resource metadata advertises (`mcp:read mcp:invoke`) plus `offline_access`,
+  // bound to one per-org MCP endpoint through `resource`, from an
+  // ephemeral-port loopback redirect against a port-less registration.
+  //
+  // Before better-auth 1.7.3 the client object handed to that first request
+  // carried `scopes: []` — the ceiling reached the row only afterwards, through
+  // `onClientCreated` — so the first attempt bounced with `invalid_scope` and
+  // the retry succeeded. The provider now persists the self-service ceiling in
+  // the same write that creates the client (`persistOAuthClientRegistration`),
+  // and the suite above asserts the stored row. This suite pins the
+  // user-visible contract on the FIRST resolution: login, consent, code,
+  // token — never a retry.
+  const REQUESTED_SCOPE = "mcp:read mcp:invoke offline_access";
+  const REDIRECT_URI = "http://localhost:53692/callback";
+  let documentOctet = 200;
+  let clientId: string;
+  let orgUri: string;
+  let fetchDocument: ReturnType<typeof spyOn<typeof cimdTransport, "fetchClientMetadataResource">>;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+    // A distinct address per test: the document cache is keyed on client_id and
+    // outlives `truncateAll()`. A never-seen client_id is the whole point here.
+    documentOctet += 1;
+    clientId = `https://93.184.216.${documentOctet}/oauth/claude-code-client-metadata`;
+    const { id: ownerId } = await createTestUser();
+    const { org } = await createTestOrg(ownerId, { slug: "claude-code-first" });
+    orgUri = getMcpOrgResourceUri(org.id);
+    fetchDocument = spyOn(cimdTransport, "fetchClientMetadataResource").mockImplementation(
+      async (input) => {
+        expect(String(input)).toBe(clientId);
+        return Response.json({
+          client_id: clientId,
+          client_name: "Claude Code",
+          client_uri: `https://93.184.216.${documentOctet}`,
+          // Port-less loopback redirects: the port is ephemeral (RFC 8252 §7.3).
+          redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+        });
+      },
+    );
+    registerMcpOrgFamily();
+    await db
+      .insert(oauthResource)
+      .values({ id: crypto.randomUUID(), identifier: orgUri, name: "MCP endpoint (#1269)" })
+      .onConflictDoNothing({ target: oauthResource.identifier });
+  });
+
+  afterEach(async () => {
+    fetchDocument.mockRestore();
+    await db.delete(oauthResource).where(eq(oauthResource.identifier, orgUri));
+  });
+
+  function authorize() {
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: REDIRECT_URI,
+      scope: REQUESTED_SCOPE,
+      state: "claude-code-first",
+      code_challenge: "a".repeat(43),
+      code_challenge_method: "S256",
+      resource: orgUri,
+    });
+    return app.request(`/api/auth/oauth2/authorize?${query}`, { redirect: "manual" });
+  }
+
+  it("sends the anonymous first request to the login page, not back with invalid_scope", async () => {
+    expect(await db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId))).toEqual(
+      [],
+    );
+
+    const first = await authorize();
+    expect(first.status).toBe(302);
+    const target = new URL(first.headers.get("location")!, "http://localhost");
+    expect(target.searchParams.get("error")).toBeNull();
+    expect(target.pathname).toBe("/api/oauth/login");
+    // The login hand-off carries the request unchanged — scopes and audience.
+    expect(target.searchParams.get("scope")).toBe(REQUESTED_SCOPE);
+    expect(target.searchParams.get("resource")).toBe(orgUri);
+
+    // One resolution: the document was fetched once, and the row it created
+    // already carries the module scopes the request asked for.
+    expect(fetchDocument).toHaveBeenCalledTimes(1);
+    const [stored] = await db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId));
+    expect(stored?.scopes).toEqual(
+      expect.arrayContaining(["mcp:read", "mcp:invoke", "offline_access"]),
+    );
+    expect(stored?.level).toBe("instance");
+    expect(stored?.selfService).toBe(true);
+
+    // The retry the user used to need is now indistinguishable from the first.
+    const retry = await authorize();
+    expect(new URL(retry.headers.get("location")!, "http://localhost").pathname).toBe(
+      "/api/oauth/login",
+    );
+    expect(fetchDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("reaches consent and mints the MCP-scoped token on the first resolution", async () => {
+    const cookie = await signUpPlatformUser("claude-code-first@satellite.example.com");
+
+    const { consentShown, token, claims } = await authorizationCodeFlow({
+      cookie,
+      clientId,
+      redirectUri: REDIRECT_URI,
+      scope: REQUESTED_SCOPE,
+      resource: orgUri,
+    });
+
+    // A never-seen client has no stored consent: the screen is unavoidable.
+    expect(consentShown).toBe(true);
+    // The whole flow ran on the single resolution that created the client.
+    expect(fetchDocument).toHaveBeenCalledTimes(1);
+
+    const granted = String(token.scope).split(" ");
+    expect(granted).toEqual(expect.arrayContaining(["mcp:read", "mcp:invoke"]));
+    expect(granted).not.toContain("agents:run");
+    // `offline_access` was honoured: the client can refresh without a browser.
+    expect(typeof token.refresh_token).toBe("string");
+    // Bound to the one per-org MCP endpoint it asked for.
+    expect([claims.aud].flat()).toContain(orgUri);
+    expect(String(claims.scope).split(" ")).toEqual(
+      expect.arrayContaining(["mcp:read", "mcp:invoke"]),
+    );
+    expect(claims.actor_type).toBe("user");
   });
 });
 
@@ -439,23 +724,10 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
-    // The MCP server registers the per-org family in production at module init;
-    // register it directly so the token-endpoint guard
-    // (`enforceSelfServiceResourceRestriction` → `isProtectedResourceUri`) has a
-    // protected resource to compare against without loading the full mcp
-    // dispatch surface. This suite asserts only that guard: it stops at the
-    // before-hook verdict, so the org needs no `oauth_resources` row.
-    resetProtectedResources();
-    registerProtectedResourceFamily({
-      prefix: "/api/mcp/o",
-      deriveUri: (path) => {
-        const prefix = "/api/mcp/o/";
-        if (!path.startsWith(prefix)) return undefined;
-        const orgId = path.slice(prefix.length).split("/")[0] ?? "";
-        return orgId.length === 0 ? undefined : getMcpOrgResourceUri(orgId);
-      },
-      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
-    });
+    // This suite asserts only the token-endpoint guard
+    // (`enforceSelfServiceResourceRestriction`): it stops at the before-hook
+    // verdict, so the org needs no `oauth_resources` row.
+    registerMcpOrgFamily();
   });
 
   async function registerSelfServiceClient(): Promise<string> {
@@ -602,100 +874,16 @@ describe("CIMD refresh keeps the platform stamp", () => {
   let orgUri: string;
   let fetchDocument: ReturnType<typeof spyOn<typeof cimdTransport, "fetchClientMetadataResource">>;
 
-  function base64url(bytes: Uint8Array): string {
-    let binary = "";
-    for (const b of bytes) binary += String.fromCharCode(b);
-    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  }
-
-  async function challengeFor(verifier: string): Promise<string> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-    return base64url(new Uint8Array(digest));
-  }
-
-  async function signUpPlatformUser(email: string): Promise<string> {
-    const res = await app.request("/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: "Sup3rSecretPass!", name: "Operator" }),
-    });
-    expect(res.status).toBe(200);
-    const setCookie = res.headers.get("set-cookie") ?? "";
-    const match = setCookie.match(/better-auth\.session_token=([^;]+)/);
-    if (!match) throw new Error(`no session cookie: ${setCookie}`);
-    return `better-auth.session_token=${match[1]}`;
-  }
-
   /** Full authorization-code + PKCE exchange, returning the decoded access token. */
   async function mintAccessToken(cookie: string): Promise<Record<string, unknown>> {
-    const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
-    const authorizeQuery = new URLSearchParams({
-      response_type: "code",
-      client_id: clientId,
-      redirect_uri: redirectUri,
+    const { claims } = await authorizationCodeFlow({
+      cookie,
+      clientId,
+      redirectUri,
       scope: "openid profile email",
-      state: "cimd-mint",
-      code_challenge: await challengeFor(verifier),
-      code_challenge_method: "S256",
       resource: orgUri,
     });
-    const authorized = await app.request(`/api/auth/oauth2/authorize?${authorizeQuery}`, {
-      headers: { cookie, accept: "text/html" },
-      redirect: "manual",
-    });
-    expect(authorized.status).toBe(302);
-    const authorizeTarget = new URL(authorized.headers.get("location")!, "http://localhost");
-
-    // A stored consent short-circuits the consent screen and the authorization
-    // response comes straight back on the callback.
-    let callback = authorizeTarget;
-    if (authorizeTarget.pathname === "/api/oauth/consent") {
-      const consentPage = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
-        headers: { cookie, accept: "text/html" },
-      });
-      expect(consentPage.status).toBe(200);
-      const csrfCookie = (consentPage.headers.get("set-cookie") ?? "")
-        .split(",")
-        .map((c) => c.trim())
-        .find((c) => c.startsWith("oidc_csrf="))!
-        .split(";")[0]!;
-      const csrfToken = (await consentPage.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
-
-      const consented = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
-        method: "POST",
-        headers: {
-          cookie: `${cookie}; ${csrfCookie}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-          accept: "application/json",
-          origin: "http://localhost:3000",
-        },
-        body: new URLSearchParams({ _csrf: csrfToken, accept: "true" }).toString(),
-        redirect: "manual",
-      });
-      expect([200, 302]).toContain(consented.status);
-      const location = consented.headers.get("location");
-      callback = location
-        ? new URL(location, redirectUri)
-        : new URL(String(((await consented.json()) as { url?: string }).url));
-    }
-    const code = callback.searchParams.get("code");
-    expect(code).toBeTruthy();
-
-    const token = await app.request("/api/auth/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code: code!,
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        code_verifier: verifier,
-        resource: orgUri,
-      }).toString(),
-    });
-    expect(token.status).toBe(200);
-    const { access_token: accessToken } = (await token.json()) as { access_token: string };
-    return decodeJwt(accessToken) as Record<string, unknown>;
+    return claims;
   }
 
   async function storedClient() {
@@ -730,15 +918,7 @@ describe("CIMD refresh keeps the platform stamp", () => {
           token_endpoint_auth_method: "none",
         }),
     );
-    resetProtectedResources();
-    registerProtectedResourceFamily({
-      prefix: "/api/mcp/o",
-      deriveUri: (path) => {
-        const id = path.slice("/api/mcp/o/".length).split("/")[0];
-        return id ? getMcpOrgResourceUri(id) : undefined;
-      },
-      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
-    });
+    registerMcpOrgFamily();
     await db
       .insert(oauthResource)
       .values({ id: crypto.randomUUID(), identifier: orgUri, name: "MCP endpoint (cimd suite)" })
