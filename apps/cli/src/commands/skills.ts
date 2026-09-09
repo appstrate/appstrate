@@ -136,11 +136,16 @@ export async function skillsSyncCommand(
       }
 
       const context = syncContext(profileName, profile!);
+      // The pin is checked here although it is NOT part of the context: it is
+      // what `fixedFiles` was computed from at the start of the run, so a swap
+      // after it moved would commit a `.mcp.json` naming the previous space.
+      // The next run rewrites that file without treating anything as a switch.
       const validate = async (): Promise<void> => {
         const current = await resolveActiveProfile(opts.profile);
         if (
           !current.profile ||
           !sameContext(context, syncContext(current.profileName, current.profile)) ||
+          current.profile.spaceId !== profile!.spaceId ||
           JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
         ) {
           throw new Error("Active sync context changed; run skills sync again.");

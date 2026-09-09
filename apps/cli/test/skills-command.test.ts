@@ -1326,7 +1326,9 @@ describe("skills sync — active context replacement", () => {
     await skillsSyncCommand({}, io);
     const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
     const previousState = await readText(getStatePath());
-    await updateProfile("default", { spaceId: "spc_2" });
+    // The organization is what an installation belongs to; the pinned space is
+    // `.mcp.json` content and switching it is not a switch of installation.
+    await updateProfile("default", { orgId: "org_2" });
     const nextSkill = {
       id: "@acme/new-context",
       skillMd: skillMd("new-context", "New context skill."),
@@ -1339,10 +1341,8 @@ describe("skills sync — active context replacement", () => {
     await skillsSyncCommand({}, io);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["new-context"]);
     expect(
-      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
-        "X-Space-Id"
-      ],
-    ).toBe("spc_2");
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
+    ).toBe("https://app.example.com/api/mcp/o/org_2");
   });
 
   it("rejects a context changed while downloading before writing any installation", async () => {
@@ -1351,13 +1351,92 @@ describe("skills sync — active context replacement", () => {
     const serve = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       if (new URL(String(input)).pathname.endsWith("/download")) {
-        await updateProfile("default", { spaceId: "spc_changed" });
+        await updateProfile("default", { orgId: "org_changed" });
       }
       return serve(input, init);
     }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
     await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
     expect(await exists(pluginRoot())).toBe(false);
+  });
+
+  it("rewrites the MCP space over a skill that cannot be resolved at all", async () => {
+    // A space switch installs the same skills, so it is NOT a context switch:
+    // the all-or-nothing rule does not apply and a package that persistently
+    // fails to resolve is kept, exactly as it is on any other run.
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const skillPath = join(pluginRoot(), "skills", "pdf-tools", "SKILL.md");
+    const before = await readText(skillPath);
+    await updateProfile("default", { spaceId: "spc_2" });
+    const server = createSkillServer([{ ...ONE_SKILL[0]!, resolveError: 500 }]);
+    server.install();
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({ printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toContain("Skipped @acme/pdf-tools");
+    expect(
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
+        "X-Space-Id"
+      ],
+    ).toBe("spc_2");
+    expect(await readText(skillPath)).toBe(before);
+    expect(server.downloads()).toBe(0);
+  });
+
+  it("rejects a pinned space changed while downloading and keeps the previous plugin", async () => {
+    // The pin is not part of the context, but `.mcp.json` was already built
+    // from it: swapping now would publish a header naming the previous space.
+    const { updateProfile } = await import("../src/lib/config.ts");
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
+    const serve = createSkillServer([
+      ...ONE_SKILL,
+      { id: "@acme/notes", skillMd: skillMd("notes") },
+    ]);
+    serve.install();
+    const passthrough = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/download")) {
+        await updateProfile("default", { spaceId: "spc_2" });
+      }
+      return passthrough(input, init);
+    }) as unknown as typeof fetch;
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("Active sync context changed");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(previousMcp);
+  });
+
+  it("refuses a ledger whose context carries a pinned space", async () => {
+    // The shape the previous commits of this branch wrote. It is not this
+    // format: there is no second, narrower comparison for it, so it claims
+    // nothing and the run re-materializes everything.
+    const server = createSkillServer(ONE_SKILL);
+    server.install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    const pinned = JSON.parse(await readText(getStatePath()));
+    pinned.targets["claude-plugin"].context.spaceId = "spc_1";
+    await writeFile(getStatePath(), JSON.stringify(pinned));
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(stderr()).toContain("Sync state could not be used and has been ignored");
+    expect(server.downloads()).toBe(2);
+    expect(JSON.parse(await readText(getStatePath())).targets["claude-plugin"].context).toEqual({
+      profileName: "default",
+      instance: "https://app.example.com",
+      userId: "u_1",
+      orgId: "org_1",
+    });
   });
 });
 

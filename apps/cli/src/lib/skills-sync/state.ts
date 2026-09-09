@@ -31,13 +31,17 @@ export interface ManagedSkill {
  * Which connection an installation belongs to. One per destination: profiles do
  * not accumulate installations, so every managed directory under a target was
  * written by this context.
+ *
+ * The pinned space is NOT part of it: it selects no skill (D14), it only fills
+ * the `X-Space-Id` header of the generated `.mcp.json` — content
+ * `pluginTreeMatches` already compares and rewrites. Switching space installs
+ * the same skills, so it is a property of the plugin, not a different owner.
  */
 export interface SyncContext {
   profileName: string;
   instance: string;
   userId: string;
   orgId: string;
-  spaceId: string;
 }
 
 /**
@@ -49,7 +53,6 @@ const CONTEXT_KEYS = Object.keys({
   instance: 0,
   userId: 0,
   orgId: 0,
-  spaceId: 0,
 } satisfies Record<keyof SyncContext, 0>) as (keyof SyncContext)[];
 
 export function syncContext(profileName: string, profile: Profile): SyncContext {
@@ -58,7 +61,6 @@ export function syncContext(profileName: string, profile: Profile): SyncContext 
     instance: normalizeInstance(profile.instance),
     userId: profile.userId,
     orgId: profile.orgId!,
-    spaceId: profile.spaceId!,
   };
 }
 
@@ -178,6 +180,17 @@ function sortState(state: SyncState): SyncState {
   return { version: state.version, targets };
 }
 
+/**
+ * The key set is EXACT. A context carrying anything else — a `spaceId`, say —
+ * was written in a shape this CLI no longer produces, and reading it through a
+ * narrower comparison would be a second, untested code path for a format
+ * nothing writes. It is refused whole, exactly like a context-less ledger: the
+ * run reports the state as unusable and re-materializes everything.
+ */
 function isContext(value: unknown): value is SyncContext {
-  return isRecord(value) && CONTEXT_KEYS.every((key) => isNonEmptyString(value[key]));
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === CONTEXT_KEYS.length &&
+    CONTEXT_KEYS.every((key) => isNonEmptyString(value[key]))
+  );
 }
