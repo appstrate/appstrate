@@ -85,11 +85,14 @@ export function resolveContainerE2eGate(label: string, images: string[]): Contai
   const platforms = images.map((image) => ({ image, platform: imagePlatform(image) }));
   const run = daemon !== null && platforms.every(({ platform }) => platform === daemon);
   if (dockerEnabled && !run) {
-    const mismatched = daemon !== null && platforms.some(({ platform }) => platform !== null);
-    const hint = mismatched
-      ? " — rebuild natively: bun run docker:build:runtime (or, for one image," +
-        ` docker build --platform ${daemon} -t <tag> -f <dockerfile> .)`
-      : "";
+    // Same remedy whether an image is absent or built for another platform:
+    // build it natively. `docker:build:runtime` is the only command that builds
+    // the pi + sidecar pair with one revision stamp.
+    const hint =
+      daemon !== null
+        ? " — build natively: bun run docker:build:runtime (or, for one image," +
+          ` docker build --platform ${daemon} -t <tag> -f <dockerfile> .)`
+        : "";
     const seen = platforms
       .map(({ image, platform }) => `${image}=${platform ?? "absent"}`)
       .join(" ");

@@ -536,6 +536,20 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   per cluster to per process for its length rather than removing it or refusing
   the call. A rejection that still reaches a caller means both backends failed.
 
+- **The runtime container e2e now runs one inference turn through the BUILT
+  pi + sidecar pair (#1197).** `runtime-pi/test/inference-container.e2e.test.ts`
+  launches both images on a private Docker network — the agent reaching the
+  sidecar on its `sidecar` DNS alias, exactly as the platform wires them — and
+  drives a single Codex OAuth turn against a stub upstream on the host. It
+  asserts what actually arrives there: one `POST /codex/responses`, the real
+  subscription bearer swapped in and the container's placeholder JWT present in
+  no header, Pi's own `chatgpt-account-id` / `originator` / `OpenAI-Beta`
+  fingerprint forwarded verbatim, the two container→sidecar-only headers
+  stripped, and the `content-encoding: zstd` body decompressing and parsing —
+  which is the byte-identity witness a mismatched pair cannot produce (#1195
+  was an older sidecar text-decoding that frame; both halves were individually
+  correct and every in-process test stayed green).
+
 ### Fixed
 
 - **The hosted connect portal names the missing OAuth client instead of a
