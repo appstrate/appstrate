@@ -4,15 +4,16 @@
  * Shared plumbing for the `runtime-pi` container e2e tests — the layer that
  * runs the BUILT images under the local Docker engine.
  *
- * Every such test needs the same three things, and getting any of them subtly
+ * Every such test needs the same five things, and getting any of them subtly
  * different is how a container e2e silently stops running: the opt-in gate
  * (docker present, images present, image platform == daemon platform, #882),
- * a valid agent `.afps-bundle` to serve from the mock `/workspace` route, and
- * the container-log dump that makes a deadline failure diagnosable. They live
- * here so both suites share one definition.
+ * the `docker run` argv both suites launch containers with, a valid agent
+ * `.afps-bundle` to serve from the mock `/workspace` route, the container-log
+ * dump that makes a failure diagnosable, and the placeholder codex JWT a
+ * subscription run carries. They live here so both suites share one definition.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { zipArtifact } from "@appstrate/core/zip";
 import {
   extractRootFromAfps,
@@ -81,8 +82,15 @@ interface ContainerE2eGate {
  * every image's platform to match the daemon's and skip honestly otherwise.
  */
 export function resolveContainerE2eGate(label: string, images: string[]): ContainerE2eGate {
-  const daemon = dockerEnabled && hasDocker() ? daemonPlatform() : null;
-  const platforms = images.map((image) => ({ image, platform: imagePlatform(image) }));
+  const dockerPresent = dockerEnabled && hasDocker();
+  const daemon = dockerPresent ? daemonPlatform() : null;
+  // One `docker` process per image, so only probe when there is a daemon to
+  // answer: with none, every inspect fails identically and the images are
+  // unreachable by definition. Keeps a skipped suite at zero docker spawns.
+  const platforms: { image: string; platform: string | null }[] =
+    daemon === null
+      ? images.map((image) => ({ image, platform: null }))
+      : images.map((image) => ({ image, platform: imagePlatform(image) }));
   const run = daemon !== null && platforms.every(({ platform }) => platform === daemon);
   if (dockerEnabled && !run) {
     // Same remedy whether an image is absent or built for another platform:
@@ -97,10 +105,64 @@ export function resolveContainerE2eGate(label: string, images: string[]): Contai
       .map(({ image, platform }) => `${image}=${platform ?? "absent"}`)
       .join(" ");
     console.warn(
-      `[${label}] skipped — docker=${hasDocker()} ${seen} daemon=${daemon ?? "unknown"}${hint}`,
+      `[${label}] skipped — docker=${dockerPresent} ${seen} daemon=${daemon ?? "unknown"}${hint}`,
     );
   }
   return { run, daemon };
+}
+
+/** `docker` with string output. Every docker call in these suites goes here. */
+export function docker(args: string[]): SpawnSyncReturns<string> {
+  return spawnSync("docker", args, { encoding: "utf8" });
+}
+
+export interface DockerRunOptions {
+  /** `--name`, so `docker logs` and `docker rm -f` can reach the container. */
+  name: string;
+  image: string;
+  /**
+   * `--platform`. Explicit rather than omitted: a `DOCKER_DEFAULT_PLATFORM`
+   * override would otherwise re-route the run to a foreign platform behind the
+   * gate's back (#882). Null only when there is no daemon platform to pin,
+   * which the gate makes unreachable from a running suite.
+   */
+  platform: string | null;
+  /** `-e KEY=VALUE`, in insertion order. */
+  env: Record<string, string>;
+  /** `--network`, when the container shares a private network with a peer. */
+  network?: string;
+  /** `--network-alias`, the DNS name peers on {@link network} reach it by. */
+  networkAlias?: string;
+}
+
+/**
+ * `docker run -d` as both container e2e suites need it: detached, so no
+ * long-lived child keeps Bun alive — each suite polls its own mock sink and
+ * then `rm -f`s — and always with `--add-host
+ * host.docker.internal:host-gateway`, which Docker Desktop adds by itself but a
+ * Linux engine (CI) needs spelled out.
+ */
+export function dockerRun({
+  name,
+  image,
+  platform,
+  env,
+  network,
+  networkAlias,
+}: DockerRunOptions): SpawnSyncReturns<string> {
+  return docker([
+    "run",
+    "-d",
+    "--name",
+    name,
+    ...(platform !== null ? ["--platform", platform] : []),
+    ...(network !== undefined ? ["--network", network] : []),
+    ...(networkAlias !== undefined ? ["--network-alias", networkAlias] : []),
+    "--add-host",
+    "host.docker.internal:host-gateway",
+    ...Object.entries(env).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
+    image,
+  ]);
 }
 
 /**
@@ -129,7 +191,7 @@ export async function buildAgentBundle(name = "@e2e/provision-probe"): Promise<U
 
 /** `docker logs` (stdout+stderr merged) for a container, for failure messages. */
 export function dumpContainerLogs(containerName: string): string {
-  const logs = spawnSync("docker", ["logs", containerName], { encoding: "utf8" });
+  const logs = docker(["logs", containerName]);
   return (logs.stdout ?? "") + (logs.stderr ?? "");
 }
 

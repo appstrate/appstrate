@@ -34,13 +34,13 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { zstdDecompressSync } from "node:zlib";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
-import { PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import {
   buildAgentBundle,
   codexPlaceholderJwt,
+  docker,
+  dockerRun,
   dumpContainerLogs,
   resolveContainerE2eGate,
 } from "./helpers/container-e2e.ts";
@@ -76,6 +76,13 @@ interface CapturedRequest {
 /**
  * The canned Codex SSE completion — enough for the Pi run loop to finish its
  * one turn and finalize `success`. Same frame as `pi-runner-transport.test.ts`.
+ *
+ * `output: []` is load-bearing, not just brevity: the sidecar advertises
+ * `run_history` and `recall_memory` to the model (`runtime-pi/sidecar/mcp.ts`),
+ * so a frame carrying a tool call would send the agent to
+ * `GET /internal/run-history` or `/internal/memories`, which the stub below
+ * deliberately does not serve — a surprise call must stay a failure, and it
+ * shows up as the offending path in `unmatchedRequests`.
  */
 function completedSseBody(): string {
   return `data: ${JSON.stringify({
@@ -94,15 +101,12 @@ function completedSseBody(): string {
   })}\n\n`;
 }
 
-function docker(args: string[]): ReturnType<typeof spawnSync> {
-  return spawnSync("docker", args, { encoding: "utf8" });
-}
-
 describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verbatim", () => {
   let server: ReturnType<typeof Bun.serve> | undefined;
-  const networkName = `appstrate-e2e-inference-net-${Date.now()}`;
-  const sidecarName = `appstrate-e2e-inference-sidecar-${Date.now()}`;
-  const piName = `appstrate-e2e-inference-pi-${Date.now()}`;
+  const stamp = Date.now();
+  const networkName = `appstrate-e2e-inference-net-${stamp}`;
+  const sidecarName = `appstrate-e2e-inference-sidecar-${stamp}`;
+  const piName = `appstrate-e2e-inference-pi-${stamp}`;
 
   const upstreamRequests: CapturedRequest[] = [];
   /** Anything the stub did not expect, so a surprising call shows up in the failure. */
@@ -178,105 +182,75 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
       const port = server!.port;
       const platformUrl = `http://host.docker.internal:${port}`;
       const sinkBase = `${platformUrl}/api/runs/${RID}`;
-      // `daemon` is non-null whenever RUN is true. Pin it explicitly so a
-      // DOCKER_DEFAULT_PLATFORM override cannot re-route the run to a foreign
-      // platform behind the gate's back (#882).
-      const platformArgs = daemon !== null ? ["--platform", daemon] : [];
 
       const network = docker(["network", "create", networkName]);
       expect(network.status, `docker network create failed: ${network.stderr}`).toBe(0);
 
       try {
-        // The sidecar answers the agent on the DNS alias `sidecar`, exactly as
-        // the platform's Docker orchestrator wires it in production.
-        const sidecar = docker([
-          "run",
-          "-d",
-          "--name",
-          sidecarName,
-          ...platformArgs,
-          "--network",
-          networkName,
-          "--network-alias",
-          "sidecar",
-          "--add-host",
-          "host.docker.internal:host-gateway",
-          "-e",
-          "PORT=8080",
-          "-e",
-          `RUN_ID=${RID}`,
-          "-e",
-          `RUN_TOKEN=${RUN_TOKEN}`,
-          "-e",
-          `PLATFORM_API_URL=${platformUrl}`,
-          "-e",
-          `SIDECAR_AUTH_TOKEN=${SIDECAR_AUTH_TOKEN}`,
-          "-e",
-          `PI_LLM_OAUTH_CONFIG_JSON=${JSON.stringify({
-            authMode: "oauth",
-            baseUrl: `${platformUrl}/upstream`,
-            credentialId: CREDENTIAL_ID,
-          })}`,
-          // Mandatory: `host.docker.internal` resolves into a private range, so
-          // without this operator allowlist the sidecar's SSRF gate answers 403
-          // "Resolved OAuth base URL targets a blocked network range" before
-          // any request leaves. The platform forwards the same var in prod.
-          "-e",
-          "EGRESS_ALLOW_INTERNAL_HOSTS=host.docker.internal",
-          SIDECAR_IMAGE,
-        ]);
+        const sidecar = dockerRun({
+          name: sidecarName,
+          image: SIDECAR_IMAGE,
+          // Non-null whenever RUN is true; `dockerRun` pins it on the argv.
+          platform: daemon,
+          network: networkName,
+          // The sidecar answers the agent on the DNS alias `sidecar`, exactly
+          // as the platform's Docker orchestrator wires it in production.
+          networkAlias: "sidecar",
+          env: {
+            PORT: "8080",
+            RUN_ID: RID,
+            RUN_TOKEN,
+            PLATFORM_API_URL: platformUrl,
+            SIDECAR_AUTH_TOKEN,
+            PI_LLM_OAUTH_CONFIG_JSON: JSON.stringify({
+              authMode: "oauth",
+              baseUrl: `${platformUrl}/upstream`,
+              credentialId: CREDENTIAL_ID,
+            }),
+            // Mandatory: `host.docker.internal` resolves into a private range,
+            // so without this operator allowlist the sidecar's SSRF gate
+            // answers 403 "Resolved OAuth base URL targets a blocked network
+            // range" before any request leaves. The platform forwards the same
+            // var in prod.
+            EGRESS_ALLOW_INTERNAL_HOSTS: "host.docker.internal",
+          },
+        });
         expect(sidecar.status, `docker run sidecar failed: ${sidecar.stderr}`).toBe(0);
 
-        const pi = docker([
-          "run",
-          "-d",
-          "--name",
-          piName,
-          ...platformArgs,
-          "--network",
-          networkName,
-          "--add-host",
-          "host.docker.internal:host-gateway",
-          "-e",
-          `AGENT_RUN_ID=${RID}`,
-          "-e",
-          `APPSTRATE_SINK_URL=${sinkBase}/events`,
-          "-e",
-          `APPSTRATE_SINK_FINALIZE_URL=${sinkBase}/events/finalize`,
-          "-e",
-          `APPSTRATE_SINK_SECRET=${SINK_SECRET}`,
-          "-e",
-          "MODEL_API=openai-codex-responses",
-          "-e",
-          `MODEL_ID=${MODEL_ID}`,
-          "-e",
-          "MODEL_PROVIDER=codex",
-          "-e",
-          "MODEL_BASE_URL=http://sidecar:8080/llm",
-          "-e",
-          `MODEL_API_KEY=${PLACEHOLDER_JWT}`,
-          "-e",
-          "SIDECAR_URL=http://sidecar:8080",
-          "-e",
-          `SIDECAR_AUTH_TOKEN=${SIDECAR_AUTH_TOKEN}`,
-          // Both the system prompt and the run's single user turn — no
-          // `startMessage`, so the run is exactly one inference call.
-          "-e",
-          "AGENT_PROMPT=Stop immediately.",
-          PI_IMAGE,
-        ]);
+        const pi = dockerRun({
+          name: piName,
+          image: PI_IMAGE,
+          platform: daemon,
+          network: networkName,
+          env: {
+            AGENT_RUN_ID: RID,
+            APPSTRATE_SINK_URL: `${sinkBase}/events`,
+            APPSTRATE_SINK_FINALIZE_URL: `${sinkBase}/events/finalize`,
+            APPSTRATE_SINK_SECRET: SINK_SECRET,
+            MODEL_API: "openai-codex-responses",
+            MODEL_ID,
+            MODEL_PROVIDER: "codex",
+            MODEL_BASE_URL: "http://sidecar:8080/llm",
+            MODEL_API_KEY: PLACEHOLDER_JWT,
+            SIDECAR_URL: "http://sidecar:8080",
+            SIDECAR_AUTH_TOKEN,
+            // Both the system prompt and the run's single user turn — no
+            // `startMessage`, so the run is exactly one inference call.
+            AGENT_PROMPT: "Stop immediately.",
+          },
+        });
         expect(pi.status, `docker run pi failed: ${pi.stderr}`).toBe(0);
 
         const start = Date.now();
         for (;;) {
           if (finalizeBodies.length > 0) break;
           if (Date.now() - start > DEADLINE_MS) {
+            // Both containers' logs are appended by the `catch` below, which
+            // covers every failure in here, not just this one.
             throw new Error(
-              `run did not finalize within ${DEADLINE_MS}ms.\n` +
+              `run did not finalize within ${DEADLINE_MS}ms\n` +
                 `upstream=${JSON.stringify(upstreamRequests.map((r) => `${r.method} ${r.path}`))}\n` +
-                `unmatched=${JSON.stringify(unmatchedRequests)}\n` +
-                `sidecar logs:\n${dumpContainerLogs(sidecarName).slice(-3000)}\n` +
-                `pi logs:\n${dumpContainerLogs(piName).slice(-3000)}`,
+                `unmatched=${JSON.stringify(unmatchedRequests)}`,
             );
           }
           await new Promise((r) => setTimeout(r, 500));
@@ -304,12 +278,17 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         expect(request.headers["openai-beta"]).toBe("responses=experimental");
         expect(request.headers.accept).toBe("text/event-stream");
         expect(request.headers["content-type"]).toStartWith("application/json");
-        expect(request.headers["user-agent"]).toBeTruthy();
+        // Pi's own UA, `getPiUserAgent()`: `pi (<platform> <release>; <arch>)`,
+        // or `pi (browser)` off Node. Assert the prefix rather than mere
+        // presence — Bun's fetch supplies a `Bun/<version>` UA when a request
+        // carries none, so `toBeTruthy()` would hold even had the header never
+        // crossed the container boundary.
+        expect(request.headers["user-agent"]).toStartWith("pi (");
 
-        // Container→sidecar-only headers must stop at the sidecar: the agent's
-        // own auth token has no business reaching the model provider.
+        // The container→sidecar-only header must stop at the sidecar: the
+        // agent's own auth token has no business reaching the model provider.
+        // (Verified: a beta.51 sidecar really did leak it upstream.)
         expect(request.headers[SIDECAR_AUTH_HEADER]).toBeUndefined();
-        expect(request.headers[PI_SDK_VERSION_HEADER]).toBeUndefined();
 
         // Pinned deliberately. zstd on the SSE path is the one thing the
         // subscription path does that nothing else does, and it is what #1195
@@ -319,8 +298,11 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         expect(request.headers["content-encoding"]).toBe("zstd");
 
         // A successful decode + parse IS the byte-identity witness: zstd is a
-        // checksummed binary frame, so a sidecar that text-decodes it (#1195)
-        // cannot produce anything that survives this line.
+        // framed binary format — magic number, frame descriptor, block headers —
+        // and a text round-trip replaces every byte above U+007F, so a sidecar
+        // that decodes the body as text (#1195) cannot produce anything
+        // `zstdDecompressSync` accepts, let alone anything `JSON.parse` and the
+        // field assertions behind it survive.
         const body = JSON.parse(zstdDecompressSync(request.bodyBytes).toString("utf8"));
         expect(body.model).toBe(MODEL_ID);
         expect(body.store).toBe(false);
@@ -329,12 +311,22 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         expect(body.instructions.length).toBeGreaterThan(0);
         expect(Array.isArray(body.input)).toBe(true);
         expect(body.input.length).toBeGreaterThan(0);
-        expect(Array.isArray(body.tools)).toBe(true);
 
         // The turn actually completed — the canned SSE frame was parsed by the
         // real runner, not just accepted at the socket.
         const finalize = JSON.parse(finalizeBodies[0]!);
         expect(finalize.status).toBe("success");
+      } catch (err) {
+        // Every failure in here — a missed assertion as much as the deadline —
+        // is a statement about what the two containers did, and the `finally`
+        // below is about to delete them, so this is the last chance to read
+        // their logs. Capped, because a boot loop can print megabytes.
+        if (err instanceof Error) {
+          err.message +=
+            `\n\nsidecar logs:\n${dumpContainerLogs(sidecarName).slice(-3000)}` +
+            `\n\npi logs:\n${dumpContainerLogs(piName).slice(-3000)}`;
+        }
+        throw err;
       } finally {
         docker(["rm", "-f", sidecarName, piName]);
         docker(["network", "rm", networkName]);

@@ -23,9 +23,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { spawnSync } from "node:child_process";
 import {
   buildAgentBundle,
+  docker,
+  dockerRun,
   dumpContainerLogs,
   resolveContainerE2eGate,
 } from "./helpers/container-e2e.ts";
@@ -83,7 +84,7 @@ describe.skipIf(!RUN)("runtime-pi container provisions files without spinning", 
 
   afterAll(() => {
     server?.stop(true);
-    if (containerName) spawnSync("docker", ["rm", "-f", containerName], { stdio: "ignore" });
+    if (containerName) docker(["rm", "-f", containerName]);
   });
 
   it(
@@ -92,48 +93,26 @@ describe.skipIf(!RUN)("runtime-pi container provisions files without spinning", 
       const port = server!.port;
       const host = `http://host.docker.internal:${port}/api/runs/${RID}`;
       containerName = `appstrate-e2e-provision-${Date.now()}`;
-      // Detached: the container runs independently of this test process, so no
-      // long-lived child keeps Bun alive. We poll the sink, then `rm -f`.
-      const run = spawnSync(
-        "docker",
-        [
-          "run",
-          "-d",
-          "--name",
-          containerName,
-          // Pin to the engine's native platform (which the gate above
-          // guarantees the local image matches, mirroring how the platform's
-          // Docker orchestrator launches this image in production). Explicit
-          // rather than omitted: a DOCKER_DEFAULT_PLATFORM env override would
-          // otherwise re-route the run to a foreign platform behind the
-          // gate's back (#882). `daemon` is non-null whenever RUN is true.
-          ...(daemon !== null ? ["--platform", daemon] : []),
-          // Linux portability — Docker Desktop adds this automatically, but CI
-          // engines need it explicit.
-          "--add-host",
-          "host.docker.internal:host-gateway",
-          "-e",
-          `AGENT_RUN_ID=${RID}`,
-          "-e",
-          `APPSTRATE_SINK_URL=${host}/events`,
-          "-e",
-          `APPSTRATE_SINK_FINALIZE_URL=${host}/events/finalize`,
-          "-e",
-          `APPSTRATE_SINK_SECRET=${SECRET}`,
-          "-e",
-          "MODEL_API=anthropic-messages",
-          "-e",
-          "MODEL_ID=claude-sonnet-4-6",
-          "-e",
-          `MODEL_BASE_URL=http://host.docker.internal:${port}/llm`,
-          "-e",
-          "MODEL_API_KEY=test",
-          "-e",
-          "AGENT_PROMPT=Stop immediately.",
-          IMAGE,
-        ],
-        { encoding: "utf8" },
-      );
+      const run = dockerRun({
+        name: containerName,
+        image: IMAGE,
+        // The engine's native platform, which the gate above guarantees the
+        // local image matches — mirroring how the platform's Docker
+        // orchestrator launches this image in production. `daemon` is non-null
+        // whenever RUN is true.
+        platform: daemon,
+        env: {
+          AGENT_RUN_ID: RID,
+          APPSTRATE_SINK_URL: `${host}/events`,
+          APPSTRATE_SINK_FINALIZE_URL: `${host}/events/finalize`,
+          APPSTRATE_SINK_SECRET: SECRET,
+          MODEL_API: "anthropic-messages",
+          MODEL_ID: "claude-sonnet-4-6",
+          MODEL_BASE_URL: `http://host.docker.internal:${port}/llm`,
+          MODEL_API_KEY: "test",
+          AGENT_PROMPT: "Stop immediately.",
+        },
+      });
       expect(run.status, `docker run failed: ${run.stderr}`).toBe(0);
 
       try {
@@ -154,7 +133,7 @@ describe.skipIf(!RUN)("runtime-pi container provisions files without spinning", 
         }
         expect(events.some((e) => e.includes("workspace initialized"))).toBe(true);
       } finally {
-        spawnSync("docker", ["rm", "-f", containerName], { stdio: "ignore" });
+        docker(["rm", "-f", containerName]);
       }
     },
     DEADLINE_MS + 15_000,
