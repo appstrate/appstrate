@@ -56,9 +56,9 @@ export async function enforceSystemProxyAdmission(args: {
   usageContext: SystemProxyUsageContext;
 }): Promise<void> {
   // A reserved organization admits no new work (see `refuseReservedForDeletion`
-  // for why); this seam is the OTHER way billable work enters. Refused ahead of
-  // the hook check: the reservation is a platform fact, true with or without a
-  // metering module.
+  // for why); this seam is the OTHER way metered usage enters. Refused ahead of
+  // the hook check: the reservation is a platform fact, true with or without an
+  // admission module.
   await refuseReservedForDeletion(db, args.orgId);
 
   // OSS deployments may intentionally expose system presets without a metering

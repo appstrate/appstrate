@@ -86,7 +86,7 @@ const baseResponses = {
   "409": {
     description:
       "`org_deleting` — the organization's deletion is reserved, so no new " +
-      "billable work is admitted. RFC 9457 problem+json.",
+      "metered usage is admitted. RFC 9457 problem+json.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },

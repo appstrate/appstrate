@@ -306,9 +306,9 @@ export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
  * permission the platform and its modules define, in every space, without a
  * `space_members` row.
  *
- * One name for a fact four call sites need — the billing-manager refusal (a
- * grant to one of these roles means nothing), the SPA's picker that hides them,
- * its role-preview trigger, and the space-member picker. Spelled out at each
+ * One name for a fact four call sites need — a module refusing to grant its own
+ * permissions to a role that already holds everything, the SPA's picker that
+ * hides them, its role-preview trigger, and the space-member picker. Spelled out at each
  * site, `["owner", "admin"]` is four independent decisions; here it is one, and
  * a role promoted into or out of the set moves all four together.
  */

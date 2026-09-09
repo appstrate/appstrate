@@ -106,8 +106,8 @@ interface SSEAuthResult {
  * under a role preview, so it is passed in rather than loaded.
  *
  * The org half is `orgHalfFor(…, await principalGrants(…))`, exactly as the
- * HTTP pipeline computes it: a grant a module made to this person — the ee
- * module's billing managers — is part of their org standing, so the stream
+ * HTTP pipeline computes it: a module's per-principal grant to this person is
+ * part of their org standing, so the stream
  * answers the same caller every other transport does. `principalGrants` returns
  * nothing for the key branch, which is where the session-only nature of those
  * grants is expressed.

@@ -523,13 +523,13 @@ export function orgDeletingError(): ApiError {
 /**
  * Refuse admission into an organization whose deletion is reserved.
  *
- * Every seam that admits billable work calls this: run creation (below, under
+ * Every seam that admits metered usage calls this: run creation (below, under
  * the admission lock, beside the concurrency count — no window) and the proxy
  * admission gate, which reads outside the lock and so may admit one call that
  * races the stamp. A row admitted after the reservation is cascade-deleted
  * with the org, and any `llm_usage` it wrote disappears with it — including
- * rows a metering module has already advanced its cursor past, which is
- * revenue that can never be billed.
+ * rows the admission hook's owner has already read past and can never account
+ * for.
  */
 export async function refuseReservedForDeletion(
   executor: DbTx | typeof db,

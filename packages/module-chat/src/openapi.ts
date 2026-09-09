@@ -304,13 +304,13 @@ export const chatPaths = {
         },
         "402": {
           description:
-            "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new billable work is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json.",
         },
         "429": { description: "Rate limited (20/min per caller)" },
       },
