@@ -414,6 +414,13 @@
       "when": 1788888309265,
       "tag": "0058_organization_deletion_reservation",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788888369265,
+      "tag": "0059_drop_org_viewer",
+      "breakpoints": true
     }
   ]
 }
