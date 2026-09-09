@@ -5146,6 +5146,11 @@ export interface components {
              * @enum {string}
              */
             status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "incomplete" | "canceled" | "canceling";
+            /**
+             * @description Which endpoint a plan selection goes to: `plan-change` for `POST /api/billing/plan`, `portal` for `POST /api/billing/portal` when Stripe holds the subscription but has stopped collecting on it, `checkout` for `POST /api/billing/checkout`. Checkout only creates, so an org Stripe holds a subscription for never re-enters it — a second one would bill the customer twice.
+             * @enum {string}
+             */
+            plan_action: "plan-change" | "portal" | "checkout";
             /** @description Plans the org can upgrade into — empty when on the highest plan. */
             upgrades: components["schemas"]["EeBillingUpgradePlan"][];
         };
@@ -8882,6 +8887,15 @@ export interface operations {
             };
             /** @description Caller lacks `billing:manage` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
