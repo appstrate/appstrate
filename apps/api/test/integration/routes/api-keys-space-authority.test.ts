@@ -145,7 +145,69 @@ describe("API keys carry their creator's authority in the key's space", () => {
    * cannot even see B; the key id is the only thing they hold, and it must not
    * be enough.
    */
+  it("a builder cannot revoke a key of the space they build in", async () => {
+    // Same space on both sides, so nothing cross-space is in play: the route
+    // guard alone answers, and `builder` excludes every `api-keys:` permission.
+    const closed = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
+    const builder = await createTestUser();
+    await addOrgMember(owner.orgId, builder.id, "member");
+    await seedSpaceMember({ spaceId: closed.id, userId: builder.id, presetRole: "builder" });
+
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: closed.id,
+      createdBy: owner.user.id,
+      scopes: ["agents:read"],
+    });
+
+    const denied = await app.request(`/api/api-keys/${key.id}`, {
+      method: "DELETE",
+      headers: authHeaders({ ...owner, cookie: builder.cookie }, { "X-Space-Id": closed.id }),
+    });
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { detail: string }).detail).toContain(
+      "Insufficient permissions",
+    );
+
+    // Still live: the 403 refused the revocation, it did not report one.
+    const listed = await app.request("/api/api-keys", {
+      headers: authHeaders(owner, { "X-Space-Id": closed.id }),
+    });
+    expect(((await listed.json()) as { data: { id: string }[] }).data).toHaveLength(1);
+  });
+
   describe("revoking a key of another space", () => {
+    it("answers a non-member of an OPEN sibling with that space's 403", async () => {
+      // `open` widens membership for org `member`s only; a `guest` still holds
+      // nothing there, and the wall is the open space's own — 403, not the 404
+      // a private space gives.
+      const a = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
+      const b = await seedSpace({ orgId: owner.orgId, visibility: "open" });
+      const guest = await createTestUser();
+      await addOrgMember(owner.orgId, guest.id, "guest");
+      await seedSpaceMember({ spaceId: a.id, userId: guest.id, presetRole: "admin" });
+
+      const inB = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: b.id,
+        createdBy: owner.user.id,
+        scopes: ["agents:read"],
+      });
+
+      const denied = await app.request(`/api/api-keys/${inB.id}`, {
+        method: "DELETE",
+        headers: authHeaders({ ...owner, cookie: guest.cookie }, { "X-Space-Id": a.id }),
+      });
+      expect(denied.status).toBe(403);
+      expect(((await denied.json()) as { code: string }).code).toBe("not_a_space_member");
+
+      // Still live: the 403 is a refusal, not a revocation that answered oddly.
+      const listed = await app.request("/api/api-keys", {
+        headers: authHeaders(owner, { "X-Space-Id": b.id }),
+      });
+      expect(((await listed.json()) as { data: { id: string }[] }).data).toHaveLength(1);
+    });
+
     it("answers a delegated space admin with the sibling space's own 404", async () => {
       const a = await seedSpace({ orgId: owner.orgId, visibility: "private" });
       const b = await seedSpace({ orgId: owner.orgId, visibility: "private" });

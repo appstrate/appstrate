@@ -38,12 +38,20 @@ import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module"
 /** Every `onOrgDelete` fan-out observed since the last `beforeEach`. */
 let orgDeleteCalls: string[] = [];
 
+/**
+ * Work a handler does while the platform waits on it. Set by the test that
+ * needs a handler to change the org's deletability mid-sequence; null
+ * everywhere else, so every other test sees a pure recorder.
+ */
+let onOrgDeleteSideEffect: ((orgId: string) => Promise<void>) | null = null;
+
 const recordingModule: AppstrateModule = {
   manifest: { id: "test-org-delete-recorder", name: "Org delete recorder", version: "1.0.0" },
   async init() {},
   events: {
-    onOrgDelete: (orgId: string) => {
+    onOrgDelete: async (orgId: string) => {
       orgDeleteCalls.push(orgId);
+      await onOrgDeleteSideEffect?.(orgId);
     },
   },
 };
@@ -97,6 +105,7 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
   beforeEach(async () => {
     await truncateAll();
     orgDeleteCalls = [];
+    onOrgDeleteSideEffect = null;
     resetModules();
     await loadModulesFromInstances([recordingModule], moduleCtx());
     // Call AFTER loading: getTestApp() re-registers the RBAC snapshot from the
@@ -149,6 +158,39 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
 
     expect(res.status).toBe(204);
     expect(orgDeleteCalls).toEqual([ctx.orgId]);
+    expect(await orgExists(ctx.orgId)).toBe(false);
+  });
+
+  it("emits onOrgDelete a second time when a handler leaves the org undeletable", async () => {
+    // The reservation cannot stop a run a HANDLER creates — it runs after the
+    // stamp, inside the platform's own process. So the in-transaction count
+    // still refuses, and the retry is the recovery: the contract is that a
+    // handler tolerates being called again for the same org.
+    const ctx = await createTestContext({ orgName: "Handler Blocks Org" });
+    let inserted = false;
+    onOrgDeleteSideEffect = async (orgId) => {
+      if (inserted || orgId !== ctx.orgId) return;
+      inserted = true;
+      await seedRunInOrg(ctx, "running");
+    };
+
+    const refused = await app.request(`/api/orgs/${ctx.orgId}`, {
+      method: "DELETE",
+      headers: { Cookie: ctx.cookie },
+    });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { code?: string }).code).toBe("delete_failed");
+    expect(orgDeleteCalls).toEqual([ctx.orgId]);
+    expect(await orgExists(ctx.orgId)).toBe(true);
+
+    await db.update(runs).set({ status: "success" }).where(eq(runs.orgId, ctx.orgId));
+
+    const retried = await app.request(`/api/orgs/${ctx.orgId}`, {
+      method: "DELETE",
+      headers: { Cookie: ctx.cookie },
+    });
+    expect(retried.status).toBe(204);
+    expect(orgDeleteCalls).toEqual([ctx.orgId, ctx.orgId]);
     expect(await orgExists(ctx.orgId)).toBe(false);
   });
 });

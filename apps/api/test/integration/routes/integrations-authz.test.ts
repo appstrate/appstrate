@@ -589,6 +589,43 @@ describe("integrations:configure is never grantable to an API key", () => {
       },
     );
     expect(promoted.status).toBe(403);
+
+    // Rotate and delete are the other half of the same permission. A client
+    // the SESSION registers is the target, so the 403s are the key's own wall
+    // and not a missing row.
+    const registered = await app.request(
+      "/api/integrations/@myorg/gmail/auths/google/oauth-clients",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+      },
+    );
+    expect(registered.status).toBe(201);
+    const clientId = ((await registered.json()) as { id: string }).id;
+
+    const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${clientId}`, {
+      method: "PUT",
+      headers: asKey,
+      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+    });
+    expect(rotated.status).toBe(403);
+
+    const deleted = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${clientId}`, {
+      method: "DELETE",
+      headers: asKey,
+    });
+    expect(deleted.status).toBe(403);
+
+    // The client survived both refusals.
+    const listed = await app.request("/api/integrations/@myorg/gmail/auths/google/clients", {
+      headers: authHeaders(ctx),
+    });
+    expect(listed.status).toBe(200);
+    const refs = ((await listed.json()) as { data: { client_ref: string }[] }).data.map(
+      (client) => client.client_ref,
+    );
+    expect(refs).toContain(clientId);
   });
 
   it("an owner session registers the client and promotes it", async () => {
