@@ -161,7 +161,11 @@ function LibraryMatrix({
             {spaces.map((space) => {
               const installed = pkg.installed_in.includes(space.id);
               const systemAlwaysActive = lockSystem && pkg.source === "system";
-              const missingPermission = !canToggle(space.id, installed);
+              const blocked = !canToggle(space.id, installed);
+              // While `useSpaces` is in flight the caller's standing is unknown:
+              // the box stays disabled, and claims no reason for it. Only a
+              // loaded set can say the permission is missing.
+              const missingPermission = accessibleSpaces !== undefined && blocked;
               // Two different reasons the box cannot be clicked, and a
               // disabled control that says neither reads as broken.
               const title = systemAlwaysActive
@@ -173,7 +177,7 @@ function LibraryMatrix({
                 <TableCell key={space.id} className="text-center">
                   <Checkbox
                     checked={systemAlwaysActive || installed}
-                    disabled={systemAlwaysActive || missingPermission}
+                    disabled={systemAlwaysActive || blocked}
                     title={title}
                     onCheckedChange={() => handleToggle(pkg, space.id, installed)}
                   />

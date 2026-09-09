@@ -8,6 +8,7 @@ import { LibraryPage } from "../library-page.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 
 await i18nReady;
+await i18n.changeLanguage("fr");
 
 type Space = components["schemas"]["SpaceObject"];
 type Package = components["schemas"]["LibraryPackageList"][number];
@@ -36,11 +37,22 @@ function packageRow(type: Package["type"], installed_in: string[], source = "loc
   return { id: "@org/example", name: "Example", description: "", type, source, installed_in };
 }
 
-/** Which explanation a disabled checkbox carries, by its i18n text. */
-function hintOf(element: string): "system" | "permission" | null {
+/**
+ * Which explanation a disabled checkbox carries, resolved from the bundle
+ * sentence it renders.
+ *
+ * The three reasons are named apart rather than collapsed into "permission":
+ * install and uninstall are different sentences chosen by the row's state, so a
+ * mapping that answered "permission" to both let the two be swapped silently.
+ * An unmapped title comes back verbatim, which fails the comparison loudly.
+ */
+function hintOf(element: string): string | null {
   const title = /\stitle="([^"]*)"/.exec(element)?.[1];
   if (title === undefined) return null;
-  return title === i18n.t("library.systemAlwaysActive") ? "system" : "permission";
+  if (title === i18n.t("library.systemAlwaysActive")) return "system";
+  if (title === i18n.t("library.cannotInstall")) return "install";
+  if (title === i18n.t("library.cannotUninstall")) return "uninstall";
+  return title;
 }
 
 function checkboxes(spaces: Space[] | undefined, pkg: Package) {
@@ -67,9 +79,10 @@ function checkboxes(spaces: Space[] | undefined, pkg: Package) {
   return [...html.matchAll(/<button\b[^>]*role="checkbox"[^>]*>/g)].map(([element]) => ({
     checked: element.includes('aria-checked="true"'),
     disabled: /\sdisabled(?:=|\s|>)/.test(element),
-    // Every disabled box says WHY, and the two reasons are different sentences:
-    // a system package is always active, a missing permission is the caller's
-    // own standing. `null` when the box is live and needs no explanation.
+    // Every disabled box says WHY, and the reasons are different sentences: a
+    // system package is always active, a missing permission is the caller's own
+    // standing on the operation the row offers. `null` when the box is live and
+    // needs no explanation, and while the permission set is still loading.
     hint: hintOf(element),
   }));
 }
@@ -79,8 +92,8 @@ describe("library installation controls", () => {
     expect(
       checkboxes([space("spc_a", []), space("spc_b", [])], packageRow("agent", ["spc_a"])),
     ).toEqual([
-      { checked: true, disabled: true, hint: "permission" },
-      { checked: false, disabled: true, hint: "permission" },
+      { checked: true, disabled: true, hint: "uninstall" },
+      { checked: false, disabled: true, hint: "install" },
     ]);
   });
 
@@ -91,7 +104,7 @@ describe("library installation controls", () => {
         packageRow("agent", []),
       ),
     ).toEqual([
-      { checked: false, disabled: true, hint: "permission" },
+      { checked: false, disabled: true, hint: "install" },
       { checked: false, disabled: false, hint: null },
     ]);
   });
@@ -108,9 +121,9 @@ describe("library installation controls", () => {
         packageRow("integration", ["spc_installer", "spc_remover"], "system"),
       ),
     ).toEqual([
-      { checked: true, disabled: true, hint: "permission" },
+      { checked: true, disabled: true, hint: "uninstall" },
       { checked: true, disabled: false, hint: null },
-      { checked: false, disabled: true, hint: "permission" },
+      { checked: false, disabled: true, hint: "install" },
       { checked: false, disabled: false, hint: null },
     ]);
   });
@@ -121,9 +134,12 @@ describe("library installation controls", () => {
     ).toEqual([{ checked: true, disabled: true, hint: "system" }]);
   });
 
-  it("keeps writes disabled while permissions load without changing the installed state", () => {
+  it("keeps writes disabled while permissions load, blaming nobody for it", () => {
+    // Nothing is known about the caller yet, so the box says nothing: a
+    // loading control that claims a missing permission accuses the operator of
+    // something the answer may contradict a moment later.
     expect(checkboxes(undefined, packageRow("integration", []))).toEqual([
-      { checked: false, disabled: true, hint: "permission" },
+      { checked: false, disabled: true, hint: null },
     ]);
   });
 });
