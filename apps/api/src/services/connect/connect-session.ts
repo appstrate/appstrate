@@ -96,6 +96,30 @@ export async function consumeJti(jti: string, expSeconds: number): Promise<boole
 }
 
 /**
+ * Hand a consumed `jti` back so the same link can be clicked again.
+ *
+ * Only for a click that was consumed and then failed BEFORE anything was
+ * granted or minted on the strength of it — the missing-OAuth-client case of
+ * issue #1263, where the user has to wait for an admin and then retry. The
+ * failed click is then indistinguishable from no click at all, so the replay
+ * guard has nothing to protect; the token's own `exp` keeps bounding reuse.
+ * Never call this after a partial success (a state row or provider redirect
+ * issued): the burn is what stops a replay from re-entering that flow.
+ *
+ * Best-effort: a cache fault here must not mask the error being rendered, so
+ * it is swallowed — the worst case is the pre-#1263 behaviour (link burned,
+ * one re-mint).
+ */
+export async function releaseJti(jti: string): Promise<void> {
+  try {
+    const cache = await getCache();
+    await cache.del(JTI_PREFIX + jti);
+  } catch {
+    // Degrades to a burned link — the caller's error page stays actionable.
+  }
+}
+
+/**
  * After the capability token is consumed, mint a fresh page-cookie token
  * (new jti, CSRF nonce, same context) and set it as an httpOnly, SameSite=Strict
  * cookie scoped to the hosted connect path. Returns the CSRF nonce for the page

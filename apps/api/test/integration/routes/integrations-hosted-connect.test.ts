@@ -276,3 +276,148 @@ describe("hosted connect portal — dispatch + submit", () => {
     expect(all).toHaveLength(1);
   });
 });
+
+/**
+ * Classic (confidential) oauth2 auth — needs a pre-registered client per
+ * space. Same shape as the `google` auth in `integrations.test.ts`.
+ */
+function oauthManifest(name = "@myorg/gsuite"): IntegrationManifest {
+  return {
+    type: "integration",
+    schema_version: "0.1",
+    name,
+    version: "0.1.0",
+    display_name: "Google Workspace",
+    description: "Google Workspace integration",
+    icon: "logos:google",
+    source: { kind: "local", server: { name, version: "^0.1.0" } },
+    auths: {
+      google: {
+        type: "oauth2",
+        authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        token_endpoint: "https://oauth2.googleapis.com/token",
+        default_scopes: ["openid", "email"],
+        authorized_uris: ["https://www.googleapis.com/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+      },
+    },
+  } as unknown as IntegrationManifest;
+}
+
+/**
+ * Remote MCP oauth2 auth with no pre-registered client (auto-DCR path). The
+ * `.invalid` TLD (RFC 6761) makes discovery fail fast, so provisioning fails
+ * without a live authorization server — same fixture as `integrations.test.ts`.
+ */
+function remoteMcpManifest(name = "@myorg/remote-mcp"): IntegrationManifest {
+  return {
+    type: "integration",
+    schema_version: "0.1",
+    name,
+    version: "1.0.0",
+    display_name: "Remote MCP",
+    description: "Remote MCP integration with MCP-spec auto-DCR",
+    source: {
+      kind: "remote",
+      remote: { url: "https://mcp.invalid/mcp", transport: "streamable-http" },
+    },
+    auths: {
+      oauth: {
+        type: "oauth2",
+        issuer: "https://mcp.invalid",
+        token_endpoint_auth_method: "none",
+        default_scopes: ["read", "write"],
+        authorized_uris: ["https://mcp.invalid/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+        _meta: { "dev.appstrate/oauth": { scope_separator: " " } },
+      },
+    },
+  } as unknown as IntegrationManifest;
+}
+
+async function startConnect(token: string): Promise<Response> {
+  return app.request(`/api/integrations/connect/start?token=${encodeURIComponent(token)}`, {
+    redirect: "manual",
+  });
+}
+
+describe("hosted connect portal — oauth2 dispatch without a client (issue #1263)", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, oauthManifest("@myorg/gsuite"));
+  });
+
+  it("renders the actionable 403 the programmatic path returns, not a generic 502", async () => {
+    const token = await mintSession(ctx, "@myorg/gsuite", "google");
+    const res = await startConnect(token);
+    // Parity with `POST …/connect/oauth2` on the same space: same status, same
+    // detail, naming the action to take.
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("Administrator must register OAuth client credentials");
+    expect(html).toContain("@myorg/gsuite");
+    expect(html).not.toContain("Please try again");
+  });
+
+  it("keeps the link reusable: a second click is the same 403, not 'already used'", async () => {
+    const token = await mintSession(ctx, "@myorg/gsuite", "google");
+    expect((await startConnect(token)).status).toBe(403);
+    const again = await startConnect(token);
+    expect(again.status).toBe(403);
+    expect(await again.text()).not.toContain("already been used");
+  });
+
+  it("lets the same link succeed once an administrator registers a client", async () => {
+    const token = await mintSession(ctx, "@myorg/gsuite", "google");
+    expect((await startConnect(token)).status).toBe(403);
+
+    const registered = await app.request(
+      "/api/integrations/@myorg/gsuite/auths/google/oauth-clients",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+      },
+    );
+    expect(registered.status).toBe(201);
+
+    // The very same link now dispatches to the provider — no re-mint.
+    const res = await startConnect(token);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location")!);
+    expect(location.origin).toBe("https://accounts.google.com");
+    expect(location.searchParams.get("client_id")).toBe("abc");
+
+    // …and the successful click is the one that burns it.
+    expect((await startConnect(token)).status).toBe(410);
+  });
+
+  it("renders the auto-provisioning failure verbatim for a remote MCP auth", async () => {
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
+    const res = await startConnect(token);
+    expect(res.status).toBe(403);
+    const html = await res.text();
+    // The remedy authored by the provisioning step reaches the user — the
+    // message the generic catch used to swallow.
+    expect(html).toContain("Could not automatically provision an OAuth client");
+    expect(html).toContain("@myorg/remote-mcp");
+  });
+});

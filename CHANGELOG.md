@@ -538,6 +538,22 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **The hosted connect portal names the missing OAuth client instead of a
+  generic "please try again" 502 (#1263).** Opening a `connect_url` for an
+  oauth2 auth in a space with no registered client — and no system client or
+  auto-provisioning to fall back to — rendered "Could not start the connection.
+  Please try again." with a 502, although the condition is a configuration gap
+  that no retry can clear. The programmatic `POST …/connect/oauth2` already
+  answered the same case with a 403 naming the action ("Administrator must
+  register OAuth client credentials…"); the catch around the hosted dispatch
+  swallowed that error, and the auto-provisioning failure written to be shown
+  verbatim with it. A client-side (4xx) refusal from the OAuth strategy now
+  reaches the popup with its own status and detail, and the single-use link is
+  handed back rather than burned — nothing was minted on its strength — so a
+  retry once the client is registered works from the very same link instead of
+  the previous second misleading "This connect link has already been used."
+  Transient and unknown failures keep the generic wording, the 502 and the burn.
+
 - **Deleting an organization reserves the deletion before any module tears
   anything down (migration `0058`).** `DELETE /api/orgs/:orgId` checked
   deletability without a lock, emitted `onOrgDelete` — where modules cancel a
