@@ -37,7 +37,11 @@ interface Route {
   path: string;
 }
 
-/** The three routes gated on `agents:read`. */
+/**
+ * The three agent-config GETs. The list and `…/model` also open to
+ * `agents:run` (the summary read, RBAC spec §3.4), which none of the keys
+ * below holds — so each case still isolates `agents:read`.
+ */
 function agentReadRoutes(): Route[] {
   return [
     { label: "agents list", path: "/api/agents" },

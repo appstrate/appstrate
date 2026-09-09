@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import type { AppEnv } from "../types/index.ts";
+import type { AgentManifest, AppEnv } from "../types/index.ts";
 import {
   getPackage,
   getPackageWithAccess,
@@ -26,7 +26,65 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
+import { agentReadIsSummary } from "../lib/package-access.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
+
+/**
+ * The agent's composition — what it is built FROM. Resolved only for a caller
+ * holding `agents:read`: a summary read omits the whole group, and with it the
+ * skills catalog lookup, which an `agents:run`-only caller has no scope for.
+ *
+ * Both branches project off the EFFECTIVE manifest, never off the package
+ * object (#878), but they expose different sets — a wire inconsistency that
+ * predates this code: a versioned detail lists every DECLARED skill (bare
+ * id + range, straight from the manifest — no catalog read) so the
+ * dependency-override UI can offer a pin for one that is missing, while the
+ * draft detail lists only skills the org catalog resolves, enriched with
+ * display metadata. `use-agent-readiness.ts` mirrors the server's
+ * missing-skill check against the draft array, so widening it here would
+ * silently stop the client flagging a missing skill. Unifying the two — one
+ * array of declared skills carrying `resolved` — is a wire change, tracked
+ * separately.
+ */
+async function buildDependencyGroups(
+  m: AgentManifest,
+  orgId: string,
+  versioned: boolean,
+): Promise<Record<string, unknown>> {
+  const skillDeps = versioned
+    ? Object.entries(
+        (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
+      ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
+    : (await resolveDeclaredSkills(m, orgId))
+        .filter((s) => s.resolved)
+        .map((s) => ({
+          id: s.id,
+          ...(s.version ? { version: s.version } : {}),
+          ...(s.name ? { name: s.name } : {}),
+          ...(s.description ? { description: s.description } : {}),
+        }));
+  return {
+    skills: skillDeps,
+    // AFPS §4.1 mcp_servers dependency group ({ id: version-range }). Agents
+    // can declare these via an imported manifest even though the dashboard
+    // editor doesn't surface them — return them so the detail response is a
+    // faithful projection of the manifest.
+    mcp_servers: Object.entries(
+      (m as { dependencies?: { mcp_servers?: Record<string, string> } }).dependencies
+        ?.mcp_servers ?? {},
+    ).map(([id, version]) => ({ id, version })),
+    integrations: parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
+      id: e.id,
+      version: e.version,
+      // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead
+      // of spreading the string into `["*"]`.
+      ...(e.tools !== undefined
+        ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
+        : {}),
+      ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+    })),
+  };
+}
 
 /**
  * Build the canonical Agent detail DTO — the exact object the `GET` agent
@@ -51,6 +109,11 @@ export async function buildAgentDetailDto(
   const { orgId, spaceId } = scope;
   const itemId = opts.itemId ?? getItemId(c);
   const requireAccess = opts.requireAccess !== false;
+  // `agents:run` without `agents:read`: the caller is handed what the launch
+  // form needs and nothing an author would call the agent's content — the same
+  // fields a system agent already withholds, plus the composition and the
+  // authoring metadata (RBAC spec §3.4).
+  const summaryOnly = agentReadIsSummary(c);
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
     requireAccess ? getPackageWithAccess(itemId, orgId, spaceId) : getPackage(itemId, orgId),
@@ -73,29 +136,7 @@ export async function buildAgentDetailDto(
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
-  // Both branches project off the EFFECTIVE manifest, never off the package
-  // object (#878), but they expose different sets — a wire inconsistency that
-  // predates this code: a versioned detail lists every DECLARED skill (bare
-  // id + range, straight from the manifest — no catalog read) so the
-  // dependency-override UI can offer a pin for one that is missing, while the
-  // draft detail lists only skills the org catalog resolves, enriched with
-  // display metadata. `use-agent-readiness.ts` mirrors the server's
-  // missing-skill check against the draft array, so widening it here would
-  // silently stop the client flagging a missing skill. Unifying the two — one
-  // array of declared skills carrying `resolved` — is a wire change, tracked
-  // separately.
-  const skillDeps = versioned
-    ? Object.entries(
-        (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
-      ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
-    : (await resolveDeclaredSkills(m, orgId))
-        .filter((s) => s.resolved)
-        .map((s) => ({
-          id: s.id,
-          ...(s.version ? { version: s.version } : {}),
-          ...(s.name ? { name: s.name } : {}),
-          ...(s.description ? { description: s.description } : {}),
-        }));
+  const dependencies = summaryOnly ? null : await buildDependencyGroups(m, orgId, versioned);
 
   const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
     spaceId,
@@ -129,27 +170,7 @@ export async function buildAgentDetailDto(
     // `{scope}` path params accept (issue #629).
     scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
-    dependencies: {
-      skills: skillDeps,
-      // AFPS §4.1 mcp_servers dependency group ({ id: version-range }). Agents
-      // can declare these via an imported manifest even though the dashboard
-      // editor doesn't surface them — return them so the detail response is a
-      // faithful projection of the manifest.
-      mcp_servers: Object.entries(
-        (m as { dependencies?: { mcp_servers?: Record<string, string> } }).dependencies
-          ?.mcp_servers ?? {},
-      ).map(([id, version]) => ({ id, version })),
-      integrations: parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
-        id: e.id,
-        version: e.version,
-        // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead
-        // of spreading the string into `["*"]`.
-        ...(e.tools !== undefined
-          ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
-          : {}),
-        ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
-      })),
-    },
+    ...(dependencies ? { dependencies } : {}),
     // The agent's ONE parameter schema, plus the per-space layers the
     // launch form needs: `values` are the editor's stored defaults and
     // `locked_fields` the fields it froze (not asked at launch, not
@@ -170,8 +191,6 @@ export async function buildAgentDetailDto(
           duration: lastRun.duration,
         }
       : null,
-    version_count: versionCount,
-    has_unarchived_changes: hasUnarchivedChanges,
     // What a run actually gets: the EFFECTIVE manifest's `timeout` clamped to
     // `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds` (or the platform default
     // when none is declared). Emitted UNCONDITIONALLY — the declared value is
@@ -179,8 +198,17 @@ export async function buildAgentDetailDto(
     // system agents, so making this field conditional too would leave a system
     // agent's cap undiscoverable from the API.
     effective_timeout_seconds: resolveRunTimeout(m.timeout).effectiveSeconds,
-    forked_from: rawItem?.forked_from ?? null,
-    ...(agent.source !== "system" && rawItem
+    // The authoring history: who it was forked from, how many versions stand
+    // behind it, whether the draft is ahead of them. A summary read omits it —
+    // a launcher does not edit or publish.
+    ...(summaryOnly
+      ? {}
+      : {
+          version_count: versionCount,
+          has_unarchived_changes: hasUnarchivedChanges,
+          forked_from: rawItem?.forked_from ?? null,
+        }),
+    ...(agent.source !== "system" && rawItem && !summaryOnly
       ? {
           manifest: m,
           updatedAt: rawItem.updatedAt,

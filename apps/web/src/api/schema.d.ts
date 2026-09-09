@@ -208,7 +208,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth.
+         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies` — the agent's composition — and keeps the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -288,7 +288,7 @@ export interface paths {
         };
         /**
          * Get agent model configuration
-         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).
+         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults). Readable with `agents:read` or `agents:run`: the launch form resolves the model a run will use from it, and the body carries no manifest and no prompt.
          */
         get: operations["getAgentModel"];
         /**
@@ -2839,7 +2839,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations).
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs` and `last_run` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `dependencies`, `version_count`, `has_unarchived_changes` and `forked_from`.
          */
         get: operations["getAgentPackage"];
         /**
@@ -4858,7 +4858,7 @@ export interface components {
                 /** @description Presentation order for schema properties */
                 property_order?: string[];
             };
-            dependencies: {
+            dependencies?: {
                 skills: components["schemas"]["AgentSkillRef"][];
                 /** @description AFPS §4.1 mcp_servers dependency group */
                 mcp_servers: {
@@ -4886,7 +4886,7 @@ export interface components {
             /** @description Number of published versions (0 for built-in agents) */
             version_count?: number;
             /** @description Source package ID if forked */
-            forked_from: string | null;
+            forked_from?: string | null;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
@@ -4920,7 +4920,7 @@ export interface components {
              */
             type: "agent" | "skill" | "mcp-server" | "integration";
             running_runs: number;
-            dependencies: {
+            dependencies?: {
                 skills?: {
                     [key: string]: string;
                 };

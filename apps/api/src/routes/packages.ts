@@ -70,6 +70,7 @@ import {
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
   packagePermission,
+  requireAgentRead,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
@@ -1728,7 +1729,10 @@ export function createPackagesRouter() {
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
     router.get(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
-      readGuard,
+      // `agents:run` opens the agent DETAIL too, in the summary projection the
+      // launch form reads its `input` from (§3.4). This route only: the
+      // listing above, the versions and the file explorer stay on `agents:read`.
+      rcfg.cfg.type === "agent" ? requireAgentRead : readGuard,
       rcfg.getHandler ?? makeGetHandler(rcfg),
     );
     router.put(

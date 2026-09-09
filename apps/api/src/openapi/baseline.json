@@ -579,7 +579,7 @@
         "operationId": "listAgents",
         "tags": ["Agents"],
         "summary": "List all agents",
-        "description": "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth.",
+        "description": "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies` — the agent's composition — and keeps the identity, labels and run counters a launcher picks an agent by.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1328,7 +1328,7 @@
         "operationId": "getAgentModel",
         "tags": ["Agents"],
         "summary": "Get agent model configuration",
-        "description": "Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).",
+        "description": "Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults). Readable with `agents:read` or `agents:run`: the launch form resolves the model a run will use from it, and the body carries no manifest and no prompt.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15662,7 +15662,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations).",
+        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs` and `last_run` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `dependencies`, `version_count`, `has_unarchived_changes` and `forked_from`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23353,16 +23353,7 @@
       },
       "AgentListItem": {
         "type": "object",
-        "required": [
-          "id",
-          "source",
-          "type",
-          "running_runs",
-          "dependencies",
-          "scope",
-          "keywords",
-          "version"
-        ],
+        "required": ["id", "source", "type", "running_runs", "scope", "keywords", "version"],
         "properties": {
           "id": {
             "type": "string"
@@ -23457,11 +23448,9 @@
           "source",
           "scope",
           "version",
-          "dependencies",
           "input",
           "running_runs",
           "last_run",
-          "forked_from",
           "effective_timeout_seconds"
         ],
         "properties": {

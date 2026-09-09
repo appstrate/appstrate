@@ -8,6 +8,7 @@ import { extractDependencies } from "@appstrate/core/dependencies";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard } from "@appstrate/core/permissions";
+import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { getOrgMember } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
@@ -35,6 +36,24 @@ export function packagePermission(
 export const PACKAGE_WRITE_PERMISSIONS = Object.values(PACKAGE_RESOURCES).map(
   (resource) => `${resource}:write` as Permission,
 );
+
+/**
+ * The read guard of the three agent routes `agents:run` also opens: the list,
+ * the detail, and the resolved model the launch form reads (RBAC spec §3.4).
+ * Every other agent surface keeps its `agents:read` / `agents:write` guard.
+ */
+export const requireAgentRead = requireAnyPermission(["agents:read", "agents:run"]);
+
+/**
+ * `agents:run` without `agents:read` — the caller sees what the launch form
+ * needs and nothing an author would call the agent's content.
+ *
+ * The three routes above answer this ONE question to shape their projection;
+ * none of them re-derives the condition.
+ */
+export function agentReadIsSummary(c: Context<AppEnv>): boolean {
+  return !c.get("permissions")?.has("agents:read");
+}
 
 export function spacePackagePermission(
   type: PackageType,

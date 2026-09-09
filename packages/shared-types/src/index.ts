@@ -512,7 +512,8 @@ export interface AgentListItem extends BasePackageListItem {
   schema_version?: string;
   author?: string;
   keywords: string[];
-  dependencies: {
+  /** Withheld from a summary read — `agents:run` without `agents:read`. */
+  dependencies?: {
     skills?: Record<string, string>;
     mcp_servers?: Record<string, string>;
     integrations?: Record<string, string>;
@@ -529,7 +530,11 @@ export interface AgentDetail {
   display_name?: string;
   description?: string;
   source: "system" | "local";
-  dependencies: {
+  /**
+   * The agent's composition. Withheld from a summary read — `agents:run`
+   * without `agents:read` (RBAC spec §3.4) — like `manifest` and `prompt`.
+   */
+  dependencies?: {
     // `version`/`name`/`description` are emitted only when present on the
     // manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
     skills: { id: string; version?: string; name?: string; description?: string }[];
@@ -576,7 +581,8 @@ export interface AgentDetail {
   callback_url?: string;
   version_count?: number;
   has_unarchived_changes?: boolean;
-  forked_from: string | null;
+  /** Authoring history: withheld from a summary read, with `version_count`. */
+  forked_from?: string | null;
   /**
    * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
    * platform default when it declares none) clamped to this deployment's

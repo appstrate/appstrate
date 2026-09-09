@@ -19,7 +19,7 @@ interface AgentConnectionsSectionProps {
 export function AgentConnectionsSection({ packageId, detail }: AgentConnectionsSectionProps) {
   const { t } = useTranslation(["agents"]);
 
-  const integrations = detail.dependencies.integrations ?? [];
+  const integrations = detail.dependencies?.integrations ?? [];
   const hasIntegrations = integrations.length > 0;
 
   if (!hasIntegrations) {

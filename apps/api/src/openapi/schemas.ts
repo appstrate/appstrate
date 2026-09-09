@@ -453,20 +453,13 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
-    // `running_runs`/`dependencies`/`scope`/`keywords`/`version` are always
-    // emitted by the GET /api/agents mapper. `display_name`/`description`/
-    // `schema_version`/`author` stay optional (manifest-derived, may be absent);
-    // `forked_from` is not emitted by the list endpoint (shared-type optional).
-    required: [
-      "id",
-      "source",
-      "type",
-      "running_runs",
-      "dependencies",
-      "scope",
-      "keywords",
-      "version",
-    ],
+    // `running_runs`/`scope`/`keywords`/`version` are always emitted by the
+    // GET /api/agents mapper. `display_name`/`description`/`schema_version`/
+    // `author` stay optional (manifest-derived, may be absent); `forked_from`
+    // is not emitted by the list endpoint (shared-type optional). And
+    // `dependencies` is withheld from a summary read (`agents:run` without
+    // `agents:read`), so it is optional too.
+    required: ["id", "source", "type", "running_runs", "scope", "keywords", "version"],
     properties: {
       id: { type: "string" },
       display_name: { type: "string" },
@@ -513,17 +506,18 @@ export const schemas = {
     // Always emitted by buildAgentDetailDto. `display_name`/`description`/
     // `updatedAt`/`lock_version` stay optional: system agents omit the last two,
     // and the manifest-derived display_name/description may be absent (the
-    // shared-type marks them optional to match).
+    // shared-type marks them optional to match). `dependencies` and
+    // `forked_from` are optional for a second reason: a summary read
+    // (`agents:run` without `agents:read`) withholds the composition and the
+    // authoring history along with the manifest and the prompt.
     required: [
       "id",
       "source",
       "scope",
       "version",
-      "dependencies",
       "input",
       "running_runs",
       "last_run",
-      "forked_from",
       "effective_timeout_seconds",
     ],
     properties: {
