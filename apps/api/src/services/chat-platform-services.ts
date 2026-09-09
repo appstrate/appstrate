@@ -249,13 +249,10 @@ export async function checkUsageAllowed(args: {
   sessionId: string | null;
   subscription: boolean;
 }): Promise<UsageRejection | null> {
-  // An organization whose deletion is reserved admits no new work. Same refusal
-  // as `createRun` and the proxy admission gate, in the shape this seam speaks:
-  // the chat module renders a rejection as an RFC 9457 problem response, so
-  // throwing here would surface as a 500 instead of the 409 the other two give.
-  // A turn admitted after the reservation writes an `llm_usage` row the org's
-  // cascade deletes, and a metering module that has read past it can never bill
-  // it. Ahead of the hook check: the reservation is a platform fact.
+  // A reserved organization admits no new work (see `refuseReservedForDeletion`
+  // for why), refused ahead of the hook because the reservation is a platform
+  // fact. Returned rather than thrown: this seam renders a rejection as the
+  // RFC 9457 problem response, so a throw would be a 500, not the 409.
   const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
   if (err) return { code: err.code, message: err.message, status: err.status };
 

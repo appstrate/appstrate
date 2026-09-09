@@ -495,14 +495,14 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
  * rebuild it (the debt is summed over rows that were just deleted, and a
  * consumed free-tier claim does not come back).
  *
- * A read alone could not carry that weight: it ran outside any lock, so a run
- * admitted between it and the deletion transaction still turned the module
- * teardown into a loss. The check and the reservation therefore commit
- * TOGETHER, holding the same per-org advisory key `createRun` takes before its
- * own count + INSERT — so a concurrent admission is either already visible to
- * the count here, or blocked until `deleting_at` is set, at which point
- * `createRun` refuses it (409 `org_deleting`). The deletability decided here
- * cannot be invalidated behind the modules' back.
+ * A read alone cannot carry that weight: outside a lock, a run admitted between
+ * it and the deletion transaction turns the module teardown into a loss. The
+ * check and the reservation therefore commit TOGETHER, holding the same per-org
+ * advisory key `createRun` takes before its own count + INSERT — so a
+ * concurrent admission is either already visible to the count here, or blocked
+ * until `deleting_at` is set, at which point `createRun` refuses it (409
+ * `org_deleting`). The deletability decided here cannot be invalidated behind
+ * the modules' back.
  *
  * Idempotent: a reservation that already stands is not an error, it is the
  * state a retried DELETE is meant to find. Whatever failed after the first

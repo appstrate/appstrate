@@ -597,9 +597,9 @@ function validateContribution(
  *
  * The nesting order is `SPACE_ROLE_PRESETS` itself, read strongest-first — core
  * says so at the declaration and `test/unit/lib/space-preset-nesting.test.ts`
- * checks it against the preset → permission matrix. A local copy of the tuple
- * was the same four strings with the ordering implicit in both places, so a
- * reorder in core changed which contributions boot and nothing said a word.
+ * checks it against the preset → permission matrix. Read it from core, never
+ * from a local copy of the four strings: a reorder in core must move this
+ * check with it, or it silently admits contributions it should refuse.
  */
 function assertPresetsUpwardClosed(
   presets: readonly SpaceRolePreset[],

@@ -55,11 +55,8 @@ export async function enforceSystemProxyAdmission(args: {
   resolved: ResolvedModel;
   usageContext: SystemProxyUsageContext;
 }): Promise<void> {
-  // An organization whose deletion is reserved admits no new work — the same
-  // refusal `createRun` makes, from the same function, because this seam is the
-  // OTHER way billable work enters. A proxy call admitted after the reservation
-  // writes an `llm_usage` row that the org's cascade deletes, and a metering
-  // module that has already read past it can never bill it. Refused ahead of
+  // A reserved organization admits no new work (see `refuseReservedForDeletion`
+  // for why); this seam is the OTHER way billable work enters. Refused ahead of
   // the hook check: the reservation is a platform fact, true with or without a
   // metering module.
   await refuseReservedForDeletion(db, args.orgId);

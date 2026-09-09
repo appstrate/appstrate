@@ -26,10 +26,10 @@
  *
  * It lives in core rather than in `apps/api` because a module cannot import
  * from the platform's source tree: without this, every module route re-derives
- * the malformed/invalid split by hand, and each copy phrases its own 400 —
- * which is how one of them ended up reporting every schema failure as
- * "plan_id is required". Hono is an optional peer dependency of this package
- * and only its `Context` TYPE is touched here.
+ * the malformed/invalid split by hand and each copy phrases its own 400, so the
+ * same bad body answers differently depending on which router received it. Hono
+ * is an optional peer dependency of this package and only its `Context` TYPE is
+ * touched here.
  */
 
 import type { Context } from "hono";

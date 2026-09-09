@@ -2,20 +2,19 @@
 -- organization deletion takes before anything outside this database observes
 -- it.
 --
--- WHY. `DELETE /api/orgs/:orgId` ran a lock-free deletability check, then
--- emitted `onOrgDelete` — where modules cancel a Stripe subscription and drop
--- rows of their own — then opened the deletion transaction, which re-checks
--- in-progress runs UNDER the per-org run-admission advisory lock and refuses
--- when it finds any. A run admitted in that window turned the refusal into a
--- surviving organization stripped of everything the handlers tore down, with
--- no repair path. The column closes it: the check and the reservation now
--- commit together under that lock, run admission refuses a reserved org, and a
--- retried DELETE resumes from a reservation that is already standing.
+-- WHY. `DELETE /api/orgs/:orgId` emits `onOrgDelete` — where modules cancel a
+-- Stripe subscription and drop rows of their own — before the deletion
+-- transaction, which refuses while runs are in progress. This column carries
+-- the deletability decision across that gap: the check and the stamp commit
+-- together under the per-org run-admission advisory lock, run admission refuses
+-- a reserved org, and a retried DELETE resumes from a standing reservation. A
+-- run admitted between a lock-free check and the transaction would otherwise
+-- turn the refusal into an organization stripped of what the handlers tore
+-- down, with no repair path.
 --
 -- SHAPE ONLY. No row values are written here (`docs/NO_TRANSITIONAL_CODE.md`
 -- §2); every existing organization keeps NULL, which is exactly "not being
--- deleted". Nothing reads the column until the code that writes it ships in
--- the same release.
+-- deleted".
 --
 -- ROLLBACK: safe. A previous build ignores the column, and a NULL in it means
 -- what the absent column meant.

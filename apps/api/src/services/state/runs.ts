@@ -492,9 +492,11 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<vo
  * Is this organization's deletion reserved?
  *
  * `reserveOrgDeletion` stamps `deleting_at` while holding the per-org admission
- * lock, so a caller that reads this under the same key sees the reservation or
- * commits strictly before it — never in between, which is the window where the
- * modules' teardown outruns the work still being admitted.
+ * lock. A caller reading this UNDER that key — `enforceOrgConcurrencyCap` — sees
+ * the reservation or commits strictly before it, with no window in between. The
+ * proxy and chat seams read without the lock, so a read that races the stamp by
+ * microseconds can admit one last call; the deletion transaction's own
+ * in-progress-run count and the drain that follows are what bound that.
  */
 export async function isOrgDeletionReserved(
   executor: DbTx | typeof db,
@@ -522,11 +524,12 @@ export function orgDeletingError(): ApiError {
  * Refuse admission into an organization whose deletion is reserved.
  *
  * Every seam that admits billable work calls this: run creation (below, under
- * the admission lock, beside the concurrency count) and the proxy admission
- * gate. A row admitted after the reservation is cascade-deleted with the org,
- * and any `llm_usage` it wrote disappears with it — including rows a metering
- * module has already advanced its cursor past, which is revenue that can never
- * be billed.
+ * the admission lock, beside the concurrency count — no window) and the proxy
+ * admission gate, which reads outside the lock and so may admit one call that
+ * races the stamp. A row admitted after the reservation is cascade-deleted
+ * with the org, and any `llm_usage` it wrote disappears with it — including
+ * rows a metering module has already advanced its cursor past, which is
+ * revenue that can never be billed.
  */
 export async function refuseReservedForDeletion(
   executor: DbTx | typeof db,

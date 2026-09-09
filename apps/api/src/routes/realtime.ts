@@ -107,10 +107,10 @@ interface SSEAuthResult {
  *
  * The org half is `orgHalfFor(…, await principalGrants(…))`, exactly as the
  * HTTP pipeline computes it: a grant a module made to this person — the ee
- * module's billing managers — is part of their org standing, and a stream that
- * left it out answered a narrower caller than every other transport.
- * `principalGrants` returns nothing for the key branch, which is where the
- * session-only nature of those grants is expressed.
+ * module's billing managers — is part of their org standing, so the stream
+ * answers the same caller every other transport does. `principalGrants` returns
+ * nothing for the key branch, which is where the session-only nature of those
+ * grants is expressed.
  */
 async function resolveSpaceGrants(
   c: Context<AppEnv>,
