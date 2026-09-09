@@ -127,10 +127,14 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   operator stops seeing other members' runs**. It narrows every surface a run
   reaches — the run list, an agent's run list, run detail, logs, cancel, the
   in-flight counts and `last_run` on the agents pages, a schedule's run list,
-  `rerun_from` (replaying a run returns its input), and the run outputs in the
-  file gallery — and a run you may not read answers `404`, never `403`.
-  Bulk-deleting an agent's runs takes `runs:read-all` alongside `runs:delete`:
-  it spans the whole space.
+  `rerun_from` (replaying a run returns its input), the run outputs in the file
+  gallery, and the realtime streams (`run_update`, `run_log` and `run_metric`
+  carry only your runs, and the single-run stream refuses one you may not read)
+  — and a run you may not read answers `404`, never `403`. Bulk-deleting an
+  agent's runs takes `runs:read-all` alongside `runs:delete`: it spans the whole
+  space. One consequence runs the other way: an end-user now receives the log
+  and metric frames of its own runs, which those two channels used to drop
+  wholesale for want of an actor in their payload.
   `GET /api/runs?user=me` is now strictly your own runs for every caller,
   end-user and actor-less runs included, whether or not you hold `read-all`.
 

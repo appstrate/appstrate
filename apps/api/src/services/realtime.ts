@@ -52,6 +52,13 @@ type Subscriber = {
      */
     userId?: string;
     endUserId?: string;
+    /**
+     * Does the subscriber hold `runs:read-all` in the streamed space? Without
+     * it the run channels carry only the runs this principal launched. Absent
+     * on a subscriber with no principal identity at all — the in-process
+     * `run-wait` waker, whose route already checked the run's visibility.
+     */
+    readAll?: boolean;
   };
   send: (event: RealtimeEvent) => void;
 };
@@ -88,6 +95,26 @@ function anyAccepts(channel: RealtimeChannel): boolean {
   return false;
 }
 
+/**
+ * Run-read gate (RBAC spec §3.4), applied to every run channel.
+ *
+ * `runs:read-all` is the whole space; without it a principal receives only the
+ * frames of the runs it launched — `user_id` for a dashboard session or an API
+ * key, `end_user_id` for an end-user. Strict: a frame whose actor column is
+ * NULL (an end-user's run seen from a dashboard stream, or a row from a launch
+ * path that predates #735) reaches `read-all` subscribers alone.
+ *
+ * A subscriber carrying neither identity is not a principal — it is the
+ * in-process `run-wait` waker, which subscribes on behalf of a route that has
+ * already checked what the caller may read.
+ */
+function readsRun(sub: Subscriber, raw: Record<string, unknown>): boolean {
+  if (sub.filter.readAll) return true;
+  if (sub.filter.endUserId !== undefined) return raw.end_user_id === sub.filter.endUserId;
+  if (sub.filter.userId !== undefined) return raw.user_id === sub.filter.userId;
+  return true;
+}
+
 /** Convert snake_case keys from PG NOTIFY to camelCase for API consistency. */
 function snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -115,16 +142,9 @@ function handleRunUpdate(payload: string): void {
       if (sub.filter.spaceId !== raw.space_id) continue;
       if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
       if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
-      // Actor gate: an end-user subscription (endUserId set) receives ONLY
-      // its own runs — org+space scope alone would leak every other
-      // end-user's runs on a non-pinned SSE. Dashboard members / API keys
-      // (endUserId undefined) legitimately see every run in the space, so they
-      // keep the org/space gate above. The `run_update` NOTIFY payload carries
-      // `end_user_id` (packages/db/src/notify.ts), so the match is exact.
-      // Mirrors the `connection_update` channel's actor filter below.
-      if (sub.filter.endUserId !== undefined && raw.end_user_id !== sub.filter.endUserId) {
-        continue;
-      }
+      // Run-read gate: the payload carries both actor columns
+      // (packages/db/src/notify.ts), so ownership is an exact match.
+      if (!readsRun(sub, raw)) continue;
       sub.send({ event: "run_update", data: parsed.data });
     }
   } catch (err) {
@@ -153,15 +173,10 @@ function handleRunLogInsert(payload: string): void {
       if (sub.filter.spaceId !== raw.space_id) continue;
       if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
       if (!sub.filter.isAdmin && raw.level === "debug") continue;
-      // Actor gate: the `run_log_insert` NOTIFY payload carries no
-      // `end_user_id` (packages/db/src/notify.ts — notify_run_log_insert()
-      // emits only org/space/run scope), so an end-user subscription cannot be
-      // proven to own this log row. Skip rather than leak another end-user's
-      // logs (same "skip rather than leak" posture as `connection_update`).
-      // Dashboard members / API keys (endUserId undefined) are unaffected.
-      // Per-end-user log streaming would need `end_user_id` added to the
-      // trigger payload (a DB migration — see the report).
-      if (sub.filter.endUserId !== undefined) continue;
+      // Run-read gate: `notify_run_log_insert()` resolves the run's actor
+      // alongside its space, so a log frame is gated exactly like the
+      // `run_update` frame of the same run — an end-user included.
+      if (!readsRun(sub, raw)) continue;
       sub.send({ event: "run_log", data: parsed.data });
     }
   } catch (err) {
@@ -174,10 +189,10 @@ function handleRunLogInsert(payload: string): void {
 // `run_metric` carries the running cumulative cost + token usage
 // emitted by the event sink after each `appstrate.metric` event,
 // throttled per run by the broadcaster. Routed to the same
-// org/space/run filters as `run_update` and `run_log_insert`
-// — no new isolation rule. The scope filters here are the ONLY
-// tenant gate for this channel; do not relax without updating the
-// broadcaster payload contract.
+// org/space/run/actor filters as `run_update` and `run_log_insert`
+// — no isolation rule of its own. Those filters are the ONLY gate for
+// this channel; do not relax without updating the broadcaster payload
+// contract.
 function handleRunMetric(payload: string): void {
   try {
     if (!anyAccepts("run_metric")) return;
@@ -195,14 +210,10 @@ function handleRunMetric(payload: string): void {
       if (sub.filter.spaceId !== raw.space_id) continue;
       if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
       if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
-      // Actor gate: the `run_metric` NOTIFY payload carries no `end_user_id`
-      // (packages/db/src/notify.ts — RunMetricNotifyPayload has org/space/run/
-      // package scope only), so an end-user subscription cannot be proven to
-      // own this metric row. Skip rather than leak another end-user's cost /
-      // token metrics. Dashboard members / API keys (endUserId undefined) are
-      // unaffected. Per-end-user metric streaming would need `end_user_id`
-      // added to the broadcast payload (a DB migration — see the report).
-      if (sub.filter.endUserId !== undefined) continue;
+      // Run-read gate: the broadcaster reads the run's actor into the payload
+      // (RunMetricNotifyPayload), so cost and token frames follow the same
+      // ownership rule as the run itself.
+      if (!readsRun(sub, raw)) continue;
       sub.send({ event: "run_metric", data: parsed.data });
     }
   } catch (err) {

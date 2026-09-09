@@ -159,7 +159,10 @@ describe("NOTIFY triggers (regression)", () => {
     expect(received.every((r) => r.status === "running")).toBe(true);
   });
 
-  it("notify_run_log_insert fires on run_logs INSERT", async () => {
+  it("notify_run_log_insert emits the run's scope AND its actor", async () => {
+    // `run_logs` carries no actor column: the trigger resolves it from `runs`
+    // alongside the space, because the SSE fan-out gates each log frame on
+    // `runs:read-all` OR ownership and has nothing else to decide from.
     const run = await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
@@ -167,10 +170,34 @@ describe("NOTIFY triggers (regression)", () => {
       userId: ctx.user.id,
       status: "running",
     });
+
+    const received: Array<Record<string, unknown>> = [];
+    await listenClient.listen("run_log_insert", (raw) => {
+      try {
+        const payload = JSON.parse(raw) as Record<string, unknown>;
+        if (payload.run_id === run.id) received.push(payload);
+      } catch {
+        /* ignore */
+      }
+    });
+
     await seedRunLog({
       runId: run.id,
       orgId: ctx.orgId,
       level: "info",
+      message: "trigger smoke test",
+    });
+    for (let i = 0; i < 40 && received.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      run_id: run.id,
+      org_id: ctx.orgId,
+      space_id: ctx.defaultSpaceId,
+      user_id: ctx.user.id,
+      end_user_id: null,
       message: "trigger smoke test",
     });
   });

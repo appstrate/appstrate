@@ -24,6 +24,14 @@ export interface RunMetricNotifyPayload {
   org_id: string;
   /** Owning space (cross-space isolation gate). */
   space_id: string;
+  /**
+   * The run's actor — the run-read gate on the SSE fan-out
+   * (`services/realtime.ts`): a subscriber without `runs:read-all` receives a
+   * metric frame only for the runs it launched. Exactly one of the two is set
+   * on a live run; both are NULL only on rows older than #735.
+   */
+  user_id: string | null;
+  end_user_id: string | null;
   /** Agent id, used by the per-agent runs SSE stream filter. */
   package_id: string;
   /** Cumulative token usage as last reported by the runner. */
@@ -100,13 +108,22 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     RETURNS TRIGGER AS $$
     DECLARE
       _space_id text;
+      _user_id text;
+      _end_user_id text;
     BEGIN
-      SELECT space_id INTO _space_id FROM runs WHERE id = NEW.run_id;
+      -- The run actor rides along with its space: the SSE fan-out gates each
+      -- log frame on runs:read-all OR ownership, and run_logs itself carries
+      -- no actor column to decide that from.
+      SELECT space_id, user_id, end_user_id
+        INTO _space_id, _user_id, _end_user_id
+        FROM runs WHERE id = NEW.run_id;
       PERFORM pg_notify('run_log_insert', json_build_object(
         'id', NEW.id,
         'run_id', NEW.run_id,
         'org_id', NEW.org_id,
         'space_id', _space_id,
+        'user_id', _user_id,
+        'end_user_id', _end_user_id,
         'type', NEW.type,
         'level', NEW.level,
         'event', NEW.event,

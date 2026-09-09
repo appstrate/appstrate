@@ -700,6 +700,9 @@ describe("view as role", () => {
         packageId: agentPkg.id,
         orgId: owner.orgId,
         spaceId: owner.defaultSpaceId,
+        // A previewed `viewer` holds `runs:read` and not `read-all`, so the
+        // frames it may see at all are the previewer's own runs.
+        userId: owner.user.id,
       });
 
       const response = await stream({ view: persona("member", "preset:viewer") });
@@ -712,6 +715,7 @@ describe("view as role", () => {
           org_id: owner.orgId,
           space_id: owner.defaultSpaceId,
           run_id: run.id,
+          user_id: owner.user.id,
           level,
           message,
         });

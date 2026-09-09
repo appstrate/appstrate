@@ -23,6 +23,7 @@ import {
   validateViewAs,
 } from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
+import { ownsRun } from "../lib/run-visibility.ts";
 import {
   reportPermissionDenial,
   VIEW_AS_ACTIVE_HEADER,
@@ -95,6 +96,12 @@ interface SSEAuthResult {
    * `runs:delete`: `runs:read` opens the stream for everyone, so it cannot discriminate.
    */
   canReadDebugLogs: boolean;
+  /**
+   * `runs:read-all` in the streamed space. `runs:read` opens the stream for
+   * every principal but means "the runs I launched"; this is what widens the
+   * three run channels to the whole space (RBAC spec §3.4).
+   */
+  canReadEveryRun: boolean;
   spaceId: string;
 }
 
@@ -198,8 +205,10 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
-      // From the ceilinged set, not `grants`: the key's scopes bound debug-log visibility.
+      // From the ceilinged set, not `grants`: the key's scopes bound debug-log
+      // visibility and the span of runs the stream carries.
       canReadDebugLogs: permissions.has("runs:delete"),
+      canReadEveryRun: permissions.has("runs:read-all"),
       spaceId: keyInfo.spaceId,
     };
   }
@@ -273,6 +282,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     userId: session.user.id,
     orgId,
     canReadDebugLogs: grants.has("runs:delete"),
+    canReadEveryRun: grants.has("runs:read-all"),
     spaceId,
   };
 }
@@ -287,6 +297,8 @@ function openRealtimeStream(
     orgId: string;
     spaceId: string;
     isAdmin: boolean;
+    /** Caller's `runs:read-all` grant — see {@link SSEAuthResult.canReadEveryRun}. */
+    readAll: boolean;
     /**
      * Actor identity carried into the subscriber so the
      * `connection_update` channel (and any future per-actor channel) can
@@ -494,11 +506,8 @@ function openRealtimeStream(
   });
 }
 
-async function sendInitialRunSnapshot(
-  runId: string,
-  scope: { orgId: string; spaceId: string },
-  send: (evt: RealtimeEvent) => void,
-): Promise<void> {
+/** The run row a per-run stream reads twice: once to decide the 404, once to snapshot. */
+async function loadRunForStream(runId: string, scope: { orgId: string; spaceId: string }) {
   const [row] = await db
     .select({
       id: runs.id,
@@ -517,7 +526,21 @@ async function sendInitialRunSnapshot(
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)))
     .limit(1);
+  return row ?? null;
+}
 
+/**
+ * The stream's first frame. Deliberately read AFTER the subscriber is
+ * registered — a row read before that could be superseded by an update the
+ * subscriber was not yet there to hear, and the stream would sit on a status
+ * that has already moved on.
+ */
+async function sendInitialRunSnapshot(
+  runId: string,
+  scope: { orgId: string; spaceId: string },
+  send: (evt: RealtimeEvent) => void,
+): Promise<void> {
+  const row = await loadRunForStream(runId, scope);
   if (!row) return;
   send({
     event: "run_update",
@@ -547,9 +570,27 @@ export function createRealtimeRouter() {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 
-    const runId = c.req.param("id");
+    const runId = c.req.param("id")!;
     const subId = `run-${runId}-${crypto.randomUUID().slice(0, 8)}`;
     const verbose = c.req.query("verbose") === "true";
+
+    // Refuse the subscription instead of filtering every frame of it, with the
+    // same 404 the HTTP run routes answer: a run the caller may not read must
+    // be indistinguishable from one that does not exist, on this transport
+    // too. A run id with no row is NOT refused — the SPA opens this stream the
+    // moment it fires a launch, before the row is necessarily visible here —
+    // and such a stream simply carries no snapshot.
+    const row = await loadRunForStream(runId, {
+      orgId: validated.orgId,
+      spaceId: validated.spaceId,
+    });
+    if (
+      row &&
+      !validated.canReadEveryRun &&
+      !ownsRun({ type: "user", id: validated.userId }, row)
+    ) {
+      throw notFound("Run not found");
+    }
 
     return openRealtimeStream(
       c,
@@ -559,6 +600,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         spaceId: validated.spaceId,
         isAdmin: validated.canReadDebugLogs,
+        readAll: validated.canReadEveryRun,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -585,6 +627,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         spaceId: validated.spaceId,
         isAdmin: validated.canReadDebugLogs,
+        readAll: validated.canReadEveryRun,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
@@ -607,6 +650,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         spaceId: validated.spaceId,
         isAdmin: validated.canReadDebugLogs,
+        readAll: validated.canReadEveryRun,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },

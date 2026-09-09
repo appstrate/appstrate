@@ -505,6 +505,113 @@ describe("realtime service (integration)", () => {
     });
   });
 
+  // ── run-read gate (runs:read vs runs:read-all) ──────────────
+  //
+  // The three run channels carry the same rule the REST run routes apply,
+  // frame by frame instead of row by row: `readAll` is the whole space,
+  // otherwise a principal receives only the runs it launched. The fixture is
+  // one frame per attribution — the subscriber's own, a colleague's, an
+  // end-user's and an actor-less one — because a gate that is right for the
+  // first pair and wrong for the rest is the failure this pins.
+
+  describe("run-read gate", () => {
+    const SCOPE = { orgId: "org-vis", spaceId: "space-vis" };
+
+    /** Fire one frame per attribution on `channel` and report which arrived. */
+    async function framesFor(
+      filter: Parameters<typeof addSubscriber>[0]["filter"],
+      channel: "run_update" | "run_log_insert" | "run_metric",
+    ): Promise<string[]> {
+      const received: string[] = [];
+      const id = `sub-vis-${channel}-${crypto.randomUUID().slice(0, 8)}`;
+      trackSubscriber(id);
+      addSubscriber({
+        id,
+        filter,
+        send: (evt) => {
+          const data = evt.data as { message?: string; error?: string; runId?: string };
+          received.push(data.message ?? data.error ?? data.runId ?? "");
+        },
+      });
+
+      const actors = [
+        { label: "mine", user_id: "usr-mine", end_user_id: null },
+        { label: "colleague", user_id: "usr-other", end_user_id: null },
+        { label: "end-user", user_id: null, end_user_id: "eu-mine" },
+        { label: "actor-less", user_id: null, end_user_id: null },
+      ];
+      for (const actor of actors) {
+        const common = { org_id: SCOPE.orgId, space_id: SCOPE.spaceId, ...actor };
+        if (channel === "run_update") {
+          await pgNotify("run_update", {
+            ...common,
+            id: `run-${actor.label}`,
+            status: "running",
+            // The label rides in a payload field the frame keeps, so the
+            // assertion names the attribution rather than an index.
+            error: actor.label,
+          });
+        } else if (channel === "run_log_insert") {
+          await pgNotify("run_log_insert", {
+            ...common,
+            run_id: `run-${actor.label}`,
+            level: "info",
+            message: actor.label,
+          });
+        } else {
+          await pgNotify("run_metric", {
+            ...common,
+            run_id: actor.label,
+            package_id: "@scope/p",
+            token_usage: null,
+            cost_so_far: 0,
+          });
+        }
+      }
+      await wait();
+      removeSubscriber(id);
+      return received;
+    }
+
+    it("gives a member without runs:read-all only its own runs, on all three channels", async () => {
+      const filter = { ...SCOPE, isAdmin: true, userId: "usr-mine", readAll: false };
+      expect(await framesFor(filter, "run_update")).toEqual(["mine"]);
+      expect(await framesFor(filter, "run_log_insert")).toEqual(["mine"]);
+      expect(await framesFor(filter, "run_metric")).toEqual(["mine"]);
+    });
+
+    it("gives a member holding runs:read-all every run in the space", async () => {
+      const filter = { ...SCOPE, isAdmin: true, userId: "usr-mine", readAll: true };
+      expect(await framesFor(filter, "run_update")).toEqual([
+        "mine",
+        "colleague",
+        "end-user",
+        "actor-less",
+      ]);
+      expect(await framesFor(filter, "run_log_insert")).toEqual([
+        "mine",
+        "colleague",
+        "end-user",
+        "actor-less",
+      ]);
+      expect(await framesFor(filter, "run_metric")).toEqual([
+        "mine",
+        "colleague",
+        "end-user",
+        "actor-less",
+      ]);
+    });
+
+    it("gives an end-user its own run's logs and metrics, not only its status", async () => {
+      // Both payloads now carry the run's actor, so an end-user is no longer
+      // skipped wholesale on these two channels.
+      const filter = { ...SCOPE, isAdmin: true, endUserId: "eu-mine", readAll: false };
+      expect(await framesFor(filter, "run_update")).toEqual(["end-user"]);
+      expect(await framesFor(filter, "run_log_insert")).toEqual(["end-user"]);
+      expect(await framesFor(filter, "run_metric")).toEqual(["end-user"]);
+    });
+  });
+
   // ── channel subscription filter ─────────────────────────────
   //
   // A subscriber may declare the channels it consumes. The global dashboard
