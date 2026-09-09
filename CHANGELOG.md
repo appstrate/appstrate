@@ -43,7 +43,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and every skill or MCP-server route, still answers 403. It is a preset and not a custom role on purpose —
   custom roles need the `custom_roles` feature, and this reach has to exist on
   the open-source build as a code constant. Assign it wherever the other four
-  are offered, including as a space's default role. The presets stop being a
+  are offered, including as a space's default role. In the dashboard, the
+  sidebar entries and the routes ask for the permission their page needs — so
+  the agent and skill editors now refuse a caller without `agents:write` /
+  `skills:write` up front, instead of opening a form whose save would answer 403. The presets stop being a
   single ladder here: `runner` and `viewer` grant things the other does not, so
   neither is "above" the other. Migration **0060** widens the three space-role
   CHECK constraints; it is applied automatically at boot, with no operator step.
