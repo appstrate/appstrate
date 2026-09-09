@@ -250,6 +250,23 @@ describe("multi-space skill distribution — access decides the sources", () => 
     expect(stderr()).not.toMatch(/not accessible/);
   });
 
+  it("warns when the pinned space died, and still syncs the spaces that live", async () => {
+    // The pin no longer supplies any skill, so nothing else in the run would
+    // notice it broke — but it is still what `.mcp.json` sends.
+    installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_library"] });
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "library-only",
+      "shared",
+    ]);
+    const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
+    expect(mcp.mcpServers.appstrate.headers["X-Space-Id"]).toBe("spc_active");
+  });
+
   it("narrows to syncSpaces, and skips a configured space that access no longer covers", async () => {
     installSpaces(TWO_SPACES, BOTH);
     await updateProfile("default", { syncSpaces: ["spc_library"] });

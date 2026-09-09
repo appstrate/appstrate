@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate skills sync` — the pinned space's skills as Agent Skills
- * directories, run by a *machine*: a Claude Code marketplace `command` source
+ * `appstrate skills sync` — the skills of every space this profile reaches, as
+ * Agent Skills directories, run by a *machine*: a marketplace `command` source
  * re-runs it once per session in the background. So `--print-path` writes
  * exactly one stdout line and only on success, and a per-skill failure must
  * NOT fail the process — Claude Code discards a run that exits non-zero, which
@@ -566,6 +566,13 @@ async function selectedSpaces(
   report: Report,
 ): Promise<string[]> {
   const spaces = await listSpaces(profileName);
+  // Skill sources no longer depend on the pin, so a pin that died would sync
+  // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
+  // else notices any more: say it here, where the space list is already in hand.
+  if (profile.spaceId && !spaces.some((space) => space.id === profile.spaceId))
+    report.note(
+      `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused. Run: appstrate space switch`,
+    );
   if (explicit) return [...new Set(explicit.map((ref) => explicitSpaceId(spaces, ref)))];
   if (!profile.syncSpaces) return spaces.map((space) => space.id);
   // A stored list outlives the grants it was written against. An id this
