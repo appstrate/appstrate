@@ -121,8 +121,11 @@ async function count(query: string): Promise<number> {
   return Number(rows[0]?.n ?? -1);
 }
 
+/** One entry of a `space_assignments` / `signup_space_assignments` snapshot. */
+type SpaceAssignment = { space_id: string; preset_role: string };
+
 /** Read one jsonb value back as parsed JSON, whatever the driver hands over. */
-async function json<T>(query: string): Promise<T> {
+async function json<T = SpaceAssignment[]>(query: string): Promise<T> {
   const { rows } = await pg.query<{ v: unknown }>(query);
   const value = rows[0]?.v;
   return (typeof value === "string" ? JSON.parse(value) : value) as T;
@@ -201,7 +204,7 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     //    `invitation-space-assignments.test.ts` rather than on a case that
     //    would have to hand-write the same snapshot.
     expect(
-      await json(
+      await json<SpaceAssignment[]>(
         `SELECT space_assignments AS v FROM org_invitations WHERE id = 'inv_0008_pending'`,
       ),
     ).toEqual([
@@ -252,7 +255,7 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     const migration = await Bun.file(MIGRATION_0056).text();
     await exec(`BEGIN; ${migration.slice(migration.indexOf("-- ═══ G."))} COMMIT;`);
     const policy = () =>
-      json(
+      json<{ role: string; assignments: SpaceAssignment[] }>(
         `SELECT jsonb_build_object('role', signup_role, 'assignments', signup_space_assignments) AS v
            FROM oauth_clients WHERE id = 'oac_0008'`,
       );
@@ -292,7 +295,7 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     await runScript();
 
     expect(
-      await json(
+      await json<SpaceAssignment[]>(
         `SELECT signup_space_assignments AS v FROM oauth_clients WHERE id = 'oac_0008_set'`,
       ),
     ).toEqual([{ space_id: SPACE_OTHER, preset_role: "builder" }]);
@@ -303,7 +306,9 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
       `UPDATE org_invitations SET space_assignments = '[{"space_id":"${SPACE_OTHER}","preset_role":"builder"}]'::jsonb WHERE id = 'inv_0008_pending'`,
     );
     const snapshot = () =>
-      json(`SELECT space_assignments AS v FROM org_invitations WHERE id = 'inv_0008_pending'`);
+      json<SpaceAssignment[]>(
+        `SELECT space_assignments AS v FROM org_invitations WHERE id = 'inv_0008_pending'`,
+      );
 
     await runScript();
 
