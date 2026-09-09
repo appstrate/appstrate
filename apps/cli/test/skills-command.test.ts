@@ -1240,3 +1240,62 @@ async function snapshot(root: string): Promise<Record<string, string>> {
   await walk(root, "");
   return out;
 }
+
+describe("skills sync — multiple spaces", () => {
+  it("unions selected spaces, scopes downloads, and keeps MCP in the active space", async () => {
+    const second = { id: "@acme/other", skillMd: skillMd("other", "Other skill.") };
+    createSkillServer([...ONE_SKILL, second]).install();
+    const serve = globalThis.fetch;
+    const seen: string[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const space = new Headers(init?.headers).get("X-Space-Id");
+      if (path === "/api/spaces")
+        return Response.json({
+          data: [
+            { id: "spc_1", name: "Active" },
+            { id: "spc_2", name: "Library" },
+          ],
+        });
+      if (path === "/api/packages/skills")
+        return Response.json({
+          data:
+            space === "spc_1"
+              ? [{ id: ONE_SKILL[0]!.id }]
+              : [{ id: ONE_SKILL[0]!.id }, { id: second.id }],
+        });
+      if (path.includes("other")) expect(space).toBe("spc_2");
+      seen.push(path);
+      return serve(input, init);
+    }) as typeof fetch;
+    const { io } = createMemoryIO();
+    await skillsSyncCommand({ space: ["spc_1", "Library", "spc_2"] }, io);
+    expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
+    expect(
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
+        "X-Space-Id"
+      ],
+    ).toBe("spc_1");
+    expect(await exists(join(pluginRoot(), "skills", "other", "SKILL.md"))).toBe(true);
+  });
+});
+
+it("uses stored sync spaces, supports an empty selection, and explicit spaces replace it", async () => {
+  const { updateProfile } = await import("../src/lib/config.ts");
+  await updateProfile("default", { syncSpaces: [] });
+  createSkillServer(ONE_SKILL).install();
+  const serve = globalThis.fetch;
+  globalThis.fetch = (async (input, init) =>
+    new URL(String(input)).pathname === "/api/spaces"
+      ? Response.json({ data: [{ id: "spc_1", name: "Active" }] })
+      : serve(input, init)) as typeof fetch;
+  const { io } = createMemoryIO();
+  await skillsSyncCommand({}, io);
+  expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
+  expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
+  await skillsSyncCommand({ space: ["spc_1"] }, io);
+  expect(await readdir(join(pluginRoot(), "skills"))).toHaveLength(1);
+  await updateProfile("default", { orgId: "org_2" });
+  const profile = await (await import("../src/lib/config.ts")).getProfile("default");
+  expect(profile?.syncSpaces).toBeUndefined();
+});

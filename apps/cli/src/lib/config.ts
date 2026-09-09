@@ -32,6 +32,7 @@ export interface Profile {
   email: string;
   orgId?: string;
   spaceId?: string;
+  syncSpaces?: string[];
 }
 
 export interface Config {
@@ -127,12 +128,22 @@ export async function readConfig(): Promise<Config> {
     ) {
       continue;
     }
+    if (
+      row.syncSpaces !== undefined &&
+      (!Array.isArray(row.syncSpaces) ||
+        !row.syncSpaces.every((id) => typeof id === "string" && id.trim().length > 0))
+    ) {
+      throw new Error(`Invalid syncSpaces for profile "${name}": expected space IDs.`);
+    }
     profiles[name] = {
       instance: row.instance,
       userId: row.userId,
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
       spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
+      ...(Array.isArray(row.syncSpaces)
+        ? { syncSpaces: [...new Set(row.syncSpaces as string[])] }
+        : {}),
     };
   }
   return { defaultProfile, profiles };
@@ -183,6 +194,7 @@ export async function updateProfile(name: string, patch: Partial<Profile>): Prom
     throw new Error(`Profile "${name}" missing from config — internal invariant broken.`);
   }
   const next: Profile = { ...existing, ...patch };
+  if ("orgId" in patch && patch.orgId !== existing.orgId) delete next.syncSpaces;
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) delete (next as unknown as Record<string, unknown>)[k];
   }

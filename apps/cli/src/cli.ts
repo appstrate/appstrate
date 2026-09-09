@@ -541,6 +541,11 @@ skillsGroup
     `Destination to write (repeatable): ${SYNC_TARGETS.join(" | ")}. Default: claude-plugin.`,
     collectTarget,
   )
+  .option(
+    "--space <space>",
+    "Space ID or name to sync (repeatable; overrides syncSpaces).",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
   .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
   .option(
     "--print-path",
@@ -550,6 +555,7 @@ skillsGroup
   .action(
     async (opts: {
       target?: SyncTarget[];
+      space?: string[];
       source?: SkillSource;
       printPath?: boolean;
       dryRun?: boolean;
@@ -558,6 +564,7 @@ skillsGroup
       await skillsSyncCommand({
         profile: globalOpts.profile,
         target: opts.target,
+        space: opts.space,
         source: opts.source,
         printPath: opts.printPath,
         dryRun: opts.dryRun,

@@ -49,6 +49,7 @@ export interface FileIndexEntry {
 
 export interface ResolvedSkill {
   packageId: string;
+  spaceId?: string;
   version: string;
   /** SRI for a published artifact, ETag + `lock_version` for a draft. */
   integrity: string;
@@ -68,8 +69,8 @@ export interface PlannedSkill extends ResolvedSkill {
  * Sorted by package id, which is what makes collision resolution reproducible
  * rather than server-order dependent. System packages are the platform's.
  */
-export async function listSyncableSkills(profileName: string): Promise<string[]> {
-  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills");
+export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
+  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", { spaceId });
   return rows
     .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
     .map((row) => row.id)
@@ -81,15 +82,17 @@ export async function resolveSkill(
   profileName: string,
   packageId: string,
   source: SkillSource,
+  spaceId?: string,
 ): Promise<ResolvedSkill | null> {
   return source === "published"
-    ? resolvePublished(profileName, packageId)
-    : resolveDraft(profileName, packageId);
+    ? resolvePublished(profileName, packageId, spaceId)
+    : resolveDraft(profileName, packageId, spaceId);
 }
 
 async function resolvePublished(
   profileName: string,
   packageId: string,
+  spaceId?: string,
 ): Promise<ResolvedSkill | null> {
   interface VersionDetail {
     version?: unknown;
@@ -101,6 +104,7 @@ async function resolvePublished(
     detail = await apiFetch<VersionDetail>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+      { spaceId },
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
@@ -114,13 +118,18 @@ async function resolvePublished(
   }
   return {
     packageId,
+    ...(spaceId ? { spaceId } : {}),
     version: detail.version,
     integrity: detail.integrity,
     frontmatterName: frontmatterNameOf(detail.content),
   };
 }
 
-async function resolveDraft(profileName: string, packageId: string): Promise<ResolvedSkill | null> {
+async function resolveDraft(
+  profileName: string,
+  packageId: string,
+  spaceId?: string,
+): Promise<ResolvedSkill | null> {
   interface DraftDetail {
     content?: unknown;
     lock_version?: unknown;
@@ -130,6 +139,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
     detail = await apiFetch<DraftDetail>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}`,
+      { spaceId },
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
@@ -140,6 +150,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
   const res = await apiFetchRaw(
     profileName,
     `/api/packages/${encodePackageIdPath(packageId)}/files`,
+    { spaceId },
   );
   if (!res.ok) {
     throw new SkillSyncError(
@@ -152,6 +163,7 @@ async function resolveDraft(profileName: string, packageId: string): Promise<Res
   const index = (await res.json()) as { entries?: FileIndexEntry[] };
   return {
     packageId,
+    ...(spaceId ? { spaceId } : {}),
     version: "draft",
     integrity: `draft:${lock}:${etag}`,
     frontmatterName: frontmatterNameOf(detail.content),
@@ -206,6 +218,7 @@ async function fetchPublishedFiles(
   const res = await apiFetchRaw(
     profileName,
     `/api/packages/${encodePackageIdPath(skill.packageId)}/${encodeURIComponent(skill.version)}/download`,
+    { spaceId: skill.spaceId },
   );
   if (!res.ok) {
     throw new SkillSyncError(
@@ -241,8 +254,13 @@ async function fetchDraftFiles(
   // snapshot that may have moved.
   const entries =
     skill.draftIndex ??
-    (await apiFetch<{ entries?: FileIndexEntry[] }>(profileName, `/api/packages/${encoded}/files`))
-      .entries ??
+    (
+      await apiFetch<{ entries?: FileIndexEntry[] }>(
+        profileName,
+        `/api/packages/${encoded}/files`,
+        { spaceId: skill.spaceId },
+      )
+    ).entries ??
     [];
 
   const wanted = entries
@@ -265,6 +283,7 @@ async function fetchDraftFiles(
     const res = await apiFetchRaw(
       profileName,
       `/api/packages/${encoded}/files/content?path=${encodeURIComponent(entry.path)}`,
+      { spaceId: skill.spaceId },
     );
     if (!res.ok) {
       throw new SkillSyncError(

@@ -267,7 +267,9 @@ async function runLogin(
   // over when `userId` matches: re-logging-in as a different user on the
   // same profile must NOT inherit the previous account's pins.
   const existingProfile = (await readConfig()).profiles[profileName];
-  const sameUser = existingProfile?.userId === identity.userId;
+  const sameUser =
+    existingProfile?.userId === identity.userId &&
+    normalizeInstance(existingProfile.instance) === instance;
   const preservedOrgId = sameUser && existingProfile?.orgId ? existingProfile.orgId : undefined;
   const preservedSpaceId =
     sameUser && existingProfile?.spaceId ? existingProfile.spaceId : undefined;
@@ -278,6 +280,7 @@ async function runLogin(
     email: identity.email,
     ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
     ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
+    ...(sameUser && existingProfile?.syncSpaces ? { syncSpaces: existingProfile.syncSpaces } : {}),
   });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already

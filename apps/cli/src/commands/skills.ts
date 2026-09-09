@@ -11,6 +11,7 @@
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { resolveActiveProfile, type Profile } from "../lib/config.ts";
+import { listSpaces, resolveSpaceRef } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
 import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
@@ -55,6 +56,7 @@ import {
 export interface SkillsSyncOptions {
   profile?: string;
   target?: SyncTarget[];
+  space?: string[];
   source?: SkillSource;
   printPath?: boolean;
   dryRun?: boolean;
@@ -134,7 +136,8 @@ export async function skillsSyncCommand(
         return;
       }
 
-      const catalogue = await resolveAll(profileName, source, state, targets, report);
+      const spaceIds = await selectedSpaces(profileName, profile!, opts.space);
+      const catalogue = await resolveAll(profileName, source, state, targets, report, spaceIds);
       const plans = await Promise.all(
         targets.map((target) => diffTarget(target, catalogue, state, source)),
       );
@@ -232,11 +235,21 @@ async function resolveAll(
   state: SyncState,
   targets: SyncTarget[],
   report: Report,
+  spaceIds: string[],
 ): Promise<Catalogue> {
-  const packageIds = await listSyncableSkills(profileName);
+  const origins = new Map<string, string>();
+  for (const spaceId of spaceIds) {
+    for (const packageId of await listSyncableSkills(profileName, spaceId)) {
+      if (!origins.has(packageId)) origins.set(packageId, spaceId);
+    }
+  }
+  const packageIds = [...origins.keys()].sort();
   const resolutions = await mapWithConcurrency(packageIds, MAX_CONCURRENCY, async (packageId) => {
     try {
-      return { packageId, skill: await resolveSkill(profileName, packageId, source) };
+      return {
+        packageId,
+        skill: await resolveSkill(profileName, packageId, source, origins.get(packageId)),
+      };
     } catch (err) {
       return { packageId, error: err };
     }
@@ -480,4 +493,33 @@ function reportPlans(plans: TargetPlan[], sink: LineSink): void {
 function uniqueTargets(requested: SyncTarget[] | undefined): SyncTarget[] {
   if (!requested || requested.length === 0) return ["claude-plugin"];
   return [...new Set(requested)];
+}
+
+async function selectedSpaces(
+  profileName: string,
+  profile: Profile,
+  explicit?: string[],
+): Promise<string[]> {
+  const selected = explicit ?? profile.syncSpaces;
+  if (selected === undefined) return [profile.spaceId!];
+  const spaces = await listSpaces(profileName);
+  return [
+    ...new Set(
+      selected.map((ref) => {
+        if (explicit) {
+          const id = spaces.find((space) => space.id === ref.trim());
+          if (id) return id.id;
+          const named = spaces.filter((space) => space.name === ref.trim());
+          if (named.length > 1) throw new Error(`Ambiguous space name "${ref}": use a space ID.`);
+          return named[0]?.id ?? resolveSpaceRef(spaces, ref).id;
+        }
+        if (!spaces.some((space) => space.id === ref)) {
+          throw new Error(
+            `Configured sync space "${ref}" is not accessible in the active organization.`,
+          );
+        }
+        return ref;
+      }),
+    ),
+  ];
 }
