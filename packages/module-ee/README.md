@@ -587,3 +587,53 @@ the platform's member lookups. Both are plain setters, not mocks. Every
 integration test file calls `useEeTestSeams()` at the top; it is idempotent.
 `test/tables.ts` lists the seven `ee_*` tables, so the root `truncateAll()`
 clears them between tests along with every platform table.
+
+### The Stripe mock, and what it cannot prove
+
+Everything above runs against a hand-written Stripe in `test/helpers/stripe.ts`
+— a `Bun.serve` on port 0 that records every request and answers from fixtures.
+It is the right tool for what the module _sends_: the request bodies are
+asserted (see the plan-change case in
+`test/integration/routes/billing.test.ts`, which pins `items[0][id]` because
+sending the price alone would ADD a second priced item instead of replacing the
+first — a double charge on every plan change).
+
+It cannot prove anything about what Stripe _returns_, or how Stripe _interprets_
+what we sent, because we wrote those answers. The failure mode is not
+theoretical: Stripe moved the billing-cycle end onto the subscription ITEM in
+the 2025-03-31 API version, the fixture kept it at the top level, and
+`subscriptionPeriodEnd` (`src/stripe/webhooks.ts`) — which reads the item — was
+therefore returning `null` in every test that touched it. The confirmation
+e-mail silently fell back to today's date, and no test noticed, because the
+fixture and the assertions were written from the same stale belief.
+
+`test/live/stripe-contract.test.ts` is the other half. It runs against real
+Stripe in **test mode** and checks the two things the mock structurally cannot:
+
+- **Shape** — every key path a fixture claims must exist on the live object.
+  Extra live fields are ignored (the fixtures are deliberately minimal); invented
+  ones fail. This is what turns the next relocation into a red mock rather than a
+  quiet production lie.
+- **Semantics** — that `subscriptions.update` replaces the priced item, that
+  `current_period_end` is a timestamp on the item, that a forged webhook
+  signature raises `StripeSignatureVerificationError` and an unknown id raises
+  `StripeInvalidRequestError` (both classes are branched on in `src/routes/`).
+
+It creates a customer and a subscription and deletes them in `afterAll`, so it
+needs a key that may mutate the account:
+
+```sh
+STRIPE_LIVE_SECRET_KEY=sk_test_… bun test packages/module-ee/test/live
+```
+
+Without that variable the suite skips itself and stays silent — the same opt-in
+shape as `scripts/conformance/probes.ts`. It is deliberately **not**
+`STRIPE_SECRET_KEY`: a developer `.env` holding a working key must never make
+`bun test` start creating objects in an account nobody aimed at. A key that does
+not begin with `sk_test_` is refused outright rather than skipped.
+
+In CI it is `.github/workflows/stripe-live.yml` — weekly, on demand, and on any
+PR touching `packages/module-ee/**` (which includes a Dependabot bump of the
+`stripe` dependency). The repository secret is `STRIPE_LIVE_SECRET_KEY`; until it
+is provisioned the job runs green with the suite skipped, and says so in an
+annotation.
