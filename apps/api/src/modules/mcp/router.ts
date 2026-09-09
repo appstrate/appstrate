@@ -36,7 +36,22 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createResourceServerChallenge } from "@better-auth/oauth-provider";
-import { createInsufficientScopeError } from "@better-auth/core/oauth2";
+// `createInsufficientScopeError` marks the error it returns in a module-level
+// WeakSet, and `createResourceServerChallenge` recognises it by asking
+// `isInsufficientScopeError` — which it imports from `better-auth/oauth2`. The
+// two must therefore come from the SAME `@better-auth/core` instance, or the
+// marker lookup misses and the challenge is silently dropped (a 403 with no
+// `WWW-Authenticate`, so no OAuth step-up for the client).
+//
+// `@better-auth/core` carries real peers (`jose`, `better-call`, `kysely`, …),
+// so a peer skew — `apps/api` on one `jose` range, better-auth's transitive
+// `jose` pinned to another — makes the package manager materialise two peer
+// instances of the same version, and which one `better-auth` links to is
+// install-order dependent. Importing through the `better-auth/*` façade (as
+// `APIError` below already does) pins us to the instance the provider itself
+// uses, whatever the peer graph looks like. Never reach for
+// `@better-auth/core/oauth2` here.
+import { createInsufficientScopeError } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
