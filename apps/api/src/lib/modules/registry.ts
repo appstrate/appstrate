@@ -157,9 +157,23 @@ export function buildModuleInitContext(): ModuleInitContext {
     appUrl: env.APP_URL,
     getSendMail: async () => {
       // Lazy import to break circular dep: email.ts -> app-config.ts -> modules
-      const { sendMail } = await import("../../services/email.ts");
-      // eslint-disable-next-line @typescript-eslint/no-misused-promises -- `ModuleInitContext.getSendMail` (packages/core/src/module.ts) declares the mailer as `(to, subject, html) => void`; the platform's `sendMail` returns `Promise<void>`, so no module can await delivery. Reconciling the two is a published-core contract change (a module supplying its own mailer would break), so it is not made here.
-      return sendMail;
+      const [{ sendMail }, { isSmtpConfigured }] = await Promise.all([
+        import("../../services/email.ts"),
+        import("../app-config.ts"),
+      ]);
+      // Modules get the same "is mail configured at all" gate the platform
+      // applies to its own mail (`sendEmail`), rather than the raw transport:
+      // on an install with no SMTP credentials every module send would
+      // otherwise reach nodemailer and log a transport error per event. The
+      // check is per call, not per `getSendMail()`, so a module that captures
+      // the mailer once still sees the current configuration.
+      return async (to: string, subject: string, html: string): Promise<void> => {
+        if (!isSmtpConfigured()) {
+          logger.debug("Module email skipped — SMTP is not configured", { to, subject });
+          return;
+        }
+        await sendMail(to, subject, html);
+      };
     },
     getOrgOwnerEmails,
     getOrgMembers,

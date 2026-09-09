@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { buildAppConfig } from "../../../src/lib/app-config.ts";
+import { buildAppConfig, isSmtpConfigured } from "../../../src/lib/app-config.ts";
 
 const KEYS = [
   "AUTH_BOOTSTRAP_OWNER_EMAIL",
@@ -77,5 +77,71 @@ describe("buildAppConfig — bootstrapOwnerEmail surfacing", () => {
     const cfg = buildAppConfig();
     expect(cfg.features.signupDisabled).toBe(true);
     expect(cfg.features.orgCreationDisabled).toBe(true);
+  });
+});
+
+/**
+ * `isSmtpConfigured()` is the one formula behind `features.smtp`, and — since
+ * `ModuleInitContext.getSendMail` gates the module-facing mailer on it — the
+ * one answer to "will a module's send reach a transport at all". A partial
+ * SMTP configuration is NOT configured: nodemailer would accept it and fail
+ * per message instead.
+ */
+describe("isSmtpConfigured", () => {
+  const SMTP_KEYS = ["SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  function setSmtp(values: Partial<Record<(typeof SMTP_KEYS)[number], string>>): void {
+    for (const k of SMTP_KEYS) {
+      const v = values[k];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    _resetCacheForTesting();
+  }
+
+  beforeEach(() => {
+    for (const k of SMTP_KEYS) saved[k] = process.env[k];
+    setSmtp({});
+  });
+
+  afterEach(() => {
+    for (const k of SMTP_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    _resetCacheForTesting();
+  });
+
+  const FULL = {
+    SMTP_HOST: "smtp.example.com",
+    SMTP_USER: "mailer",
+    SMTP_PASS: "secret",
+    SMTP_FROM: "no-reply@example.com",
+  } as const;
+
+  it("is false when no SMTP variable is set", () => {
+    expect(isSmtpConfigured()).toBe(false);
+  });
+
+  it("is true only when every SMTP variable is set", () => {
+    setSmtp(FULL);
+    expect(isSmtpConfigured()).toBe(true);
+  });
+
+  for (const missing of SMTP_KEYS) {
+    it(`is false when ${missing} alone is missing`, () => {
+      const partial: Record<string, string> = { ...FULL };
+      delete partial[missing];
+      setSmtp(partial);
+      expect(isSmtpConfigured()).toBe(false);
+    });
+  }
+
+  it("agrees with the features.smtp flag it backs", () => {
+    setSmtp(FULL);
+    expect(buildAppConfig().features.smtp).toBe(isSmtpConfigured());
+    setSmtp({});
+    expect(buildAppConfig().features.smtp).toBe(isSmtpConfigured());
   });
 });

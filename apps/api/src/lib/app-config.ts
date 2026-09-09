@@ -6,6 +6,20 @@ import { isBootstrapTokenPending } from "./bootstrap-token.ts";
 import { getVersionInfo } from "./version.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
+/**
+ * Is outbound mail configured at all?
+ *
+ * The single formula behind the `smtp` feature flag, exported because the
+ * module-facing mailer (`ModuleInitContext.getSendMail`) applies the same gate
+ * the platform applies to its own mail. Reads `getEnv()` on each call rather
+ * than `getAppConfig()`, so it answers before `initAppConfig()` has run —
+ * modules are loaded first, and one of them may send during `init()`.
+ */
+export function isSmtpConfigured(): boolean {
+  const env = getEnv();
+  return !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
+}
+
 // Platform config — computed once at boot, injected into SPA HTML.
 // Base config uses OSS defaults. Modules contribute feature flags at boot.
 //
@@ -25,7 +39,7 @@ export function buildAppConfig(): AppConfig {
       // `applyModuleFeatures()` after load.
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
-      smtp: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
+      smtp: isSmtpConfigured(),
       // Self-hosting closed mode (issue #228) — flags exposed so the SPA
       // can hide signup affordances and route org-less users away from
       // /onboarding/create when the platform is locked down. Sensitive

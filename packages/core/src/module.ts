@@ -1232,8 +1232,18 @@ export interface ModuleInitContext {
   redisUrl: string | null;
   /** Public-facing URL of the platform (for OAuth callbacks, etc.). */
   appUrl: string;
-  /** Lazy email sender (breaks circular deps at module load time). */
-  getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
+  /**
+   * Lazy email sender (breaks circular deps at module load time).
+   *
+   * The mailer it resolves to is asynchronous: `await`ing the returned promise
+   * means the delivery attempt is over, so a module can sequence on it (send
+   * then mark sent) instead of firing into the void. The platform's own mailer
+   * logs transport failures and settles rather than rejecting, so awaiting it
+   * says "attempted", not "delivered"; a module supplying its own mailer MAY
+   * reject, and a caller that fans out over several recipients should keep one
+   * failure from cancelling the rest.
+   */
+  getSendMail: () => Promise<(to: string, subject: string, html: string) => Promise<void>>;
   /**
    * Query helper: emails of the org's OWNERS — the one recipient list that is
    * always non-empty. Deliberately not admins: billing mail is not operational.
