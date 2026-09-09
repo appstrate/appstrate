@@ -13,7 +13,6 @@ import {
   useChangePlan,
   useCheckout,
   usePortal,
-  planSelectionRoute,
   type CheckoutPlanId,
 } from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
@@ -101,47 +100,42 @@ export function OrgSettingsBillingPage() {
   };
 
   /**
-   * Picking a plan does one of three different things.
-   *
-   * With no subscription it opens Stripe Checkout. With one Stripe still
-   * collects on, it moves that subscription onto the new price instead:
-   * Checkout only ever creates, so taking an upgrade through it would leave the
-   * old subscription running and bill the org twice — which the server refuses
-   * outright. With one Stripe holds but no longer collects on (`unpaid`,
-   * `paused`, `incomplete`) neither door is open, so the click goes to the
-   * Customer Portal, where the payment blocking the account gets fixed. The plan
-   * itself lands through the Stripe webhook, so the page refetches rather than
-   * assuming.
+   * The server decides which door a plan selection goes through and reports it
+   * as `plan_action`; the page follows that decision instead of re-deriving it.
+   * Stripe Checkout only ever CREATES, so a second one beside a subscription
+   * Stripe still collects on bills the org twice — and the routes refuse the
+   * wrong door with a 409 anyway. The plan lands through the Stripe webhook, so
+   * the page refetches rather than assuming.
    */
   const handleSelectPlan = (planId: CheckoutPlanId) => {
-    const route = planSelectionRoute(billing.status);
-    if (route === "portal") {
-      handleManage();
-      return;
-    }
-    if (route === "plan-change") {
-      changePlanMutation.mutate(
-        { body: { plan_id: planId } },
-        {
-          onSuccess: () => {
-            toast.success(t("billing.planChangeRequested"));
-            void queryClient.invalidateQueries({ queryKey: billingKey });
+    switch (billing.plan_action) {
+      case "portal":
+        handleManage();
+        return;
+      case "plan-change":
+        changePlanMutation.mutate(
+          { body: { plan_id: planId } },
+          {
+            onSuccess: () => {
+              toast.success(t("billing.planChangeRequested"));
+              void queryClient.invalidateQueries({ queryKey: billingKey });
+            },
+            onError: onMutationError,
           },
-          onError: onMutationError,
-        },
-      );
-      return;
+        );
+        return;
+      case "checkout":
+        checkoutMutation.mutate(
+          { body: { plan_id: planId, return_url: "/org-settings/billing" } },
+          {
+            onSuccess: ({ url }) => {
+              window.location.href = url;
+            },
+            onError: onMutationError,
+          },
+        );
+        return;
     }
-
-    checkoutMutation.mutate(
-      { body: { plan_id: planId, return_url: "/org-settings/billing" } },
-      {
-        onSuccess: ({ url }) => {
-          window.location.href = url;
-        },
-        onError: onMutationError,
-      },
-    );
   };
 
   return (

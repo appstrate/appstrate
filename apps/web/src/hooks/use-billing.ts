@@ -57,59 +57,6 @@ export function useBillingKey() {
   return $api.queryOptions("get", "/api/billing", { params: { header } }).queryKey;
 }
 
-/** The effective billing status of an org, as the spec enumerates it. */
-type BillingStatus = components["schemas"]["EeBillingAccount"]["status"];
-
-/**
- * Statuses at which the subscription can be MOVED between plans — the client
- * half of the module's `LIVE_SUBSCRIPTION_STATUSES`, and it has to agree with it
- * or every click lands on a 409.
- *
- * `canceling` is the projection of `cancel_at_period_end` over a subscription
- * that is otherwise active, trialing or past due — the server gates the
- * projection on exactly that — so it belongs here.
- */
-const CHANGEABLE_STATUSES: ReadonlySet<BillingStatus> = new Set<BillingStatus>([
-  "active",
-  "trialing",
-  "past_due",
-  "canceling",
-]);
-
-/**
- * Statuses at which Stripe still HOLDS the subscription but has stopped
- * collecting on it — the client half of the module's
- * `HELD_SUBSCRIPTION_STATUSES` minus the changeable ones above.
- *
- * Neither door is open: a plan change is refused (`409
- * no_active_subscription`) because the price item cannot be moved while
- * collection is suspended, and a checkout is refused (`409
- * subscription_exists`) because it would create a SECOND subscription beside
- * the held one. The Customer Portal is where the payment that is actually
- * blocking the account gets fixed.
- */
-const PORTAL_ONLY_STATUSES: ReadonlySet<BillingStatus> = new Set<BillingStatus>([
-  "unpaid",
-  "paused",
-  "incomplete",
-]);
-
-/**
- * Which route a plan selection goes to.
- *
- * An org whose subscription Stripe still collects on CHANGES it in place: Stripe
- * Checkout only ever creates, so sending an upgrade there leaves the first
- * subscription running beside the second and bills the customer twice, and the
- * server refuses it (`409 subscription_exists`). An org whose subscription
- * Stripe holds but no longer collects on goes to the Customer Portal. Only an
- * org Stripe holds nothing for opens a checkout.
- */
-export function planSelectionRoute(status: BillingStatus): "checkout" | "plan-change" | "portal" {
-  if (CHANGEABLE_STATUSES.has(status)) return "plan-change";
-  if (PORTAL_ONLY_STATUSES.has(status)) return "portal";
-  return "checkout";
-}
-
 export function useCheckout() {
   return $api.useMutation("post", "/api/billing/checkout");
 }

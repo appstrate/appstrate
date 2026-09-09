@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Picking a plan sends an org that already subscribes somewhere ELSE than an org
- * that does not.
+ * The billing page renders differently for an org that already subscribes and
+ * one that does not: the header offers the subscription portal in the first
+ * case and a checkout upgrade in the second.
  *
- * Stripe Checkout only ever CREATES a subscription. Sending an upgrade there
- * from an org that already has one left the first running beside the second and
- * charged the customer twice, so the server refuses that combination with a 409
- * and the dashboard must not ask for it. The branch itself is
- * `planSelectionRoute`, pinned directly below — the click that reaches it needs
- * a DOM this runner does not have, and the two halves of the rule (client and
- * `LIVE_SUBSCRIPTION_STATUSES` / `HELD_SUBSCRIPTION_STATUSES` on the server)
- * have to agree or every click lands on a refusal.
+ * Which endpoint a plan click goes to is NOT decided here — the server sends it
+ * as `plan_action`, and the rule it derives that from is tested in
+ * `packages/module-ee/test/integration/routes/billing.test.ts`.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -28,7 +24,6 @@ installFakeStorage({
 });
 
 const { $api } = await import("../../api/client.ts");
-const { planSelectionRoute } = await import("../../hooks/use-billing.ts");
 const { OrgSettingsBillingPage } = await import("../org-settings/billing.tsx");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { render } = await import("../../test/render.tsx");
@@ -98,31 +93,6 @@ function renderPage(account: BillingAccount): string {
   }
 }
 
-describe("planSelectionRoute", () => {
-  it("changes the subscription in place for every status Stripe still collects on", () => {
-    for (const status of ["active", "trialing", "past_due", "canceling"] as const) {
-      expect(planSelectionRoute(status)).toBe("plan-change");
-    }
-  });
-
-  it("opens a checkout only when Stripe holds no subscription", () => {
-    // The two statuses at which the server accepts a checkout: it holds
-    // nothing to duplicate.
-    for (const status of ["none", "canceled"] as const) {
-      expect(planSelectionRoute(status)).toBe("checkout");
-    }
-  });
-
-  it("sends a suspended subscription to the portal, where neither other door is open", () => {
-    // Stripe still HOLDS these, so a checkout is refused (409
-    // `subscription_exists`); it no longer collects on them, so a plan change is
-    // refused too (409 `no_active_subscription`).
-    for (const status of ["unpaid", "paused", "incomplete"] as const) {
-      expect(planSelectionRoute(status)).toBe("portal");
-    }
-  });
-});
-
 describe("the billing page for a subscribed org", () => {
   const subscribed: BillingAccount = {
     plan: { id: "starter", name: "Starter" },
@@ -132,6 +102,7 @@ describe("the billing page for a subscribed org", () => {
     credit_quota: 20000,
     period_end: "2026-10-01T00:00:00Z",
     status: "active",
+    plan_action: "plan-change",
     upgrades: [PRO],
   };
 
@@ -152,6 +123,7 @@ describe("the billing page for a subscribed org", () => {
       ...subscribed,
       plan: { id: "free", name: "Free" },
       status: "none",
+      plan_action: "checkout",
       upgrades: [STARTER, PRO],
     });
     expect(html).toContain(">Passer à un plan supérieur<");
