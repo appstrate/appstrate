@@ -496,7 +496,7 @@ describe("oidcModule.init() — boot wiring", () => {
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
       // Migrations are already applied by the test preload — we only care
       // about the post-migration steps of `init()` here.
-      getSendMail: async () => () => {},
+      getSendMail: async () => async () => {},
       getOrgOwnerEmails: async () => [],
       getOrgMembers: async () => [],
       getOrgName: async () => null,
@@ -535,7 +535,7 @@ describe("oidcModule.init() — boot wiring", () => {
     const initCtx = {
       redisUrl: process.env.REDIS_URL ?? null,
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
-      getSendMail: async () => () => {},
+      getSendMail: async () => async () => {},
       getOrgOwnerEmails: async () => [],
       getOrgMembers: async () => [],
       getOrgName: async () => null,

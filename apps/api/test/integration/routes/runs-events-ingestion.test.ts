@@ -1826,7 +1826,7 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
     await loadModulesFromInstances([mod], {
       redisUrl: null,
       appUrl: "http://localhost:3000",
-      getSendMail: async () => () => {},
+      getSendMail: async () => async () => {},
       getOrgOwnerEmails: async () => [],
       getOrgMembers: async () => [],
       getOrgName: async () => null,
@@ -2037,7 +2037,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     await loadModulesFromInstances([mod], {
       redisUrl: null,
       appUrl: "http://localhost:3000",
-      getSendMail: async () => () => {},
+      getSendMail: async () => async () => {},
       getOrgOwnerEmails: async () => [],
       getOrgMembers: async () => [],
       getOrgName: async () => null,

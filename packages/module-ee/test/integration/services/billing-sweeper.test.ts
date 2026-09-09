@@ -839,7 +839,7 @@ describe("billing sweep — quota warning email", () => {
     process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
     sentEmails.length = 0;
     initBillingEmail({
-      sendMail: (to, subject) => {
+      sendMail: async (to, subject) => {
         sentEmails.push({ to, subject });
       },
       getRecipients: async () => ["billing@test.com"],

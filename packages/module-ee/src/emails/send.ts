@@ -5,12 +5,12 @@ import { renderBillingEmail } from "./registry.ts";
 import { logger } from "../logger.ts";
 
 // Injected by the module's init() — platform provides these
-let _sendMail: ((to: string, subject: string, html: string) => void) | null = null;
+let _sendMail: ((to: string, subject: string, html: string) => Promise<void>) | null = null;
 let _getRecipients: ((orgId: string) => Promise<string[]>) | null = null;
 let _getOrgName: ((orgId: string) => Promise<string | null>) | null = null;
 
 export function initBillingEmail(deps: {
-  sendMail: (to: string, subject: string, html: string) => void;
+  sendMail: (to: string, subject: string, html: string) => Promise<void>;
   /**
    * Who this org's billing mail goes to — `resolveBillingRecipients` in
    * production. Injected rather than imported so the rendering half of this
@@ -68,11 +68,27 @@ export function sendBillingEmail<T extends BillingEmailType>(
       ]);
       const { subject, html } = renderBillingEmail(type, props, { orgName });
 
-      for (const to of emails) {
-        sendMail(to, subject, html);
+      // One recipient's transport failure must not cancel the others', so the
+      // fan-out settles rather than racing to the first rejection. The
+      // platform's mailer logs and settles on its own; a module-supplied one
+      // may reject, and that rejection is reported here instead of surfacing
+      // as an unhandled one.
+      const results = await Promise.allSettled(emails.map((to) => sendMail(to, subject, html)));
+      const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+      for (const failure of failures) {
+        logger.error("Billing email delivery failed", {
+          err: failure.reason,
+          type,
+          orgId,
+        });
       }
 
-      logger.debug("Billing email sent", { type, orgId, recipientCount: emails.length });
+      logger.debug("Billing email sent", {
+        type,
+        orgId,
+        recipientCount: emails.length,
+        failureCount: failures.length,
+      });
     } catch (err) {
       logger.error("Failed to send billing email", {
         err,
