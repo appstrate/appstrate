@@ -42,7 +42,7 @@ const UNPARSEABLE_METADATA = "not json";
  * Run a multi-statement script through the raw driver. `db.execute` speaks the
  * extended protocol (one statement per call) and the script is a
  * `BEGIN … COMMIT` block. Same helper, same reasoning, as
- * `org-viewer-to-guest-migration.test.ts`.
+ * `../../unit/migration-0008-org-viewer-to-guest.test.ts`.
  */
 async function execScript(source: string): Promise<void> {
   const pglite = getPGliteClient();

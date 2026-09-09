@@ -73,7 +73,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { is } from "drizzle-orm";
-import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
+import { getTableConfig, isPgEnum, PgTable } from "drizzle-orm/pg-core";
 import * as schema from "@appstrate/db/schema";
 import { applyCorePGliteMigrations } from "../../src/lib/pglite-migrate.ts";
 
@@ -398,6 +398,54 @@ describe("migration replay schema parity", () => {
     }
     expect(absent).toEqual([]);
     expect(wrongLeadingColumn).toEqual([]);
+  });
+
+  it("creates every declared enum with exactly the declared labels, in order", async () => {
+    // The drift no other check in this repo can see, and the one
+    // `0059_drop_org_viewer.sql` exists for. `ALTER TYPE … DROP VALUE` exists
+    // in no released PostgreSQL, so a value dropped from a TS tuple stays in
+    // every database until some migration recreates the type — and nothing
+    // reports it: drizzle-kit compares the schema to the SNAPSHOT, and the two
+    // lose the value in the same `db:generate`, while every column keeps
+    // working because the labels that remain still parse. `org_role` held
+    // `viewer` on every database from `0056` to `0059` with the code declaring
+    // four values throughout. Delete `0059` and this is the case that goes red.
+    //
+    // ORDER is compared, not merely membership. `enumsortorder` is what an
+    // `ORDER BY role` and a `role < 'member'` resolve against, so two databases
+    // holding the same labels in a different order are not the same database.
+    const { rows } = await pg.query<{ typname: string; labels: string[] }>(
+      `SELECT t.typname, array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS labels
+       FROM pg_type t
+       JOIN pg_enum e ON e.enumtypid = t.oid
+       JOIN pg_namespace n ON n.oid = t.typnamespace
+       WHERE n.nspname = 'public'
+       GROUP BY t.typname`,
+    );
+    const actual = new Map(rows.map((row) => [row.typname, row.labels]));
+
+    const declaredEnums = new Map<string, string[]>();
+    for (const value of Object.values(schema)) {
+      if (isPgEnum(value)) declaredEnums.set(value.enumName, [...value.enumValues]);
+    }
+    // Fixture guard, same reasoning as the table count above: a barrel that
+    // exported no enum would make every comparison below vacuous.
+    expect(declaredEnums.size).toBeGreaterThan(5);
+
+    const drifted: string[] = [];
+    for (const [name, labels] of declaredEnums) {
+      const found = actual.get(name);
+      if (found === undefined) drifted.push(`${name}: absent from the replayed catalog`);
+      else if (found.join(",") !== labels.join(",")) {
+        drifted.push(`${name}: catalog has [${found}], schema declares [${labels}]`);
+      }
+    }
+    for (const name of actual.keys()) {
+      if (!declaredEnums.has(name)) {
+        drifted.push(`${name}: created by the replay, declared nowhere`);
+      }
+    }
+    expect(drifted).toEqual([]);
   });
 
   it("keeps every declared identifier inside Postgres' 63-byte limit", () => {

@@ -73,9 +73,14 @@ export async function applyCorePGliteMigrations(
     // `{"values":{"values":…,"locked":[]},"locked":[]}`.
     //
     // Nothing in the journal forbids a transaction block: no CREATE INDEX
-    // CONCURRENTLY, no VACUUM, no `ALTER TYPE … ADD VALUE`, and every `BEGIN` in
-    // the checked-in SQL is PL/pgSQL inside a `DO $$ … $$` block, not
-    // transaction control. The journal is already written on that assumption —
+    // CONCURRENTLY, no VACUUM, and every `BEGIN` in the checked-in SQL is
+    // PL/pgSQL inside a `DO $$ … $$` block, not transaction control. The two
+    // `ALTER TYPE`s are transactional too, and each says so in its own header:
+    // `0056`'s `ADD VALUE` is legal inside a transaction on Postgres >= 12
+    // because nothing in that file then USES the new value as an `org_role`,
+    // and `0059` creates its replacement type in the same transaction it casts
+    // through, which is the case Postgres' `check_safe_enum_use` allows. The
+    // journal is already written on that assumption —
     // `0041_restore_squash_indexes.sql` rules CONCURRENTLY out precisely because
     // the batch runs inside one transaction, and the `SET LOCAL lock_timeout`
     // fences in 0039/0041 are no-ops outside one.

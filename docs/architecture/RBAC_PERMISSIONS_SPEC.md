@@ -512,17 +512,19 @@ Doctrine: `NO_TRANSITIONAL_CODE.md`. Catalog changes are drizzle migrations; row
 
 Between `0056` and `0008` a member whose row still reads `viewer` resolves no permission set and its requests fail; the two are one maintenance window, not two deploys. Rollback is one-way from `0056`: the previous build inserts `chat_sessions` without `space_id`, which is now NOT NULL.
 
-The `org_role` type keeps `viewer` because `ALTER TYPE … DROP VALUE` does not exist — see §12.
+**Rows — `scripts/migration/0012-org-invitation-history-viewer-to-guest.sql`:** the invitations `0008` deliberately leaves alone. `0008` restricts its invitation UPDATE to `status = 'pending'`, because a pending row also gets the `space_assignments` snapshot its step 5 verifies; an accepted, expired or cancelled one grants nothing and needs none. That leaves them as history reading `viewer`, which `0059` cannot cast — so `0012` maps them to `guest`, the successor `0008` chose for the same offers, and keeps `status <> 'pending'` as a load-bearing scope rather than a tidy one: a pending row swallowed there would lose its snapshot and become invisible to `0008` on a rerun.
+
+**Schema — `packages/db/drizzle/0059_drop_org_viewer.sql`:** `ALTER TYPE … DROP VALUE` exists in no released PostgreSQL, so `0056` can add `guest` but cannot remove `viewer`; `0059` recreates the type as `('owner','admin','member','guest')`, moves `org_members.role` and `org_invitations.role` onto it, and drops the old one. No data write. Its section A refuses the deploy while any row still reads `viewer`, counting each set and naming the script that clears it.
+
+**Whether `0059` ships with `0056` or one release later is a property of the database, not of the change.** Nothing can run between the two inside one release — drizzle applies the pending batch in one transaction and the row scripts run after it — and `0008` must READ `viewer` to compute the `space_members` rows that preserve those users' reach, which it cannot do before `0056` creates that table. So a database holding `viewer` rows needs two releases, with `0008` and `0012` in the gap. A database holding none gives `0008` and `0012` nothing to do, section A reads four zeros, and the migrations apply as one batch. Step 3 of the runbook is the query that decides, and section A is what makes guessing wrong safe: it fails the deploy rather than casting rows it cannot preserve.
 
 The Drizzle snapshot includes the OAuth assignment column and matches the schema generator (`db:generate` reports no changes). Migration tests replay the OAuth rewrite and the invitation migration, including real invitation acceptance.
 
-**The runbook is `scripts/migration/README.md` → RBAC rollout**, and it is the only copy: rehearsal on a restored dump, the duplicate-pair pre-flight that decides whether `0009` runs, the order of the four files, and what to verify after each. Each migration file's own header is the authority on what it touches and what it deliberately leaves alone.
+**The runbook is `scripts/migration/README.md` → RBAC rollout**, and it is the only copy: rehearsal on a restored dump, the duplicate-pair pre-flight that decides whether `0009` runs, the order of the five files, which release each belongs to, and what to verify after each. Each migration file's own header is the authority on what it touches and what it deliberately leaves alone.
 
 ---
 
 ## 12. Follow-ups
-
-- **Drop `viewer` from the `org_role` type** (#1275). A future migration would have to recreate the type, since `ALTER TYPE … DROP VALUE` does not exist. It would guard first — `DO $$ BEGIN IF EXISTS (SELECT 1 FROM org_members WHERE role = 'viewer') THEN RAISE EXCEPTION 'run scripts/migration/0008-org-viewer-to-guest.sql first'; END IF; END $$;` — so a database whose rows have not moved would fail the deploy instead of losing them.
 
 - **Extending a pending invitation from a space form.** One pending invitation exists per (organization, email), so a second invite for a pending address is refused with 409 `invitation_already_pending` and the administrator edits the existing invitation to add a space (§6.1, §8). Adding the space atomically from the space form would spare that round trip; a frontend read followed by a whole-list `PUT` is not a concurrency-safe merge and is not the shape to build.
 
