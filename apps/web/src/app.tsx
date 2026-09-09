@@ -661,25 +661,31 @@ export function App() {
             <Route
               path="/schedules/new"
               element={
-                <LazyRoute>
-                  <ScheduleCreatePage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:write">
+                  <LazyRoute>
+                    <ScheduleCreatePage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/:id"
               element={
-                <LazyRoute>
-                  <ScheduleDetailPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:read">
+                  <LazyRoute>
+                    <ScheduleDetailPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/:id/edit"
               element={
-                <LazyRoute>
-                  <ScheduleEditPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:write">
+                  <LazyRoute>
+                    <ScheduleEditPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -747,17 +753,21 @@ export function App() {
             <Route
               path="/skills/:scope/:name"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name/:version"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -773,17 +783,21 @@ export function App() {
             <Route
               path="/mcp-servers/:scope/:name"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="mcp-server" />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/mcp-servers/:scope/:name/:version"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="mcp-server" />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route

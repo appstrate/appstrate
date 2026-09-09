@@ -2,7 +2,6 @@
 
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { usePermissions } from "../hooks/use-permissions";
 import {
   useScheduleById,
   useUpdateSchedule,
@@ -15,7 +14,6 @@ import { LoadingState, ErrorState } from "../components/page-states";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { can } = usePermissions();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
 
@@ -24,7 +22,6 @@ export function ScheduleEditPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  if (!can("schedules:write")) return null;
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
   // The agent detail is a SEPARATE query from the schedule: mounting the form
