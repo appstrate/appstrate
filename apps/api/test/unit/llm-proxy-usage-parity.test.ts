@@ -39,7 +39,7 @@ interface Buckets {
  *
  *   const promptTokens = rawUsage.prompt_tokens || 0;
  *   const cacheReadTokens = rawUsage.prompt_tokens_details?.cached_tokens
- *     ?? rawUsage.prompt_cache_hit_tokens ?? 0;
+ *     ?? rawUsage.prompt_cache_hit_tokens ?? rawUsage.cached_tokens ?? 0;
  *   const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens || 0;
  *   const input = Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens);
  *   const outputTokens = rawUsage.completion_tokens || 0;
@@ -49,7 +49,10 @@ function piAiReference(raw: Record<string, unknown>): Buckets {
     Record<string, number | undefined> | undefined;
   const promptTokens = (raw["prompt_tokens"] as number | undefined) || 0;
   const cacheReadTokens =
-    details?.cached_tokens ?? (raw["prompt_cache_hit_tokens"] as number | undefined) ?? 0;
+    details?.cached_tokens ??
+    (raw["prompt_cache_hit_tokens"] as number | undefined) ??
+    (raw["cached_tokens"] as number | undefined) ??
+    0;
   const cacheWriteTokens = details?.cache_write_tokens || 0;
   const input = Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens);
   return {
@@ -109,6 +112,23 @@ const cases: { name: string; usage: Record<string, unknown> }[] = [
       completion_tokens: 100,
       prompt_cache_hit_tokens: 400,
       prompt_tokens_details: { cached_tokens: 250, cache_write_tokens: 50 },
+    },
+  },
+  {
+    name: "Kimi (top-level usage.cached_tokens)",
+    usage: {
+      prompt_tokens: 4_000,
+      completion_tokens: 200,
+      cached_tokens: 3_000,
+    },
+  },
+  {
+    name: "Kimi dialect loses to the nested field when both are present",
+    usage: {
+      prompt_tokens: 4_000,
+      completion_tokens: 200,
+      cached_tokens: 3_000,
+      prompt_tokens_details: { cached_tokens: 1_000 },
     },
   },
   {
@@ -182,7 +202,8 @@ describe("openai-compatible usage parity: platform proxy vs pi-ai (runner)", () 
     const normalizedSource = source.replace(/\s+/g, " ");
 
     expect(normalizedSource).toContain(
-      "rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens ?? 0",
+      "rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens" +
+        " ?? rawUsage.cached_tokens ?? 0",
     );
     expect(normalizedSource).toContain("rawUsage.prompt_tokens_details?.cache_write_tokens || 0");
     expect(normalizedSource).toContain(
