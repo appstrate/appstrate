@@ -429,6 +429,12 @@
         "package.json"
       ]
     },
+    // `cache: false`, like most siblings: the run is a spawn of a cached
+    // binary against 18 files and finishes in milliseconds, so a cache entry
+    // would buy nothing and could only ever hide a finding.
+    "//#verify:workflows": {
+      "cache": false
+    },
     "//#detect:breaking": {
       "cache": false
     },
