@@ -19,6 +19,33 @@
 -- and widening that WHERE would have made `0008` flip rows its own coverage
 -- check could not account for.
 --
+-- ═══ WHY THIS IS A FILE AND NOT A SIXTH STATEMENT IN `0008` ═══
+--
+-- The argument above is about widening `0008`'s existing WHERE. It does not
+-- reach the obvious alternative — a SEPARATE statement inside `0008`, which
+-- would touch neither `mig0008_invitations` (captured `pending` only) nor step
+-- 5's predicates, and would break nothing. `0008` is also unapplied everywhere
+-- and in no released tag, so amending it in place was available. The reason not
+-- to is none of that:
+--
+-- `0008` CANNOT BE RE-RUN OUTSIDE ITS WINDOW. Its step 4 capture predicate is
+-- `signup_role = 'guest' AND signup_space_assignments = '[]'::jsonb`, and that
+-- is permanent: an org that had no space when `0008` ran keeps `'[]'` forever
+-- and re-matches on every later run, at which point step 4 hands that OIDC
+-- signup client `viewer` rows in every space created since. `0008`'s own header
+-- says so. Folding this UPDATE into `0008` therefore ships the fix as "re-run
+-- `0008`" to anyone who has already run it — a permission widening on the
+-- auto-provisioning path, to repair two invitation rows.
+--
+-- A bare UPDATE on one column of one table has no window and no captured set,
+-- so it is the only shape that can be handed to that operator. `main` is a
+-- documented build path, `0008` has been on it since 2026-09-08, and that
+-- operator is exactly who needs this file.
+--
+-- Second, independently: the `pending_before` / `pending_after` counters below
+-- are a cross-check on a DIFFERENT script — non-zero means `0008` has not run.
+-- Folded into `0008` they would be self-referential and prove nothing.
+--
 -- Which leaves them as pure history: `role` on a non-pending invitation is a
 -- record of what was once offered, and after `0059` `viewer` is not a value the
 -- type can hold. `guest` is the successor `0008` chose for exactly
