@@ -529,12 +529,12 @@ spaceGroup
 
 const skillsGroup = program
   .command("skills")
-  .description("Sync selected spaces' skills to Claude Code and Codex");
+  .description("Sync the skills of every space you reach to Claude Code and Codex");
 
 skillsGroup
   .command("sync")
   .description(
-    "Materialize selected spaces' skills as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile reaches as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",
@@ -543,7 +543,7 @@ skillsGroup
   )
   .option(
     "--space <space>",
-    "Space ID or name to sync (repeatable; overrides syncSpaces).",
+    "Narrow this sync to a space — ID or name (repeatable; overrides syncSpaces).",
     (value: string, previous: string[] = []) => [...previous, value],
   )
   .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)

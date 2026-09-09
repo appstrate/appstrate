@@ -146,7 +146,7 @@ export async function skillsSyncCommand(
           throw new Error("Active sync context changed; run skills sync again.");
         }
       };
-      const spaceIds = await selectedSpaces(profileName, profile!, opts.space);
+      const spaceIds = await selectedSpaces(profileName, profile!, opts.space, report);
       const catalogue = await resolveAll(
         profileName,
         source,
@@ -251,8 +251,8 @@ async function bootstrapPlugin(
 }
 
 /**
- * List the space's skills, pin each to an artifact, and assign directory
- * names. A skill with no published version is a note, not a failure.
+ * List the selected spaces' skills, pin each to an artifact, and assign
+ * directory names. A skill with no published version is a note, not a failure.
  */
 async function resolveAll(
   profileName: string,
@@ -263,12 +263,19 @@ async function resolveAll(
   spaceIds: string[],
   context: SyncContext,
 ): Promise<Catalogue> {
+  // A package is an ORG row that `space_packages` attributes to zero or more
+  // spaces, so the same skill is normally listed by several of them. It is
+  // downloaded once, from the first space that listed it — and `spaceIds` order
+  // decides which, so the listings run concurrently but merge in input order.
+  const listings = await mapWithConcurrency(spaceIds, MAX_CONCURRENCY, (spaceId) =>
+    listSyncableSkills(profileName, spaceId),
+  );
   const origins = new Map<string, string>();
-  for (const spaceId of spaceIds) {
-    for (const packageId of await listSyncableSkills(profileName, spaceId)) {
+  spaceIds.forEach((spaceId, index) => {
+    for (const packageId of listings[index]!) {
       if (!origins.has(packageId)) origins.set(packageId, spaceId);
     }
-  }
+  });
   const packageIds = [...origins.keys()].sort();
   const resolutions = await mapWithConcurrency(packageIds, MAX_CONCURRENCY, async (packageId) => {
     try {
@@ -544,23 +551,33 @@ function uniqueTargets(requested: SyncTarget[] | undefined): SyncTarget[] {
 }
 
 /**
- * Which spaces supply skills: explicit `--space` flags, else the profile's
- * persisted list, else the pinned space. An explicit selection REPLACES the
- * list — it never adds the pinned space back in.
+ * Which spaces supply skills. The default is EVERY space this profile reaches:
+ * being granted a space is what puts its skills on the machine, and losing one
+ * is what takes them off again — neither should need a second, manual step.
+ * `GET /api/spaces` answers per principal (`listSpacesForPrincipal`), so the
+ * grant is the whole mechanism.
+ *
+ * `--space` and `syncSpaces` NARROW that set; they never widen it.
  */
 async function selectedSpaces(
   profileName: string,
   profile: Profile,
-  explicit?: string[],
+  explicit: string[] | undefined,
+  report: Report,
 ): Promise<string[]> {
-  const selected = explicit ?? profile.syncSpaces;
-  if (selected === undefined) return [profile.spaceId!];
-  if (selected.length === 0) return [];
   const spaces = await listSpaces(profileName);
-  const ids = explicit
-    ? selected.map((ref) => explicitSpaceId(spaces, ref))
-    : selected.map((id) => configuredSpaceId(spaces, id));
-  return [...new Set(ids)];
+  if (explicit) return [...new Set(explicit.map((ref) => explicitSpaceId(spaces, ref)))];
+  if (!profile.syncSpaces) return spaces.map((space) => space.id);
+  // A stored list outlives the grants it was written against. An id this
+  // profile no longer reaches is dropped with a note, not a failure: losing
+  // access is a decision elsewhere, and it must not break the other spaces.
+  const reachable = new Set(spaces.map((space) => space.id));
+  const kept = profile.syncSpaces.filter((id) => reachable.has(id));
+  for (const id of profile.syncSpaces.filter((id) => !reachable.has(id)))
+    report.note(
+      `Configured sync space "${id}" is not accessible in the active organization — skipped.`,
+    );
+  return [...new Set(kept)];
 }
 
 /** A flag is typed by hand, so it takes an ID or an unambiguous exact name. */
@@ -572,14 +589,4 @@ function explicitSpaceId(spaces: Space[], ref: string): string {
   // Nothing matched: `resolveSpaceRef` only throws here, and its message lists
   // the spaces this profile can see.
   return named[0]?.id ?? resolveSpaceRef(spaces, trimmed).id;
-}
-
-/**
- * A persisted list holds IDs. One that the active organization does not contain
- * is refused rather than silently syncing nothing from it.
- */
-function configuredSpaceId(spaces: Space[], id: string): string {
-  if (!spaces.some((space) => space.id === id))
-    throw new Error(`Configured sync space "${id}" is not accessible in the active organization.`);
-  return id;
 }

@@ -50,10 +50,20 @@ const SPACES = [
   { id: "spc_library", name: "Library" },
 ];
 
+/**
+ * `memberships` is the space → package attribution (`space_packages`), and
+ * `reachable` is what `GET /api/spaces` answers for this principal — the two
+ * halves the real API keeps apart. Default: every space named in `memberships`.
+ */
 function installSpaces(
   fixtures: SkillFixture[],
   memberships: Record<string, string[]>,
-  options: { failingSpace?: string; duplicateNames?: boolean; seen?: string[] } = {},
+  options: {
+    failingSpace?: string;
+    duplicateNames?: boolean;
+    seen?: string[];
+    reachable?: string[];
+  } = {},
 ) {
   const server = createSkillServer(fixtures);
   server.install();
@@ -62,8 +72,9 @@ function installSpaces(
     const url = new URL(String(input));
     const spaceId = new Headers(init?.headers).get("X-Space-Id") ?? "";
     if (url.pathname === "/api/spaces") {
+      const reachable = options.reachable ?? Object.keys(memberships);
       return Response.json({
-        data: SPACES.map((space) => ({
+        data: SPACES.filter((space) => reachable.includes(space.id)).map((space) => ({
           ...space,
           name: options.duplicateNames ? "Duplicate" : space.name,
         })),
@@ -164,14 +175,18 @@ describe("multi-space skill distribution regressions", () => {
     await updateProfile("default", { syncSpaces: ["spc_active"] });
     await skillsSyncCommand({}, createMemoryIO().io);
 
-    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["shared"]);
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["shared"]);
     expect(server.downloads()).toBe(2);
     expect((await getProfile("default"))?.syncSpaces).toEqual(["spc_active"]);
   });
 
   it("rejects ambiguous names without altering the installed plugin or ledger", async () => {
     const fixtures = [{ id: "@acme/retained", skillMd: skillMd("retained") }];
-    installSpaces(fixtures, { spc_active: ["@acme/retained"] }, { duplicateNames: true });
+    installSpaces(
+      fixtures,
+      { spc_active: ["@acme/retained"], spc_library: [] },
+      { duplicateNames: true },
+    );
     await skillsSyncCommand({}, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const ledger = await readFile(getStatePath(), "utf8");
@@ -185,5 +200,73 @@ describe("multi-space skill distribution regressions", () => {
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);
     expect(await readFile(getStatePath(), "utf8")).toBe(ledger);
+  });
+});
+
+describe("multi-space skill distribution — access decides the sources", () => {
+  const TWO_SPACES = [
+    { id: "@acme/active-only", skillMd: skillMd("active-only") },
+    { id: "@acme/library-only", skillMd: skillMd("library-only") },
+    { id: "@acme/shared", skillMd: skillMd("shared") },
+  ];
+  const BOTH = {
+    spc_active: ["@acme/active-only", "@acme/shared"],
+    spc_library: ["@acme/library-only", "@acme/shared"],
+  };
+
+  it("installs the union of every reachable space, downloading a shared package once", async () => {
+    const server = installSpaces(TWO_SPACES, BOTH);
+
+    await skillsSyncCommand({}, createMemoryIO().io);
+
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "active-only",
+      "library-only",
+      "shared",
+    ]);
+    // `@acme/shared` is one org package attributed to both spaces.
+    expect(server.downloads()).toBe(3);
+  });
+
+  it("picks up a newly reachable space, and drops one that is taken away", async () => {
+    installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_active"] });
+    await skillsSyncCommand({}, createMemoryIO().io);
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["active-only", "shared"]);
+
+    installSpaces(TWO_SPACES, BOTH);
+    await skillsSyncCommand({}, createMemoryIO().io);
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "active-only",
+      "library-only",
+      "shared",
+    ]);
+
+    // Access revoked: the exclusive skill goes, the shared one stays because
+    // the other space still supplies it.
+    installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_active"] });
+    const { io, stderr } = createMemoryIO();
+    await skillsSyncCommand({}, io);
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["active-only", "shared"]);
+    expect(stderr()).not.toMatch(/not accessible/);
+  });
+
+  it("narrows to syncSpaces, and skips a configured space that access no longer covers", async () => {
+    installSpaces(TWO_SPACES, BOTH);
+    await updateProfile("default", { syncSpaces: ["spc_library"] });
+    await skillsSyncCommand({}, createMemoryIO().io);
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
+      "library-only",
+      "shared",
+    ]);
+
+    installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_active"] });
+    await updateProfile("default", { syncSpaces: ["spc_active", "spc_library"] });
+    const { io, stderr } = createMemoryIO();
+    await skillsSyncCommand({}, io);
+
+    // A stored id the grant no longer covers is a note, not a run failure: the
+    // spaces that ARE reachable still sync.
+    expect(stderr()).toContain('Configured sync space "spc_library" is not accessible');
+    expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["active-only", "shared"]);
   });
 });

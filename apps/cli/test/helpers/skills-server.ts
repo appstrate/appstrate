@@ -22,6 +22,9 @@ const encoder = new TextEncoder();
 /** The sync never reads it; the stub carries it because the real DTOs do. */
 const MANIFEST_DESCRIPTION = "A skill.";
 
+/** Same reason: `Space` declares it, the sync only ever reads `id`. */
+const SPACE_STAMP = { createdAt: "2026-01-01T00:00:00.000Z" };
+
 /** Draft-side state of a fixture, read by `--source draft`. */
 export interface DraftFixture {
   /** `SKILL.md` of the working copy. Defaults to the published one. */
@@ -145,6 +148,18 @@ export function createSkillServer(fixtures: SkillFixture[]): SkillServer {
   const respond = async (input: string | URL | Request): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input.toString());
     const path = url.pathname;
+
+    // The sync selects its skill sources from the spaces this profile reaches,
+    // so every run starts here. The two ids are the ones the suites pin.
+    if (path === "/api/spaces") {
+      return json({
+        object: "list",
+        data: [
+          { id: "spc_1", orgId: "org_1", name: "Space One", isDefault: true, ...SPACE_STAMP },
+          { id: "spc_2", orgId: "org_1", name: "Space Two", isDefault: false, ...SPACE_STAMP },
+        ],
+      });
+    }
 
     if (path === "/api/packages/skills") {
       return json({
