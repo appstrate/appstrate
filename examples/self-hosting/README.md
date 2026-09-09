@@ -406,7 +406,7 @@ install dir itself, so use it only when you intend a full wipe.
 - Place a reverse proxy (nginx, Caddy, Traefik) in front of Appstrate for TLS termination
 - Set `APP_URL` to your public HTTPS URL
 - Set `TRUSTED_ORIGINS` to your public domain
-- Set `TRUST_PROXY=true` so client IPs and forwarded-proto are read from `X-Forwarded-*`
+- Set `TRUST_PROXY` to the number of proxy hops in front of Appstrate (`1` for the single reverse proxy above) so the per-IP rate limiters and the audit trail read `X-Forwarded-For`. Not optional: behind an HTTPS `APP_URL` the image refuses to boot on `TRUST_PROXY=false`
 
 The `appstrate install` CLI wires all three for you when you pass the public URL
 (`--app-url https://appstrate.example.com`, or `APPSTRATE_APP_URL` for the

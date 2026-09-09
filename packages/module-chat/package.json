@@ -31,7 +31,7 @@
     "drizzle-orm": "^0.45.2",
     "ioredis": "^6.0.0",
     "remark-gfm": "^4.0.1",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "peerDependencies": {
     "hono": "*",

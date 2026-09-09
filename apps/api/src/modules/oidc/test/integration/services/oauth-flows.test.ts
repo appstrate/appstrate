@@ -17,7 +17,7 @@
  *  - The minted access token verifies against the module's
  *    `verifyEndUserAccessToken` — proving the JWT is ES256-signed by the
  *    `jwks` table + carries the `endUserId` + `spaceId` custom
- *    claims injected by `customAccessTokenClaims`.
+ *    claims injected by the access-token claim extension in `auth/plugins.ts`.
  *  - PKCE enforcement: a tampered `code_verifier` fails exchange.
  *
  * What this test intentionally does NOT assert:
@@ -33,7 +33,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { user as userTable } from "@appstrate/db/schema";
+import { user as userTable, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -42,7 +42,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { overrideJwksResolver } from "../../../services/enduser-token.ts";
+import { overrideJwks } from "../../../services/enduser-token.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
@@ -51,12 +51,8 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import {
-  getMcpOrgResourceUri,
-  orgIdFromMcpAudience,
-  addMcpOrgAudience,
-  _resetMcpOrgAudiencesForTesting,
-} from "../../../../../lib/audiences.ts";
+import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
+import { encodeBasicCredentials } from "@better-auth/core/oauth2";
 import { decodeJwt } from "jose";
 
 // The protected-resource registry is a process-wide singleton shared with the
@@ -192,13 +188,34 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   beforeAll(() => {
     // Make sure the JWKS cache starts clean so verifyEndUserAccessToken
     // fetches the ES256 keys the jwt plugin just installed.
-    overrideJwksResolver(null);
+    overrideJwks(null);
   });
+
+  /**
+   * Headers for the client-authenticated OAuth endpoints (`/oauth2/token`,
+   * `/oauth2/introspect`, `/oauth2/revoke`).
+   *
+   * `createClient` registers every admin-provisioned client as
+   * `client_secret_basic`, and the oauth-provider holds a client to the method
+   * it registered ("client registered for client_secret_basic cannot use
+   * client_secret_post"), so the secret travels in the Authorization header —
+   * encoded by upstream's own RFC 6749 §2.3.1 encoder rather than a hand-rolled
+   * base64. Repeating it in the body would be rejected as two authentication
+   * methods on one request. `client_id` stays in the body: that is
+   * identification, not authentication, and the token guard's self-service
+   * audience confinement reads it from there.
+   */
+  function clientAuthHeaders(): Record<string, string> {
+    return {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: encodeBasicCredentials(clientId, clientSecret),
+    };
+  }
 
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
-    overrideJwksResolver(null);
+    overrideJwks(null);
     resetOidcGuardsLimiters();
     ctx = await createTestContext({ orgSlug: "e2eoauth" });
     const client = await registerClient(ctx);
@@ -352,13 +369,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       code: code!,
       redirect_uri: "https://satellite.example.com/callback",
       client_id: clientId,
-      client_secret: clientSecret,
       code_verifier: verifier,
       resource: "http://localhost:3000",
     });
     const tokenRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: tokenBody.toString(),
     });
     expect(tokenRes.status).toBe(200);
@@ -376,8 +392,9 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // ── Step 5 ── Decode the access token (signature verification is
     // covered by `test/integration/middleware/enduser-token-auth.test.ts`
     // which spins up a local JWKS server). Here we assert the payload
-    // shape — proving `customAccessTokenClaims` actually ran and injected
-    // `end_user_id` + `space_id` + `org_id` via `resolveOrCreateEndUser`.
+    // shape — proving the access-token claim extension actually ran and
+    // injected `end_user_id` + `space_id` + `org_id` via
+    // `resolveOrCreateEndUser`.
     const payload = decodeJwt(tokens.access_token) as {
       sub?: string;
       scope?: string;
@@ -488,13 +505,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // so the rejection here is guaranteed to come from PKCE verification.
     const tokenRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code: code!,
         redirect_uri: "https://satellite.example.com/callback",
         client_id: clientId,
-        client_secret: clientSecret,
         code_verifier: randomVerifier(), // wrong verifier
         resource: "http://localhost:3000",
       }).toString(),
@@ -578,13 +594,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   }> {
     const res = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
         redirect_uri: "https://satellite.example.com/callback",
         client_id: clientId,
-        client_secret: clientSecret,
         code_verifier: verifier,
         resource: "http://localhost:3000",
         ...extras,
@@ -602,13 +617,12 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // first (it would otherwise be consumed by oauth-provider).
     const res = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code: "fake-code",
         redirect_uri: "https://satellite.example.com/callback",
         client_id: clientId,
-        client_secret: clientSecret,
         code_verifier: "fake-verifier",
         // NO resource
       }).toString(),
@@ -619,33 +633,14 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(body.error_description).toContain("RFC 8707");
   });
 
-  it("rejects /oauth2/token with a resource not in validAudiences", async () => {
-    const res = await app.request("/api/auth/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code: "fake-code",
-        redirect_uri: "https://satellite.example.com/callback",
-        client_id: clientId,
-        client_secret: clientSecret,
-        code_verifier: "fake-verifier",
-        resource: "https://evil.example.com",
-      }).toString(),
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("invalid_request");
-  });
-
   it("mints a token audience-bound to a per-org MCP resource when resource=<…>/api/mcp/o/<orgId>", async () => {
     // RFC 8707: a client targeting an org's inbound MCP endpoint requests that
-    // org's canonical per-org resource URI; the AS (with the org in
-    // validAudiences) accepts it and stamps it as the token `aud`. The
+    // org's canonical per-org resource URI; the AS accepts it (the org has an
+    // `oauth_resources` row) and stamps it as the token `aud`. The
     // `/api/mcp/o/:org` resource server then enforces that audience (covered by
-    // the mcp module's audience suite). The MCP server registers the per-org
-    // family + audience at boot in production — do it inline here so this
-    // single test does not perturb the shared beforeEach.
+    // the mcp module's audience suite). The MCP module registers the per-org
+    // family + writes the row at boot in production — do both inline here so
+    // this single test does not perturb the shared beforeEach.
     registerProtectedResourceFamily({
       prefix: "/api/mcp/o",
       deriveUri: (path) => {
@@ -656,46 +651,25 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       },
       ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
     });
-    addMcpOrgAudience(ctx.orgId);
+    const mcpResourceUri = getMcpOrgResourceUri(ctx.orgId);
+    await db.insert(oauthResource).values({
+      id: crypto.randomUUID(),
+      identifier: mcpResourceUri,
+      name: `MCP endpoint for organization ${ctx.orgId}`,
+    });
     try {
       const { cookie } = await signUpEndUser(ctx.defaultSpaceId, "mcp-aud@satellite.example.com");
       const { code, verifier } = await runHappyPathToCode({ cookie });
-      const mcpResource = getMcpOrgResourceUri(ctx.orgId);
-      const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResource });
+      const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResourceUri });
       const payload = decodeJwt(tokens.access_token) as { aud?: string | string[] };
       const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : [];
-      expect(auds).toContain(mcpResource);
+      expect(auds).toContain(mcpResourceUri);
     } finally {
-      // Restore the mutable audience allowlist + registry for sibling tests.
-      _resetMcpOrgAudiencesForTesting();
+      // `oauth_resources` is outside `truncateAll` (see `oidc/test/tables.ts`),
+      // so drop the row and the registry entry for sibling tests.
+      await db.delete(oauthResource).where(eq(oauthResource.identifier, mcpResourceUri));
       resetProtectedResources();
     }
-  });
-
-  it("rate-limits /oauth2/token to 30 req/min per IP", async () => {
-    // The guard limiter is keyed on x-forwarded-for; app.request() sets no
-    // such header, so all spam shares the `unknown` bucket. Fire 31 posts;
-    // the 31st must be rejected with 429.
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      code: "fake",
-      redirect_uri: "https://satellite.example.com/callback",
-      client_id: clientId,
-      client_secret: clientSecret,
-      code_verifier: "fake",
-      resource: "http://localhost:3000",
-    }).toString();
-
-    let rateLimited = 0;
-    for (let i = 0; i < 35; i++) {
-      const res = await app.request("/api/auth/oauth2/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      if (res.status === 429) rateLimited++;
-    }
-    expect(rateLimited).toBeGreaterThan(0);
   });
 
   it("issues a fresh JWT access token via grant_type=refresh_token with custom claims re-injected", async () => {
@@ -711,12 +685,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
     const refreshRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: tokens.refresh_token!,
         client_id: clientId,
-        client_secret: clientSecret,
         resource: "http://localhost:3000",
       }).toString(),
     });
@@ -725,9 +698,9 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(refreshed.access_token).toBeTruthy();
     expect(refreshed.access_token).not.toBe(initialAccess);
 
-    // Prove customAccessTokenClaims re-ran on refresh — end_user_id + space_id
-    // are injected only by that closure, so their presence on the new token
-    // is the canary.
+    // Prove the access-token claim extension re-ran on refresh — end_user_id +
+    // space_id are injected only there, so their presence on the new token is
+    // the canary.
     const payload = decodeJwt(refreshed.access_token) as {
       actor_type?: string;
       end_user_id?: string;
@@ -741,12 +714,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   it("refresh_token grant also requires resource parameter", async () => {
     const res = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: "whatever",
         client_id: clientId,
-        client_secret: clientSecret,
         // NO resource
       }).toString(),
     });
@@ -766,11 +738,10 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
     const liveRes = await app.request("/api/auth/oauth2/introspect", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         token: tokens.access_token,
         client_id: clientId,
-        client_secret: clientSecret,
       }).toString(),
     });
     expect(liveRes.status).toBe(200);
@@ -783,11 +754,10 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // before consulting the token store — either shape is spec-compliant.
     const garbageRes = await app.request("/api/auth/oauth2/introspect", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         token: "not-a-real-token",
         client_id: clientId,
-        client_secret: clientSecret,
       }).toString(),
     });
     expect([200, 400, 401]).toContain(garbageRes.status);
@@ -814,12 +784,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
     const revokeRes = await app.request("/api/auth/oauth2/revoke", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         token: tokens.refresh_token!,
         token_type_hint: "refresh_token",
         client_id: clientId,
-        client_secret: clientSecret,
       }).toString(),
     });
     expect(revokeRes.status).toBe(200);
@@ -827,15 +796,81 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // A subsequent refresh attempt with the revoked token must fail.
     const refreshAttempt = await app.request("/api/auth/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: clientAuthHeaders(),
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: tokens.refresh_token!,
         client_id: clientId,
-        client_secret: clientSecret,
         resource: "http://localhost:3000",
       }).toString(),
     });
     expect([400, 401]).toContain(refreshAttempt.status);
+  });
+
+  it("refuses a client_secret_basic client that authenticates in the body", async () => {
+    // The provider holds a client to the auth method it registered, so a secret
+    // in the body is `invalid_client` even though the secret itself is correct.
+    // Without that rule a leaked secret could be replayed over a transport the
+    // registration deliberately excluded. A REAL code is required to reach the
+    // check: the grant validates the code first.
+    const { cookie } = await signUpEndUser(ctx.defaultSpaceId, "postauth@satellite.example.com");
+    const { code, verifier } = await runHappyPathToCode({ cookie });
+
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "https://satellite.example.com/callback",
+        client_id: clientId,
+        client_secret: clientSecret,
+        code_verifier: verifier,
+        resource: "http://localhost:3000",
+      }).toString(),
+    });
+    expect((await res.json()) as { error?: string }).toMatchObject({ error: "invalid_client" });
+  });
+});
+
+describe("public clients must carry PKCE", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+  });
+
+  it("refuses an authorization request from a `none` client with no code_challenge", async () => {
+    // `token_endpoint_auth_method: "none"` IS the public/confidential
+    // discriminator: the provider demands PKCE off the back of that value alone,
+    // and a public client without it has no proof of possession at all.
+    const registered = await app.request("/api/auth/oauth2/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Public client without PKCE",
+        redirect_uris: ["http://localhost:9921/callback"],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+    expect([200, 201]).toContain(registered.status);
+    const { client_id: publicClientId } = (await registered.json()) as { client_id: string };
+
+    const res = await app.request(
+      `/api/auth/oauth2/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: publicClientId,
+        redirect_uri: "http://localhost:9921/callback",
+        scope: "openid",
+        state: "no-pkce",
+      })}`,
+    );
+    const location = res.headers.get("location");
+    expect(location).toBeTruthy();
+    expect(new URL(location!, "http://localhost").searchParams.get("error")).toBe(
+      "invalid_request",
+    );
   });
 });

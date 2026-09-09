@@ -526,10 +526,20 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   runs predating the stamp, such rows now carry the runtime dot instead of the
   speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
 
+- **Every rate limit keeps a per-process budget behind Redis.** Each limiter the
+  platform builds — auth, OIDC, run, proxy — now carries a `RateLimiterMemory`
+  insurance limiter of the same points and duration
+  (`apps/api/src/infra/rate-limit/redis-rate-limit.ts`). While Redis is
+  unreachable the store rejects with an `Error` rather than a decision, which
+  Better Auth's limiter turns into a 500 on every `/api/auth/**` route; the
+  insurance budget answers instead, so a Redis outage degrades each limit from
+  per cluster to per process for its length rather than removing it or refusing
+  the call. A rejection that still reaches a caller means both backends failed.
+
 ### Fixed
 
 - **Deleting an organization reserves the deletion before any module tears
-  anything down (migration `0057`).** `DELETE /api/orgs/:orgId` checked
+  anything down (migration `0058`).** `DELETE /api/orgs/:orgId` checked
   deletability without a lock, emitted `onOrgDelete` — where modules cancel a
   Stripe subscription and drop rows of their own — and only then opened the
   transaction that re-checks in-progress runs and refuses when it finds any. A
@@ -1060,6 +1070,36 @@ skills sync is running` and kept the stale plugin. The lock is now
   #1201 image-trio boot guard already refuses a deployment whose platform,
   `PI_IMAGE` and `SIDECAR_IMAGE` versions disagree, so a correctly pinned
   compose file cannot land in either state.
+
+- **`TRUST_PROXY=false` refuses to boot in production behind a non-loopback
+  `APP_URL`.** The platform terminates no TLS, so that pair means a proxy is in
+  front by construction, and ignoring `X-Forwarded-For` there hands every caller
+  the proxy's own address — collapsing every per-IP rate limit and every audit
+  record into one bucket. `@appstrate/env` now rejects the combination at boot
+  instead of running degraded.
+
+  **Operators: name the hop count.** `TRUST_PROXY=1` behind a single reverse
+  proxy, `N` behind N hops you control. The self-hosting example ships `1` and
+  passes the variable through in all four of its compose files.
+
+- **A token request that identifies no client is held to the self-service
+  confinement.** `/oauth2/token` confines a self-registered (DCR / CIMD) client
+  to exactly one protected-resource audience; a request naming no client now
+  falls under the same rule rather than past it, so dropping `client_id` is not
+  a way to mint a token for the broad platform audience. `private_key_jwt` keeps
+  working: the client id is read from the `client_assertion`'s `sub` (RFC 7523
+  §3, `iss` must agree when present), unverified — the provider then verifies
+  the assertion against the row that id names, so a forged assertion naming an
+  operator-provisioned client dies on the signature check and one naming a
+  self-service client stays confined.
+
+- **Operators: run `scripts/migration/0011` after the drizzle batch carrying
+  `0057`, on any deployment that has ever accepted a self-registered client.**
+  `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
+  `0011` fills it from the `selfService` key already in `metadata`. Until it
+  runs, a self-registered client reads as operator-provisioned and its tokens
+  are not confined. Idempotent, one transaction, and it never flips a `true`
+  back.
 
 ## [1.0.0-beta.53] - 2026-08-26
 

@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { encodeBasicCredentials } from "@better-auth/core/oauth2";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable, session as sessionTable } from "@appstrate/db/schema";
@@ -201,7 +202,7 @@ async function sha256Base64Url(input: string): Promise<string> {
 /**
  * Drive the full OAuth 2.1 + PKCE flow for the given session cookie and
  * space-level client, returning the `/oauth2/token` response. The
- * realm enforcement lives in `customAccessTokenClaims` → claim builder
+ * realm enforcement lives in the access-token claim extension → claim builder
  * → `assertUserRealm`, which fires at the token exchange — so the caller
  * asserts on `res.status` here. Happy-path token shape is already covered
  * by `oauth-flows.test.ts`; this helper exists to probe the rejection
@@ -294,13 +295,19 @@ async function exchangeCode(
 ): Promise<Response> {
   return app.request("/api/auth/oauth2/token", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      // `createClient` registers admin-provisioned clients as
+      // `client_secret_basic`, and the oauth-provider holds a client to the
+      // method it registered — a secret in the body would be answered
+      // `invalid_client` before the realm guard this file asserts ever runs.
+      Authorization: encodeBasicCredentials(opts.clientId, opts.clientSecret),
+    },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
       redirect_uri: opts.redirectUri,
       client_id: opts.clientId,
-      client_secret: opts.clientSecret,
       code_verifier: verifier,
       resource: "http://localhost:3000",
     }).toString(),

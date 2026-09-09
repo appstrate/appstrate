@@ -252,11 +252,10 @@ describe("Public end-user pages — /api/oauth/*", () => {
   });
 
   // C3 — surface `UnverifiedEmailConflictError` while we still control the
-  // response. Previously this error fired inside `customAccessTokenClaims`
-  // during the subsequent token mint, long after the POST /login handler
-  // had already 302'd away, so the user saw an opaque 500. We now pre-
-  // resolve the end-user at the end of the login handler and render the
-  // friendly FR error page from there.
+  // response. The POST /login handler pre-resolves the end-user and renders the
+  // friendly FR error page from there; left to the access-token claim extension
+  // it would fire at token mint, long after the handler has 302'd away, and the
+  // user would see an opaque 500.
   it("POST /login proactively detects an unverified email conflict and 409s", async () => {
     const { clientId } = await registerClient(ctx);
 

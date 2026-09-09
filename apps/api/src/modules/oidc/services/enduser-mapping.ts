@@ -39,8 +39,8 @@ import { oidcEndUserProfiles } from "@appstrate/db/schema";
 /**
  * Load a space row by id — shared helper for callers that need the
  * full `SpaceContextRow` shape outside the Hono middleware chain (e.g. the
- * `customAccessTokenClaims` closure in `auth/plugins.ts`, which only has
- * the `metadata.spaceId` string at token-mint time). Returns `null`
+ * access-token claim extension in `auth/plugins.ts`, which holds only the
+ * client's `referencedSpaceId` at token-mint time). Returns `null`
  * if the space has been deleted between client registration and
  * token mint.
  */
@@ -113,8 +113,8 @@ export class SpaceSignupClosedError extends Error {
  * Better Auth identity.
  *
  * Accepts either a fully-loaded `SpaceContextRow` (preferred — callers on the
- * hot path like `customAccessTokenClaims` in `auth/plugins.ts` load the space
- * once per token mint and pass it through) or a bare `spaceId` string
+ * hot path like the access-token claim extension in `auth/plugins.ts` load the
+ * space once per token mint and pass it through) or a bare `spaceId` string
  * (kept for the integration tests and any caller that hasn't threaded the
  * middleware-resolved `space` through yet — the function loads the row itself
  * and throws a clear error if the space is missing).

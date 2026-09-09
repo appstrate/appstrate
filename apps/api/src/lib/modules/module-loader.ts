@@ -788,9 +788,9 @@ export function getModuleAuthStrategies(): readonly AuthStrategy[] {
  * no per-module schema map is passed.
  *
  * `betterAuthPlugins` is erased to `unknown` at this layer — the boot
- * integration site in `packages/db/src/auth.ts` narrows to
- * `BetterAuthPluginList` before calling `createAuth(plugins)`. Keeps Better
- * Auth types out of core.
+ * integration site (`apps/api/src/lib/boot.ts`) narrows to
+ * `BetterAuthPluginList` inside the thunk it hands `createAuth(() => plugins)`,
+ * which takes the list as a factory. Keeps Better Auth types out of core.
  */
 interface ModuleContributions {
   betterAuthPlugins: unknown[];

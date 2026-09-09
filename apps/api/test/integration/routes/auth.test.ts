@@ -103,14 +103,18 @@ describe("Authentication", () => {
   // contract — the 403 + `SESSION_NOT_FRESH` code the frontend relies on —
   // and confirm a fresh session still unlinks while BA's last-account guard
   // stays intact.
+  // `/unlink-account` names its target by the `account` ROW id (its `id`
+  // column), never by `providerId` and never by the row's own `accountId`
+  // (the id at the provider). Each test therefore posts the uuid it inserted.
   describe("unlink-account session freshness (step-up)", () => {
     it("blocks unlink with a stale session (403 SESSION_NOT_FRESH)", async () => {
       const testUser = await createTestUser();
 
       // Link a second (social) account so the credential one isn't the last —
       // this isolates the freshness gate as the only reason for a rejection.
+      const googleRowId = crypto.randomUUID();
       await db.insert(accountTable).values({
-        id: crypto.randomUUID(),
+        id: googleRowId,
         accountId: "google-account-id",
         providerId: "google",
         userId: testUser.id,
@@ -125,7 +129,7 @@ describe("Authentication", () => {
       const res = await app.request("/api/auth/unlink-account", {
         method: "POST",
         headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "google" }),
+        body: JSON.stringify({ accountId: googleRowId }),
       });
 
       expect(res.status).toBe(403);
@@ -144,8 +148,9 @@ describe("Authentication", () => {
       const testUser = await createTestUser();
 
       // Link a second (social) account so the credential one isn't the last.
+      const googleRowId = crypto.randomUUID();
       await db.insert(accountTable).values({
-        id: crypto.randomUUID(),
+        id: googleRowId,
         accountId: "google-account-id",
         providerId: "google",
         userId: testUser.id,
@@ -155,7 +160,7 @@ describe("Authentication", () => {
       const res = await app.request("/api/auth/unlink-account", {
         method: "POST",
         headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "google" }),
+        body: JSON.stringify({ accountId: googleRowId }),
       });
 
       expect(res.status).toBe(200);
@@ -172,11 +177,18 @@ describe("Authentication", () => {
 
       // The user has ONLY the `credential` account (no social linked). BA's
       // own guard must refuse to delete the last account, independent of the
-      // freshness gate (session is fresh here).
+      // freshness gate (session is fresh here). Naming the row that really
+      // exists is what makes this exercise the guard rather than body
+      // validation.
+      const [credentialAccount] = await db
+        .select()
+        .from(accountTable)
+        .where(eq(accountTable.userId, testUser.id));
+
       const res = await app.request("/api/auth/unlink-account", {
         method: "POST",
         headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "credential" }),
+        body: JSON.stringify({ accountId: credentialAccount!.id }),
       });
 
       expect(res.status).toBeGreaterThanOrEqual(400);

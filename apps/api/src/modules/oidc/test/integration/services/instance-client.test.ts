@@ -71,9 +71,8 @@ beforeAll(async () => {
   await startJwksServer();
   const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
   const { default: oidcModule } = await import("../../../index.ts");
-  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
-  const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
-  overrideJwksResolver(localSet as unknown as Parameters<typeof overrideJwksResolver>[0]);
+  const { overrideJwks } = await import("../../../services/enduser-token.ts");
+  overrideJwks(async () => ({ keys: [publicJwk] }));
   app = getTestApp({ modules: [oidcModule] });
 });
 
@@ -213,13 +212,11 @@ describe("ensureInstanceClient", () => {
       level: "instance",
       referencedOrgId: null,
       referencedSpaceId: null,
-      metadata: JSON.stringify({ level: "instance", clientId }),
       skipConsent: true,
       allowSignup: true,
       signupRole: "member",
       disabled: false,
-      type: "web",
-      public: false,
+      applicationType: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -237,7 +234,6 @@ describe("ensureInstanceClient", () => {
       .where(eq(oauthClient.clientId, clientId))
       .limit(1);
     expect(row).toBeDefined();
-    expect(row!.public).toBe(true);
     expect(row!.tokenEndpointAuthMethod).toBe("none");
     expect(row!.clientSecret).toBeNull();
     // clientId unchanged → outstanding tokens still valid
@@ -255,7 +251,6 @@ describe("ensureInstanceClient", () => {
       .from(oauthClient)
       .where(eq(oauthClient.level, "instance"))
       .limit(1);
-    expect(before!.public).toBe(true);
     expect(before!.tokenEndpointAuthMethod).toBe("none");
     expect(before!.clientSecret).toBeNull();
     const originalUpdatedAt = before!.updatedAt!.getTime();
@@ -268,7 +263,6 @@ describe("ensureInstanceClient", () => {
       .where(eq(oauthClient.level, "instance"))
       .limit(1);
     expect(after!.updatedAt!.getTime()).toBe(originalUpdatedAt);
-    expect(after!.public).toBe(true);
     expect(after!.tokenEndpointAuthMethod).toBe("none");
     expect(after!.clientSecret).toBeNull();
   });
@@ -292,13 +286,11 @@ describe("ensureInstanceClient", () => {
       level: "instance",
       referencedOrgId: null,
       referencedSpaceId: null,
-      metadata: JSON.stringify({ level: "instance", clientId }),
       skipConsent: true,
       allowSignup: true,
       signupRole: "member",
       disabled: false,
-      type: "web",
-      public: false,
+      applicationType: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -317,7 +309,6 @@ describe("ensureInstanceClient", () => {
       .limit(1);
     expect(row).toBeDefined();
     // Auth shape converged
-    expect(row!.public).toBe(true);
     expect(row!.tokenEndpointAuthMethod).toBe("none");
     expect(row!.clientSecret).toBeNull();
     // Redirect URIs converged

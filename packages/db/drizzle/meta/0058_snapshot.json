@@ -1,6 +1,6 @@
 {
-  "id": "6f8c3c54-cbc3-40a1-8c95-24bb52762459",
-  "prevId": "b7e41d92-3c58-4a76-9f0d-2e6a41c8d503",
+  "id": "65ab9fbd-6934-4492-8f0a-c49bd801ce4e",
+  "prevId": "6f8c3c54-cbc3-40a1-8c95-24bb52762459",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1463,6 +1463,12 @@
         "files_bytes_limit": {
           "name": "files_bytes_limit",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleting_at": {
+          "name": "deleting_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

@@ -45,6 +45,19 @@ const jsonEnv = <T>(defaultValue: string) =>
 const isProductionSafeUrl = (v: string): boolean =>
   v.startsWith("https://") || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(v);
 
+// True when a base URL can only be reached through a reverse proxy: the
+// platform terminates no TLS of its own, so `https://` means something in
+// front does, and a non-loopback host means the request crossed the network
+// to arrive. The one layout that reaches the platform directly is plain-http
+// loopback — the same carve-out `isProductionSafeUrl` grants.
+const servedThroughReverseProxy = (v: string): boolean =>
+  !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(v);
+
+// Whether `TRUST_PROXY` trusts at least one forwarded hop, matching how
+// `apps/api/src/lib/client-ip.ts` parses it: `"false"` and `"0"` both leave
+// `X-Forwarded-For` ignored, `"true"` means one hop, `"N"` means N.
+const trustsForwardedChain = (v: string): boolean => v !== "false" && Number(v) !== 0;
+
 // Host of an absolute URL (lowercased by the URL parser, port and path
 // stripped), or null when the value does not parse. Refinements compare parsed
 // hosts rather than raw strings — `https://a.example.com` and
@@ -938,6 +951,24 @@ export const envSchema = z
     message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
     path: ["APP_URL"],
   })
+  // A production `APP_URL` that is not plain-http loopback is reached through a
+  // reverse proxy, and there `TRUST_PROXY=false` makes `lib/client-ip.ts`
+  // ignore `X-Forwarded-For` and hand every caller the proxy's own address:
+  // per-IP limiters and audit records collapse into one bucket per instance.
+  // The loopback carve-out is a topology the repo ships — the CLI's local tiers
+  // and `scripts/health-container-e2e.sh` both run this image, whose Dockerfile
+  // bakes in `NODE_ENV=production`, on `http://127.0.0.1` with nothing in front.
+  .refine(
+    (env) =>
+      env.NODE_ENV !== "production" ||
+      !servedThroughReverseProxy(env.APP_URL) ||
+      trustsForwardedChain(env.TRUST_PROXY),
+    {
+      message:
+        "TRUST_PROXY must name the reverse-proxy hop count in production (TRUST_PROXY=1 behind a single proxy): with TRUST_PROXY=false every client resolves to the proxy's own address and per-IP rate limits and audit records collapse to one bucket",
+      path: ["TRUST_PROXY"],
+    },
+  )
   // The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not
   // three independent knobs: the agent runtime and the sidecar speak a wire
   // protocol to each other, and both speak a container boundary to the

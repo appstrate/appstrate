@@ -328,6 +328,93 @@ describe("APP_URL is the canonical public origin", () => {
   });
 });
 
+// Behind a reverse proxy, `TRUST_PROXY=false` makes every caller resolve to
+// the proxy's own address, so per-IP limits and audit records address the
+// whole instance as one client. Production plus an `APP_URL` that is not
+// plain-http loopback IS behind a proxy — the platform terminates no TLS.
+describe("TRUST_PROXY must name a hop count behind a production proxy", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("rejects TRUST_PROXY=false in production behind a proxy", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "false";
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+
+  it("rejects the default (unset) the same way — `false` is the default", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    delete process.env.TRUST_PROXY;
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+
+  it("rejects the `0` spelling — client-ip.ts reads it as zero trusted hops", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "0";
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+
+  it("accepts a hop count in production", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "1";
+    expect(getEnv().TRUST_PROXY).toBe("1");
+  });
+
+  it('accepts `"true"` in production (one hop)', () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "true";
+    expect(getEnv().TRUST_PROXY).toBe("true");
+  });
+
+  it("accepts TRUST_PROXY=false outside production", () => {
+    process.env.NODE_ENV = "development";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "false";
+    expect(getEnv().TRUST_PROXY).toBe("false");
+  });
+
+  // The layout the CLI's local Tier 1/2/3 install and
+  // `scripts/health-container-e2e.sh` boot: the production image on plain-http
+  // loopback with nothing in front of it.
+  it("accepts TRUST_PROXY=false in production on a plain-http loopback APP_URL", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "http://127.0.0.1:3317";
+    process.env.TRUST_PROXY = "false";
+    expect(getEnv().TRUST_PROXY).toBe("false");
+  });
+
+  // `https://localhost` still means a proxy terminated TLS in front.
+  it("rejects TRUST_PROXY=false in production on an https loopback APP_URL", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://localhost:3000";
+    process.env.TRUST_PROXY = "false";
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+});
+
 // USERCONTENT_URL is the origin agent-authored HTML previews are served from.
 // Its presence grants no extra execution context — `mayServeActiveHtml` serves
 // active HTML only for a proven iframe load, in every mode. What a value
@@ -431,6 +518,7 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   it("requires https:// when NODE_ENV=production (same rule APP_URL carries)", () => {
     process.env.NODE_ENV = "production";
     process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "1";
     process.env.USERCONTENT_URL = "http://usercontent.example.com";
     expect(() => getEnv()).toThrow(/USERCONTENT_URL must use https:\/\/ when NODE_ENV=production/);
   });
@@ -438,6 +526,7 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   it("accepts https:// in production", () => {
     process.env.NODE_ENV = "production";
     process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "1";
     process.env.USERCONTENT_URL = "https://usercontent.example.com";
     expect(getEnv().USERCONTENT_URL).toBe("https://usercontent.example.com");
   });

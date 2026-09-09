@@ -54,7 +54,7 @@ async function mintToken(payload: Record<string, unknown>) {
   // basePath is `/api/auth`. The production verifier in `enduser-token.ts`
   // matches against that shape; the test harness must mint tokens with the
   // same `iss` claim or it will exercise the wrong code path. Audience must
-  // also be in `validAudiences` (APP_URL or APP_URL/api/auth) — C1 added
+  // also be one the verifier accepts (APP_URL or APP_URL/api/auth) — C1 added
   // explicit `aud` verification for defense-in-depth.
   const issuer = `${process.env.APP_URL!}/api/auth`;
   return new jose.SignJWT(payload)
@@ -71,21 +71,18 @@ beforeAll(async () => {
   await createSigningKey();
   const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
   const { default: oidcModule } = await import("../../../index.ts");
-  // Install an in-process JWKS resolver built from the test public key.
-  // This bypasses both the `auth.api.getJwks()` path (which would resolve
-  // against the Better Auth singleton the preload built with a different
-  // key set) and the remote URL path (which would need a real HTTP
-  // listener on APP_URL). Tokens minted by `mintToken()` below verify
-  // cleanly against this resolver.
-  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
-  const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
-  overrideJwksResolver(localSet as unknown as Parameters<typeof overrideJwksResolver>[0]);
+  // Serve the test public key as the JWKS. This bypasses the
+  // `auth.api.getJwks()` path, which resolves against the Better Auth
+  // singleton the preload built with a different key set, so tokens minted by
+  // `mintToken()` below verify cleanly.
+  const { overrideJwks } = await import("../../../services/enduser-token.ts");
+  overrideJwks(async () => ({ keys: [publicJwk] }));
   app = getTestApp({ modules: [oidcModule] });
 });
 
 afterAll(async () => {
-  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
-  overrideJwksResolver(null);
+  const { overrideJwks } = await import("../../../services/enduser-token.ts");
+  overrideJwks(null);
 });
 
 describe("OIDC auth strategy — end-to-end via getTestApp", () => {

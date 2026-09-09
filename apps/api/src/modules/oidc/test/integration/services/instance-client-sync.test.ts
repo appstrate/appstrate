@@ -81,7 +81,7 @@ describe("syncInstanceClientsFromEnv — create", () => {
     expect(row!.postLogoutRedirectUris).toEqual(["https://admin.example.com"]);
     expect(row!.scopes).toEqual(["openid", "profile", "email", "offline_access"]);
     expect(row!.skipConsent).toBe(false);
-    expect(row!.type).toBe("web");
+    expect(row!.applicationType).toBe("web");
     expect(row!.tokenEndpointAuthMethod).toBe("client_secret_basic");
     expect(row!.requirePKCE).toBe(true);
     expect(row!.referencedOrgId).toBeNull();
@@ -102,7 +102,7 @@ describe("syncInstanceClientsFromEnv — create", () => {
     expect(row!.clientSecret).toBe(await hashSecret(VALID_SECRET));
   });
 
-  it("persists metadata with { level, clientId } shape", async () => {
+  it("persists an instance-level, operator-provisioned client", async () => {
     setDeclaration([validEntry()]);
     await syncInstanceClientsFromEnv();
 
@@ -111,9 +111,9 @@ describe("syncInstanceClientsFromEnv — create", () => {
       .from(oauthClient)
       .where(eq(oauthClient.clientId, "admin-dashboard"))
       .limit(1);
-    const metadata = JSON.parse(row!.metadata ?? "{}");
-    expect(metadata.level).toBe("instance");
-    expect(metadata.clientId).toBe("admin-dashboard");
+    expect(row!.level).toBe("instance");
+    // Not self-registered, so not confined to a single protected resource.
+    expect(row!.selfService).toBe(false);
   });
 
   it("creates multiple declared clients in one pass", async () => {

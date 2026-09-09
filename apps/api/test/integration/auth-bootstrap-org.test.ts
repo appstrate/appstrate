@@ -16,6 +16,7 @@ import {
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
 import { db, truncateAll } from "../helpers/db.ts";
+import { flushRedis } from "../helpers/redis.ts";
 import { organizations, organizationMembers, user, spaces, packages } from "@appstrate/db/schema";
 import { emitEvent } from "../../src/lib/modules/module-loader.ts";
 import { createDefaultSpace } from "../../src/services/spaces.ts";
@@ -58,6 +59,10 @@ async function signUp(email: string) {
 describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
   beforeEach(async () => {
     await truncateAll();
+    // Better Auth caps `/sign-up*` at 3 per 10s per IP and every request
+    // here arrives from the same (absent) address — reset the budget so a
+    // test is never throttled by the one before it.
+    await flushRedis();
     setEnv({
       AUTH_BOOTSTRAP_OWNER_EMAIL: undefined,
       AUTH_BOOTSTRAP_ORG_NAME: undefined,

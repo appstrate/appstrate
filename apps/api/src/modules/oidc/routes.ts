@@ -1147,7 +1147,8 @@ export function createOidcRouter() {
     // Org-level clients skip this — they don't create end_users rows.
     //
     // INTENTIONAL DOUBLE CALL: `resolveOrCreateEndUser` is also invoked
-    // later during token minting in `auth/plugins.ts` (customAccessTokenClaims).
+    // later during token minting by the access-token claim extension in
+    // `auth/plugins.ts`.
     // This is safe by design — the function is idempotent and race-safe:
     // step 1 is a SELECT-only `findLinkedEndUser` lookup that returns the
     // existing row without side effects, so the second call is a no-op for

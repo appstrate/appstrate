@@ -151,6 +151,10 @@ userId)` after writing the table its resolver reads —
   **Requires `@appstrate/afps-shared@0.8.0` on npm before this release is
   published.**
 
+- **`zod` dependency range moved to `^4.5.4`** (from `^4.4.3`). The floor a
+  consumer's install has to satisfy rises accordingly; core's own schemas and
+  exported types are unchanged.
+
 ### Added
 
 - **`./map-with-concurrency`** — the bounded worker pool, moved into core from

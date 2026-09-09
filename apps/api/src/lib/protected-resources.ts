@@ -122,7 +122,8 @@ export function resolveProtectedResource(
  * `resolveProtectedResource` (which works from a request path): it answers "is
  * this token audience bound to ANY protected resource?" without enumerating the
  * (dynamic) family URIs — the per-org MCP resources cannot be listed at mint
- * time. Backs the outbound-confinement and mint-time gates.
+ * time. Backs the outbound-confinement gate and the self-service single-resource
+ * rule at the token endpoint.
  */
 export function isProtectedResourceUri(uri: string): boolean {
   return families.some((f) => f.ownsUri(uri));
