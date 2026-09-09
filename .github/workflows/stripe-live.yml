@@ -1,0 +1,75 @@
+# Stripe live contract suite.
+#
+# The EE billing tests run against a hand-written mock. The mock proves what
+# the module SENDS; it cannot prove what Stripe RETURNS, because we wrote those
+# responses ourselves. This job closes that half: it runs
+# `packages/module-ee/test/live` against real Stripe in TEST MODE and fails
+# when a fixture claims a field the live API does not have, or when Stripe stops
+# behaving the way the module bets it does.
+#
+# Without `STRIPE_LIVE_SECRET_KEY` the suite skips itself and this job is green
+# — the same opt-in shape as `scripts/conformance/probes.ts`. That covers fork
+# PRs, which never receive secrets.
+name: Stripe live contract
+
+on:
+  # Weekly, so API drift surfaces on a schedule rather than on the unlucky PR
+  # that happens to bump the SDK.
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+  # Anything that touches the billing module or its Stripe dependency. A
+  # Dependabot bump of `stripe` edits packages/module-ee/package.json, so it
+  # lands here without anyone remembering to label it.
+  pull_request:
+    paths:
+      - "packages/module-ee/**"
+      - ".github/workflows/stripe-live.yml"
+
+concurrency:
+  # One at a time: the suite creates and tears down a customer + subscription in
+  # a shared test account, and two runs interleaving there is a false red.
+  group: stripe-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: Stripe live contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Cache Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install
+
+      # `packages/module-ee` declares `postgres: true`, so under TEST_TIER=0 the
+      # harness skips the module and collects none of its tests — including this
+      # suite. The infra is up purely so the suite is allowed to run; it touches
+      # no table.
+      - name: Start test infrastructure
+        run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
+
+      - name: Report coverage state
+        run: |
+          if [ -z "${STRIPE_LIVE_SECRET_KEY}" ]; then
+            echo "::notice::STRIPE_LIVE_SECRET_KEY is not set — the live contract suite will skip itself."
+          fi
+        env:
+          STRIPE_LIVE_SECRET_KEY: ${{ secrets.STRIPE_LIVE_SECRET_KEY }}
+
+      - name: Run Stripe live contract suite
+        run: bun test packages/module-ee/test/live
+        env:
+          STRIPE_LIVE_SECRET_KEY: ${{ secrets.STRIPE_LIVE_SECRET_KEY }}

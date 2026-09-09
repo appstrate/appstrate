@@ -83,7 +83,7 @@ async function parseBody(req: Request): Promise<Record<string, unknown> | null> 
 
 let customerCounter = 0;
 
-function defaultCustomerResponse(): Record<string, unknown> {
+export function defaultCustomerResponse(): Record<string, unknown> {
   customerCounter++;
   return {
     id: `cus_test_${customerCounter.toString().padStart(3, "0")}`,
@@ -92,7 +92,7 @@ function defaultCustomerResponse(): Record<string, unknown> {
   };
 }
 
-function defaultCheckoutResponse(): Record<string, unknown> {
+export function defaultCheckoutResponse(): Record<string, unknown> {
   return {
     id: `cs_test_${Date.now()}`,
     url: "https://checkout.stripe.com/test",
@@ -100,7 +100,7 @@ function defaultCheckoutResponse(): Record<string, unknown> {
   };
 }
 
-function defaultPortalResponse(): Record<string, unknown> {
+export function defaultPortalResponse(): Record<string, unknown> {
   return {
     id: `bps_test_${Date.now()}`,
     url: "https://billing.stripe.com/test",
@@ -108,7 +108,7 @@ function defaultPortalResponse(): Record<string, unknown> {
   };
 }
 
-function defaultSubscriptionResponse(id: string): Record<string, unknown> {
+export function defaultSubscriptionResponse(id: string): Record<string, unknown> {
   return {
     id,
     object: "subscription",
@@ -119,10 +119,20 @@ function defaultSubscriptionResponse(id: string): Record<string, unknown> {
         {
           id: "si_test_001",
           price: { id: "price_starter_test", product: "prod_test" },
+          // On the ITEM, not the subscription: Stripe moved the billing cycle
+          // end here in the 2025-03-31 API version, and the top-level field is
+          // gone from the live response. `subscriptionPeriodEnd` (src/stripe/
+          // webhooks.ts) reads this path; while the fixture kept the old
+          // placement that read returned `undefined` in every test and the
+          // confirmation email silently fell back to today's date.
+          current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
         },
       ],
     },
-    current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+    // Always an object on the live API, empty when unset. Production calls
+    // `parseStripeMetadata` on it during budget allocation, so the path has to
+    // be here even when the values are not.
+    metadata: {},
     cancel_at_period_end: false,
     customer: "cus_test_001",
   };
