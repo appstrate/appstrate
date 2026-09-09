@@ -53,14 +53,7 @@ interface OrgResult {
    * detail endpoint can report the raw override alongside the effective limit.
    */
   filesBytesLimit: number | null;
-  /**
-   * When this organization's deletion was reserved (`organizations.deleting_at`),
-   * or null. A reservation is one-way: `reserveOrgDeletion` stamps it and the
-   * row disappears when the deletion completes, so a non-null value on a row
-   * that still exists means a DELETE was interrupted between the reservation and
-   * the end. Surfaced so that state is visible instead of silent — the recovery
-   * is to repeat the DELETE.
-   */
+  /** When deletion was reserved (`organizations.deleting_at`), or null. */
   deletingAt: string | null;
 }
 
@@ -493,28 +486,15 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
  * its transaction, when runs are in progress — the org row survives but comes
  * back stripped of everything the handlers tore down, and no repair path can
  * rebuild it (the debt is summed over rows that were just deleted, and a
- * consumed free-tier claim does not come back).
+ * consumed free-tier claim does not come back). So: refuse first, notify
+ * second, delete third.
  *
- * A read alone cannot carry that weight: outside a lock, a run admitted between
- * it and the deletion transaction turns the module teardown into a loss. The
- * check and the reservation therefore commit TOGETHER, holding the same per-org
- * advisory key `createRun` takes before its own count + INSERT — so a
- * concurrent admission is either already visible to the count here, or blocked
- * until `deleting_at` is set, at which point `createRun` refuses it (409
- * `org_deleting`). The deletability decided here cannot be invalidated behind
- * the modules' back.
+ * The check and the stamp commit TOGETHER under the per-org advisory key
+ * `createRun` takes, so no run can be admitted behind the modules' back.
+ * Idempotent: a standing reservation is the state a retried DELETE finds.
  *
- * Idempotent: a reservation that already stands is not an error, it is the
- * state a retried DELETE is meant to find. Whatever failed after the first
- * reservation — a module hook, the deletion transaction — is retried by
- * repeating the whole sequence, and the module hooks are required to tolerate
- * that (a second `onOrgDelete` for the same org).
- *
- * The transaction holds no network call: the lock is released before the route
- * emits anything.
- *
- * Throws the same `Error` messages the deletion transaction would, so the
- * route maps either failure onto the same `400 delete_failed` response.
+ * Throws the same `Error` messages the transaction would, so the route maps
+ * either failure onto the same `400 delete_failed` response.
  */
 export async function reserveOrgDeletion(orgId: string): Promise<void> {
   await db.transaction(async (tx) => {
@@ -543,11 +523,7 @@ export async function reserveOrgDeletion(orgId: string): Promise<void> {
 }
 
 export async function deleteOrganization(orgId: string): Promise<void> {
-  // Delete in FK-safe order within a transaction. The in-progress-runs check
-  // lives INSIDE the transaction as well as in `reserveOrgDeletion`: the
-  // reservation is what makes a new admission impossible, this count is what
-  // proves it for the rows about to be cascade-deleted, and the two are
-  // separated by the module teardown. Keep both.
+  // Delete in FK-safe order within a transaction.
   await db.transaction(async (tx) => {
     // Serialize against concurrent run admission. `createRun` acquires this
     // same per-org advisory lock before its count + INSERT. Taking it here

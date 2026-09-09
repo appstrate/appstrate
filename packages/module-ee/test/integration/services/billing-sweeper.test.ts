@@ -724,9 +724,8 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
   });
 
   it("records the seeded frontier as the cutover floor", async () => {
-    // The floor is what keeps the replay window out of the excluded history on
-    // every later pass, so it must be written at seed time — not derived later
-    // from a watermark that has since moved.
+    // The floor keeps the replay window out of the excluded history, so it must be
+    // written at seed time — not derived from a watermark that has since moved.
     seedLlmUsage({ orgId, costUsd: 0.25 });
     seedLlmUsage({ orgId, costUsd: 0.5 });
 
@@ -1302,11 +1301,9 @@ describe("billing sweep — cutover exclusion floor", () => {
   });
 
   it("REGRESSION: historical usage stays excluded on the SECOND sweep too", async () => {
-    // The cutover promise is "rows below the seeded frontier are never
-    // revisited". The first pass honoured it by returning early; the second one
-    // read from `watermark − REPLAY_WINDOW`, walked back under the seed and
-    // billed the whole history — 750 credits of usage this deployment had
-    // deliberately excluded.
+    // The cutover promise is "rows below the seeded frontier are never revisited".
+    // Without the floor the second pass reads from `watermark − REPLAY_WINDOW`, walks
+    // back under the seed and bills the whole excluded history.
     seedLlmUsage({ orgId, costUsd: 0.25, contextId: "run-old" });
     seedLlmUsage({ orgId, costUsd: 0.5, contextId: "run-older" });
 
@@ -1322,9 +1319,8 @@ describe("billing sweep — cutover exclusion floor", () => {
   });
 
   it("still replays a row that commits late ABOVE the floor", async () => {
-    // The floor bounds the replay window; it does not disable it. A row that
-    // took a low id before the watermark passed but committed after must still
-    // be caught — that is the whole point of reading below the watermark.
+    // The floor bounds the replay window, it does not disable it: a row that took a low
+    // id before the watermark passed but committed after must still be caught.
     seedLlmUsage({ orgId, costUsd: 0.25, id: 1, contextId: "run-old" });
     seedLlmUsage({ orgId, costUsd: 0.5, id: 2, contextId: "run-older" });
     await runBillingSweep(); // seeds watermark AND floor at 2
@@ -1389,9 +1385,8 @@ describe("billing sweep — rows the platform could not price", () => {
   });
 
   it("claims an `unpriced` row for 0 credits instead of settling it as free", async () => {
-    // cost 0 + `unpriced` means "could not price this call", NOT "free". Claiming
-    // it stops a later pass from billing it twice; the stamp is what keeps the
-    // uncollected revenue findable.
+    // cost 0 + `unpriced` means "could not price this call", NOT "free": claiming it
+    // stops a double bill, the stamp keeps the uncollected revenue findable.
     const id = seedLlmUsage({ orgId, costUsd: 0, pricingStatus: "unpriced" });
 
     const result = await runBillingSweep();
@@ -1403,9 +1398,8 @@ describe("billing sweep — rows the platform could not price", () => {
   });
 
   it("never reads a null pricing status as priced", async () => {
-    // A row that predates the field. Core's contract forbids treating it as
-    // priced, so it is claimed at 0 credits and stamped `unknown` — a different
-    // fact from `unpriced`, and one an operator diagnoses differently.
+    // A row predating the field: claimed at 0 credits and stamped `unknown`, a
+    // different fact from `unpriced` that an operator diagnoses differently.
     const id = seedLlmUsage({ orgId, costUsd: 0.05, pricingStatus: null });
 
     const result = await runBillingSweep();

@@ -47,9 +47,7 @@ const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, str
  * Who may act on billing without running the organization (RBAC spec §10).
  *
  * Mounted only where `can("billing:manage")` holds — the exact condition the
- * module's admin routes check, so its queries never fire for a caller they
- * would answer with 403. The route around it already requires `billing:read`,
- * a permission only `@appstrate/module-ee` contributes.
+ * module's admin routes check, so no query fires for a caller they would 403.
  *
  * A save is a `PUT` of the whole set, so it is refused wholesale over one stale
  * id — a manager since promoted to admin, or since removed from the org. Those
@@ -81,8 +79,7 @@ export function BillingManagersSection() {
 
   if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
   if (managersQuery.error) return <ErrorState message={getErrorMessage(managersQuery.error)} />;
-  // Without the roster every saved manager reads as "no longer a member", which
-  // makes the list dirty and turns Save into a PUT of the empty set.
+  // Without the roster every saved manager reads as gone, so Save would PUT {}.
   if (orgQuery.error) return <ErrorState message={getErrorMessage(orgQuery.error)} />;
 
   const saved = (managersQuery.data?.managers ?? []).map((m) => m.user_id);

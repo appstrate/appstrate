@@ -150,9 +150,7 @@ describe("runCheck — undeclared indexes never fail the run", () => {
   });
 
   it("ignores an index on a table a MODULE owns", async () => {
-    // `@appstrate/module-ee` migrates its `ee_*` tables under a journal of its
-    // own, so its indexes are in no platform snapshot. Comparing all of `public`
-    // reported every one of them as reverse drift.
+    // A module's tables migrate under a journal of its own: no platform snapshot declares them.
     const { exitCode, lines } = await check({
       snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
       actual: [
@@ -169,10 +167,8 @@ describe("runCheck — undeclared indexes never fail the run", () => {
   });
 
   it("REPORTS an index on a table NO module owns, naming the table", async () => {
-    // The regression the module filter caused when it was written as "keep only
-    // the tables the snapshot declares": a platform table the schema stopped
-    // declaring vanished from the comparison along with the module's, and with
-    // it every index on it — the reverse-drift class this script exists for.
+    // Subtracting by "table the snapshot declares" instead would also drop a platform table the
+    // schema stopped declaring — the reverse-drift class this script exists for.
     const { exitCode, lines } = await check({
       snapshots: { "0001_snapshot.json": snapshot({ runs: ["idx_runs_schedule_id"] }) },
       actual: [

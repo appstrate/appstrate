@@ -251,9 +251,7 @@ describe("verify-compose-defaults as a process", () => {
     const { code, output } = runGate();
     expect(code).toBe(0);
     expect(output).toContain("no duplicated env defaults");
-    // A discovery that found nothing checks the pass-through blocks against an
-    // empty population and prints the same tick. The count line says which it
-    // was, so the floor is read there.
+    // A discovery that found nothing prints the same tick; the count line is where they differ.
     expect(output).not.toContain("0 module schema(s)");
     expect(output).toMatch(/from \d+ module schema\(s\)/);
   });
@@ -275,14 +273,8 @@ describe("verify-compose-defaults as a process", () => {
 });
 
 /**
- * The module env pass-through block.
- *
- * `docker-compose.yml` lists `@appstrate/module-ee`'s seven variables by hand,
- * and nothing compared that list to the module's schema: add a key to
- * `packages/module-ee/src/env.ts` and forget the block, and the variable never
- * reaches the container — the module reads `process.env`, sees nothing, and
- * either falls back to a default or refuses to boot, with no error naming the
- * compose file.
+ * The module env pass-through block: `docker-compose.yml` lists the module's variables by hand,
+ * and a key added to the schema but forgotten there never reaches the container.
  */
 describe("findPassThroughGaps", () => {
   const MODULE = [
@@ -308,8 +300,7 @@ describe("findPassThroughGaps", () => {
   });
 
   it("leaves a file that forwards NONE of them alone", () => {
-    // The self-hosting templates do not run the module. Demanding the block
-    // everywhere would put Stripe variables in every example file.
+    // The self-hosting templates do not run the module, so the block is not demanded there.
     expect(findPassThroughGaps(compose(["APP_URL", "DATABASE_URL"]), MODULE)).toEqual([]);
   });
 

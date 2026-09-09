@@ -33,13 +33,9 @@ export function setCheckoutResponse(response: Record<string, unknown>): void {
 }
 
 /**
- * Answer the next `GET /v1/subscriptions/:id` (retrieve) with `response`.
- *
- * Retrieve only. The in-place plan change retrieves and then updates the same
- * subscription, so an override both verbs consumed would be spent by the
- * retrieve and never describe what the update answers — and one shaped for the
- * retrieve (a subscription with no price item, say) would describe a Stripe
- * response the update never returns.
+ * Answer the next `GET /v1/subscriptions/:id` (retrieve) with `response`. Retrieve ONLY:
+ * the in-place plan change retrieves then updates the same subscription, so an override
+ * both verbs consumed would be spent by the retrieve and never reach the update.
  */
 export function setSubscriptionResponse(response: Record<string, unknown>): void {
   subscriptionOverride = response;

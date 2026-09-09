@@ -18,15 +18,10 @@ import { orgQueries } from "./org-queries.ts";
 import { startStripeMock } from "./stripe.ts";
 
 /**
- * Point the module's three `init(ctx)` seams at the in-memory doubles for the
- * duration of ONE test file, then hand them back.
- *
- * The handles are process-global, and the preload has already `init()`d the
- * real module against the test platform — so a file that installed the mocks
- * and walked away would leave every later file (the platform's own admission
- * tests included) running through whichever doubles the file ordering happened
- * to leave behind. Install in `beforeAll`, restore in `afterAll`: call this at
- * the top level of a test file and the swap is scoped to it.
+ * Point the module's three `init(ctx)` seams at the in-memory doubles for ONE test file,
+ * then hand them back. The handles are process-global, so a file that installs the mocks
+ * and walks away leaves every later file running through them. Call this at the top level
+ * of a test file: it installs in `beforeAll` and restores in `afterAll`.
  */
 export function useEeTestSeams(): void {
   let previousServices: PlatformServices;
@@ -39,11 +34,10 @@ export function useEeTestSeams(): void {
   beforeAll(() => {
     for (const key of SWAPPED_ENV) previousEnv[key] = process.env[key];
 
-    // Before the first `getStripe()`, which caches host + port and honors the mock
-    // only under NODE_ENV=test — forced for a box whose `.env` pins it otherwise.
+    // Before the first `getStripe()`, which caches host + port and honors the mock only
+    // under NODE_ENV=test — forced for a box whose `.env` pins it otherwise.
     process.env.NODE_ENV = "test";
-    // The mock server itself is process-lifetime and idempotent: a second call
-    // returns the port the first one bound. Only the env pointing at it is
+    // The mock server is process-lifetime and idempotent; only the env pointing at it is
     // file-scoped, because that is what a later file can be misled by.
     const { port } = startStripeMock();
     process.env.STRIPE_MOCK_HOST = "localhost";
@@ -72,14 +66,10 @@ export function useEeTestSeams(): void {
 }
 
 /**
- * Scope the reconciliation knobs a sweep test rewrites (`EE_RECONCILIATION_*`)
- * to ONE test file, then hand them back and drop the cached env.
- *
- * `test/requirements.ts` pins `EE_RECONCILIATION_INTERVAL_SECONDS` to `"0"` on
- * purpose — a timer firing mid-suite bills rows a later file seeded into the
- * ledger. A file that sets an interval and walks away arms that timer for every
- * file after it. Call this at the top level of a file whose tests write any of
- * the three.
+ * Scope the reconciliation knobs a sweep test rewrites (`EE_RECONCILIATION_*`) to ONE
+ * test file, then hand them back and drop the cached env. `test/requirements.ts` pins
+ * `EE_RECONCILIATION_INTERVAL_SECONDS` to `"0"` on purpose — a timer firing mid-suite
+ * bills rows a later file seeded into the ledger.
  */
 export function useEeReconciliationEnv(): void {
   const KNOBS = [

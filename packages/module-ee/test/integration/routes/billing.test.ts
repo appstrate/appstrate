@@ -112,9 +112,8 @@ describe("billing routes", () => {
     });
 
     it("reports the real status when the cancel flag sits on a suspended subscription", async () => {
-      // `canceling` is what routes the dashboard to POST /api/billing/plan,
-      // which refuses anything outside LIVE_SUBSCRIPTION_STATUSES. Projecting
-      // it from the cancel flag alone would send a call this API 409s.
+      // `canceling` routes the dashboard to POST /api/billing/plan, which refuses
+      // anything outside LIVE_SUBSCRIPTION_STATUSES.
       await seedBillingAccount({
         orgId,
         planId: "starter",
@@ -158,8 +157,8 @@ describe("billing routes", () => {
     });
 
     it("reports an incomplete subscription under its own status", async () => {
-      // `incomplete` is a status Stripe holds the object at, so it is neither
-      // `none` nor a warning state — the dashboard shows the pending payment.
+      // `incomplete` is a status Stripe holds the object at: neither `none` nor a
+      // warning state.
       await seedBillingAccount({
         orgId,
         planId: "starter",
@@ -174,8 +173,7 @@ describe("billing routes", () => {
     });
 
     /**
-     * `plan_action` is the server's answer to "where does a plan selection go".
-     * It has to be the exact predicate `POST /checkout` and `POST /plan` refuse
+     * `plan_action` must be the exact predicate `POST /checkout` and `POST /plan` refuse
      * on, or the dashboard sends a call this API rejects.
      */
     describe("plan_action", () => {
@@ -215,8 +213,7 @@ describe("billing routes", () => {
       });
 
       it("sends a canceling subscription to the in-place plan change", async () => {
-        // The cancel flag is set but Stripe still collects: picking another plan
-        // is a change, not a new subscription.
+        // Cancel flag set but Stripe still collects: another plan is a change, not new.
         expect(
           await planActionFor({
             stripeSubscriptionId: "sub_pa_canceling",
@@ -314,9 +311,8 @@ describe("billing routes", () => {
     });
 
     it("rejects member role (admin-only) as RFC 9457 problem+json", async () => {
-      // The guard is the platform's own (`requireModulePermission`), which
-      // signals by throwing; this asserts the module router renders that throw
-      // as the same problem body a core route would.
+      // The platform's `requireModulePermission` signals by throwing; the module router
+      // must render that throw as the same problem body a core route would.
       await seedBillingAccount({ orgId });
 
       const res = await app.request("/api/billing/checkout", {
@@ -366,9 +362,8 @@ describe("billing routes", () => {
     });
 
     it("REFUSES a second subscription for an org that already has one", async () => {
-      // Checkout only ever CREATES. Completing a second one leaves the first
-      // running and charges the customer twice, so the server — not the
-      // dashboard's buttons — is what closes the door.
+      // Checkout only ever CREATES: a second one leaves the first running and charges
+      // the customer twice, so the server closes the door.
       await seedBillingAccount({
         orgId,
         planId: "starter",
@@ -394,8 +389,7 @@ describe("billing routes", () => {
     });
 
     it("returns 404 when the org has no billing account", async () => {
-      // Not a 503: no amount of retrying gives this org an account, and the
-      // generic Stripe-failure envelope would tell the caller to try again.
+      // Not a 503: no amount of retrying gives this org an account.
       const res = await app.request("/api/billing/checkout", {
         method: "POST",
         headers: { ...headers(), "Content-Type": "application/json" },
@@ -450,8 +444,8 @@ describe("billing routes", () => {
         (r) => r.method === "POST" && r.path === "/v1/subscriptions/sub_plan_001",
       );
       expect(updates).toHaveLength(1);
-      // The item id must travel with the price: `items[0][price]` alone ADDS a
-      // priced item instead of replacing the one that is there.
+      // The item id must travel with the price: `items[0][price]` alone ADDS a priced
+      // item instead of replacing the one that is there.
       expect(updates[0]!.body).toMatchObject({
         "items[0][id]": "si_test_001",
         "items[0][price]": getPlans().pro.stripePriceId!,
@@ -480,8 +474,8 @@ describe("billing routes", () => {
         body: JSON.stringify({ plan_id: "pro" }),
       });
 
-      // The PLAN itself is applied by the webhook Stripe sends back, so the
-      // snapshot still names the current one — everything else is live.
+      // The PLAN is applied by the webhook Stripe sends back, so the snapshot still
+      // names the current one — everything else is live.
       expect(await res.json()).toMatchObject({
         plan: { id: "starter" },
         status: "active",
@@ -545,9 +539,8 @@ describe("billing routes", () => {
     });
 
     /**
-     * `stripeCallFailure` renders one Stripe throw per branch. A refusal
-     * flattened into the generic 503 tells the caller to retry something that
-     * can never succeed.
+     * `stripeCallFailure` renders one Stripe throw per branch: a refusal flattened into
+     * the generic 503 would tell the caller to retry something that cannot succeed.
      */
     describe("Stripe failure rendering", () => {
       async function changePlan() {
@@ -596,9 +589,8 @@ describe("billing routes", () => {
       });
 
       it("refuses a subscription with no price item without sending an update", async () => {
-        // `items: [{ price }]` without an item id ADDS a second priced item
-        // instead of replacing the first, so a subscription with nothing to
-        // replace must never reach the update call at all.
+        // `items: [{ price }]` without an item id ADDS a second priced item, so a
+        // subscription with nothing to replace must never reach the update call.
         await seedBillingAccount({
           orgId,
           planId: "starter",

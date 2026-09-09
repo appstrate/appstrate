@@ -278,14 +278,9 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?
     }
     if (ctx.skills_truncated) lines.push("(list truncated)");
   }
-  // `/api/me/context` also carries `recent_runs`, and this block DELIBERATELY
-  // neither reads nor renders it. It carries `started_at` and rewrites itself
-  // the moment the user launches anything — i.e. on exactly the turns this
-  // product exists for — which would bust the system prompt's single cache
-  // breakpoint, and the conversation history behind it, on every one of them.
-  // SYSTEM_PROMPT tells the model to call `listRuns` when the user refers to a
-  // run without naming it — one tool call on that path, in exchange for a
-  // cacheable prefix on every turn.
+  // `/api/me/context` also carries `recent_runs`, deliberately neither read nor rendered here: it
+  // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
+  // SYSTEM_PROMPT tells the model to call `listRuns` instead.
   return lines.join("\n");
 }
 

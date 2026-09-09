@@ -241,9 +241,6 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     name: org.name,
     slug: org.slug,
     createdAt: org.createdAt,
-    // Non-null while a DELETE that reserved this organization has not finished.
-    // The reservation is never lifted by the platform — repeating the DELETE is
-    // the recovery — so surfacing it is what keeps the state from being silent.
     deleting_at: org.deletingAt,
     storage: {
       used_bytes: org.filesBytesUsed,
@@ -327,15 +324,9 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
     // billing then cancels the Stripe subscription and drops the billing
     // account; the mcp module drops the org from the RFC 8707 audience
     // allowlist). `deleteOrganization` refuses — from inside its transaction —
-    // when runs are in progress, so with the emit first that refusal left a
-    // surviving-but-gutted organization no repair path can rebuild.
-    //
-    // The reservation is what makes the refusal impossible AFTER the modules
-    // have acted: it checks deletability and stamps `deleting_at` in one
-    // transaction, under the per-org lock run admission takes, and admission
-    // then refuses the reserved org. Anything that fails from here on leaves
-    // the reservation standing, and repeating this DELETE resumes — the hooks
-    // are required to tolerate a second `onOrgDelete` for the same org.
+    // when runs are in progress. The reservation closes that window: it stamps
+    // `deleting_at` under the per-org lock run admission takes, so a repeat of
+    // this DELETE resumes and the hooks tolerate a second `onOrgDelete`.
     //
     // Both calls throw plain Errors, and both land on the same 400
     // `delete_failed` below — the wire contract is unchanged.

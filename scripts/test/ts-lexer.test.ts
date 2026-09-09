@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The primitives both module gates tokenize with.
- *
- * They decide where a literal ENDS, and every later decision rides on that
- * answer: end one quote too early and the code behind it is read as a string;
- * end it too late and live code is blanked. A gate that mis-tokenizes reports
- * the exact opposite of the truth, silently, so the ending rules are pinned
- * here rather than only through the two scans that consume them.
+ * The primitives both module gates tokenize with. They decide where a literal ENDS: end one quote
+ * too early and the code behind it reads as a string, too late and live code is blanked.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -18,8 +13,7 @@ const endOf = (source: string, quote: string): number => scanQuoted(source, 0, q
 
 describe("scanQuoted", () => {
   it("walks past a backslash-escaped quote to the real end", () => {
-    // `"a\"b"` ending at the middle quote inverts every decision after it:
-    // the rest of the file reads as string, then as code again, out of phase.
+    // `"a\"b"` ending at the middle quote inverts every decision after it.
     const source = '"a\\"b" + rest';
     expect(endOf(source, '"')).toBe(6);
     expect(source.slice(0, 6)).toBe('"a\\"b"');

@@ -24,10 +24,9 @@ const orgLabels: Record<SupportedLocale, string> = {
 };
 
 /**
- * The billing emails' shared chrome: a white rounded card on a transparent
- * page, with a plain-text `appstrate.com` link under it. No image, so nothing
- * depends on a client loading remote content, and the transparent page body
- * works in both light and dark mode email clients.
+ * The billing emails' shared chrome: a white rounded card on a transparent page with a
+ * plain-text `appstrate.com` link. No image, so nothing depends on a client loading
+ * remote content, and the transparent body works in light and dark mail clients.
  */
 export function wrapEeLayout({ locale, content, footer, orgName }: LayoutProps): string {
   const trimmedOrgName = orgName?.trim();
@@ -110,9 +109,8 @@ export function billingSettingsUrl(appUrl: string): string {
 }
 
 /**
- * Substitute `{name}` placeholders in a localized string. An unknown key is
- * left as it was written rather than blanked, so a typo shows up in the mail
- * instead of silently deleting the sentence it was in.
+ * Substitute `{name}` placeholders in a localized string. An unknown key is left as
+ * written rather than blanked, so a typo shows up instead of deleting its sentence.
  */
 export function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);

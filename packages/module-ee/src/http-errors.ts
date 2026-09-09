@@ -54,13 +54,9 @@ export function rateLimited(retryAfterSeconds: number): ApiError {
 }
 
 /**
- * 409 — the org already has a subscription Stripe is holding, so Checkout is the
- * wrong door: completing it would create a SECOND subscription beside the first
- * and bill the organization twice. `POST /api/billing/plan` modifies the one
- * that exists.
- *
- * Enforced on the server, not in the dashboard's buttons: the failure is a
- * duplicate charge, and a client is not what stands between a customer and that.
+ * 409 — the org already has a subscription Stripe is holding, so Checkout is the wrong
+ * door: completing it would create a SECOND subscription and bill the organization twice.
+ * `POST /api/billing/plan` modifies the one that exists.
  */
 export function subscriptionExists(): ApiError {
   return new ApiError({
@@ -73,8 +69,8 @@ export function subscriptionExists(): ApiError {
 }
 
 /**
- * 409 — a plan change was asked for on an account with no subscription to
- * change. The way in is Checkout.
+ * 409 — a plan change on an account with no subscription to change; the way in is
+ * Checkout.
  */
 export function noActiveSubscription(): ApiError {
   return new ApiError({

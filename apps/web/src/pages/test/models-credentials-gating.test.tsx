@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which requests the models page makes for the role that opens it.
- *
- * `GET /api/model-provider-credentials` is guarded server-side by
- * `model-provider-credentials:read`, which a `member` does not hold: a request
- * made for them is a guaranteed 403. React Query fires a query when ANY of its
- * observers is enabled, so one ungated caller on the page re-opens the request
- * the gated ones closed — which is what a warm-up in `useModelFormHandler` did.
- *
- * Every observer's registration goes through `QueryCache.build` carrying its own
- * `enabled`, so recording those calls answers "would this render have fetched
- * the credentials?" — the runner has no DOM, so no query ever actually fetches.
+ * Which requests the models page makes for the role that opens it. React Query
+ * fires a query when ANY observer is enabled, so one ungated caller re-opens the
+ * request the gated ones closed. Every registration goes through
+ * `QueryCache.build` with its own `enabled`, so recording those calls answers
+ * "would this render have fetched the credentials?".
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -38,8 +32,8 @@ function observerEnabledFlags(cache: QueryCache, path: string): unknown[] {
   const flags: unknown[] = [];
   const build = cache.build.bind(cache);
   spyOn(cache, "build").mockImplementation((client, options, state) => {
-    // `build` is declared over the narrower `QueryOptions`; what an observer
-    // hands it is its own defaulted set, `enabled` included.
+    // `build` is declared over the narrower `QueryOptions`; an observer hands it
+    // its own defaulted set, `enabled` included.
     if (options.queryKey[1] === path) flags.push((options as { enabled?: unknown }).enabled);
     return build(client, options, state);
   });
@@ -85,8 +79,7 @@ const ADMIN = [
 describe("the models page for a member who can only read models", () => {
   it("registers no enabled observer on the credentials list", () => {
     const { credentialFlags } = renderFor(MEMBER);
-    // A page-level observer may exist — disabled. What must not exist is one
-    // that would fetch, from anywhere on the page.
+    // A disabled page-level observer is fine; one that would fetch is not.
     expect(credentialFlags.filter((enabled) => enabled !== false)).toEqual([]);
   });
 

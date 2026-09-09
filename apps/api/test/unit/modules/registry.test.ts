@@ -57,13 +57,10 @@ describe("getModuleRegistry", () => {
 });
 
 /**
- * The init context a module receives actually carries the storage-limit
- * capability.
+ * The init context a module receives carries the storage-limit capability.
  *
- * An out-of-tree module binds this off the LIVE services object the platform
- * injects, not off its pinned `PlatformServices` types, so a member missing
- * here is not a compile error anywhere — it is a `TypeError` on that module's
- * next boot.
+ * An out-of-tree module binds it off the LIVE services object, not off its
+ * pinned types, so a missing member is a boot-time `TypeError`, not a type error.
  */
 describe("buildModuleInitContext().services — storage-limit capability", () => {
   it("exposes setFileStorageLimit", () => {

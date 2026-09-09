@@ -2,39 +2,10 @@
 
 /**
  * Architecture test — a module with its own database touches its OWN tables only.
- *
- * `apps/api/src/modules/README.md` rule 4 lets a module whose tables the
- * Apache-2.0 core schema must not carry keep a drizzle tree of its own and
- * self-migrate it — and `@appstrate/module-ee` migrates that tree into the
- * PLATFORM database (`DATABASE_URL`, see `packages/module-ee/src/db.ts`). The
- * rule that comes with the escape hatch is "reads platform data through
- * `ctx.services`, never a SQL join across the licence boundary", and until this
- * gate existed that rule was prose only: the module's pool can reach
- * `organizations` and `llm_usage` because they are literally in the same
- * database, so `sql`SELECT … FROM organizations`` compiles, runs, returns rows
- * and passes typecheck, lint, knip, the isolation gate and every test.
- *
- * What it enforces, per module package that owns a migration journal:
- *
- *   1. No platform schema import. `@appstrate/db` (any subpath) and any
- *      relative import landing in `packages/db/` are refused outright — the
- *      drizzle table OBJECT is the other way a cross-boundary join is written,
- *      and it names no table in any string this scan could read.
- *   2. No foreign table in raw SQL. Every `sql` tagged template, `sql.raw(…)`,
- *      `.execute("…")` and `.unsafe("…")` is read as SQL, the identifiers after
- *      `FROM` / `JOIN` / `INTO` / `UPDATE` / `DELETE FROM` / `TRUNCATE` are
- *      extracted, and anything that is not one of the module's own tables (read
- *      from its newest drizzle snapshot) or a PostgreSQL catalog relation
- *      (`pg_*`, `information_schema.*`, the `drizzle.*` journal) fails.
- *
- * The two rules compose: a drizzle table object interpolated into a template
- * (`FROM ${organizations}`) leaves nothing for rule 2 to read, and is caught by
- * rule 1 at the import that had to precede it.
- *
- * SCOPE — this reads SQL that is WRITTEN in the module. A query string built at
- * runtime from a variable is not readable here and is not covered; the module
- * writes none today, and rule 1 removes the ergonomic way to write one.
- *
+ * `apps/api/src/modules/README.md` rule 4: such a module reads platform data through
+ * `ctx.services`, never a SQL join across the licence boundary. Per module package owning a
+ * migration journal, this refuses any `@appstrate/db` / `packages/db/` import and any foreign
+ * table named in raw SQL. Scope: only SQL written literally in the module is read.
  * Usage: bun scripts/verify-module-sql-boundary.ts
  */
 
@@ -53,29 +24,11 @@ const SQL_TAG = /(?:^|[^\w$.])sql\s*$/;
 const SQL_CALL = /(?:sql\s*\.\s*raw|\.\s*execute|\.\s*unsafe)\s*\(\s*$/;
 
 /**
- * Everything the scan must not read, blanked to spaces — byte offsets and line
- * numbers survive, so a finding can be reported at its real line.
- *
- * The output is the file's SQL and nothing else: comments go (a header
- * discussing `FROM organizations` in prose is not a query), and so does every
- * string literal that is not itself SQL (a log message, an error string, an
- * import specifier). The bodies that SURVIVE are the ones a database executes —
- * a `` sql`…` `` tagged template and the string argument of `sql.raw`,
- * `.execute` and `.unsafe` — which is the same "blank what does not execute"
- * split `verify-no-migration-dml.ts`'s `sanitize` makes one level down, in SQL
- * rather than in TypeScript.
- *
- * `${…}` interpolations inside a surviving template are blanked too. They are
- * values and drizzle column/table objects, not identifiers this scan can read;
- * leaving them in would make `FROM ${orgUsageRecords}` look like a table named
- * `orgUsageRecords`. What an interpolated TABLE object really is, rule 1 sees
- * at its import.
- *
- * `literals` counts the SQL-bearing literals kept. It is not decoration: a
- * module can hold zero table references legitimately (today's does — every
- * query it writes goes through drizzle's builder), and a scanner that had
- * stopped recognising `` sql`…` `` altogether would report the same zero. The
- * count line prints both numbers so the two cases are distinguishable.
+ * Blanks to spaces everything the scan must not read, preserving offsets so a finding reports at
+ * its real line. Kept is what a database executes: a `` sql`…` `` tagged template and the string
+ * argument of `sql.raw`, `.execute` and `.unsafe`, minus their `${…}` interpolations. `literals`
+ * counts the SQL literals kept, so a legitimate zero table references is distinguishable from a
+ * scanner that stopped recognising `` sql`…` `` at all.
  */
 export function sqlText(source: string): { text: string; literals: number } {
   let out = "";
@@ -151,23 +104,11 @@ export function sqlText(source: string): { text: string; literals: number } {
   return { text: out, literals };
 }
 
-/**
- * The clauses that name a table, and the identifier each one takes.
- *
- * `DELETE FROM` and `INSERT INTO` are covered by the bare `FROM` / `INTO`
- * alternatives — the keyword before them changes nothing about which token is
- * the table.
- */
+/** The clauses that name a table; `DELETE FROM` / `INSERT INTO` fall under `FROM` / `INTO`. */
 const TABLE_CLAUSE =
   /\b(FROM|JOIN|INTO|UPDATE|TRUNCATE)\s+(?:TABLE\s+)?(?:ONLY\s+)?([A-Za-z_"][\w".$]*)/gi;
 
-/**
- * Words that follow one of those keywords without being a table.
- *
- * `ON CONFLICT DO UPDATE SET` is the one that matters here — it is how every
- * upsert in the module is written, and without this the gate would report a
- * table called `SET` in a dozen files.
- */
+/** Words that follow one of those keywords without being a table (`ON CONFLICT DO UPDATE SET`). */
 const NOT_A_TABLE = new Set([
   "SET",
   "SELECT",
@@ -179,19 +120,13 @@ const NOT_A_TABLE = new Set([
   "ALL",
 ]);
 
-/** One table identifier a module's SQL names, with where it was written. */
 interface TableReference {
-  /** The identifier verbatim, quotes and schema qualifier included. */
   table: string;
   /** 1-based line in the file the SQL came from. */
   line: number;
 }
 
-/**
- * Every table identifier in a file's SQL, given the blanked view `sqlText`
- * produced. A name immediately followed by `(` is a function call
- * (`FROM generate_series(…)`, `extract(epoch FROM now())`) and is not a table.
- */
+/** Every table identifier in `sqlText`'s output; a name followed by `(` is a call, not a table. */
 export function findTableReferences(sqlOnly: string): TableReference[] {
   const refs: TableReference[] = [];
   for (const match of sqlOnly.matchAll(TABLE_CLAUSE)) {
@@ -203,10 +138,7 @@ export function findTableReferences(sqlOnly: string): TableReference[] {
   return refs;
 }
 
-/**
- * Relations any module may name: PostgreSQL's own catalogs, plus the `drizzle`
- * journal schema its migrator writes to. Everything else has an owner.
- */
+/** Relations any module may name: PostgreSQL catalogs, plus the `drizzle` journal schema. */
 export function isSystemRelation(name: string): boolean {
   const lower = name.replaceAll('"', "").toLowerCase();
   const dot = lower.indexOf(".");
@@ -228,18 +160,14 @@ function isOwnTable(name: string, own: ReadonlySet<string>): boolean {
   return lower.slice(0, dot) === "public" && own.has(lower.slice(dot + 1));
 }
 
-/** One module source file, as the scan reads it. */
+/** One module source file, as the scan reads it; `file` is repo-relative, for the report. */
 export interface ScannedFile {
-  /** Repo-relative path, for the report. */
   file: string;
   source: string;
 }
 
-/**
- * The problems one module's files commit, given the tables it owns. Pure — the
- * scan feeds it the real tree, `scripts/test/verify-module-sql-boundary.test.ts`
- * feeds it synthetic files.
- */
+/** The problems one module's files commit, given the tables it owns. Pure, so tests can feed it
+ * synthetic files. */
 export function reviewModuleSql(
   moduleId: string,
   files: readonly ScannedFile[],
@@ -281,12 +209,9 @@ export function reviewModuleSql(
 }
 
 /**
- * The refusal a module earns by owning a migration journal while declaring no
- * tables — `null` when it declares some.
- *
- * Pure and separate from the walk so the refusal has a positive control: with
- * an empty `tables` set every identifier in the repository reads as the
- * module's own and the gate passes over a module it checked nothing about.
+ * The refusal a module earns by owning a migration journal while declaring no tables — `null`
+ * when it declares some. An empty table set makes every identifier read as its own, so the
+ * gate would pass vacuously.
  */
 export function reviewModuleSnapshot(module: {
   id: string;
@@ -301,12 +226,8 @@ export function reviewModuleSnapshot(module: {
 }
 
 /**
- * Every file of a module package the scan reads: its own `.ts`/`.tsx`, tests
- * and installed dependencies excluded.
- *
- * The root is the PACKAGE, not `src/` — `packages/module-ee/drizzle/schema.ts`
- * is production code that names tables and sits outside `src/`, which is
- * exactly the file this gate must not be blind to.
+ * Every file of a module package the scan reads: its own `.ts`/`.tsx`, tests and installed
+ * dependencies excluded. The root is the PACKAGE, not `src/`: `drizzle/schema.ts` names tables.
  */
 async function moduleSourceFiles(packageDir: string): Promise<ScannedFile[]> {
   const files: ScannedFile[] = [];

@@ -386,17 +386,8 @@ export function orgHalfFor(
 }
 
 /**
- * The caller's effective set IN one space: their org half ∪ the space half of
- * `ref`, under the credential ceiling. The counterpart of {@link orgHalfFor},
- * shared by four sites — the space-context middleware, the space listing behind
- * package access, `GET /api/spaces`, and the SSE auth path. One helper, so a
- * ceiling applied on three of them and forgotten on the fourth is not a thing
- * that can happen.
- *
- * `orgHalf` defaults to the half the auth pipeline already wrote for this
- * request. The SSE routes run outside that pipeline and pass their own
- * (`orgHalfFor(...).orgPermissions`); they also carry no `scopeCeiling`, and
- * intersect the key's scopes themselves once the set is built.
+ * The caller's effective set IN one space, under the credential ceiling.
+ * `orgHalf` defaults to the half the auth pipeline wrote; SSE passes its own.
  */
 export function effectiveInSpace(
   c: Context<AppEnv>,

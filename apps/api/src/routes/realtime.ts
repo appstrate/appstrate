@@ -105,12 +105,8 @@ interface SSEAuthResult {
  * the principal has no role in that space. `memberRow` is the persona's overlay
  * under a role preview, so it is passed in rather than loaded.
  *
- * The org half is `orgHalfFor(…, await principalGrants(…))`, exactly as the
- * HTTP pipeline computes it: a module's per-principal grant to this person is
- * part of their org standing, so the stream
- * answers the same caller every other transport does. `principalGrants` returns
- * nothing for the key branch, which is where the session-only nature of those
- * grants is expressed.
+ * The org half folds in `principalGrants` exactly as the HTTP pipeline does, so
+ * the stream answers the same caller every other transport does.
  */
 async function resolveSpaceGrants(
   c: Context<AppEnv>,
@@ -234,8 +230,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   });
   c.set("orgId", orgId);
   c.set("orgRole", role);
-  // What this caller IS. `principalGrants` below is session-shaped only, and
-  // `reportPermissionDenial` names the transport in its audit row.
+  // `principalGrants` is session-shaped, and the denial audit names the transport.
   c.set("authMethod", "session");
 
   const persona = await validateViewAs({

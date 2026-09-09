@@ -41,9 +41,8 @@ type SystemProxyUsageContext =
       /**
        * Where the referenced run's compute lives. ATTRIBUTION DATA ONLY: it is
        * reported onward as the hook's `executionPlane` fact and is never read
-       * as a gating input. Reading it as half of an "already admitted at
-       * preflight" skip condition is the bypass documented on the dispatch
-       * below, and must not be introduced here.
+       * as a gating input. Using it to skip the hook is the bypass documented
+       * on the dispatch below.
        */
       runOrigin: "platform" | "remote";
     }
@@ -55,10 +54,8 @@ export async function enforceSystemProxyAdmission(args: {
   resolved: ResolvedModel;
   usageContext: SystemProxyUsageContext;
 }): Promise<void> {
-  // A reserved organization admits no new work (see `refuseReservedForDeletion`
-  // for why); this seam is the OTHER way metered usage enters. Refused ahead of
-  // the hook check: the reservation is a platform fact, true with or without an
-  // admission module.
+  // Ahead of the hook check: a reserved organization admits no new work whether
+  // or not an admission module is loaded.
   await refuseReservedForDeletion(db, args.orgId);
 
   // OSS deployments may intentionally expose system presets without a metering
@@ -115,17 +112,9 @@ export async function enforceSystemProxyAdmission(args: {
   //     mints its own `llm_usage` row (`source='proxy'`). It is never the
   //     continuation of the launch the preflight gate admitted.
   //
-  // Skipping the hook when the referenced run is platform-origin AND declares a
-  // system credential (`runs.model_source`) would therefore not be "avoiding a
-  // double gate", it would be an open bypass: a preflight quote is issued ONCE
-  // per run launch while the number of proxy calls attachable to that run id is
-  // unbounded, and once platform compute is billed the org's balance moves
-  // DURING the run, so admitting at launch gates later calls against a stale
-  // balance. An org past its quota (so every new run/turn is rejected) could
-  // keep spending indefinitely by stamping `X-Run-Id` of ANY still-alive
-  // platform system run onto its proxy calls. `assertRunAttributable` only
-  // binds an API-key principal to org + space, so any key in the space can
-  // borrow any live run as a billing context.
+  // Skipping the hook for a platform-origin run declaring a system credential
+  // (`runs.model_source`) is therefore a bypass: one preflight quote per launch
+  // against unbounded proxy calls stamping that run id, from any key in the space.
   //
   // The one-gate-per-unit invariant is preserved on the legitimate paths:
   // chat returns above (its turn was gated by `checkUsageAllowed` before the

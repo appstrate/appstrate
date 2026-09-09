@@ -128,13 +128,10 @@ export async function onOrgDelete(orgId: string): Promise<void> {
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
 
-  // Runs whether or not an account row exists — usage records and billing
-  // managers are written without one — and is idempotent, so the platform may
-  // call this again after a deletion that failed further along.
-  //
-  // Cancel, then delete, in that order: an unconfirmed cancellation KEEPS the
-  // rows for the sweeper to retry, because dropping them takes the subscription
-  // id with them and leaves a customer charged for an organization that is gone.
+  // Runs whether or not an account row exists and is idempotent, so the platform may call
+  // it again after a deletion that failed further along. Cancel, THEN delete: an
+  // unconfirmed cancellation keeps the rows for the sweeper to retry, because dropping
+  // them takes the subscription id with them.
   const subscriptionId = account?.stripeSubscriptionId ?? null;
   const done = await cancelSubscriptionAndCleanUp(orgId, subscriptionId);
   if (!done) {

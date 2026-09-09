@@ -41,11 +41,9 @@ import { logger } from "../logger.ts";
  * capability is read directly — no structural probe, no missing-capability
  * fallback.
  *
- * The name is read off the LIVE services object the platform injects, not off
- * this module's pinned `PlatformServices` type, so a platform-side rename does
- * not rename the read here — it turns the next boot into a `TypeError`. The two
- * therefore move in lockstep: this line ships BEFORE (or with) the platform
- * build that renames the capability.
+ * The name is read off the LIVE services object the platform injects, not off this
+ * module's pinned `PlatformServices` type, so a platform-side rename turns the next boot
+ * into a `TypeError` rather than renaming the read. The two move in lockstep.
  */
 function getSetter(): (orgId: string, bytes: number | null) => Promise<void> {
   const services = getPlatformServices();

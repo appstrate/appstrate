@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * Holder for the two organization queries this module reads off its init
- * context.
+ * Holder for the two organization queries this module reads off its init context.
  *
- * "Who owns this org" and "is this user id one of its members" are answers the
- * platform owns, so they are asked through `ModuleInitContext` rather than
- * through SQL of our own — this module's pool reaches its `ee_*` tables, never
- * a platform one.
- *
- * The type is a `Pick` of the platform contract rather than a redeclaration of
- * it: the shape of `getOrgOwnerEmails` / `getOrgMembers` is core's to define,
- * and a second copy here would compile happily against a contract that had
- * moved on.
+ * "Who owns this org" and "is this user id one of its members" are answers the platform
+ * owns, so they are asked through `ModuleInitContext` rather than through SQL of our own
+ * — this module's pool reaches its `ee_*` tables, never a platform one. The `Pick` keeps
+ * the shape core's to define; a redeclaration would compile against a moved contract.
  */
 
 import type { ModuleInitContext } from "@appstrate/core/module";

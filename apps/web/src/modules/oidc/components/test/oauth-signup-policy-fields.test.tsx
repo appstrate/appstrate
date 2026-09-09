@@ -2,13 +2,9 @@
 
 /**
  * The signup policy of an OAuth client: what the operator may answer, and when.
- *
  * The policy is what a signup WOULD receive, so an org-level client edits it
- * whether or not signups are currently allowed — the server stores and
- * validates it the same way either side of the opt-in.
- *
- * `SignupPolicyFields` is rendered rather than the modal, whose Radix dialog
- * chrome renders nothing without a DOM (the web runner has none).
+ * whether or not signups are currently allowed. `SignupPolicyFields` is rendered
+ * rather than the modal, whose Radix chrome needs a DOM.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -44,10 +40,7 @@ function renderFields(overrides: { isOrgLevel?: boolean; allowSignup?: boolean }
 
 /**
  * The `<select>` opening tag, so `disabled` is read off the element itself.
- *
- * Absent is not "not disabled": a caller that returned `""` for a missing
- * select would satisfy every `not.toContain` written about it, so the element
- * has to be asserted present before its attributes mean anything.
+ * Absent is not "not disabled", so presence is asserted before attributes are.
  */
 function signupRoleSelect(html: string): string | null {
   const start = html.indexOf('<select id="oauth-client-signup-role"');

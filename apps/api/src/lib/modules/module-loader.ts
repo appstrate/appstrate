@@ -595,11 +595,8 @@ function validateContribution(
  * be upward-closed: `builder` without `admin` would give a space admin LESS than
  * a builder. Boot error, not a warning: the wrong answer is a 403 nobody looks for.
  *
- * The nesting order is `SPACE_ROLE_PRESETS` itself, read strongest-first — core
- * says so at the declaration and `test/unit/lib/space-preset-nesting.test.ts`
- * checks it against the preset → permission matrix. Read it from core, never
- * from a local copy of the four strings: a reorder in core must move this
- * check with it, or it silently admits contributions it should refuse.
+ * Read the order from `SPACE_ROLE_PRESETS` (strongest-first), never a local copy:
+ * a reorder in core must move this check with it.
  */
 function assertPresetsUpwardClosed(
   presets: readonly SpaceRolePreset[],

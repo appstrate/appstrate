@@ -70,18 +70,10 @@ function subscriptionPeriodEnd(subscription: Stripe.Subscription): Date | null {
   return ts ? new Date(ts * 1000) : null;
 }
 
-// ---------------------------------------------------------------------------
-// Subscription identity — which account a subscription-scoped event may write.
-//
-// Stripe guarantees nothing about delivery order, and `metadata.orgId` says which
-// ORG a subscription belongs to, never that the org is still on it: an org that
-// replaced `sub_old` with `sub_new` keeps receiving `sub_old`'s tail. So every
-// subscription-scoped write names the subscription it is about. Matching on
-// `orgId` alone lets a `deleted` for the dead subscription wipe the live one —
-// plan to free, quota to zero, id to null — on an account Stripe still bills.
-// Event-id dedupe (`ee_stripe_events`) does not reach this: each such event is
-// genuinely new and genuinely from Stripe.
-// ---------------------------------------------------------------------------
+// Subscription identity — which account a subscription-scoped event may write. Stripe
+// guarantees no delivery order and `metadata.orgId` names the ORG, never that the org is
+// still on that subscription, so every such write names the subscription it is about:
+// on `orgId` alone a `deleted` for a replaced subscription wipes the live one.
 
 /** The org's account, but only while it still carries THIS subscription. */
 function currentSubscription(orgId: string, subscriptionId: string): SQL {
@@ -92,14 +84,9 @@ function currentSubscription(orgId: string, subscriptionId: string): SQL {
 }
 
 /**
- * An account Stripe holds no subscription for — free to take a new one.
- *
- * The id alone does not decide it: only `customer.subscription.deleted` nulls the
- * column, so an account at `canceled` or `incomplete_expired`, or one whose
- * `deleted` was lost, still carries a dead id, and refusing on that id drops the
- * org's next paid checkout as "superseded" — a charged customer with no plan and
- * no quota. An account on a subscription Stripe DOES hold is excluded: that org
- * is being billed for the row it carries.
+ * An account Stripe holds no subscription for — free to take a new one. The id alone does
+ * not decide it: only `customer.subscription.deleted` nulls the column, so a `canceled`
+ * account keeps a dead id and refusing on it would drop the org's next paid checkout.
  */
 function noHeldSubscription(): SQL {
   return or(
@@ -111,21 +98,16 @@ function noHeldSubscription(): SQL {
 }
 
 /**
- * The predicate for `customer.subscription.created`, whose payload carries
- * CREATION-time state — `incomplete` or `trialing`, `cancel_at_period_end:
- * false`. A late one for the subscription the account already carries would roll
- * back what `checkout.session.completed` or `customer.subscription.updated`
- * wrote, so it attaches only where nothing is held.
+ * The predicate for `customer.subscription.created`, whose payload carries CREATION-time
+ * state: it attaches only where nothing is held, so a late one rolls nothing back.
  */
 function unattachedAccount(orgId: string): SQL {
   return and(eq(billingAccounts.orgId, orgId), noHeldSubscription())!;
 }
 
 /**
- * The predicate for `checkout.session.completed` and `invoice.paid`, which carry
- * AUTHORITATIVE data for the subscription they name. They also write the account
- * already carrying THAT subscription, so neither depends on winning the ordering
- * race against the other.
+ * The predicate for `checkout.session.completed` and `invoice.paid`: they carry
+ * AUTHORITATIVE data and also write the account already carrying that subscription.
  */
 function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   return and(
@@ -134,11 +116,7 @@ function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   )!;
 }
 
-/**
- * One line for an event that described a subscription this org is not on. `info`,
- * not `warn`: it is the expected tail of a replaced subscription, and the
- * alternative — acting on it — is what corrupts the account.
- */
+/** One line for an event on a subscription this org is not on — a replacement's tail. */
 function logSupersededSubscription(
   event: Stripe.Event,
   orgId: string,
@@ -333,8 +311,8 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const plan = planForSubscription(subscription, plans);
       const planId = plan?.id ?? subMetadata.planId;
 
-      // The condition rides in the UPDATE, where the row lock decides it: a
-      // read-then-write lets a concurrent handler attach between the two.
+      // The condition rides in the UPDATE, where the row lock decides it: a read-then-write
+      // lets a concurrent handler attach between the two.
       const [linked] = await db
         .update(billingAccounts)
         .set({
@@ -431,9 +409,8 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // clobber a billing-sweep debit that committed in the read→write gap.
       const resetCredits = invoice.billing_reason === "subscription_cycle";
 
-      // (Re)establishes the Stripe linkage on the shared attach predicate, so
-      // allocation does not depend on `checkout.session.completed` winning the
-      // ordering race.
+      // (Re)establishes the Stripe linkage on the shared attach predicate, so allocation
+      // does not depend on `checkout.session.completed` winning the ordering race.
       const [allocated] = await db
         .update(billingAccounts)
         .set({
@@ -504,11 +481,8 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       if (itemPeriodEnd) updates.periodEnd = itemPeriodEnd;
       if (newPlan) updates.planId = newPlan.id;
 
-      // Org from metadata (ordering-independent), written only if the org is
-      // still ON this subscription. Nothing here ATTACHES one, so an `updated`
-      // for a subscription the account does not carry is either a replacement's
-      // tail or an event ahead of the attach — and the attaching handler carries
-      // the truth in both cases.
+      // Org from metadata (ordering-independent), written only if the org is still ON this
+      // subscription. Nothing here ATTACHES one, so an `updated` naming another is a tail.
       const [updated] = await db
         .update(billingAccounts)
         .set(updates)
@@ -600,8 +574,8 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           creditQuota: 0,
           updatedAt: new Date(),
         })
-        // ONLY if this is still the org's subscription: a replacement's tail
-        // would otherwise tear the live one down on an account Stripe charges.
+        // ONLY if this is still the org's subscription: a replacement's tail would
+        // otherwise tear the live one down on an account Stripe charges.
         .where(currentSubscription(orgId, subscription.id))
         .returning({ orgId: billingAccounts.orgId });
 
@@ -652,8 +626,8 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           .from(billingAccounts)
           .where(eq(billingAccounts.stripeCustomerId, failedCustomerId));
 
-        // A dunning notice for a subscription the org has replaced tells the
-        // customer their live plan is failing to charge, which is false.
+        // A dunning notice for a replaced subscription would tell the customer their live
+        // plan is failing to charge, which is false.
         const failedSubscriptionId = refId(invoice.parent?.subscription_details?.subscription);
         if (
           failedAccount &&

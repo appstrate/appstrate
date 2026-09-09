@@ -239,9 +239,8 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     inline in the platform's process, so the platform funds its compute and a
  *     module gating on subscription status must be able to refuse it.
  *
- * Returns null when no module provides the hook (OSS mode allows everything) —
- * except for a reserved deletion, which refuses the turn whatever the
- * deployment loads.
+ * Returns null when no module provides the hook (OSS mode allows everything),
+ * except for a reserved deletion, which refuses whatever the deployment loads.
  */
 export async function checkUsageAllowed(args: {
   orgId: string;
@@ -249,10 +248,7 @@ export async function checkUsageAllowed(args: {
   sessionId: string | null;
   subscription: boolean;
 }): Promise<UsageRejection | null> {
-  // A reserved organization admits no new work (see `refuseReservedForDeletion`
-  // for why), refused ahead of the hook because the reservation is a platform
-  // fact. Returned rather than thrown: this seam renders a rejection as the
-  // RFC 9457 problem response, so a throw would be a 500, not the 409.
+  // Returned, not thrown: this seam renders a rejection as the problem response.
   const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
   if (err) return { code: err.code, message: err.message, status: err.status };
 

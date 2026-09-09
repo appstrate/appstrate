@@ -386,14 +386,11 @@ describe("shutdown drain", () => {
 
   it("REGRESSION: waits for a reconcile the tick started while the drain was already waiting", async () => {
     // The tick STARTS the reconcile from inside the very promise a drain entered
-    // mid-sweep is awaiting. A drain that snapshotted [sweep, resync] once, at
-    // entry, would therefore see no resync, return the instant the sweep
-    // finished, and let `closeEeDb()` run underneath a reconcile that began in
-    // between. Re-reading after every wait is what closes it.
+    // mid-sweep is awaiting, so a drain that snapshotted [sweep, resync] once would
+    // return the instant the sweep finished and let `closeEeDb()` run under it.
     await seedBillingAccount({ orgId, planId: "starter" });
-    // Seed the cursor so the FIRST tick reads the ledger (and blocks in the hook
-    // below) instead of returning early to seed it. The reconcile has to still
-    // be un-started when the drain is entered — that is the whole race.
+    // Seed the cursor so the FIRST tick reads the ledger (and blocks in the hook below)
+    // instead of returning early to seed it, leaving the reconcile un-started.
     await seedBillingCursor(0);
 
     let releaseSweep!: () => void;
@@ -413,8 +410,8 @@ describe("shutdown drain", () => {
       startBillingSweeper();
       await inSweep;
 
-      // Shutdown order: clear the timer, then drain. At this instant the tick is
-      // inside the sweep and has NOT yet started the reconcile.
+      // Shutdown order: clear the timer, then drain. The tick is inside the sweep and
+      // has NOT yet started the reconcile.
       stopBillingSweeper();
       let drained = false;
       const drain = drainBillingSweeper().then(() => {
@@ -422,8 +419,8 @@ describe("shutdown drain", () => {
       });
 
       releaseSweep();
-      // The tick finishes the sweep, starts the reconcile, and returns. The
-      // reconcile is still blocked, so the drain must still be waiting.
+      // The tick finishes the sweep, starts the reconcile, and returns; the reconcile
+      // is still blocked, so the drain must still be waiting.
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(drained).toBe(false);
 

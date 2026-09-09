@@ -31,13 +31,8 @@
  * `max(created_at)` in `drizzle.__drizzle_migrations` → the journal entry whose
  * `when` equals it → that entry's snapshot.
  *
- * Actual set: every index in `public` EXCEPT those on a table a workspace module
- * owns. "Owns" is read from that module's own drizzle snapshot
- * (`scripts/lib/drizzle-snapshots.ts`), never inferred from a name prefix and
- * never widened to "any table the platform snapshot does not declare": that
- * wider rule also subtracts every index on a platform table the schema stopped
- * declaring, which is the reverse-drift class this script exists to surface. An
- * index on a table nothing declares is reported, with the table's name.
+ * Actual set: every index in `public` EXCEPT those on a table a workspace module owns, read from
+ * that module's own drizzle snapshot (`scripts/lib/drizzle-snapshots.ts`), never from a prefix.
  *
  * SCOPE — this compares index NAMES ONLY. An index that exists under the
  * expected name with a different definition (other columns, a lost partial
@@ -65,11 +60,8 @@ const META_DIR = `${REPO_ROOT}/packages/db/drizzle/meta`;
 
 /**
  * Actual indexes in the database, each with the table it sits on. Exported so
- * the migration-replay test runs the same query. The table comes back for two
- * reasons: module-owned tables are subtracted by table name (a module carries
- * its own migration journal, so its indexes are in no platform snapshot and are
- * not this check's), and every index this check DOES report is reported with
- * the table it sits on — an index name alone is not enough to act on.
+ * the migration-replay test runs the same query. The table is what subtracts module-owned tables
+ * and what every reported index is named with — an index name alone is not enough to act on.
  */
 export const PUBLIC_INDEXES_QUERY =
   "SELECT indexname, tablename FROM pg_indexes WHERE schemaname = 'public'";
@@ -240,13 +232,8 @@ export async function runCheck(input: {
   watermark: number | null;
   actual: ActualIndex[];
   constraintBacked: Set<string>;
-  /**
-   * Table name → the module package that owns it, read from that module's own
-   * drizzle snapshot. These tables live in `public` beside the platform's, and
-   * their indexes are declared by no platform snapshot; subtracting them by
-   * NAME is what lets everything else — including a platform table the schema
-   * stopped declaring — stay in the comparison.
-   */
+  /** Table name → the module package that owns it; its indexes are in no platform snapshot, so
+   * subtracting by NAME leaves a platform table the schema stopped declaring in the comparison. */
   moduleTables: ReadonlyMap<string, string>;
   loadSnapshot: (snapshotName: string) => Promise<DrizzleSnapshot>;
 }): Promise<{ exitCode: number; lines: string[] }> {
@@ -291,18 +278,11 @@ export async function runCheck(input: {
   const declared = declaredIndexes(snapshot);
   const tables = declaredTables(snapshot);
 
-  // A module-owned table migrates under a journal of its own, so its indexes
-  // are in no platform snapshot and every one of them would read as reverse
-  // drift. Exactly those tables are subtracted, and no more: keeping only the
-  // tables the snapshot DECLARES would also drop every index on a platform
-  // table the schema stopped declaring, the exact population `reverseDrift`
-  // exists to name. What is skipped is counted, so the subtraction is visible
-  // instead of implied.
+  // Exactly the module-owned tables are subtracted, and no more (see `moduleTables`).
   const skipped: ActualIndex[] = [];
   const considered: ActualIndex[] = [];
   for (const row of input.actual) {
-    // A table BOTH sides declare is compared as the platform's: the platform
-    // snapshot is the one this run's watermark was resolved against.
+    // A table BOTH sides declare is compared as the platform's — the watermark resolved against it.
     if (!tables.has(row.tablename) && input.moduleTables.has(row.tablename)) skipped.push(row);
     else considered.push(row);
   }
@@ -414,9 +394,7 @@ async function main(): Promise<number> {
     await sql.close();
   }
 
-  // Discovered from the module trees on disk, never a name prefix: `ee_%` would
-  // both over-match (a platform table someone names `ee_…`) and under-match (the
-  // next module, whose tables carry a different prefix or none).
+  // Discovered from the module trees on disk: `ee_%` would both over- and under-match.
   const moduleTables = new Map<string, string>();
   for (const module of await moduleOwnedTables(REPO_ROOT)) {
     for (const table of module.tables) moduleTables.set(table, module.packageDir);

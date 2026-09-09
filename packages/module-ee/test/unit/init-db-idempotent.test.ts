@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * `initEeDb` runs once per process, but nothing in the module contract stops a
- * second call: the loader re-initialising a module, a test harness booting the
- * module beside an already-open pool. A call that overwrote the handle would
- * leave the first pool's sockets open with no reference left to end them, and
- * `shutdown()` would close only the last one.
+ * `initEeDb` runs once per process, but nothing in the module contract stops a second
+ * call. A call that overwrote the handle would leave the first pool's sockets open with
+ * no reference left to end them, and `shutdown()` would close only the last one.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -22,9 +20,8 @@ describe("initEeDb", () => {
   });
 
   it("refuses a second database rather than stranding the first pool", () => {
-    // Opens the pool itself rather than inheriting the one the test above left:
-    // a test whose precondition is another test's side effect passes or fails on
-    // the order the runner happens to pick.
+    // Opens the pool itself rather than inheriting the one the test above left: a
+    // precondition that is another test's side effect depends on runner order.
     initEeDb(DATABASE_URL);
     const before = getEeDb();
     expect(() => initEeDb("postgres://elsewhere:5432/other")).toThrow(

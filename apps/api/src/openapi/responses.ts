@@ -157,11 +157,9 @@ export const responses = {
     },
   },
   /**
-   * The 409 every run-creation operation answers with. Two causes share the
-   * status: the idempotency guard and the org-deletion reservation
-   * (`enforceOrgConcurrencyCap` → `refuseReservedForDeletion`, under the
-   * admission lock). Shared so a run-creation operation cannot document one
-   * and return the other.
+   * The 409 every run-creation operation answers with — idempotency guard or
+   * deletion reservation. Shared so an operation cannot document one and
+   * return the other.
    */
   RunAdmissionConflict: {
     description:

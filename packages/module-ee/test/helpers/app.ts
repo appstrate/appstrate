@@ -13,9 +13,8 @@ import { createBillingRoutes } from "../../src/routes/billing.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 
 /**
- * The permissions the platform's RBAC aggregation grants `orgRole` from this
- * module's own contribution — read from the module, never restated here, so a
- * grant this harness hands out is one production hands out too.
+ * The permissions the platform's RBAC aggregation grants `orgRole` from this module's own
+ * contribution — read from the module, never restated, so this harness matches production.
  */
 export function permissionsForRole(orgRole: OrgRole): ReadonlySet<string> {
   const granted = new Set<string>();

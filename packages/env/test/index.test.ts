@@ -3,11 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getEnv, _resetCacheForTesting } from "../src/index.ts";
 
-/**
- * Every variable a test below mutates. `restore()` cleans only what is named
- * here, so one this list misses stays set for every test after it — which is
- * exactly how the control below first failed.
- */
+/** Every variable a test below mutates — `restore()` cleans only what is named here. */
 const TRACKED = [
   "BETTER_AUTH_SECRET",
   "BETTER_AUTH_ACTIVE_KID",

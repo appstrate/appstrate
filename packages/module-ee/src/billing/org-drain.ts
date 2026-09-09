@@ -25,10 +25,9 @@
  *     and finds them already claimed (`ee_billed_llm_usage` is the arbiter),
  *     so it is a no-op for them. Nothing is rewound, and the drain can bill an
  *     org sitting behind another tenant's head-of-line stall.
- *   - It starts where the SWEEP starts, from the one shared `ledgerScanStart`.
- *     Starting strictly at the watermark loses the rows the replay window exists
- *     for, and here that loss is final: the org's ledger rows cascade away
- *     moments later and no sweep will ever replay them.
+ *   - It starts where the SWEEP starts, from the one shared `ledgerScanStart`: at the
+ *     watermark it would lose the replay window's rows, and that loss is final here —
+ *     the org's ledger rows cascade away moments later.
  *   - Bounded: at most {@link MAX_DRAIN_BATCHES} reads of the configured batch
  *     size, and the scan is narrowed server-side to `credentialSource: "system"`
  *     (the only billable rows). A truncated drain is reported at `warn`.

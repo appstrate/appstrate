@@ -15,17 +15,9 @@
  * --upgrade-compose`, issue #515) share one source of truth and can
  * never disagree about what counts as a duplication.
  *
- * ─── The module half ─────────────────────────────────────────────────
- *
- * A module declares environment variables of its own
- * (`packages/module-ee/src/env.ts`), and reading `packages/env` alone would
- * compare none of them: a compose file pinning a default for one would have its
- * value checked against nothing. `docker-compose.yml`'s pass-through block for
- * those names is a hand-maintained COPY of the module's schema, so a key added
- * to the schema and forgotten in the block never reaches the container, with no
- * error anywhere. So the schema population is unioned with every discovered
- * module schema, and a compose file that passes through SOME of a module's
- * variables must pass through all of them.
+ * The schema population is unioned with every discovered module schema, and a compose file that
+ * passes through SOME of a module's variables must pass through all of them — the block is a
+ * hand-maintained copy of the schema, and a name missing from it never reaches the container.
  *
  * Usage: bun scripts/verify-compose-defaults.ts
  */
@@ -184,11 +176,8 @@ export function findTableGaps(
 /** One compose file forwarding part of a module's environment and not the rest. */
 interface PassThroughGap {
   file: string;
-  /** Module id, `module-` stripped. */
   module: string;
-  /** Repo-relative path of the schema the names come from. */
   declaredIn: string;
-  /** Declared names the file does not forward. */
   missing: string[];
   /** How many it does forward — 0 means the file is out of scope, not a gap. */
   present: number;
@@ -198,16 +187,9 @@ interface PassThroughGap {
 const COMPOSE_ENV_ENTRY = /^\s*-\s*([A-Z][A-Z0-9_]*)\s*(?:=|$)/gm;
 
 /**
- * The pass-through gaps in one compose file. Pure, so the test can hold a
- * synthetic compose against a synthetic module schema.
- *
- * A file that forwards NONE of a module's variables is not a gap — the
- * self-hosting templates legitimately do not run the module, and demanding the
- * block everywhere would put Stripe variables in every example. A file that
- * forwards SOME of them has taken the position that the module may run there,
- * and a half-forwarded environment is the failure this catches: the module
- * reads `process.env`, sees nothing, and either silently falls back to a
- * default or refuses to boot, with nothing pointing at the compose file.
+ * The pass-through gaps in one compose file. Pure, so the test can hold a synthetic compose
+ * against a synthetic module schema. Forwarding NONE of a module's variables is not a gap — that
+ * file simply does not run the module; forwarding SOME of them and not the rest is.
  */
 export function findPassThroughGaps(
   content: string,

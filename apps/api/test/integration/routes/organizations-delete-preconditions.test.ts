@@ -3,14 +3,9 @@
 /**
  * DELETE /api/orgs/:orgId — deletability is a PRECONDITION, not a side effect.
  *
- * Cover for a severe, user-triggerable, irreversible data-loss shape: emitting
- * `onOrgDelete` before `deleteOrganization`. `deleteOrganization` refuses (from
- * inside its transaction) while runs are in progress, so an owner who clicks
- * "delete org" during a run gets a 400 back — and with that ordering the module
- * handlers would already have run their destructive, non-transactional teardown
- * (the ee module drains billing, cancels the Stripe subscription and drops the
- * billing account; the mcp module drops the org from the RFC 8707 audience
- * allowlist), leaving the organization gutted with no repair path.
+ * Emitting `onOrgDelete` before `deleteOrganization` is irreversible data
+ * loss: the refusal on in-progress runs returns a 400 to the owner after the
+ * handlers have already torn down their non-transactional, external state.
  *
  * The load-bearing assertion in this file is therefore NEGATIVE: with an
  * in-progress run, the `onOrgDelete` handler must NOT have been invoked at
@@ -38,11 +33,7 @@ import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module"
 /** Every `onOrgDelete` fan-out observed since the last `beforeEach`. */
 let orgDeleteCalls: string[] = [];
 
-/**
- * Work a handler does while the platform waits on it. Set by the test that
- * needs a handler to change the org's deletability mid-sequence; null
- * everywhere else, so every other test sees a pure recorder.
- */
+/** Work a handler does while the platform waits on it; null = pure recorder. */
 let onOrgDeleteSideEffect: ((orgId: string) => Promise<void>) | null = null;
 
 const recordingModule: AppstrateModule = {
@@ -137,8 +128,6 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
       expect(body.code).toBe("delete_failed");
 
       // THE assertion: no module may observe a deletion that never happened.
-      // With the emit ahead of the refusal this array holds one entry — the ee
-      // module would already have cancelled the subscription by here.
       expect(orgDeleteCalls).toEqual([]);
 
       // And the org is intact (the transaction rolled back).
@@ -162,10 +151,8 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
   });
 
   it("emits onOrgDelete a second time when a handler leaves the org undeletable", async () => {
-    // The reservation cannot stop a run a HANDLER creates — it runs after the
-    // stamp, inside the platform's own process. So the in-transaction count
-    // still refuses, and the retry is the recovery: the contract is that a
-    // handler tolerates being called again for the same org.
+    // A run a HANDLER creates runs after the stamp, so the in-transaction count
+    // still refuses; handlers must tolerate a second call for the same org.
     const ctx = await createTestContext({ orgName: "Handler Blocks Org" });
     let inserted = false;
     onOrgDeleteSideEffect = async (orgId) => {
@@ -196,13 +183,9 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
 });
 
 /**
- * The precondition above is only worth what it still means once the modules
- * have acted, and a read outside any lock means nothing there: a run admitted
- * after it would make the in-transaction check refuse a deletion whose Stripe
- * subscription is already cancelled. `reserveOrgDeletion` decides and records
- * the deletion in one transaction, under the same per-org key run admission
- * takes, and admission refuses a reserved org — so no run can appear in that
- * window, and a sequence interrupted after the reservation resumes.
+ * `reserveOrgDeletion` decides and records the deletion in one transaction,
+ * under the same per-org key run admission takes, and admission refuses a
+ * reserved org — so no run can appear between the check and the teardown.
  */
 describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
   beforeEach(async () => {
@@ -245,9 +228,7 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
   });
 
   it("completes a DELETE that finds the reservation already standing", async () => {
-    // The reservation is never lifted, so the retry of an interrupted DELETE
-    // finds it in place. That is the recovery path, and it must be a no-op for
-    // the reservation and a completion for the deletion.
+    // A standing reservation is a no-op for the retry, not a refusal.
     const ctx = await createTestContext({ orgName: "Already Reserved Org" });
     await reserveOrgDeletion(ctx.orgId);
     const reservedAt = await deletingAt(ctx.orgId);
@@ -263,8 +244,7 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
   });
 
   it("shows the standing reservation on the organization resource", async () => {
-    // A reservation nothing surfaces is a state an operator cannot see. It is
-    // on the detail read and the listing, null everywhere else.
+    // Surfaced on the detail read and the listing, null everywhere else.
     const ctx = await createTestContext({ orgName: "Visible Reservation Org" });
 
     const before = (await (
@@ -299,16 +279,14 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
     const reservedAt = await deletingAt(ctx.orgId);
     expect(reservedAt).not.toBeNull();
 
-    // Stand in for whatever failed after the reservation: the next attempt
-    // cannot finish while this row is in progress.
+    // Stand in for whatever failed after the reservation.
     await seedRunInOrg(ctx, "running");
     const refused = await app.request(`/api/orgs/${ctx.orgId}`, {
       method: "DELETE",
       headers: { Cookie: ctx.cookie },
     });
     expect(refused.status).toBe(400);
-    // The reservation is not rolled back by the failure — it is the state the
-    // retry is meant to find, unchanged.
+    // The failure does not roll the reservation back.
     expect((await deletingAt(ctx.orgId))?.getTime()).toBe(reservedAt!.getTime());
 
     await db.update(runs).set({ status: "success" }).where(eq(runs.orgId, ctx.orgId));

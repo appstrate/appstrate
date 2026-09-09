@@ -162,12 +162,10 @@ function LibraryMatrix({
               const installed = pkg.installed_in.includes(space.id);
               const systemAlwaysActive = lockSystem && pkg.source === "system";
               const blocked = !canToggle(space.id, installed);
-              // While `useSpaces` is in flight the caller's standing is unknown:
-              // the box stays disabled, and claims no reason for it. Only a
-              // loaded set can say the permission is missing.
+              // Until `useSpaces` resolves the caller's standing is unknown, so the
+              // box is disabled without claiming a missing permission.
               const missingPermission = accessibleSpaces !== undefined && blocked;
-              // Two different reasons the box cannot be clicked, and a
-              // disabled control that says neither reads as broken.
+              // Two different reasons the box cannot be clicked.
               const title = systemAlwaysActive
                 ? t("library.systemAlwaysActive")
                 : missingPermission

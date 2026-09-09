@@ -18,26 +18,10 @@
  *
  * So this gate checks the half a machine can check and leaves the prose alone:
  *
- *   keys(envSchema) ∪ keys(module env schemas)  ⊆ rows(ENV.md)
- *   keys(*.env.example)                         ⊆ rows(ENV.md) ∪ INFRA_ALLOWLIST
- *   required(envSchema)                         ⊆ keys(EACH shipped .env.example)
- *
- * ─── Why the first line is a union ───────────────────────────────────
- *
- * A module declares variables of its own (`packages/module-ee/src/env.ts`
- * declares seven), and reading `packages/env` alone would let every one of them
- * through with a row nowhere. From an operator's side
- * there is no distinction to make — the module ships in the same image, reads
- * the same `process.env`, and refuses to boot with the same "Required". The
- * module schemas are DISCOVERED (`scripts/lib/module-env-schemas.ts`), so the
- * next module joins on its own.
- *
- * The THIRD line is deliberately NOT unioned. "Required" there means "the
- * platform cannot boot without it", and a module's hard-required key is
- * required only when that module is named in `MODULES` — the platform boots
- * fine without `STRIPE_SECRET_KEY`. Forcing it into every shipped
- * `.env.example` would put Stripe credentials in the self-hosting template of
- * an operator who will never enable billing.
+ *   keys(envSchema) ∪ modules ⊆ rows(ENV.md)
+ *   keys(*.env.example)    ⊆ rows(ENV.md) ∪ INFRA_ALLOWLIST
+ *   required(envSchema)    ⊆ keys(EACH shipped .env.example)
+ * Module schemas are discovered; the third line is not unioned — modules are opt-in via `MODULES`.
  *
  * ─── Why the third line exists ───────────────────────────────────────
  *
@@ -116,16 +100,8 @@ const INFRA_ALLOWLIST: Record<string, string> = {
 /**
  * The variables `docs/ENV.md`'s MAIN table documents.
  *
- * ─── Only the `| Variable |` table counts; any other header closes it ───
- *
- * A backticked `SCREAMING_SNAKE` name under ANY other table header is not a
- * documented variable. The alternative — keep counting until a specific header
- * appears — lets a live schema key lose its row and keep this gate green,
- * because a name in some other table answers for it. A table this parser has
- * never seen is a table whose meaning it does not know, and the answer to "is
- * this documentation?" for an unknown table is no. Adding a new table costs
- * nothing; adding one whose rows SHOULD count means giving it the
- * `| Variable |` header, which is a decision someone makes on purpose.
+ * Only the `| Variable |` table counts — any other table header closes it, so a backticked name
+ * under an unknown header is not a documented variable.
  *
  * Rows are told apart by shape rather than by position: a separator row is
  * dashes and pipes, a variable row's first cell is a backticked
@@ -246,7 +222,6 @@ export function findUndocumented(
   schemaKeys: ReadonlySet<string>,
   envExampleKeys: ReadonlyMap<string, string>,
   documented: ReadonlySet<string>,
-  /** Key → the module env file that declares it, for the finding's wording. */
   moduleSources: ReadonlyMap<string, string> = new Map(),
 ): Finding[] {
   const findings: Finding[] = [];
@@ -293,7 +268,7 @@ interface MainDeps {
   exampleFiles?: readonly string[];
   /** Reads one repo-relative path. Default: from disk. */
   readFile?: (relativePath: string) => string;
-  /** The PLATFORM schema key set. Default: the real `envSchema`'s keys. */
+  /** The schema key set. Default: the real `envSchema`'s keys. */
   schemaKeys?: ReadonlySet<string>;
   /** The module env schemas. Default: discovered from `packages/module-*`. */
   moduleEnv?: ModuleEnvFiles;

@@ -212,15 +212,8 @@ describe("importSpecifiers", () => {
 });
 
 /**
- * Which files each half of the scan reads.
- *
- * Both blind spots this pins were real. `packages/module-ee/drizzle/schema.ts`
- * and `drizzle.config.ts` sat in NO scan root while the module walk was anchored
- * at each module's `src` directory and the platform walk skipped the module
- * packages entirely — module-ee is the first module with production code
- * outside `src`. And `scripts/test` is
- * Apache-2.0 platform code that CI runs, so the platform→module import ban
- * applies to it exactly as it does to `scripts/verify-*.ts`.
+ * Which files each half of the scan reads. Two roots are easy to miss: a module's
+ * code outside `src`, and `scripts/test`, platform code the import ban covers.
  */
 describe("isScannedSource", () => {
   it("reads a module's production code outside src/", () => {
@@ -237,8 +230,8 @@ describe("isScannedSource", () => {
   });
 
   it("never reads an installed dependency, tests included", () => {
-    // A workspace root's `node_modules` holds every module's own source; reading
-    // it would report the platform as importing all of them.
+    // A workspace's `node_modules` holds every module's source — reading it would
+    // report the platform as importing all of them.
     expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", false)).toBe(false);
     expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", true)).toBe(false);
   });

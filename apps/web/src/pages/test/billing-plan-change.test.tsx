@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The billing page renders differently for an org that already subscribes and
- * one that does not: the header offers the subscription portal in the first
- * case and a checkout upgrade in the second.
- *
- * Which endpoint a plan click goes to is NOT decided here — the server sends it
- * as `plan_action`, and the rule it derives that from is tested in
+ * The billing page header offers the subscription portal to an org that already
+ * subscribes and a checkout upgrade to one that does not. Which endpoint a plan
+ * click goes to is the server's `plan_action`, tested in
  * `packages/module-ee/test/integration/routes/billing.test.ts`.
  */
 
@@ -36,10 +33,8 @@ await i18n.changeLanguage("fr");
 const ORG_ID = "org_a";
 const header = { "X-Org-Id": ORG_ID };
 
-// Typed against the generated wire schema, not cast into it: a field added to
-// the billing account or its plans stops these fixtures compiling, which is the
-// whole point of a fixture. `upgrades` takes the narrower checkout-target type,
-// so `free` cannot land there.
+// Typed against the generated wire schema, not cast into it, so a new field
+// stops these fixtures compiling. `upgrades` takes the narrower checkout type.
 const FREE: Plan = {
   id: "free",
   name: "Free",

@@ -126,14 +126,13 @@ describe("createCheckoutSession", () => {
   });
 
   /**
-   * Which door a subscribing org goes through is decided by whether STRIPE
-   * still holds a subscription, not by whether the account row carries an id.
+   * Which door a subscribing org goes through is decided by whether STRIPE still holds
+   * a subscription, not by whether the account row carries an id.
    */
   describe("an account that already carries a subscription id", () => {
     it("refuses a checkout while Stripe still holds the subscription", async () => {
-      // `unpaid`: Stripe stopped collecting but the subscription object is
-      // still there, so a second checkout would bill the org twice. The
-      // Customer Portal is the way back.
+      // `unpaid`: Stripe stopped collecting but the object is still there, so a second
+      // checkout would bill the org twice. The Customer Portal is the way back.
       await seedBillingAccount({
         orgId,
         planId: "starter",
@@ -150,8 +149,8 @@ describe("createCheckoutSession", () => {
     });
 
     it("refuses a checkout while the first payment is still pending", async () => {
-      // `incomplete` is HELD: Stripe may yet activate the subscription, so a
-      // second checkout can end with two live subscriptions on one org.
+      // `incomplete` is HELD: Stripe may yet activate it, so a second checkout can end
+      // with two live subscriptions on one org.
       await seedBillingAccount({
         orgId,
         planId: "starter",
@@ -168,9 +167,8 @@ describe("createCheckoutSession", () => {
     });
 
     it("opens a checkout when the id names a subscription Stripe no longer holds", async () => {
-      // Same non-null id, terminal status: only `customer.subscription.deleted`
-      // nulls the column, so a lost or late one leaves this row behind. The org
-      // must still be able to subscribe again.
+      // Same non-null id, terminal status: only `customer.subscription.deleted` nulls
+      // the column, so a lost one leaves this row behind and the org must still subscribe.
       await seedBillingAccount({
         orgId,
         planId: "free",

@@ -64,13 +64,7 @@ import { resolve } from "node:path";
 
 const MODULE_ROOT = resolve(import.meta.dir, "../../packages/module-ee");
 
-/**
- * Column names the module's newest drizzle snapshot declares, per target table.
- * The snapshot is the module's own statement of its schema, and reading it is
- * what keeps this script from carrying a second copy that a migration can make
- * wrong. Which snapshot is newest comes from the journal, never from a literal
- * index.
- */
+/** Column names the module's newest drizzle snapshot declares, per target table. */
 function declaredColumns(): Map<string, string[]> {
   const meta = resolve(MODULE_ROOT, "drizzle/migrations/meta");
   const journal = JSON.parse(readFileSync(resolve(meta, "_journal.json"), "utf8")) as {
@@ -90,19 +84,10 @@ function declaredColumns(): Map<string, string[]> {
 
 const DECLARED = declaredColumns();
 
-/**
- * The tables under their TARGET names, read off the snapshot above and sorted
- * so the printed plan is stable. No foreign key runs between them (they
- * reference the platform's `organizations` by value only), so the order is
- * presentation, not a constraint.
- */
+/** The tables under their TARGET names, sorted so the printed plan is stable. */
 export const EE_TABLES = [...DECLARED.keys()].sort();
 
-/**
- * The part of a table name the two prefixes share: `ee_usage_records` →
- * `usage_records`. A snapshot table without the prefix would be silently
- * mangled into a source name that matches nothing, so it fails at load instead.
- */
+/** The part of a table name the two prefixes share: `ee_usage_records` → `usage_records`. */
 const LOGICAL = EE_TABLES.map((t) => {
   if (!t.startsWith("ee_")) {
     throw new Error(`Snapshot table is not prefixed \`ee_\`: ${t}`);
@@ -334,9 +319,7 @@ function shippedMigrations(): number {
  * module in a literal one — the same shape `scripts/lib/module-openapi.ts` uses.
  */
 async function applyModuleMigrations(url: string): Promise<void> {
-  // Crossing the licence boundary AT RUNTIME is the point: do not "fix" this by
-  // copying `migrateEeDb` into the Apache-2.0 tree — that would put commercial
-  // schema management under the wrong LICENSE and fork the module's journal.
+  // Crossing the licence boundary AT RUNTIME is the point — never copy `migrateEeDb` in-tree.
   const db = (await import(resolve(MODULE_ROOT, "src/db.ts"))) as {
     migrateEeDb: (databaseUrl: string) => Promise<void>;
   };

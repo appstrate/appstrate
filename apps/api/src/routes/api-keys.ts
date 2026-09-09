@@ -121,20 +121,16 @@ export function createApiKeysRouter() {
   // DELETE /api/api-keys/:id — revoke a key (soft-delete)
   router.delete("/:id", requirePermission("api-keys", "revoke"), async (c) => {
     const keyId = c.req.param("id")!;
-    // The guard above answered for the space this request entered; the key may
-    // live in another one, and `api-keys:revoke` is held PER SPACE (spec §3.4).
-    // So the key's own space is resolved first, and the caller must hold the
-    // permission there. A caller who cannot reach that space gets the space's
-    // own wall — 404 for a private one, which must not become discoverable
-    // through the id of a key inside it.
+    // `api-keys:revoke` is held PER SPACE (spec §3.4) and the key may live in a
+    // different space from the one this request entered, so authority is decided
+    // in the key's own space — behind that space's wall (404 when private).
     const orgScope = getOrgScope(c);
     const keySpaceId = await findApiKeySpace(orgScope, keyId);
     if (!keySpaceId) {
       throw notFound("API key not found or already revoked");
     }
     if (keySpaceId !== c.get("spaceId")) {
-      // A key delegates authority in exactly one space (spec §7.1), so it
-      // never reaches a sibling — no second space to authorize against.
+      // A key delegates authority in exactly one space (spec §7.1).
       if (c.get("authMethod") === "api_key") {
         throw notFound("API key not found or already revoked");
       }
@@ -143,9 +139,8 @@ export function createApiKeysRouter() {
         throw notFound("API key not found or already revoked");
       }
       await applySpacePermissions(c, keySpace);
-      // The context now describes ONE space — the key's. Everything downstream
-      // that reads it (the audit row's space, any later guard) must name the
-      // space the revocation acts in, not the one the request entered from.
+      // Downstream readers (the audit row, any later guard) must name the space
+      // the revocation acts in, not the one the request entered from.
       c.set("spaceId", keySpaceId);
       assertPermission(c, "api-keys", "revoke");
     }

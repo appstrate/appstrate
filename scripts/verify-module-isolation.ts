@@ -19,16 +19,9 @@
  *   differently-licensed tree into the Apache-2.0 one. The loader's computed
  *   `import(specifier)` is invisible to a specifier scan; a literal one is not.
  * `apps/web` is out of scope of that rule (the SPA imports a module's UI on
- * purpose). Test files are exempt module→module — a module's own tests may
- * reach for a sibling's fixtures — but NOT platform→module under `scripts/`:
- * `scripts/test/**` is Apache-2.0 code in the platform tree, and a static
- * import there drags a differently-licensed package into it exactly as a
- * non-test one would (`scripts/migration/0010-…` already reaches its module
- * through a computed `import()` for that reason).
+ * purpose). Test files are exempt module→module, but not platform→module under `scripts/`.
  *
  * Override via env: `MODULE_ISOLATION_POLICY=warn|fail|off`.
- * `--verbose` additionally lists every file the two scans read, which is how a
- * test pins a scan root to the files it has to cover.
  */
 
 import { Glob } from "bun";
@@ -38,9 +31,10 @@ import { REGEX_PRECEDERS, scanQuoted } from "./lib/ts-lexer.ts";
 
 // Under CI the override is ignored, so a green pipeline can never be bought
 // with `MODULE_ISOLATION_POLICY=off` — same pin `verify-module-contract.ts`
-// carries for the same reason. `readGatePolicy` also REJECTS an unrecognised
-// value rather than letting it fall out of `fail`; `scripts/lib/policy-env.ts`
-// states why.
+// carries for the same reason. `readGatePolicy` also REJECTS a value that is
+// neither `warn`, `fail` nor `off`; the cast this replaces accepted anything
+// and every non-`fail` value silently downgraded the exit below to 0 while the
+// `❌` lines still printed.
 const POLICY = readGatePolicy("MODULE_ISOLATION_POLICY");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 
@@ -104,9 +98,7 @@ const IMPORT_RE =
 /**
  * Blank the comments out: a commented-out import is not one. Strings are walked
  * over so a `//` inside a specifier opens no comment, and so are regex literals
- * — an unclosed `["']` would swallow the code behind it. The primitives are
- * `scripts/lib/ts-lexer.ts`, shared with `verify-module-sql-boundary.ts`, whose
- * scan has to end a literal in exactly the same place this one does.
+ * — an unclosed `["']` would swallow the code behind it.
  */
 function stripComments(source: string): string {
   let out = "";
@@ -235,19 +227,8 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
   return problems;
 }
 
-/**
- * Is `rel` (a path relative to a scan root) source this gate reads?
- *
- * Pure and exported so both halves of the test exemption are pinned by a test
- * rather than by reading the walk: the module→module scan skips tests, the
- * `scripts/` platform scan does not, and a walk that silently stopped reading
- * either population would report the same clean tick.
- */
+/** Is `rel` (relative to a scan root) source this gate reads? Exported so a test pins it. */
 export function isScannedSource(rel: string, includeTests: boolean): boolean {
-  // `apps/api/src` and `packages/*/src` hold none, but `runtime-pi`, `e2e`,
-  // `apps/cli` and every `packages/module-*` are workspace roots — scanning
-  // their dependency tree would read every module's published source as
-  // platform source.
   if (rel.includes("node_modules/")) return false;
   if (includeTests) return true;
   return !(rel.includes("/test/") || rel.startsWith("test/") || /\.test\.tsx?$/.test(rel));
@@ -290,14 +271,7 @@ if (import.meta.main) {
       process.exit(1);
     }
   }
-  // Workspace npm modules. The root is the PACKAGE directory, not its `src/`:
-  // a module's production code is not confined to `src/` (`packages/module-ee`
-  // declares its tables in `drizzle/schema.ts` and wires its migrator in
-  // `drizzle/drizzle.config.ts`), and the platform walk skips `module-*`
-  // entirely — so anything outside a module's `src/` would sit in no scan root
-  // at all, and its imports would be invisible to both directions.
-  // `sourceFilesUnder` already drops `test/` and `node_modules/`, which is the
-  // whole of what narrowing to `src/` would buy.
+  // Workspace npm modules — root is the PACKAGE dir, since module code lives outside `src/` too.
   {
     const glob = new Glob("module-*/package.json");
     for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages") })) {
@@ -324,9 +298,6 @@ if (import.meta.main) {
 
   const problems: string[] = [];
   const crossModuleImports: CrossModuleImport[] = [];
-  // Repo-relative, for `--verbose`. The counts below say how MANY files each
-  // direction read; only the listing says which, and a scan root that quietly
-  // stops covering a population is the failure a count reads straight past.
   const scannedFiles: string[] = [];
   const verbose = process.argv.includes("--verbose");
   let filesScanned = 0;
@@ -375,13 +346,7 @@ if (import.meta.main) {
   // platform import. `scripts/` stays in scope: `scripts/lib/module-openapi.ts`
   // loads modules by a computed `import(entry)`, the form this gate deliberately
   // cannot see, and nothing there names a module in a literal specifier.
-  //
-  // `includeTests` is set for `scripts` alone, and it is the one root where a
-  // test file is platform code in the same sense a non-test file is: the gates
-  // and operator scripts it exercises are Apache-2.0, they run in CI on the
-  // platform's behalf, and `scripts/test/migration-0010-…` needed a computed
-  // `import()` for precisely this reason. The other roots keep the exemption:
-  // `apps/api/test` and `e2e` legitimately drive a module end to end.
+  // `scripts/test/**` is platform code; the other roots' tests drive a module on purpose.
   const platformRoots: { dir: string; includeTests: boolean }[] = [
     { dir: resolve(ROOT, "apps/api/src"), includeTests: false },
     { dir: resolve(ROOT, "apps/cli/src"), includeTests: false },

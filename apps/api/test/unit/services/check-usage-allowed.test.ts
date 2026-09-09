@@ -19,7 +19,7 @@
  *     owns) is `"org"` whatever its preset resolves to, and is dispatched like
  *     any other — it runs inline in the platform's own process;
  *   - an organization whose deletion is reserved is refused before any of that,
- *     hook or no hook: its usage rows would be cascade-deleted unbilled.
+ *     hook or no hook: its usage rows would be cascade-deleted unaccounted for.
  *
  * These are the exact facts a metering module (the ee module) quotes against, so a
  * regression that stopped reporting one — or resurrected the old "skip the hook
@@ -47,11 +47,7 @@ import type {
 
 const SYSTEM_PRESET = "sys-chat-model";
 
-/**
- * A real uuid for an organization that does not exist. The gate reads
- * `organizations.deleting_at` before anything else — an org row that is absent
- * carries no reservation, which is every case below except the last.
- */
+/** A real uuid for an organization that does not exist, so it carries no reservation. */
 const ORG_ID = "00000000-0000-4000-a000-0000000000c1";
 
 function fakeInitCtx(): ModuleInitContext {
@@ -103,9 +99,8 @@ describe("checkUsageAllowed", () => {
   });
 
   it("refuses a turn in an organization whose deletion is reserved", async () => {
-    // The reservation is a platform fact, not a module policy, so it answers
-    // with no module loaded at all. It is refused HERE and not only at the
-    // proxy: a rejected turn opens no MCP session and persists no message.
+    // A platform fact, not a module policy, so it answers with no module loaded.
+    // Refused here and not only at the proxy: a rejected turn persists nothing.
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
     const reservedOrgId = "00000000-0000-4000-a000-0000000000c2";
@@ -131,8 +126,7 @@ describe("checkUsageAllowed", () => {
       });
       expect(calls).toHaveLength(0);
 
-      // Control: the same call against an organization with no reservation
-      // reaches the hook.
+      // Control: the same call, an organization with no reservation.
       await db
         .update(organizations)
         .set({ deletingAt: null })

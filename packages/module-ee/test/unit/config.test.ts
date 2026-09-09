@@ -80,8 +80,8 @@ describe("config", () => {
     });
 
     it("keeps LIVE a strict subset of HELD", () => {
-      // A status a plan change accepts but a checkout does not refuse would let
-      // one org hold two subscriptions at once.
+      // A status a plan change accepts but a checkout does not refuse would let one org
+      // hold two subscriptions at once.
       for (const status of LIVE_SUBSCRIPTION_STATUSES) {
         expect(HELD_SUBSCRIPTION_STATUSES.has(status)).toBe(true);
       }
@@ -111,8 +111,8 @@ describe("config", () => {
       expect(planAction({ stripeSubscriptionId: "sub_dead", subscriptionStatus: "canceled" })).toBe(
         "checkout",
       );
-      // A dead id with no status at all: only `customer.subscription.deleted`
-      // nulls the column, so this row is what a lost one leaves behind.
+      // A dead id with no status: only `customer.subscription.deleted` nulls the
+      // column, so this row is what a lost one leaves behind.
       expect(planAction({ stripeSubscriptionId: "sub_dead", subscriptionStatus: null })).toBe(
         "checkout",
       );

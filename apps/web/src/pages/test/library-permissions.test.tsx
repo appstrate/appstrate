@@ -38,13 +38,8 @@ function packageRow(type: Package["type"], installed_in: string[], source = "loc
 }
 
 /**
- * Which explanation a disabled checkbox carries, resolved from the bundle
- * sentence it renders.
- *
- * The three reasons are named apart rather than collapsed into "permission":
- * install and uninstall are different sentences chosen by the row's state, so a
- * mapping that answered "permission" to both let the two be swapped silently.
- * An unmapped title comes back verbatim, which fails the comparison loudly.
+ * Which explanation a disabled checkbox carries, from the sentence it renders.
+ * Install and uninstall are named apart; an unmapped title comes back verbatim.
  */
 function hintOf(element: string): string | null {
   const title = /\stitle="([^"]*)"/.exec(element)?.[1];
@@ -79,10 +74,7 @@ function checkboxes(spaces: Space[] | undefined, pkg: Package) {
   return [...html.matchAll(/<button\b[^>]*role="checkbox"[^>]*>/g)].map(([element]) => ({
     checked: element.includes('aria-checked="true"'),
     disabled: /\sdisabled(?:=|\s|>)/.test(element),
-    // Every disabled box says WHY, and the reasons are different sentences: a
-    // system package is always active, a missing permission is the caller's own
-    // standing on the operation the row offers. `null` when the box is live and
-    // needs no explanation, and while the permission set is still loading.
+    // `null` when the box is live, and while the permission set is loading.
     hint: hintOf(element),
   }));
 }
@@ -135,9 +127,7 @@ describe("library installation controls", () => {
   });
 
   it("keeps writes disabled while permissions load, blaming nobody for it", () => {
-    // Nothing is known about the caller yet, so the box says nothing: a
-    // loading control that claims a missing permission accuses the operator of
-    // something the answer may contradict a moment later.
+    // Nothing is known about the caller yet, so the box claims no reason.
     expect(checkboxes(undefined, packageRow("integration", []))).toEqual([
       { checked: false, disabled: true, hint: null },
     ]);

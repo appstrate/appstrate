@@ -231,16 +231,10 @@ describe("per-principal org permissions", () => {
   });
 
   /**
-   * The SSE routes skip the pipeline and resolve the caller's set themselves,
-   * so they are a second implementation of the same rule and drifted from it:
-   * they computed the org half without the principal grants, answering a
-   * narrower caller on the stream than on every other transport.
-   *
-   * The stream's own two gates are space-level (`runs:read`, `runs:delete`) and
-   * a principal grant is org-level by construction, so what discriminates here
-   * is the same instrument the API-key test above uses — whether the module's
-   * resolver is CONSULTED for the principal. It is, for a session; it is not,
-   * for a key.
+   * The SSE routes resolve the caller's set themselves, so they are a second
+   * implementation of the same rule. Its gates are space-level while a principal
+   * grant is org-level, so what discriminates is whether the module's resolver
+   * is CONSULTED — it is for a session, it is not for a key.
    */
   describe("the SSE transport resolves the same org half", () => {
     /** A space role with no `runs:read`, so SSE auth refuses after the grants are resolved. */
@@ -268,9 +262,7 @@ describe("per-principal org permissions", () => {
     });
 
     it("never asks it for an API key stream", async () => {
-      // The key's creator is the owner, so the space role resolves and the
-      // refusal below comes from the key's scopes — the grants ARE computed,
-      // and the resolver is still not consulted.
+      // The refusal below comes from the key's scopes, not from a missing role.
       const key = await seedApiKey({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,

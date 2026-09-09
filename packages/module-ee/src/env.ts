@@ -3,15 +3,11 @@
 import { z } from "zod";
 
 /**
- * This module's environment contract.
- *
- * Exported for one reader that no import graph shows: the platform's env gates
- * (`scripts/verify-env-docs.ts`, `scripts/verify-compose-defaults.ts`) discover
- * `packages/module-<id>/src/env.ts` by glob and load it through a COMPUTED
- * `import()`, so `docs/ENV.md`, every shipped `.env.example` and the compose
- * pass-through block are held to these keys as well as to `@appstrate/env`'s.
- * The specifier has to be computed — a literal one would be an Apache-2.0 file
- * naming this package, which `verify-module-isolation.ts` refuses.
+ * This module's environment contract. Exported for one reader no import graph shows: the
+ * platform's env gates (`scripts/verify-env-docs.ts`, `scripts/verify-compose-defaults.ts`)
+ * glob `packages/module-<id>/src/env.ts` and load it through a COMPUTED `import()` — a
+ * literal specifier would be an Apache-2.0 file naming this package, which
+ * `verify-module-isolation.ts` refuses.
  *
  * @gateImport
  */

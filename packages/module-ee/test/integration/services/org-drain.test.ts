@@ -77,10 +77,9 @@ describe("final usage drain on org deletion", () => {
   });
 
   it("REGRESSION: bills a row of the org that committed late BELOW the watermark", async () => {
-    // The row the periodic sweep's replay window exists for — a low serial id
-    // published after the watermark passed it. Starting the drain strictly above
-    // the watermark debited 0 and the org's ledger row then cascaded away, so
-    // the sweep never got its replay: the loss was final.
+    // The row the periodic sweep's replay window exists for — a low serial id published
+    // after the watermark passed it. Starting the drain strictly above the watermark
+    // debits 0, and the org's ledger row then cascades away: the loss is final.
     await seedBillingCursor(3);
     seedLlmUsage({ orgId, id: 2, costUsd: 0.05, contextId: "run-late-commit" });
 
@@ -92,8 +91,8 @@ describe("final usage drain on org deletion", () => {
   });
 
   it("does not reach below the cutover floor", async () => {
-    // Same selection rule as the sweep, floor included: usage the cutover
-    // excluded is not billed by the deletion path either.
+    // Same selection rule as the sweep, floor included: usage the cutover excluded is
+    // not billed by the deletion path either.
     await seedBillingCursor(3, 3);
     seedLlmUsage({ orgId, id: 2, costUsd: 0.05, contextId: "run-historical" });
 
@@ -175,10 +174,9 @@ describe("final usage drain on org deletion", () => {
   });
 
   it("claims an unpriced row at 0 credits and names the org in one error line", async () => {
-    // Claiming it is what stops a later sweep billing it twice; the 0 credits is
-    // what stops it being billed at a price nobody computed. The `error` line is
-    // the only trace an operator has of the revenue that went uncharged, so it
-    // names the org and appears exactly once for the drain.
+    // Claiming it stops a later sweep billing it twice; the 0 credits stops it being
+    // billed at a price nobody computed. The `error` line is the operator's only trace
+    // of the uncharged revenue, so it names the org and appears once for the drain.
     await seedBillingCursor(0);
     const id = seedLlmUsage({
       orgId,

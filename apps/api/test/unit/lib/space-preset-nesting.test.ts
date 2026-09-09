@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `SPACE_ROLE_PRESETS` is ordered strongest first, and the module loader reads
- * it in that order to decide whether a module's `presets` list is upward-closed
- * (`assertPresetsUpwardClosed`). Nothing in the type system says so: the tuple
- * is four strings, and reordering it would silently change which module
- * contributions boot — a `builder`-only grant would start passing, handing a
- * space admin less than a builder.
- *
- * The loader holds no copy of the ordering — a second copy would make the
- * question undecidable in both places at once. This file is the answer instead:
- * the order is checked against the thing that actually defines it, the preset →
- * permission matrix, where "stronger" means "grants a superset".
+ * `SPACE_ROLE_PRESETS` is ordered strongest first and `assertPresetsUpwardClosed`
+ * relies on it, so the order is checked against the preset → permission matrix,
+ * where "stronger" means "grants a superset".
  */
 
 import { describe, expect, it } from "bun:test";
@@ -37,8 +29,7 @@ describe("SPACE_ROLE_PRESETS ordering", () => {
           missing.join("\n  "),
       ).toEqual([]);
 
-      // And strictly weaker, or the two are interchangeable and the order says
-      // something the grants do not.
+      // And strictly weaker, or the order says something the grants do not.
       expect(weakerGrants.size, `"${weaker}" grants as much as "${stronger}"`).toBeLessThan(
         strongerGrants.size,
       );

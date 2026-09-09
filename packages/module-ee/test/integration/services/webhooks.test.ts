@@ -142,11 +142,9 @@ describe("handleWebhook", () => {
     });
 
     it("leaves the account alone when it already carries THIS subscription", async () => {
-      // Stripe orders nothing, so `created` can land after
-      // `checkout.session.completed` or an `updated` for the same subscription.
-      // Its payload is creation-time state — `incomplete`, and whatever cancel
-      // flag the object was born with — so writing it would roll back the live
-      // status and cancel flag of the subscription the org is actually on.
+      // Stripe orders nothing, so `created` can land after `checkout.session.completed`
+      // or an `updated`. Its payload is creation-time state, so writing it would roll
+      // back the live status and cancel flag of the subscription the org is on.
       await seedBillingAccount({
         orgId,
         planId: "pro",
@@ -187,9 +185,8 @@ describe("handleWebhook", () => {
     });
 
     it("attaches over an id the account carries with no status at all", async () => {
-      // Only `customer.subscription.deleted` nulls the id column, and only the
-      // status-writing handlers fill the status one — an account left with an id
-      // and no status has nothing Stripe is holding, so it must not be locked out.
+      // Only `customer.subscription.deleted` nulls the id column, so an account with an
+      // id and no status has nothing Stripe holds and must not be locked out.
       await seedBillingAccount({
         orgId,
         planId: "free",
@@ -584,11 +581,9 @@ describe("handleWebhook", () => {
   });
 
   describe("subscription identity — an event may only act on the current subscription", () => {
-    // Stripe orders nothing. An org that replaced `sub_old` with `sub_new` still
-    // receives `sub_old`'s tail, and `metadata.orgId` is identical on both — it
-    // says which ORG owns the subscription, never that the org is still on it.
-    // Event-id dedupe cannot help: these events are new, real, and about a
-    // subscription that no longer matters.
+    // An org that replaced `sub_old` with `sub_new` still receives `sub_old`'s tail, and
+    // `metadata.orgId` is identical on both. Event-id dedupe cannot help: these events
+    // are new, real, and about a subscription that no longer matters.
 
     async function account() {
       const db = getEeDb();
@@ -681,8 +676,8 @@ describe("handleWebhook", () => {
     });
 
     it("ignores a late invoice.paid for the superseded subscription", async () => {
-      // A renewal invoice for `sub_old` would otherwise re-attach the dead
-      // subscription AND reset the live plan's quota and credit usage.
+      // A renewal invoice for `sub_old` would re-attach the dead subscription AND reset
+      // the live plan's quota and credit usage.
       await seedReplacedSubscription();
       setSubscriptionResponse({
         id: "sub_old",
@@ -741,10 +736,9 @@ describe("handleWebhook", () => {
     });
 
     /**
-     * The identity guard pins on the subscription STRIPE holds, not on the id
-     * the row happens to carry. An account whose stored subscription is dead
-     * has nothing to supersede, and dropping its next checkout as "superseded"
-     * left a paying customer with no plan and no quota.
+     * The identity guard pins on the subscription STRIPE holds, not on the id the row
+     * carries: an account whose stored subscription is dead has nothing to supersede,
+     * and dropping its next checkout would leave a paying customer with no plan.
      */
     describe("a dead subscription id does not block a new one", () => {
       async function seedDeadSubscription(status: string) {
@@ -830,8 +824,7 @@ describe("handleWebhook", () => {
       });
 
       it("still ignores a checkout completion for an account on a HELD subscription", async () => {
-        // Control: `unpaid` is a status Stripe still holds the object at, so
-        // the account is not free to be re-attached.
+        // Control: `unpaid` is held, so the account is not free to be re-attached.
         await seedDeadSubscription("unpaid");
 
         const { body, signature } = signedEvent({

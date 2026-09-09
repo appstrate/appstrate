@@ -305,14 +305,8 @@ const config: KnipConfig = {
    *     `event`), or one named only inside another tagged type
    *     (`SignupBlockReason`). Those are what the tag holds today.
    *
-   *   `@gateImport` — the export is loaded by a COMPUTED `import()` in a
-   *     `scripts/` gate, so knip sees no edge and neither could it: the
-   *     specifier is built at runtime from a glob. The computation is not an
-   *     optimisation — `scripts/verify-module-isolation.ts` forbids an
-   *     Apache-2.0 platform file from naming a module package in a literal
-   *     specifier, so a gate that reads a module's own declarations has no
-   *     other way to reach them. `packages/module-ee/src/env.ts` carries it for
-   *     `verify:env-docs` / `verify:compose-defaults`.
+   *   `@gateImport` — loaded by a COMPUTED `import()` in a `scripts/` gate, so knip sees no
+   *     edge: `verify-module-isolation.ts` forbids a literal module specifier in platform code.
    */
   tags: ["-openapiMirror", "-typeContract", "-gateImport"],
 

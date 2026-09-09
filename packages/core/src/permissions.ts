@@ -288,33 +288,16 @@ export type OrgRole = (typeof ORG_ROLES)[number];
  * Space-role presets (RBAC spec §3.3). Constants, not rows. In core so modules can name
  * them in `ModulePermissionContribution.presets`; the preset → permission mapping is
  * policy and stays in `apps/api/src/lib/permissions.ts`.
- *
- * **Ordered strongest first**, and that order is load-bearing, not cosmetic: the presets
- * are nested (`viewer ⊂ operator ⊂ builder ⊂ admin`), and the platform reads this tuple
- * in order to decide whether a module's `presets` list is upward-closed
- * (`assertPresetsUpwardClosed`, `apps/api/src/lib/modules/module-loader.ts`). Reordering
- * it silently changes which contributions boot. `apps/api/test/unit/lib/space-preset-nesting.test.ts`
- * holds the order against the real preset → permission matrix.
+ * Ordered strongest first — `assertPresetsUpwardClosed` reads the tuple in order.
  */
 export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as const;
 
 /** Space-role preset union — `"admin" | "builder" | "operator" | "viewer"`. */
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
 
-/**
- * The org roles that already run the organization: they hold every org-level
- * permission the platform and its modules define, in every space, without a
- * `space_members` row.
- *
- * One name for a fact four call sites need — a module refusing to grant its own
- * permissions to a role that already holds everything, the SPA's picker that
- * hides them, its role-preview trigger, and the space-member picker. Spelled out at each
- * site, `["owner", "admin"]` is four independent decisions; here it is one, and
- * a role promoted into or out of the set moves all four together.
- */
+/** Org roles holding every org-level permission in every space, without a `space_members` row. */
 export const ORG_ROLES_WITH_FULL_ACCESS = ["owner", "admin"] as const;
 
-/** Org role union of {@link ORG_ROLES_WITH_FULL_ACCESS} — `"owner" | "admin"`. */
 export type OrgRoleWithFullAccess = (typeof ORG_ROLES_WITH_FULL_ACCESS)[number];
 
 /**
@@ -344,13 +327,7 @@ export interface SpaceAssignment {
 // ignored.
 // ---------------------------------------------------------------------------
 
-/**
- * Org roles a preview may take: every role that is NOT
- * {@link ORG_ROLES_WITH_FULL_ACCESS}. Derived rather than listed, because "a
- * preview only removes" is exactly the statement that the previewable roles are
- * the complement of the ones that hold everything — a role added to either
- * tuple by hand would break that on one side only.
- */
+/** Org roles a preview may take — the complement of {@link ORG_ROLES_WITH_FULL_ACCESS}. */
 export type ViewAsOrgRole = Exclude<OrgRole, OrgRoleWithFullAccess>;
 
 export const VIEW_AS_ORG_ROLES: readonly [ViewAsOrgRole, ...ViewAsOrgRole[]] = ORG_ROLES.filter(

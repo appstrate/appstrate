@@ -44,8 +44,7 @@ export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   // The route is mounted behind `RequirePermission permission="billing:read"`,
-  // a permission only `@appstrate/module-ee` contributes — so reaching this
-  // component already proves the module is loaded and `/api/billing` answers.
+  // which only `@appstrate/module-ee` contributes, so `/api/billing` answers.
   const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();
   const changePlanMutation = useChangePlan();
@@ -55,13 +54,11 @@ export function OrgSettingsBillingPage() {
 
   // Storage entitlement — core data (organizations.files_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit when
-  // billing is on. Same source (useOrgStorage) as the org-settings/general
-  // storage section.
+  // billing is on. Same source (useOrgStorage) as org-settings/general.
   const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
 
-  // The two admin sections below are MOUNTED on the exact condition the
-  // module's admin routes check (`billing:manage`), not merely hidden by it — so
-  // their queries never fire for a caller the routes would answer with 403.
+  // The two admin sections below are MOUNTED on `billing:manage`, not merely
+  // hidden by it, so their queries never fire for a caller the routes would 403.
   const canManageBilling = can("billing:manage");
 
   if (isLoading) return <LoadingState />;
@@ -100,12 +97,9 @@ export function OrgSettingsBillingPage() {
   };
 
   /**
-   * The server decides which door a plan selection goes through and reports it
-   * as `plan_action`; the page follows that decision instead of re-deriving it.
-   * Stripe Checkout only ever CREATES, so a second one beside a subscription
-   * Stripe still collects on bills the org twice — and the routes refuse the
-   * wrong door with a 409 anyway. The plan lands through the Stripe webhook, so
-   * the page refetches rather than assuming.
+   * The server reports the door as `plan_action`; the page follows it instead of
+   * re-deriving it (a second Checkout beside a live subscription bills twice).
+   * The plan lands through the Stripe webhook, so the page refetches.
    */
   const handleSelectPlan = (planId: CheckoutPlanId) => {
     switch (billing.plan_action) {

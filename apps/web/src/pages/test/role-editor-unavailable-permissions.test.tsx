@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A custom role that holds a permission the platform no longer knows — its
- * module was unloaded — must stay repairable.
- *
- * The editor rendered only what the vocabulary named, kept everything else
- * selected out of sight, and resent the whole selection on save; the write
- * route refuses the unknown string with a 400, so the role could not be saved
- * and nothing on screen could take the string out. Dropping it on open would
- * be the other failure: rewriting a role because someone looked at it.
- *
- * The editor lives inside a Radix dialog, which renders nothing without a DOM
- * (the web runner has none), so the two pieces are exercised directly.
+ * A custom role holding a permission the platform no longer knows — its module
+ * was unloaded — must stay repairable: the save resends the whole selection and
+ * the write route 400s on the unknown string, so the editor has to offer a
+ * control that removes it. Dropping it on open would rewrite the role instead.
+ * The pieces are exercised directly; the editor's Radix dialog needs a DOM.
  */
 
 import { describe, it, expect } from "bun:test";

@@ -113,9 +113,8 @@ export function seedLlmUsage(overrides: {
   credentialSource?: "system" | "org" | null;
   settled?: boolean;
   /**
-   * How much of `costUsd` the platform could price. Omitted defaults to
-   * `"priced"` (the common case); pass `null` explicitly for a row that predates
-   * the field, which the billing rules must NOT read as priced.
+   * How much of `costUsd` the platform could price. Omitted defaults to `"priced"`; pass
+   * `null` for a row predating the field, which the billing rules must NOT read as priced.
    */
   pricingStatus?: "priced" | "partial" | "unpriced" | null;
 }): number {
@@ -160,9 +159,8 @@ export async function markLlmUsageBilled(args: {
 }
 
 /**
- * Seed the singleton billing cursor at a given watermark. `floorId` defaults to
- * 0 — the column's own default, i.e. a cursor that predates the cutover floor —
- * so a test that cares about the exclusion bound has to state it.
+ * Seed the singleton billing cursor at a given watermark. `floorId` defaults to the
+ * column's own 0, so a test that cares about the exclusion bound has to state it.
  */
 export async function seedBillingCursor(lastLlmUsageId: number, floorId = 0): Promise<void> {
   const db = getEeDb();

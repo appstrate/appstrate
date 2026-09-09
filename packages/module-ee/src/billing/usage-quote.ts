@@ -3,16 +3,10 @@
 /**
  * Usage quoting — the credit estimate for one admission attempt.
  *
- * The platform decides nothing about what is free: it reports neutral execution
- * facts (`credentialSource`, `executionPlane`, `timeoutSeconds`) on EVERY
- * metered usage attempt, and this module turns those facts into an estimated
- * amount. Admission gates on the amount, not on a boolean.
- *
- * Why the split matters: "platform-provided model ⇒ gate, else skip" would
- * hard-code "BYOK ⇒ free", which holds only while platform compute is unbilled.
- * The moment compute is billed, a platform-hosted BYOK run has `model = 0`,
- * `compute > 0` and MUST be gated. Quoting the components separately makes
- * enabling that a rate change, not a topology change.
+ * The platform decides nothing about what is free: it reports neutral execution facts
+ * (`credentialSource`, `executionPlane`, `timeoutSeconds`) on every metered attempt and
+ * this module turns them into the amount admission gates on. Quoting model and compute
+ * separately keeps "BYOK ⇒ free" out of the topology — billing compute is a rate change.
  *
  * `quoteUsage` is deliberately PURE — no DB, no clock, no module-scope config
  * read. Rates arrive as a parameter so a test can inject a non-zero compute
@@ -81,20 +75,11 @@ function toCredits(raw: number): number {
 export function quoteUsage(params: BeforeUsageParams, rates: QuoteRates): UsageQuote {
   switch (params.context) {
     case "run": {
-      // Runs multiply by the projected in-flight count (which INCLUDES the run
-      // being admitted) — a pessimistic concurrent-overshoot guard, since the
-      // soft cap cannot reserve.
-      //
-      // KNOWN OVER-QUOTE, deliberately deferred. `modelCreditsPerRun` is a
-      // per-RUN rate, but the run variant is dispatched by two seams that meter
-      // different units: the preflight gate admits one run LAUNCH (rate matches
-      // the unit), while the system-proxy seam admits ONE raw `/api/llm-proxy`
-      // CALL of an already-running run (`timeoutSeconds: null`). On that second
-      // seam the per-run rate is charged per call, so an agent making many proxy
-      // calls is quoted far above what it will actually consume — a soft cap that
-      // over-gates, never under-gates. Fixing it needs a unit discriminant on
-      // `BeforeUsageParams` (launch vs. call) so a per-call rate can be applied;
-      // that is a core contract change and is intentionally NOT done here.
+      // Runs multiply by the projected in-flight count (which INCLUDES the run being
+      // admitted) — a pessimistic concurrent-overshoot guard, since the soft cap cannot
+      // reserve. KNOWN OVER-QUOTE, deferred: the system-proxy seam admits ONE
+      // `/api/llm-proxy` CALL at the per-RUN rate, so a chatty agent is quoted far above
+      // what it consumes. The fix needs a launch-vs-call discriminant on core's contract.
       const rawModel =
         params.credentialSource === "system" ? rates.modelCreditsPerRun * params.runningCount : 0;
       // `null` ⇒ this seam does not own the run's compute — contribute nothing.
@@ -105,15 +90,14 @@ export function quoteUsage(params: BeforeUsageParams, rates: QuoteRates): UsageQ
       return toQuote(rawModel, rawCompute);
     }
     case "chat": {
-      // A chat turn is short-lived and single-shot, so it carries no
-      // concurrency term.
+      // A chat turn is short-lived and single-shot: no concurrency term.
       const rawModel = params.credentialSource === "system" ? rates.modelCreditsPerChatTurn : 0;
       const rawCompute = params.executionPlane === "platform" ? rates.computeCreditsPerChatTurn : 0;
       return toQuote(rawModel, rawCompute);
     }
     default: {
-      // Exhaustiveness is the contract check: a surface added to
-      // `BeforeUsageParams` fails `tsc` here rather than quoting zero for it.
+      // Exhaustiveness is the contract check: a surface added to `BeforeUsageParams`
+      // fails `tsc` here rather than quoting zero for it.
       const unquoted: never = params;
       throw new Error(`unquoted usage context: ${JSON.stringify(unquoted)}`);
     }

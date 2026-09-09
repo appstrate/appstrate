@@ -34,11 +34,7 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
     >
   >;
 
-/**
- * Both reads are gated server-side by `model-provider-credentials:read`, which
- * a `member` or a `guest` does not hold. `enabled` lets a surface that renders
- * for those roles skip the request instead of collecting a guaranteed 403.
- */
+/** Gated by `model-provider-credentials:read`; `enabled` skips a sure 403. */
 export function useModelProviderCredentials(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(

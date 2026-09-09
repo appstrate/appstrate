@@ -239,10 +239,8 @@ describe("post-signup", () => {
     });
 
     it("still removes the org's other rows when it has no billing account", async () => {
-      // Usage records and billing managers are written without an account row —
-      // a debt bucket from an orphaned org, a manager granted before checkout.
-      // Reading a missing account as "already cleaned up" strands both, with no
-      // organization left to name them.
+      // Usage records and billing managers are written without an account row, so
+      // reading a missing account as "already cleaned up" strands both.
       const orphanOrg = "00000000-0000-4000-a000-000000000098";
       await seedUsageRecord({ orgId: orphanOrg, contextId: "run-orphan", costCredits: 42 });
       await seedBillingManager({ orgId: orphanOrg, userId: "user-orphan" });
@@ -289,9 +287,8 @@ describe("post-signup", () => {
     }
 
     it("REGRESSION: keeps the subscription reference when Stripe refuses", async () => {
-      // Deleting the account regardless would take the subscription id with it,
-      // so a Stripe blip would leave a customer charged for an org that is gone,
-      // with nothing in the system able to name it.
+      // Deleting the account regardless takes the subscription id with it, leaving a
+      // customer charged for an org that is gone.
       await seedBillingAccount({
         orgId,
         stripeCustomerId: "cus_retry",
@@ -331,9 +328,8 @@ describe("post-signup", () => {
     });
 
     it("treats a subscription Stripe no longer has as cancelled", async () => {
-      // The response to the first attempt may simply have been lost. Retrying
-      // forever on "no such subscription" would keep a dead org's rows alive on
-      // a cancellation that already happened.
+      // The first attempt's response may simply have been lost; retrying forever on
+      // "no such subscription" would pin a dead org's rows.
       await seedBillingAccount({
         orgId,
         stripeSubscriptionId: "sub_gone",
@@ -349,10 +345,8 @@ describe("post-signup", () => {
     });
 
     it("keeps the rows on a 400 that merely mentions cancellation", async () => {
-      // Only ONE Stripe 400 means "already canceled". Reading any refusal whose
-      // prose contains the word as success would delete the row holding the
-      // subscription id, leaving a live subscription charging a customer with
-      // nothing left in the system able to name it.
+      // Only ONE Stripe 400 means "already canceled": reading any refusal that merely
+      // contains the word as success deletes the row holding the subscription id.
       await seedBillingAccount({
         orgId,
         stripeSubscriptionId: "sub_param_error",
@@ -370,9 +364,8 @@ describe("post-signup", () => {
     });
 
     it("keeps the rows on a 400 that only CONTAINS the already-canceled sentence", async () => {
-      // The match is anchored at the start. A refusal that quotes the sentence
-      // after its own prose is a different failure, and reading it as success
-      // deletes the row holding the subscription id.
+      // The match is anchored at the start: a refusal that quotes the sentence after
+      // its own prose is a different failure.
       await seedBillingAccount({
         orgId,
         stripeSubscriptionId: "sub_quoted_sentence",
@@ -390,8 +383,7 @@ describe("post-signup", () => {
     });
 
     it("the billing tick is what runs the retry, not a direct call", async () => {
-      // `retryPendingCancellations` is only durable because something calls it
-      // on a schedule. Driving the tick is what proves the wiring.
+      // `retryPendingCancellations` is only durable because the tick calls it.
       await seedBillingAccount({
         orgId,
         stripeSubscriptionId: "sub_tick",
@@ -410,8 +402,7 @@ describe("post-signup", () => {
     });
 
     it("treats Stripe's already-canceled 400 as done", async () => {
-      // Control: the same status, the sentence Stripe actually answers a
-      // cancel-the-already-canceled request with.
+      // Control: the sentence Stripe answers a cancel-the-already-canceled request with.
       await seedBillingAccount({
         orgId,
         stripeSubscriptionId: "sub_already_canceled",

@@ -152,11 +152,8 @@ function scheduleNext(intervalSec: number): void {
 }
 
 /**
- * How long {@link drainBillingSweeper} waits for in-flight work at shutdown.
- *
- * Sized to cover a full drain tick (`MAX_DRAIN_ITERATIONS` batches): a timeout
- * that expires mid-pass lets `closeEeDb()` run underneath an open transaction.
- * A constant, not a parameter — a knob nobody turns is a knob that misleads.
+ * How long {@link drainBillingSweeper} waits for in-flight work at shutdown: a full drain
+ * tick, since a timeout expiring mid-pass lets `closeEeDb()` run under an open transaction.
  */
 const DRAIN_TIMEOUT_MS = 60_000;
 
@@ -168,11 +165,9 @@ const DRAIN_TIMEOUT_MS = 60_000;
  * pass rolls back on its own, losing nothing; the reconcile is an idempotent
  * rewrite the next boot repeats).
  *
- * RE-READS AFTER EVERY WAIT, because the tick starts the reconcile from inside
- * the very promise this is awaiting. A drain entered mid-sweep therefore sees no
- * reconcile at entry, and a single snapshot would return the moment the sweep
- * finished — letting `closeEeDb()` run under one that began in between. The loop
- * ends only when both handles are null.
+ * RE-READS AFTER EVERY WAIT, because the tick starts the reconcile from inside the very
+ * promise this is awaiting: a single snapshot would return the moment the sweep finished,
+ * letting `closeEeDb()` run under a reconcile that began in between.
  */
 export async function drainBillingSweeper(): Promise<void> {
   const deadline = Date.now() + DRAIN_TIMEOUT_MS;
@@ -267,10 +262,9 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
 
   maybeResyncEntitlements();
 
-  // Cancellations `onOrgDelete` could not confirm. A pending row means a
-  // customer may still be charged for an organization that is gone, so it is
-  // retried every tick — and awaited, unlike the fleet-wide reconcile, because
-  // steady state is zero rows and zero work.
+  // Cancellations `onOrgDelete` could not confirm: a pending row means a customer may
+  // still be charged for an organization that is gone. Awaited because steady state is
+  // zero rows and zero work.
   try {
     await retryPendingCancellations();
   } catch (err) {
@@ -358,8 +352,7 @@ export async function runBillingSweep(): Promise<SweepResult> {
     replayed: totalReplayed,
     replayBilled: totalReplayBilled,
     orphanedOrgs: totalOrphanedOrgs,
-    // Rows claimed but not charged at their true price. Each pass logs its own
-    // `error` line naming the orgs; the counts keep the per-tick summary honest.
+    // Rows claimed but not charged at their true price; each pass logs the orgs.
     partialPriced: totalPricing.partial,
     unpriced: totalPricing.unpriced,
     unknownPriced: totalPricing.unknown,

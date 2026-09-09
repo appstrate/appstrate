@@ -50,11 +50,8 @@ export const billingAccounts = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'`),
-    /**
-     * Set while an org deletion's Stripe cancellation is unconfirmed, so the row
-     * — and the `stripe_subscription_id` on it — survives for the sweeper to
-     * retry. Rationale: `src/billing/org-cancellation.ts`.
-     */
+    /** Set while an org deletion's Stripe cancellation is unconfirmed, so the row
+     * survives for the sweeper to retry. See `src/billing/org-cancellation.ts`. */
     cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -146,12 +143,7 @@ export const stripeEvents = pgTable("ee_stripe_events", {
  */
 export const eeBilledLlmUsage = pgTable("ee_billed_llm_usage", {
   llmUsageId: integer("llm_usage_id").primaryKey(),
-  /**
-   * What the claim is WORTH, not merely that it happened — the four stamps and
-   * why each is kept distinct: `PricingFaults` in `src/billing/usage-recorder.ts`.
-   * `DEFAULT 'priced'` covers rows claimed before this column existed: every one
-   * of them WAS billed on its full `cost_usd`.
-   */
+  /** What the claim is WORTH: `PricingFaults` in `src/billing/usage-recorder.ts`. */
   pricingStatus: text("pricing_status", { enum: ["priced", "partial", "unpriced", "unknown"] })
     .default("priced")
     .notNull(),
@@ -185,13 +177,8 @@ export const billingCursor = pgTable(
   {
     id: boolean("id").primaryKey().default(true),
     lastLlmUsageId: integer("last_llm_usage_id").notNull(),
-    /**
-     * The settled frontier this cursor was SEEDED at — the cutover exclusion
-     * bound, written once by `ensureCursorSeeded` and never moved. What it
-     * bounds: `ledgerScanStart` in `src/billing/usage-recorder.ts`. `DEFAULT 0`
-     * preserves the behaviour of a cursor that predates the column, whose
-     * original frontier was never recorded.
-     */
+    /** The settled frontier this cursor was SEEDED at, written once and never moved.
+     * What it bounds: `ledgerScanStart` in `src/billing/usage-recorder.ts`. */
     floorId: integer("floor_id").default(0).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

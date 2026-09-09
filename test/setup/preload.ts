@@ -5,12 +5,8 @@
  *
  * 1. Starts test containers (PostgreSQL + Redis + MinIO + DinD) if not already running
  * 2. Sets environment variables for the test database and Redis
- * 3. Runs the core Drizzle migrations against the test database — the tables a
- *    module reads and writes live in the core schema and are created here (see
- *    apps/api/src/modules/README.md). `@appstrate/module-ee` is the exception:
- *    it keeps a Drizzle tree of its own and self-migrates its `ee_*` tables
- *    into the platform database from its `init()`, which phase 3 below runs.
- *    That is why step 4 can name tables this step never created.
+ * 3. Runs the core Drizzle migrations — module tables live in the core schema. `module-ee` is
+ *    the exception: it self-migrates its `ee_*` tables from `init()`, which phase 3 below runs.
  * 4. Registers the tables a module reads/writes for truncation
  *
  * Module discovery — two roots:

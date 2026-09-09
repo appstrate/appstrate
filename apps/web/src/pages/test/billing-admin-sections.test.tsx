@@ -5,8 +5,7 @@
  * a save puts on the wire.
  *
  * Gating is the interesting half. The module's admin routes require
- * `billing:manage`, so that — not the org role — is what mounts the sections:
- * a member who can only READ billing gets the plan cards and nothing else.
+ * `billing:manage`, so that — not the org role — is what mounts the sections.
  *
  * The picker is a Radix `Popover`, which renders nothing under
  * `renderToStaticMarkup` — what it may offer is pinned in
@@ -65,7 +64,6 @@ interface SeedOptions {
   permissions: string[];
   managers?: { user_id: string; added_by: string; created_at: string }[];
   contact?: { billing_email: string | null; billing_cc: string[] };
-  /** The org read the managers card resolves its rows against fails. */
   orgError?: boolean;
 }
 
@@ -224,11 +222,9 @@ describe("billing managers section", () => {
     // The card is replaced by its error state, so it has no header to slice on.
     const section = html.slice(0, html.indexOf("Contact de facturation"));
     expect(section).toContain("Une erreur est survenue.");
-    // The generic heading alone would render over any failure, including one
-    // the card invented: the seeded reason has to reach the operator.
+    // The generic heading renders over any failure; the seeded reason must too.
     expect(section).toContain("Organization unavailable");
-    // With no roster every saved manager reads as gone, the list reads dirty and
-    // Save would PUT the empty set — so there must be no Save to press.
+    // With no roster Save would PUT the empty set, so there must be no Save.
     expect(section).not.toContain("Enregistrer");
     expect(section).not.toContain("n'est plus membre de l'organisation");
   });

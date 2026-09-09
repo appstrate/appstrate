@@ -201,12 +201,8 @@ export async function listApiKeys(
 }
 
 /**
- * The space a live key belongs to, or `null` when the org holds no such
- * unrevoked key.
- *
- * `api-keys:*` is a SPACE-level permission (RBAC spec §3.4), so the caller's
- * authority over a key can only be decided once the key's own space is known —
- * which the route reads here before it authorizes anything.
+ * The space a live key belongs to, or `null`. `api-keys:*` is space-level (RBAC
+ * spec §3.4), so the route reads this before it authorizes anything.
  */
 export async function findApiKeySpace(scope: OrgScope, keyId: string): Promise<string | null> {
   const [row] = await db
@@ -219,11 +215,8 @@ export async function findApiKeySpace(scope: OrgScope, keyId: string): Promise<s
 }
 
 /**
- * Revoke (soft-delete) an API key.
- *
- * Takes a `SpaceScope`, never an org-only one: a key lives in exactly one
- * space and the permission that revokes it is held per space, so an org-wide
- * UPDATE would delete a row the caller may hold no authority over.
+ * Revoke (soft-delete) an API key. `SpaceScope` only: an org-wide UPDATE would
+ * revoke a key in a space the caller holds no `api-keys:revoke` in.
  */
 export async function revokeApiKey(scope: SpaceScope, keyId: string): Promise<boolean> {
   const rows = await db

@@ -68,14 +68,10 @@ const KNOWN_STATUSES = new Set([
 ]);
 
 /**
- * The status the dashboard reads, projected from the account row.
- *
- * `canceling` projects `cancel_at_period_end`, gated on the underlying status
- * being one a plan change accepts (`LIVE_SUBSCRIPTION_STATUSES`): Stripe keeps
- * the cancel flag on an `unpaid` or `paused` subscription, and reporting
- * `canceling` there would send the dashboard to `POST /api/billing/plan`, which
- * answers 409. Those accounts report their real status, which is what routes
- * them to the Customer Portal where the payment needs fixing.
+ * The status the dashboard reads, projected from the account row. `canceling` projects
+ * `cancel_at_period_end` only where a plan change is accepted (`LIVE_SUBSCRIPTION_STATUSES`):
+ * Stripe keeps the flag on an `unpaid` or `paused` subscription, and reporting `canceling`
+ * there would send the dashboard to `POST /api/billing/plan`, which answers 409.
  */
 function getBillingStatus(account: {
   stripeSubscriptionId: string | null;
@@ -171,17 +167,11 @@ function managerDetail(m: BillingManager) {
 }
 
 /**
- * The wire projection of one org's billing account — plan, usage, status and the
- * upgrades it may take.
- *
- * Shared by `GET /api/billing` and the answer to a plan change, so the dashboard
- * refreshes from the same shape it renders. `null` when the org has no billing
- * account.
- *
- * `plan_action` is the server's answer to "where does a plan selection go" —
- * the same `planAction` predicate `createCheckoutSession` and
- * `changeSubscriptionPlan` refuse on, so a dashboard that follows it never
- * calls an endpoint this API is going to reject.
+ * The wire projection of one org's billing account — plan, usage, status and upgrades —
+ * shared by `GET /api/billing` and the answer to a plan change; `null` when the org has
+ * no billing account. `plan_action` is the same `planAction` predicate
+ * `createCheckoutSession` and `changeSubscriptionPlan` refuse on, so a dashboard that
+ * follows it never calls an endpoint this API is going to reject.
  */
 async function billingSnapshot(orgId: string) {
   const [account] = await getEeDb()
@@ -225,12 +215,8 @@ async function billingSnapshot(orgId: string) {
 }
 
 /**
- * Render the failure of a Stripe-facing billing call.
- *
- * `ApiError` first: the refusals this module raises itself (a second concurrent
- * subscription, a plan change with nothing to change) are decisions, and burying
- * them under a generic 503 would tell the caller to retry something that can
- * never succeed.
+ * Render the failure of a Stripe-facing billing call. `ApiError` first: the refusals this
+ * module raises itself are decisions, and a generic 503 would invite a pointless retry.
  */
 function stripeCallFailure(
   c: Context<EeEnv>,
@@ -256,11 +242,9 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   const router = new Hono<EeEnv>();
 
   // The shared permission guards and body reader signal a refusal by THROWING an
-  // `ApiError`; the module's own Stripe-facing failures return `problemJson`
-  // directly. Hono honours a mounted sub-app's error handler, so this one renders
-  // both halves as the same RFC 9457 body whether the router is mounted in the
-  // platform app or stood up alone (this module's tests). Anything else is
-  // rethrown, so the platform's handler still owns the 500 path.
+  // `ApiError`, while this module's Stripe-facing failures return `problemJson` directly;
+  // this handler renders both halves as the same RFC 9457 body whether the router is
+  // mounted in the platform app or stood up alone. Anything else is rethrown.
   router.onError((err, c) => {
     if (err instanceof ApiError) return problemJson(c, err);
     throw err;
@@ -291,9 +275,9 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
     },
   );
 
-  // POST /api/billing/plan — move an EXISTING subscription onto another plan
-  // (admin only, 5/min). Checkout is for an org that has no subscription; this
-  // is the only door for one that does, and the server enforces the split.
+  // POST /api/billing/plan — move an EXISTING subscription onto another plan (admin only,
+  // 5/min). Checkout is the door for an org with no subscription; this one for an org
+  // that has one, and the server enforces the split.
   router.post(
     "/api/billing/plan",
     requireModulePermission("billing", "manage"),
@@ -308,10 +292,9 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
         return stripeCallFailure(c, err, { route: "plan", orgId, planId: body.plan_id });
       }
 
-      // The account itself is written by the `customer.subscription.updated`
-      // webhook Stripe sends back, so this snapshot may still name the previous
-      // plan. It is returned anyway because everything else in it — status,
-      // period end, credits — is current, and the dashboard refetches.
+      // The account is written by the `customer.subscription.updated` webhook Stripe sends
+      // back, so this snapshot may still name the previous plan; everything else in it is
+      // current and the dashboard refetches.
       const snapshot = await billingSnapshot(orgId);
       if (!snapshot) return problemJson(c, noBillingAccount());
       return c.json(snapshot);

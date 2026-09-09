@@ -21,14 +21,10 @@ let eeSql: ReturnType<typeof postgres> | null = null;
 let eeDatabaseUrl: string | null = null;
 
 /**
- * Connection options shared by the module's pool and its migrator.
- *
- * `onnotice`: postgres.js prints server NOTICEs to stdout by default, which
- * bypasses the platform's JSON logger entirely — `CREATE SCHEMA IF NOT EXISTS`
- * raises one on every boot. `max`: this module's concurrency is the sweeper's
- * one pass plus its billing routes, so a small pool is the honest size; without
- * a value postgres.js opens up to ten connections per replica on the PLATFORM
- * database, beside the platform's own pool.
+ * Connection options shared by the module's pool and its migrator. `onnotice`:
+ * postgres.js prints server NOTICEs to stdout, bypassing the platform's JSON logger.
+ * `max`: without one, postgres.js opens up to ten connections per replica on the
+ * PLATFORM database, beside the platform's own pool.
  */
 const EE_POOL_OPTIONS = { max: 5, onnotice: () => {} } as const;
 
@@ -44,9 +40,8 @@ export function getEeDb(): EeDb {
  * the module reads platform rows through `ctx.services`, and sharing the handle
  * (for an atomic org deletion, say) is a contract change, not a connection one.
  *
- * Idempotent: a second call for the same URL keeps the pool that is open.
- * Calling it for a DIFFERENT one throws — silently replacing the handle would
- * strand the first pool's sockets with nothing left holding them.
+ * Idempotent: a second call for the same URL keeps the open pool; a call for a DIFFERENT
+ * one throws, since replacing the handle strands the first pool's sockets.
  */
 export function initEeDb(databaseUrl: string): void {
   if (eeSql) {
@@ -112,8 +107,8 @@ export async function migrateEeDb(databaseUrl: string): Promise<void> {
     "../drizzle/migrations",
   );
   // max: 1 — the lock and the migration must run on the SAME connection for the
-  // session-level advisory lock to guard the migration. Everything else is the
-  // pool's own options, so a setting added there reaches the migrator too.
+  // session-level advisory lock to guard the migration. Everything else is the pool's
+  // own options, so a setting added there reaches the migrator too.
   const sqlClient = postgres(databaseUrl, { ...EE_POOL_OPTIONS, max: 1 });
   try {
     await sqlClient`SELECT pg_advisory_lock(${MIGRATION_ADVISORY_LOCK_KEY})`;

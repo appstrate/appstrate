@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 /**
- * The prop type of every BILLING email, plus the `BillingEmailType` union the
- * registry keys on. These have no OSS counterpart — `@appstrate/emails` knows
- * nothing about subscriptions — so they are declared here. The props of the
- * four templates this module OVERRIDES are not: those come from
- * `@appstrate/emails`, whose `EmailPropsMap` is what the platform actually
- * calls the renderer with.
+ * The prop type of every BILLING email, plus the `BillingEmailType` union the registry
+ * keys on. They have no OSS counterpart — `@appstrate/emails` knows nothing about
+ * subscriptions. The four templates this module OVERRIDES keep their props there, whose
+ * `EmailPropsMap` is what the platform calls the renderer with.
  */
 
 import type { RenderedEmail, SupportedLocale } from "@appstrate/emails";

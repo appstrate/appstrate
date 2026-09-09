@@ -16,10 +16,9 @@ import EE_TABLES from "../tables.ts";
 export { getEeDb };
 
 /**
- * Clear the EE-owned tables — the module writes nothing else, even though its
- * tables now share the platform database. The platform `llm_usage` ledger is
- * read through the mock `PlatformServices` (see `mock-platform.ts`), reset
- * alongside the rows.
+ * Clear the EE-owned tables — the module writes nothing else, even though its tables
+ * share the platform database. The platform `llm_usage` ledger is read through the mock
+ * `PlatformServices` (`mock-platform.ts`), reset alongside the rows.
  */
 export async function truncateEeTables(): Promise<void> {
   const db = getEeDb();

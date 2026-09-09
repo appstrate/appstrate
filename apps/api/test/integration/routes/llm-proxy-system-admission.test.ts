@@ -554,17 +554,15 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
   });
 
   it("refuses a chat turn's proxy call once the org's deletion is reserved", async () => {
-    // A reserved org is about to be cascade-deleted, and every `llm_usage` row
-    // written from here on goes with it — including rows a metering module has
-    // already read past, which is spend that can never be billed. The
-    // reservation therefore refuses at THIS seam too, not only in `createRun`:
-    // a chat turn is not a `runs` row, so the deletability count never saw it.
+    // Every `llm_usage` row written from here on is cascade-deleted with the org,
+    // including rows an admission hook has already read past. Refused at THIS
+    // seam too: a chat turn is not a `runs` row, so the deletability count never
+    // saw it.
     const h = await buildHarness();
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
-    // The reservation refuses while runs are in progress; the harness's run has
-    // served its purpose (it is not referenced by this call).
+    // The reservation refuses while runs are in progress; this call references none.
     await db.update(runs).set({ status: "success" }).where(eq(runs.id, h.runId));
     await reserveOrgDeletion(h.ctx.orgId);
 

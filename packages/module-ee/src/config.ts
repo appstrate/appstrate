@@ -137,11 +137,8 @@ export const DEFAULT_QUOTE_RATES: QuoteRates = {
 };
 
 /**
- * Statuses at which Stripe still HOLDS a subscription object for this account —
- * the set a second Checkout would double-bill. `unpaid` and `paused` are held
- * because Stripe stopped collecting on them rather than deleting them, and
- * `incomplete` because its first payment is still pending. Outside the set
- * Stripe holds nothing, whatever id the row carries.
+ * Statuses at which Stripe still HOLDS a subscription object for this account — the set
+ * a second Checkout would double-bill. Outside it Stripe holds nothing, whatever id the row carries.
  */
 export const HELD_SUBSCRIPTION_STATUSES = new Set([
   "active",
@@ -153,11 +150,9 @@ export const HELD_SUBSCRIPTION_STATUSES = new Set([
 ]);
 
 /**
- * Statuses at which the subscription can be MOVED between plans in place — the
- * ones Stripe is still collecting on, and a strict subset of
- * {@link HELD_SUBSCRIPTION_STATUSES}. `unpaid`, `paused` and `incomplete` are
- * excluded: a plan swap would change what the org owes without restoring the
- * payment that is actually blocking it.
+ * Statuses at which the subscription can be MOVED between plans in place — the ones
+ * Stripe is still collecting on, a strict subset of {@link HELD_SUBSCRIPTION_STATUSES}.
+ * A plan swap elsewhere would change what the org owes without unblocking the payment.
  */
 export const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
 
@@ -165,18 +160,10 @@ export const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_d
 type PlanAction = "plan-change" | "portal" | "checkout";
 
 /**
- * The one door open to an org that picks a plan, derived from the two sets above
- * so the server's answer and the server's refusals cannot disagree:
- *
- *   - `plan-change` — `POST /api/billing/plan` swaps the price item in place;
- *   - `portal` — Stripe holds the subscription but has stopped collecting on it,
- *     so the Customer Portal is where the payment gets fixed;
- *   - `checkout` — Stripe holds nothing, and `POST /api/billing/checkout` is the
- *     only way in.
- *
- * Checkout only ever CREATES, so an org Stripe holds a subscription for never
- * re-enters it: a second completed Checkout leaves the first running beside the
- * second and bills the customer twice.
+ * The one door open to an org that picks a plan, derived from the two sets above so the
+ * server's answer and its refusals cannot disagree: `plan-change` swaps the price item,
+ * `portal` fixes a held-but-uncollected payment, `checkout` is the only way in when
+ * Stripe holds nothing — and it only ever CREATES, so a second one double-bills.
  */
 export function planAction(account: {
   stripeSubscriptionId: string | null;

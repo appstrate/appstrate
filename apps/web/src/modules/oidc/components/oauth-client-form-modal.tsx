@@ -78,8 +78,7 @@ function OAuthClientFormBody({
   const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
   const formLevel = effectiveLevel ?? level;
   const isOrgLevel = formLevel === "org";
-  // The org signup policy is the only thing either catalog feeds; a space- or
-  // instance-level client asks for neither.
+  // Either catalog feeds the org signup policy only.
   const spacesQuery = useSpaces(isOrgLevel);
   const rolesQuery = useSpaceRoleOptions(undefined, isOrgLevel);
   const spaces = spacesQuery.data ?? [];
@@ -448,16 +447,10 @@ function OAuthClientFormBody({
 
 /**
  * The signup half of the client policy: the opt-in, and — on an org-level
- * client — the role and space grants a self-registered user lands with.
- *
- * The policy is what a signup WOULD receive, so it is edited and validated on
- * every org-level client whether or not signups are currently allowed — the
- * server stores and checks it the same way, and a `guest` policy still needs
- * at least one space grant with the opt-in off. The checkbox decides only
- * whether a signup can happen at all.
- *
- * Split out of the modal body because a Radix dialog renders nothing without a
- * DOM, and the web runner has none.
+ * client — the role and space grants a self-registered user lands with. The
+ * policy is what a signup WOULD receive, so it is edited and validated whether
+ * or not the opt-in is on. Split out of the modal body so it can be rendered
+ * without the Radix dialog, which needs a DOM.
  */
 export function SignupPolicyFields({
   isOrgLevel,

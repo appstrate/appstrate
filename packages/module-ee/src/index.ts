@@ -55,14 +55,11 @@ declare module "@appstrate/core/permissions" {
   }
 }
 
-// Email template overrides — branded Appstrate Cloud versions.
-//
-// Typed against `@appstrate/emails`' own registry shape rather than left to
-// inference: `registerEmailOverrides` takes exactly this type, so a key that is
-// not an `EmailType` (or a renderer whose props do not match the one the
-// platform calls it with) is a `tsc` error here instead of a template the
-// registry silently never reaches. Core's `emailOverrides` slot stays
-// `Record<string, any>` — core cannot depend on a workspace-only package.
+// Email template overrides — branded Appstrate Cloud versions. Typed against
+// `@appstrate/emails`' own registry shape rather than left to inference, so a key that is
+// not an `EmailType` is a `tsc` error here instead of a template the registry never
+// reaches. Core's `emailOverrides` slot stays `Record<string, any>` — core cannot depend
+// on a workspace-only package.
 const emailOverrides: Partial<{ [K in EmailType]: EmailRenderer<K> }> = {
   verification: renderEeVerificationEmail,
   invitation: renderEeInvitationEmail,
@@ -244,9 +241,8 @@ const eeModule: AppstrateModule = {
     // The platform dispatches this hook on EVERY metered usage attempt and
     // never pre-classifies an operation as free; it reports neutral execution
     // facts and this module quotes them. Admission therefore gates on an
-    // estimated AMOUNT, not on "is the model platform-provided?" — which would
-    // hard-code "BYOK ⇒ free" and stop being true the moment platform compute
-    // is billed.
+    // estimated AMOUNT, not on "is the model platform-provided?", which would hard-code
+    // "BYOK ⇒ free" and stop being true the moment platform compute is billed.
     beforeUsage: async (params: BeforeUsageParams): Promise<UsageRejection | null> => {
       // Self-funded short-circuit: the org supplies both the credential and the
       // host (a remote BYOK run), so the platform funds nothing and there is

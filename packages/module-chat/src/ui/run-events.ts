@@ -386,10 +386,6 @@ function asChatRunFile(raw: unknown): ChatRunFile | undefined {
 /**
  * The published file list of a persisted `run_and_wait` result. The tool
  * writes it under `files`, and that is the only key read.
- *
- * `files` is the only key read, even though this payload IS the reload-safe
- * source (it exists precisely because run logs get pruned) — no persisted
- * result carries any other spelling.
  */
 function rawFileList(record: Record<string, unknown> | null | undefined): unknown[] | undefined {
   const value = record?.files;

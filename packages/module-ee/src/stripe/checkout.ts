@@ -9,12 +9,9 @@ import { resolvePrimaryBillingEmail } from "../billing/contact.ts";
 import { noBillingAccount, subscriptionExists } from "../http-errors.ts";
 
 /**
- * Start a Stripe Checkout for an org Stripe holds no subscription for.
- *
- * The test is {@link planAction}, the same predicate the billing snapshot
- * reports and `changeSubscriptionPlan` refuses on. The refusal lives here rather
- * than in the dashboard because a customer is protected from a double charge by
- * the server, not by which button the SPA renders.
+ * Start a Stripe Checkout for an org Stripe holds no subscription for. The test is
+ * {@link planAction}, the same predicate the billing snapshot reports and
+ * `changeSubscriptionPlan` refuses on — a double charge is the server's to prevent.
  */
 export async function createCheckoutSession(
   orgId: string,

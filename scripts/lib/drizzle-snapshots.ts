@@ -1,18 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Reading a drizzle migration tree — the journal, the snapshot it points at,
- * and the tables that snapshot declares.
- *
- * Two gates ask the same question of the same files and must not answer it
- * differently. `check-index-drift.ts` needs the PLATFORM snapshot's tables to
- * know which indexes are its business; `verify-module-sql-boundary.ts` needs a
- * MODULE snapshot's tables to know which names that module may write in SQL.
- * Since `@appstrate/module-ee` migrates its own tables into the platform
- * database, the two populations sit in one `public` schema and are told apart
- * only by which snapshot declares them — so "which tables does this tree own"
- * has to have exactly one implementation.
- */
+/** Reading a drizzle migration tree: journal, newest snapshot, and the tables it declares. */
 
 import { Glob } from "bun";
 import { dirname, join, relative } from "node:path";
@@ -32,14 +20,7 @@ export function snapshotNameForIdx(idx: number): string {
   return `${String(idx).padStart(4, "0")}_snapshot.json`;
 }
 
-/**
- * Snapshot filename of the highest `idx` in the journal — the newest schema on
- * disk.
- *
- * Journal entries are appended by `drizzle-kit generate` and are normally
- * contiguous and sorted, but neither is relied upon: only the maximum `idx`
- * matters.
- */
+/** Snapshot filename of the highest `idx` in the journal — entries need not be sorted. */
 export function latestSnapshotName(journal: DrizzleJournal): string {
   let latest: number | null = null;
   for (const entry of journal.entries) {
@@ -50,14 +31,7 @@ export function latestSnapshotName(journal: DrizzleJournal): string {
   return snapshotNameForIdx(latest);
 }
 
-/**
- * Table names DECLARED by a snapshot, in the public schema.
- *
- * Keys are `<schema>.<table>`; drizzle writes `""` for the public schema and
- * the schema name otherwise. The filter mirrors `pg_indexes`' `schemaname =
- * 'public'` on the actual side of the index diff, and on the SQL side it keeps
- * a `pgSchema(...)` table from being read as a bare identifier.
- */
+/** Public-schema table names a snapshot DECLARES; keys are `<schema>.<table>`, `""` for public. */
 export function declaredTables(snapshot: DrizzleSnapshot): Set<string> {
   const names = new Set<string>();
   for (const [key, table] of Object.entries(snapshot.tables)) {
@@ -68,34 +42,15 @@ export function declaredTables(snapshot: DrizzleSnapshot): Set<string> {
   return names;
 }
 
-/** One workspace module that carries a drizzle migration tree of its own. */
 interface ModuleTables {
-  /** Module id with `module-` stripped — `ee`. */
   id: string;
-  /** Repo-relative package directory — `packages/module-ee`. */
   packageDir: string;
-  /** Repo-relative snapshot the table list was read from. */
   snapshot: string;
-  /** Public-schema table names that snapshot declares. */
   tables: Set<string>;
 }
 
-/**
- * Every `packages/module-*` that owns a migration tree, with the tables it
- * declares — discovered, never listed.
- *
- * The discovery signal is the journal file itself (`meta/_journal.json`), which
- * is also the only thing that makes a module's tables knowable: a module
- * without one owns no tables, and a hardcoded roster of "modules with a
- * database" is the shape that silently stops covering the next one. Today
- * exactly one module qualifies.
- *
- * The glob matches `meta/_journal.json` at ANY depth under the package rather
- * than at one fixed path: the platform's own tree puts `meta/` directly under
- * `drizzle/` while a module's drizzle-kit config puts it under
- * `drizzle/migrations/`, and anchoring on either layout would make a correct
- * relocation read as "this module owns nothing".
- */
+/** Every `packages/module-*` owning a migration tree, with the tables it declares. The journal
+ * glob matches at any depth — module trees nest `meta/` one level deeper than the platform's. */
 export async function moduleOwnedTables(repoRoot: string): Promise<ModuleTables[]> {
   const packagesDir = join(repoRoot, "packages");
   const found: ModuleTables[] = [];
