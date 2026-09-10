@@ -1569,7 +1569,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  *   nothing about what the caller is ALLOWED to do — a credential with
  *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
  *   had to undo across the rest of the package surface.
- * - `requirePackagePermission` is AUTHORIZATION: the resolved row's
+ * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
  *   `<type>:read` scope. Both file-explorer routes are registered on the
  *   router ROOT, so the RBAC resource is not knowable from the path — only
  *   from the row — which is why the guard runs here and not as route-level
@@ -1616,7 +1616,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
   // The index lists every file and inlines text content; `/files/content`
   // serves any byte of the artifact. Both are at least as sensitive as the
   // detail route, so both need the same `<type>:read`.
-  await requirePackagePermission(c, pkg.type, "read");
+  await requirePackageReadPermission(c, pkg.type);
 
   return pkg;
 }
@@ -1633,7 +1633,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * the space, and the cached 200 keeps being handed out until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
  * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
- * `requirePackagePermission` run on every hit.
+ * `requirePackageReadPermission` run on every hit.
  *
  * The revalidation this costs is nearly free: `resolvePackageFileValidator`
  * answers a version's 304 from one DB read, with no storage GET and no unzip.
@@ -1791,16 +1791,13 @@ function toDraftFileOperations(
 }
 
 // ═══════════════════════════════════════════════
-// Row-resolved permission
+// Read permission
 // ═══════════════════════════════════════════════
 
-type PackageGuard = (c: Context<AppEnv>, next: () => Promise<void>) => Promise<unknown>;
-
-/** The actions a router-root package route resolves from the row it loaded. */
-type PackageGuardAction = "read" | "write";
+type ReadGuard = (c: Context<AppEnv>, next: () => Promise<void>) => Promise<unknown>;
 
 /**
- * `type` → the `*:read` and `*:write` guards for that type's RBAC resource.
+ * `type` → the `*:read` guard for that type's RBAC resource.
  *
  * The per-type routes get their resource straight from the route path
  * (`skills` → `skills:read`), but a route registered on the router ROOT
@@ -1808,31 +1805,26 @@ type PackageGuardAction = "read" | "write";
  * type in its path — the resource is only knowable from the resolved package
  * row. This map is what lets such a route reach the same guard, so downloading
  * a skill's ZIP is gated on `skills:read` exactly like
- * `GET /skills/@scope/name`, and writing a skill's file tree on `skills:write`
- * exactly like `PUT /skills/@scope/name`.
+ * `GET /skills/@scope/name`.
  *
  * Built from `ROUTE_CONFIGS` rather than hand-written so a new package type
  * cannot land with a per-type guard and no root-route guard.
  */
-const GUARD_BY_TYPE = new Map<PackageType, Record<PackageGuardAction, PackageGuard>>(
-  Object.entries(ROUTE_CONFIGS).flatMap(([type, rcfg]) => {
-    if (!rcfg) return [];
-    const resource = rcfg.path as import("../lib/permissions.ts").Resource;
-    return [
-      [
-        type as PackageType,
-        {
-          read: requirePermission(resource, "read"),
-          write: requirePermission(resource, "write"),
-        },
-      ] as const,
-    ];
-  }),
+const READ_GUARD_BY_TYPE = new Map<PackageType, ReadGuard>(
+  Object.entries(ROUTE_CONFIGS).flatMap(([type, rcfg]) =>
+    rcfg
+      ? [
+          [
+            type as PackageType,
+            requirePermission(rcfg.path as import("../lib/permissions.ts").Resource, "read"),
+          ] as const,
+        ]
+      : [],
+  ),
 );
 
 /**
- * Enforce the resolved package's `<type>:<action>` permission from INSIDE a
- * handler.
+ * Enforce the resolved package's `*:read` permission from INSIDE a handler.
  *
  * Route-level middleware cannot do this job on the router-root routes: the
  * resource depends on the row, and the row is only read once the handler runs.
@@ -1841,18 +1833,14 @@ const GUARD_BY_TYPE = new Map<PackageType, Record<PackageGuardAction, PackageGua
  * every other RBAC call site.
  *
  * An unmapped type fails CLOSED — a package type with no route config has no
- * scope to satisfy, so nobody may reach its bytes.
+ * read scope to satisfy, so nobody may read its bytes.
  */
-async function requirePackagePermission(
-  c: Context<AppEnv>,
-  type: string,
-  action: PackageGuardAction,
-): Promise<void> {
-  const guards = GUARD_BY_TYPE.get(type as PackageType);
-  if (!guards) {
-    throw forbidden(`Insufficient permissions: no ${action} scope is defined for type '${type}'`);
+async function requirePackageReadPermission(c: Context<AppEnv>, type: string): Promise<void> {
+  const guard = READ_GUARD_BY_TYPE.get(type as PackageType);
+  if (!guard) {
+    throw forbidden(`Insufficient permissions: no read scope is defined for type '${type}'`);
   }
-  await guards[action](c, async () => {});
+  await guard(c, async () => {});
 }
 
 /** Reject non-authors before parsing uploads or fetching a GitHub archive. */
@@ -2648,7 +2636,7 @@ export function createPackagesRouter() {
 
     // The ZIP carries the manifest and every authored file, so it is at least
     // as sensitive as the detail route — it needs the same `<type>:read`.
-    await requirePackagePermission(c, pkg.type, "read");
+    await requirePackageReadPermission(c, pkg.type);
 
     const ver = await getVersionForDownload(packageId, versionSpec);
     if (!ver) {

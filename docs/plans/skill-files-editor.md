@@ -1,6 +1,6 @@
 # Multi-file skill authoring — draft tree write path + editor
 
-Status: proposed (2026-09-10). Customer need #1 of the 2026-09-09 call.
+Status: shipped in PR #1312 (2026-09-10). Customer need #1 of the 2026-09-09 call.
 
 ## 1. Problem, precisely
 
@@ -94,17 +94,27 @@ Nobody models files as rows.
   two writers of one object must share one lock.
 - **D4 — Validation of the RESULT tree, same rules as import:**
   - path predicate extracted from `unzipArtifact`'s filter into
-    `@appstrate/core/zip` as `isSafeArchivePath(path)` (no `..` segment, no
-    leading `/`, no `\0`, no `\`, no `__MACOSX/`, no trailing `/`, no empty
-    segment). Import keeps _dropping_ offenders; the write _rejects_ them
-    (`400`). One predicate, two policies.
+    `@appstrate/core/zip` as `isSafeArchivePath(path)` (no `..` segment, no `.`
+    segment, no leading `/`, no `C:/` drive prefix, no `\0`, no `\`, no
+    `__MACOSX/`, no trailing `/`, no empty segment). Import keeps _dropping_
+    offenders; the write _rejects_ them (`400`). One predicate, three policies:
+    the CLI skills materializer takes the same import rather than restating it,
+    and aborts the sync — its local copy had drifted, refusing `.` segments and
+    drive prefixes the platform accepted.
   - `manifest.json` is not writable, deletable or movable here (`400`): the
     manifest is authored through the package `PUT` and validated by
     `validateManifestForRoute`.
   - the content entry (`SKILL.md` / `prompt.md`) cannot be deleted or moved
     (`400`); it can be written, and then passes the same gate as import:
     `assertArchiveContentConforms(type, files, "file")`.
-  - a file may not shadow a directory nor a directory a file (`400`).
+  - a file may not shadow a directory nor a directory a file
+    (`path_conflict`).
+  - two of the names the batch ADDS that a filesystem cannot tell apart — equal
+    after Unicode NFC normalization and case folding — are refused
+    (`path_conflict`): a ZIP is a flat list of byte strings and can carry
+    `SKILL.md` and `skill.md` at once, `~/.claude/skills` cannot. The rule is
+    scoped to what this write introduces, so an author is not locked out of a
+    package whose stored archive already holds such a pair.
   - caps: `PACKAGE_FILE_INLINE_MAX_BYTES` (1 MiB) per written file,
     `PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES` (50 MB) and 10 000 entries for the
     tree (`413`). Larger binaries keep going through ZIP import (§8).
@@ -113,16 +123,31 @@ Nobody models files as rows.
   `mcp-server` carry executable bundles whose invariants are enforced by
   `parsePackageZip` at import/publish; opening arbitrary writes on them is a
   separate decision. A `PATCH` on those answers `400 package_type_not_editable`.
-- **D6 — Authorization = the package `PUT`'s.** `requirePermission(type,
-"write")` resolved from the package row, `requirePackageInOrg()`, system
-  packages `403`, `rateLimit(30)`. Draft only — no `?version`: versions are
-  immutable (Anthropic, OpenAI, Windmill, Cloudflare all agree).
+- **D6 — Authorization = the package `PUT`'s**, reused whole rather than
+  restated: the `PUT`'s `requirePackageInOrg()` gate, i.e.
+  `assertPackageMutationAccess(c, id, "write")`. It settles the row lookup, the
+  system-package `403`, and — because a draft tree is one object behind every
+  installation — `<type>:write` in EVERY space the package is installed in
+  (`403` otherwise), reachable at all only from a space that grants it or
+  through org-catalog authority over a package installed nowhere (`404`
+  otherwise). Not a hand-rolled row read plus permission check: gating on org
+  ownership alone would let a builder in space A rewrite, through the file tree,
+  a skill that only exists in the private space B. `rateLimit(30)`. Draft only —
+  no `?version`: versions are immutable (Anthropic, OpenAI, Windmill,
+  Cloudflare all agree).
 - **D7 — Front: structural operations are immediate, content edits are
   buffered.** Create / rename / delete / upload each send one `PATCH` and
-  replace the tree with the response; typing edits live in a `{ path → text }`
-  map and are flushed by the editor's existing _Enregistrer_ as one `PATCH`
-  (N `write` ops), followed by the manifest `PUT` when the manifest is dirty,
-  threading `lock_version` through both. The server stays the only truth for
+  replace the tree with the response; typing edits live in a
+  `{ path → { text, base } }` map and are flushed by the editor's existing
+  _Enregistrer_ as one `PATCH` (N `write` ops), followed by the manifest `PUT`
+  carrying the `lock_version` the flush returned. `base` — the server text a
+  buffer was composed against — is what keeps an overwrite VISIBLE: a
+  structural operation that `412`s re-reads the index and hands the editor a
+  live validator for a tree a colleague meanwhile wrote, so without it the next
+  save would flush text composed against the OLD bytes under a validator for
+  the NEW ones and the server would accept it. `conflictedDrafts` names exactly
+  those files and the editor banners them; saving still writes the author's
+  version — an informed overwrite, never a silent one. The server stays the only truth for
   the tree shape; the client never applies tree algebra. _Rejected: buffering
   structural ops too_ — it requires a client-side reducer replaying ops over
   the server index (rename of a dirty file, delete of a created file, …) for no
@@ -151,37 +176,68 @@ Nobody models files as rows.
   `invalid_path`, `reserved_entry` (manifest.json), `content_entry_immovable`,
   `not_found` (delete/move source), `path_conflict` (file↔dir shadowing),
   `file_too_large`, `tree_too_large`.
-- `mutatePackageDraftFiles(pkg, precondition, mutate)` — the one
-  read-modify-write for a package's draft tree:
+- `mutatePackageDraftFiles(target, input)` — the one read-modify-write for a
+  package's draft tree. `input` is `{ precondition, mutate }` plus an optional
+  `manifest` and `draftContent`, which default to the row's current values;
+  there is no `label` and no per-call manifest-storage option.
   1. `db.transaction`: advisory lock on the package id;
-  2. `readPackageSnapshot(pkg, draft)` (the overlaid tree — a fresh package
-     with no ZIP still yields its `SKILL.md` + `manifest.json`);
+  2. the row (`draft_manifest`, `draft_content`, `lock_version`), then
+     `readPackageSnapshot(source, draft)` — the overlaid tree, so a fresh
+     package with no ZIP still yields its `SKILL.md` + `manifest.json`;
   3. check `precondition` — `{ etag }` against `indexEtag(snapshot.snapshotId)`
      → `412`, or `{ lockVersion }` against the row → `409` (the `PUT`'s
      contract, unchanged);
   4. `mutate(files)` → new map; `assertArchiveContentConforms(type, files,
-"file")`; caps;
-  5. `uploadPackageFiles(folder, orgId, id, files)` — `manifest.json` is
-     stripped before upload exactly as today's merge never stores it for
-     skills/agents (the overlay re-adds it from `draft_manifest`);
-  6. row update: `lock_version + 1`, `updated_at`, and `draft_content` =
-     decoded content entry when it changed;
+"file")` on the bytes about to be STORED; caps;
+  5. row update through `updateOrgItem`: `lock_version + 1`, `updated_at`,
+     `draft_manifest`, and `draft_content` = the decoded content entry unless
+     the caller resolved it. Losing the optimistic-lock race here → `409`;
+  6. upload: `manifest.json` is stripped when the TYPE does not store it
+     (`CONFIG_BY_TYPE.manifestIsStoredFile` — `false` for `agent` / `skill`,
+     where the overlay re-adds it from `draft_manifest`; `true` for
+     `integration` / `mcp-server`, whose archive holds it like any other file),
+     then `uploadPackageFiles(folder, orgId, id, files)`;
   7. return `{ snapshot, lockVersion }`.
-- `makeUpdateHandler` (`routes/packages.ts:983`) replaces its
-  `downloadPackageFiles … uploadPackageFiles` tail with a call to this helper
-  (`precondition: { lockVersion: body.lock_version }`, `mutate` = set the
-  content entry). Behaviour identical, one lock.
+
+  The row is written BEFORE the object, and the upload runs INSIDE the
+  transaction: an upload that fails — the likelier of the two, being a network
+  round-trip — rolls the row back with it and the write simply did not happen.
+  What remains is a successful upload followed by a failed COMMIT. The overlay
+  then hides exactly the two entries it owns, the content entry and
+  `manifest.json`, read back at their pre-write values; every OTHER entry of the
+  batch DID land — an ancillary file written is listed, one deleted is gone, one
+  moved sits at its new path — while `lock_version` did not move and nothing
+  told the caller. The helper's header states it; closing it means storing each
+  write as a content-addressed object and swapping a pointer, a storage layout
+  this package does not have.
+
+- The other EDITING writers take the same helper: the package `PUT`
+  (`makeUpdateHandler`) replaces its `downloadPackageFiles …
+uploadPackageFiles` tail with it (`precondition: { lockVersion:
+body.lock_version }`, `mutate` = set the content entry), and so does a version
+  restore — a whole-tree replacement, one write rather than two, so a `PATCH`
+  taking the lock runs strictly before or strictly after it.
+  `postInstallPackage` does NOT, for the two reasons its own header states: the
+  content gate is deliberately not applied to a bundle's non-root packages (AFPS
+  §3.3 gates the ROOT only), and that path persists a raw manifest into the
+  version while the draft row takes a normalized one — one write cannot do both.
 
 ### 4.3 Route — `routes/packages.ts`
 
 ```
 PATCH /api/packages/:scope/:name/files
-  rateLimit(30) → loadOrgItemOr404 → requirePermission(type,"write") → system 403
+  rateLimit(30) → assertPackageMutationAccess(write)   // row + <type>:write in
+                                                       // every install space
+                                                       // + system 403
   → CONFIG_BY_TYPE[type].draftFilesWritable || 400
-  → If-Match required (428) → readJsonBody(patchFileOperationsSchema)
+  → If-Match required (428) → readJsonBody(patchPackageFilesSchema)
   → mutatePackageDraftFiles → 200 { entries, lock_version } + ETag + fileCacheHeaders
-  → recordAuditFromContext("package.updated", { type, files: ops.length })
+  → recordAuditFromContext("package.updated", { type, fileOperations, filePaths })
 ```
+
+The authority gate is FIRST: it settles before the `428` and before the body is
+read, so a caller who may not write the package learns nothing from the
+validator requirement, from a body-shape rejection, or from the type gate.
 
 Zod: `operations` non-empty, ≤ 200 per request; `text` xor `bytes_base64`;
 paths ≤ 1024 bytes. Every rejection is RFC 9457 through the existing helpers.
@@ -232,27 +288,37 @@ paths ≤ 1024 bytes. Every rejection is RFC 9457 through the existing helpers.
 
 ### 5.2 `apps/web/src/components/package-files/`
 
-- `editable-file-tree.tsx` — `ReadOnlyFileTree` gains an optional `actions`
-  prop instead of a fork: row context actions (rename, delete) and a header
-  toolbar (new file, upload). The pure keyboard/ARIA model is unchanged; `F2`
-  = rename, `Delete` = delete, both no-ops on the pinned entry. Folders stay
-  implicit (a path with `/`), as in the index.
-- `package-files-editor.tsx` — owns: the `GET …/files` query, the `ETag` from
-  its headers, `{ path → text }` dirty map, the selected path, and
-  `usePatchPackageFiles` (one mutation, `If-Match` from the last index, replaces
-  the query cache with the response and lifts `lock_version` to the parent).
-  Right pane: `ContentEditor` for text (`languageForPath`), the existing
+- `file-tree.tsx` — `FileTree` with an optional `actions` prop, replacing
+  `ReadOnlyFileTree` rather than forking it: row context actions (rename,
+  delete) and a header toolbar (new file, upload), absent when `actions` is.
+  The pure keyboard/ARIA model is unchanged; `F2` = rename, `Delete` = delete,
+  both no-ops on the pinned entry. Folders stay implicit (a path with `/`), as
+  in the index.
+- `package-files-editor.tsx` — owns: the `GET …/files` query and the `ETag`
+  from its headers (`use-package-draft-files.ts`: one mutation, `If-Match` from
+  the last index, replaces the query cache with the response), the selected
+  path, and the `lock_version` it lifts to the parent. The dirty map itself
+  lives one level up, beside the manifest, because the two together are what
+  "unsaved changes" means; the component exposes `flush()` and
+  `contentEntryText()` to the save bar through `useImperativeHandle`. Right
+  pane: `ContentEditor` for text (`languageForPath`), the existing
   `FilePreview` metadata card + _Remplacer_ / _Supprimer_ for binary or
-  oversized. Dialogs: `NewFileDialog` (path input with live validation),
-  `RenameDialog`, `ConfirmModal` for delete. Upload = `<input type=file
-multiple>` → base64 `write` ops, client-side 1 MiB check with the same
-  message the server would give.
+  oversized. Dialogs: one `file-path-dialog.tsx` (`FilePathDialog`, live path
+  validation) serves create AND rename — one path input, one rule set — plus
+  `ConfirmModal` for delete. Upload = `<input type=file multiple>` → base64
+  `write` ops, client-side 1 MiB check with the same message the server would
+  give. `ContentEditor` is uncontrolled after mount (`defaultValue`, remounted
+  by `key` when the text must change from outside): a controlled `value` drops
+  keystrokes typed within one React batch — the reason is in the header of
+  `content-editor.tsx`.
 - `PackageEditorInner` (`pages/package-editor.tsx`): the `content` tab becomes
-  `files` and mounts `PackageFilesEditor`; `state.content` is removed from
-  the skill editor state — `SKILL.md` is a file like the others. Save =
-  `flushFiles()` then, if the manifest is dirty, the existing `PUT` with the
-  `lock_version` the flush returned. `validate` keeps the frontmatter check on
-  the dirty `SKILL.md` text (already the same checker the routes run).
+  `files` and mounts `PackageFilesEditor`; on an existing skill `SKILL.md` is a
+  file like the others and the `PUT` body carries the manifest alone. Save =
+  `flush()` then the manifest `PUT` with the `lock_version` the flush returned —
+  sent even when the manifest is clean, because that mutation owns the
+  post-save cache invalidation and the navigation back to the detail page.
+  `validate` keeps the frontmatter check on the content entry as the editor
+  holds it (already the same checker the routes run).
   `useEditorState.isDirty` ORs in the dirty map so the unsaved-changes modal
   still fires.
 - Creation flow (`isEdit === false`): `POST /skills` first (needs a manifest
@@ -270,11 +336,13 @@ multiple>` → base64 `write` ops, client-side 1 MiB check with the same
 ### 5.4 Tests (web + e2e)
 
 - web unit: `languageForPath`, `validateNewPath`, `isPinnedEntry`.
-- e2e `packages/skill-files-editor.ui.spec.ts` (label `e2e`): create a skill,
-  add `scripts/run.py`, type, save, reload → tree + content persisted; rename
-  to `scripts/main.py`; delete; `SKILL.md` has no rename/delete affordance;
-  stale-tab scenario: second context patches, first context's save → 412
-  message.
+- e2e `e2e/tests/agents/skill-files-editor.ui.spec.ts` (label `e2e`), six
+  scenarios: adding a file, buffering its text until save, and the API index
+  holding both; renaming and deleting without a save; no rename or delete
+  affordance on `SKILL.md` or `manifest.json`; a write composed against a tree
+  that moved refused and the index re-read; a file the `412` recovery re-read
+  under an open buffer marked and saved anyway; leaving the page blocked while
+  a file edit is still buffered.
 
 ## 6. Delivery
 
@@ -291,6 +359,9 @@ DRY/KISS) then one fix agent — the pattern that shipped #1307.
 | 3     | tree lib + editable tree + `PackageFilesEditor` + skill editor wiring + i18n + web unit tests                                         | `bun run check`                                                                         |
 | 4     | e2e spec, CHANGELOGs (root + core), `docs/` API mention                                                                               | e2e job green                                                                           |
 | 5     | two reviews + fix pass, conformance check, `/audit-legacy` on the diff                                                                | CI fully green, `bun run check`                                                         |
+
+Shipped as 11 commits; two adversarial reviews and CI added the authority
+gate, the collision rules, the Monaco fix and the plan corrections above.
 
 No migration. No env var. No `@appstrate/core` version bump beyond the
 CHANGELOG line (additive export). Behaviour change for existing clients: none —

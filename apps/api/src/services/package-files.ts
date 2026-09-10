@@ -943,10 +943,11 @@ export async function mutatePackageDraftFiles(
       row.lockVersion,
       tx,
     );
-    // The advisory lock only binds writers that take it. A writer that bumps
-    // `lock_version` without it (a re-install, a version restore) still loses
-    // this update, and the caller is told so rather than being told the write
-    // landed.
+    // The advisory lock only binds writers that take it. The one writer that
+    // bumps `lock_version` without it is the re-install path
+    // (`postInstallPackage` → `reinstallOrgItem`, the last bullet above); it
+    // still loses this update, and the caller is told so rather than being told
+    // the write landed.
     if (!updated) {
       throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
