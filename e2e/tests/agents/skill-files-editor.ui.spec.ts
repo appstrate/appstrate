@@ -171,13 +171,58 @@ test.describe("Skill files editor", () => {
 
     await expect(
       page.getByText(
-        "Le package a été modifié ailleurs. L'arborescence a été rechargée : réessayez votre enregistrement.",
+        "Le package a été modifié ailleurs. L'arborescence a été rechargée ; les fichiers modifiés des deux côtés sont signalés.",
       ),
     ).toBeVisible();
     // The recovery is the other half of the message: the tree the next attempt
     // composes against is the live one.
     await expect(editor.fileRow("from-api.md")).toBeVisible();
     await expect(editor.fileRow("scripts/run.py")).toHaveCount(0);
+  });
+
+  test("marks a file the 412 recovery re-read under an open buffer, and saves it anyway", async ({
+    authedPage: page,
+    apiClient,
+    browserCtx,
+  }) => {
+    // The failure this guards: the author types on tree E1, a colleague writes
+    // E2, a structural gesture 412s and the recovery adopts E2's validator — so
+    // the next *Enregistrer* would carry E1-based text under an E2 validator and
+    // the route would accept it. The overwrite is allowed; being told is not.
+    const scope = `@${browserCtx.org.orgSlug}`;
+    const name = skillName("files-conflict");
+    const id = `${scope}/${name}`;
+    await createSkill(apiClient, scope, name);
+    await writeFileOutOfBand(apiClient, id, "notes.md", "Original.");
+
+    const editor = new SkillEditorPage(page, scope, name);
+    await editor.goto();
+    await editor.openFilesTab();
+    await editor.fileRow("notes.md").click();
+    await editor.typeIntoEditor("notes.md", "Mine.");
+
+    // A colleague rewrites the same file. The page learns it only when its next
+    // structural gesture is refused.
+    await writeFileOutOfBand(apiClient, id, "notes.md", "Theirs.");
+    await editor.createFile("scripts/run.py");
+
+    await expect(
+      page.getByText(
+        "Ce fichier a été modifié ailleurs pendant votre édition. Votre version est affichée ; Enregistrer l'écrira par-dessus.",
+      ),
+    ).toBeVisible();
+    await expect(
+      editor.fileRow("notes.md").getByRole("img", {
+        name: "Modifié ailleurs pendant votre édition",
+      }),
+    ).toBeVisible();
+
+    // Saving is still the author's call, and it writes THEIR text — over the
+    // colleague's, deliberately and after being told.
+    await editor.saveButton.click();
+    await expect(page).toHaveURL(`/skills/${scope}/${name}`);
+    const entries = await listFiles(apiClient, id);
+    expect(entries.find((e) => e.path === "notes.md")!.inline).toContain("Mine.");
   });
 
   test("blocks leaving the page while a file edit is still buffered", async ({

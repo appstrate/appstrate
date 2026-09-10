@@ -31,6 +31,7 @@ import {
   FolderOpen,
   Pencil,
   Trash2,
+  TriangleAlert,
   Upload,
 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -55,11 +56,18 @@ interface FileTreeActions {
   isPinned: (path: string) => boolean;
   /** A write is in flight: every gesture is refused until the tree is current again. */
   isBusy: boolean;
+  /**
+   * Paths whose server bytes moved while the author's text sat unsent. Marked in
+   * the row so the file is findable without opening every tab of the tree — the
+   * pane says what it means, this says WHERE.
+   */
+  conflicted: ReadonlySet<string>;
   labels: {
     newFile: string;
     upload: string;
     rename: string;
     delete: string;
+    conflicted: string;
   };
 }
 
@@ -281,6 +289,18 @@ export function FileTree({
                 )}
                 <Icon size={13} className="shrink-0 opacity-70" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                {node.kind === "file" && actions?.conflicted.has(node.entry.path) && (
+                  <TriangleAlert
+                    size={12}
+                    // Named, not decorative: this is the only thing in the row
+                    // that says the file is contested, and a screen reader
+                    // reaching the row must hear it. What it MEANS is the
+                    // banner's job, in the pane that opens on click.
+                    role="img"
+                    aria-label={actions.labels.conflicted}
+                    className="shrink-0 text-amber-600"
+                  />
+                )}
                 {editable && node.kind === "file" && (
                   // `tabIndex={-1}`: a `treeitem` owns exactly one tab stop, and
                   // the roving tabindex above IS that stop. The keyboard path to

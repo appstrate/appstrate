@@ -31,7 +31,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, TriangleAlert } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   PACKAGE_FILE_INLINE_MAX_BYTES,
@@ -49,6 +49,7 @@ import {
   type PackageFileWriteOperation,
 } from "../../lib/package-file-tree";
 import {
+  conflictedDrafts,
   draftWriteOperations,
   dropDraftText,
   renameDraftText,
@@ -125,6 +126,9 @@ export function PackageFilesEditor({
   const limit = formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES);
 
   const entries = files.entries;
+  // The type's content entry, named ONCE for this component: the file the tree
+  // opens on, and the one the package editor's frontmatter check reads.
+  const contentEntry = primaryDisplayFile(type).name;
 
   /**
    * Send one batch and report the row's new token. `flush` awaits this directly
@@ -145,6 +149,13 @@ export function PackageFilesEditor({
         // A `412` says someone wrote between the read and this request. Re-read
         // the tree so the next attempt carries a live validator — and keep the
         // buffer, which holds the author's unsent work, not the server's.
+        //
+        // That re-read is also what would DISARM the guard, which is why the
+        // buffer carries the bytes it was typed on top of: the next
+        // *Enregistrer* would otherwise send text composed against the old tree
+        // with a validator for the new one, and the route would accept it.
+        // `conflictedDrafts` names the files where that applies; the pane below
+        // says so and the author chooses.
         files.reload();
       },
     );
@@ -167,17 +178,15 @@ export function PackageFilesEditor({
       setDrafts({});
       return lockVersion;
     },
-    contentEntryText: () => {
-      const contentPath = primaryDisplayFile(type).name;
-      return drafts[contentPath] ?? entries?.find((e) => e.path === contentPath)?.inline;
-    },
+    contentEntryText: () =>
+      drafts[contentEntry]?.text ?? entries?.find((e) => e.path === contentEntry)?.inline,
   }));
 
   if (!active) return null;
   if (files.isError) return <ErrorState message={t("files.errorLoad")} />;
   if (!entries) return <LoadingState />;
 
-  const activeEntry = pickActiveEntry(entries, selectedPath, primaryDisplayFile(type).name);
+  const activeEntry = pickActiveEntry(entries, selectedPath, contentEntry);
   if (activeEntry === null) {
     return <EmptyState icon={FolderOpen} message={t("files.empty")} compact />;
   }
@@ -255,6 +264,9 @@ export function PackageFilesEditor({
   };
 
   const isPinned = (path: string) => isPinnedEntry(type, path);
+  // Files a colleague wrote while their text sat unsent here. Saving still
+  // writes the author's version — the point is that they see it first.
+  const conflicted = conflictedDrafts(drafts, entries);
   // `manifest.json` is authored on the JSON tab and refused by the write route,
   // so it is shown but never opened for typing. Everything else the preview
   // ceiling admits is text.
@@ -277,11 +289,13 @@ export function PackageFilesEditor({
           onDelete: (path) => setDialog({ kind: "delete", path }),
           isPinned,
           isBusy: files.isPatching,
+          conflicted,
           labels: {
             newFile: t("files.newFile"),
             upload: t("files.upload"),
             rename: t("files.rename"),
             delete: t("files.delete"),
+            conflicted: t("files.conflictedRow"),
           },
         }}
       />
@@ -291,7 +305,9 @@ export function PackageFilesEditor({
           id={paneId}
           packageId={packageId}
           entry={activeEntry}
-          draft={drafts[activeEntry.path]}
+          draft={drafts[activeEntry.path]?.text}
+          conflicted={conflicted.has(activeEntry.path)}
+          onDiscardDraft={() => setDrafts((current) => dropDraftText(current, activeEntry.path))}
           hint={isPinned(activeEntry.path) ? t("files.pinnedHint") : null}
           onChange={(text, serverText) =>
             setDrafts((current) => setDraftText(current, activeEntry.path, text, serverText))
@@ -358,7 +374,7 @@ export function PackageFilesEditor({
           confirmLabel={t("files.rename")}
           initialPath={dialog.path}
           // The entry being renamed is not a collision with itself.
-          entries={withoutPath(entries, dialog.path)}
+          entries={entries.filter((entry) => entry.path !== dialog.path)}
           onClose={() => setDialog(null)}
           onSubmit={(to) => rename(dialog.path, to)}
         />
@@ -378,13 +394,6 @@ export function PackageFilesEditor({
   );
 }
 
-function withoutPath(
-  entries: readonly PackageFileEntry[],
-  path: string,
-): readonly PackageFileEntry[] {
-  return entries.filter((entry) => entry.path !== path);
-}
-
 /**
  * The right pane for a file the author can type into: the bytes the server
  * holds, overlaid by the buffer while it is dirty.
@@ -397,6 +406,8 @@ function EditableFilePane({
   packageId,
   entry,
   draft,
+  conflicted,
+  onDiscardDraft,
   hint,
   onChange,
 }: {
@@ -404,9 +415,13 @@ function EditableFilePane({
   packageId: string;
   entry: PackageFileEntry;
   draft: string | undefined;
+  /** The server bytes moved under this buffer — saving will write over them. */
+  conflicted: boolean;
+  onDiscardDraft: () => void;
   hint: string | null;
   onChange: (text: string, serverText: string) => void;
 }) {
+  const { t } = useTranslation("agents");
   const { text, isLoading, isError } = usePackageFile(packageId, undefined, entry);
 
   return (
@@ -425,6 +440,18 @@ function EditableFilePane({
         </span>
         {hint && <span className="text-muted-foreground shrink-0 text-xs">{hint}</span>}
       </div>
+      {conflicted && (
+        <div
+          role="status"
+          className="border-border bg-muted/50 flex flex-wrap items-center gap-2 border-b px-3 py-2 text-xs"
+        >
+          <TriangleAlert size={14} className="shrink-0 text-amber-600" aria-hidden />
+          <span className="min-w-0 flex-1">{t("files.conflictBanner")}</span>
+          <Button variant="outline" size="sm" onClick={onDiscardDraft}>
+            {t("files.conflictDiscard")}
+          </Button>
+        </div>
+      )}
       {isError ? (
         <ErrorState />
       ) : isLoading || text === undefined ? (

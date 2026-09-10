@@ -11,7 +11,7 @@
  */
 
 import {
-  PACKAGE_CONTENT_ENTRY,
+  PACKAGE_CONTENT_FILE,
   PACKAGE_FILE_INLINE_MAX_BYTES,
   PACKAGE_MANIFEST_FILE,
 } from "@appstrate/core/package-files";
@@ -367,7 +367,7 @@ export function languageForPath(path: string): string {
  * file the editor opens on — while `manifest.json` is not.
  */
 export function isPinnedEntry(type: PackageType, path: string): boolean {
-  return path === PACKAGE_MANIFEST_FILE || path === PACKAGE_CONTENT_ENTRY[type]?.path;
+  return path === PACKAGE_MANIFEST_FILE || path === PACKAGE_CONTENT_FILE[type];
 }
 
 /**

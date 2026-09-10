@@ -147,6 +147,24 @@ export function useEditorState<S extends EditorStateBase>(
 
   const bumpJsonKey = useCallback(() => setJsonEditorKey((k) => k + 1), []);
 
+  /**
+   * The optimistic token the manifest `PUT` must carry.
+   *
+   * `beforeUpdate` is the file editor's flush: it writes through a route of its
+   * own and returns the row's NEW `lock_version`, so the `PUT` that follows has
+   * to use that one and not the token the editor mounted with. Without a flush
+   * the mounted token is still current. The save bar reads `isFlushing` because
+   * the flush runs outside React Query and would otherwise look idle.
+   */
+  const resolveLockVersion = useCallback(async () => {
+    setIsFlushing(true);
+    try {
+      return (await beforeUpdate?.()) ?? state.lock_version!;
+    } finally {
+      setIsFlushing(false);
+    }
+  }, [beforeUpdate, state.lock_version]);
+
   const saveDraft = useCallback(async () => {
     if (!isEdit || !packageId) return;
     // Same pre-submit `validate` as `handleSubmit`: this path bypassed it, so
@@ -157,13 +175,7 @@ export function useEditorState<S extends EditorStateBase>(
       throw new Error(invalid.error);
     }
     const cfg = PACKAGE_CONFIG[packageType];
-    setIsFlushing(true);
-    let lockVersion: number;
-    try {
-      lockVersion = (await beforeUpdate?.()) ?? state.lock_version!;
-    } finally {
-      setIsFlushing(false);
-    }
+    const lockVersion = await resolveLockVersion();
     // PUT returns the updated package resource bare (issue #657) — read back
     // the NEW `lock_version` so a subsequent save doesn't go stale.
     const { data: updated } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
@@ -188,7 +200,7 @@ export function useEditorState<S extends EditorStateBase>(
       // newly-required reconnection/upgrade without a page reload.
       void invalidateIntegrationQueries(qc);
     }
-  }, [state, isEdit, packageId, packageType, qc, toWireBody, validate, beforeUpdate]);
+  }, [state, isEdit, packageId, packageType, qc, toWireBody, validate, resolveLockVersion]);
 
   const handleSubmit = useCallback(
     (e?: FormEvent, onValidationError?: (tab: string | undefined) => void) => {
@@ -211,16 +223,13 @@ export function useEditorState<S extends EditorStateBase>(
         // editor unmounts, so the stale token can never be reused. If that
         // navigation is ever removed, read the token back here too or the
         // next save will 409.
-        setIsFlushing(true);
         void (async () => {
           let lockVersion: number;
           try {
-            lockVersion = (await beforeUpdate?.()) ?? state.lock_version!;
+            lockVersion = await resolveLockVersion();
           } catch (err) {
             setError(translateError?.(err as Error) ?? (err as Error).message);
             return;
-          } finally {
-            setIsFlushing(false);
           }
           // The blocker opens here and not a line earlier: everything above can
           // fail with the author's work still in the page — the flush writes the
@@ -260,7 +269,7 @@ export function useEditorState<S extends EditorStateBase>(
       createPkg,
       updatePkg,
       translateError,
-      beforeUpdate,
+      resolveLockVersion,
     ],
   );
 

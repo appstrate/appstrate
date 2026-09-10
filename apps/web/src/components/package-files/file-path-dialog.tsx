@@ -52,7 +52,7 @@ export function FilePathDialog({
   onClose,
   onSubmit,
 }: FilePathDialogProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "common"]);
   const inputId = useId();
   const [path, setPath] = useState(initialPath);
 

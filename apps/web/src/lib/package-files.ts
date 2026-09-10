@@ -80,8 +80,14 @@ export function packageFilesErrorKey(error: unknown): string | null {
       return "files.errorReserved";
     case "path_conflict":
       return "files.errorConflictPath";
+    // `payload_too_large` is the GLOBAL body-limit middleware, which answers
+    // before the route runs: several near-1 MiB files in one import inflate
+    // ~1.37x as base64 and cross `API_BODY_LIMIT_BYTES` while every individual
+    // file is under the per-file ceiling. The author's fix is the same one —
+    // send fewer or smaller files — so it is the same sentence.
     case "file_too_large":
     case "tree_too_large":
+    case "payload_too_large":
       return "files.errorTooLarge";
     default:
       return null;
