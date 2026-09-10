@@ -5,7 +5,7 @@
  *
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
- *   1b. Integration tool/scope selections against each integration's catalog
+ *   1b. Integration tool/scope selections against each integration's PINNED catalog
  *   2. input against the manifest's own AJV schema
  *   3. Agent readiness (prompt, skills, tools, integrations)
  *
@@ -41,6 +41,10 @@ import { validateInput } from "./schema.ts";
 import { resolveEffectiveInput } from "./input-resolution.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
+import {
+  resolveRunIntegrationVersions,
+  type IntegrationManifestCache,
+} from "./integration-service.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
@@ -143,10 +147,34 @@ export async function runInlinePreflight(params: {
   // `requireCallableTools` stays OFF: it is the freeze-point rule (publish /
   // import), and an inline agent freezes nothing. The subset checks below are
   // the whole point here.
+  //
+  // The memo below is what makes those checks judge the PINNED integration
+  // versions this run will spawn — `resolveRunIntegrationVersions` is the same
+  // resolver the kickoff calls, and the same seeding `resolveRunPreflight` does
+  // for the registered-agent path (`run-pipeline.ts`). Unseeded, both this
+  // stage and readiness fall through to `packages.draft_manifest`, i.e. they
+  // judge the integration AUTHOR'S LIVE DRAFT: an inline run pinning `^1.0.0`
+  // and selecting a tool that version exposes was refused with `unknown_tool`
+  // because the author had since dropped it from their working copy.
+  //
+  // Resolved ONCE, before stage 1b, and shared with the readiness pass below:
+  // one resolution per preflight, not one per stage.
+  //
+  // The result is deliberately ignored, for the reason spelled out in
+  // `resolveRunPreflight`: an unsatisfiable pin is a `dependency_unresolved`
+  // (422) the kickoff raises on its own, and the ids left unseeded keep the
+  // pre-existing draft fallback rather than blanking either verdict.
+  const manifestCache: IntegrationManifestCache = new Map();
   if (manifest) {
+    await resolveRunIntegrationVersions({
+      agentManifest: manifest as unknown as Record<string, unknown>,
+      orgId,
+      manifestCache,
+    });
     const selectionErrors = await validateAgentIntegrationSelections({
       manifest: manifest as unknown as Record<string, unknown>,
       orgId,
+      manifestCache,
     });
     if (selectionErrors.length > 0) {
       if (mode === "fail-fast") throw validationFailed(selectionErrors);
@@ -216,6 +244,7 @@ export async function runInlinePreflight(params: {
         orgId,
         spaceId,
         actor,
+        manifestCache,
         ...(runOverrides ? { runOverrides } : {}),
         ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
       });
@@ -226,6 +255,7 @@ export async function runInlinePreflight(params: {
           orgId,
           spaceId,
           actor,
+          manifestCache,
           ...(runOverrides ? { runOverrides } : {}),
         }),
       );

@@ -103,6 +103,27 @@ function watchConnectionSse(
   return () => es?.close();
 }
 
+/**
+ * Browsing-context name for this card's popup — one per integration.
+ *
+ * A single fixed name is a single popup: a run-kickoff 412 renders one card per
+ * integration to connect, and clicking a second card while the first popup is
+ * still open NAVIGATES that popup to the second URL, silently abandoning flow 1
+ * (its `state` is never redeemed, and the user sees only the second consent).
+ * Keyed on `packageId`, each card gets its own window and reclicking the same
+ * card still refocuses its own.
+ *
+ * The id is sanitized to `[A-Za-z0-9_]` because a window name is a target
+ * token: `@scope/name` carries characters no browser needs to preserve here,
+ * and two ids colliding after sanitization would just share a popup, which is
+ * the pre-existing behaviour. No `packageId` (the card is rendered from a bare
+ * `initiateIntegrationConnect` frame) falls back to the fixed name.
+ */
+function popupName(packageId: string | undefined): string {
+  if (!packageId) return "appstrate_oauth";
+  return `appstrate_oauth_${packageId.replace(/[^A-Za-z0-9_]+/g, "_")}`;
+}
+
 export function OAuthConnectCard({
   authUrl,
   state,
@@ -259,7 +280,7 @@ export function OAuthConnectCard({
     setErrMsg(null);
     setPhase("pending");
     // Keep the opener (no `noopener`) so the callback can postMessage us back.
-    const popup = window.open(authUrl, "appstrate_oauth", "width=520,height=680");
+    const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
     if (!popup) {
       // Popup blocked — fall back to a same-tab navigation; the BroadcastChannel
       // + SSE backstops still resume the (now backgrounded) chat tab.

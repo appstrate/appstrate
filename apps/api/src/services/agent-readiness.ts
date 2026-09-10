@@ -61,9 +61,16 @@ interface AgentReadinessParams {
    * Opt-in relay for the run-kickoff connect link (#1207). Non-null only when
    * the request carried `RUN_CONNECT_OFFERS_HEADER`; it then decides whether
    * the 412 items an oauth2 connect flow can clear also carry a ready-to-open
-   * `connect_url`. Read by the THROWING wrapper only —
-   * `collectAgentReadinessErrors` is the dashboard's advisory DTO source and
-   * stays link-free.
+   * `connect_url`.
+   *
+   * Read by the THROWING wrapper only. The one caller that reaches
+   * `collectAgentReadinessErrors` directly is the accumulate branch of
+   * `inline-run-preflight.ts` — `POST /api/runs/inline/validate`, a dry run
+   * that launches nothing — and it passes no policy, so the link-free
+   * guarantee holds AT THAT CALL SITE, not by anything this function does.
+   * (The dashboard's advisory DTO is a different code path entirely:
+   * `resolveAgentConnectionReadiness` in `integration-pins-service.ts`, which
+   * calls the resolver itself and never comes through here.)
    */
   connectOffers?: ConnectOfferPolicy | null;
 }
@@ -236,8 +243,12 @@ export async function collectAgentReadinessErrors(
   // picks a candidate, the modal POSTs `connection_overrides`, readiness
   // honours the pick instead of re-firing must_choose on the same N>1
   // candidate set. run-pipeline.ts re-runs the resolver after readiness
-  // (with the same overrides) to produce the persisted snapshot — both
-  // passes see the same inputs so they cannot disagree.
+  // (with the same overrides) to produce the persisted snapshot. The two
+  // passes cannot disagree even though only this one passes
+  // `skipIntegrationIds`: a non-empty set means an error was pushed above, and
+  // the throwing wrapper raises it, so the snapshot pass never runs on an
+  // agent whose integrations this pass refused. When the set IS empty the two
+  // calls are identical.
   if (actor) {
     const resolution = await resolveConnectionsForRun({
       agentManifest: manifest as Record<string, unknown>,

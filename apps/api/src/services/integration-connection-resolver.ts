@@ -468,20 +468,32 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
  * manifest declares several oauth2 auths (or none) and the dep pins nothing —
  * the resolver refuses to guess and the caller lets the user choose.
  *
- * A pin naming an auth the manifest no longer declares is `null` too, not the
- * stale string: the pin is agent-side and the manifest moved under it, so
- * relaying it would name a connect target that cannot exist and the kickoff
- * would 404 on `/auths/{authKey}/…`. The item then carries neither `auth_key`
- * nor `required_scopes`, which is the "let the user choose" shape.
+ * A pin naming an auth the manifest no longer declares is `null` too — see
+ * {@link declaredAuthKey}.
  */
 function connectTargetAuthKey(args: ResolveOneArgs): string | null {
   if (args.requiredAuthKey !== undefined) {
-    return args.manifest.auths?.[args.requiredAuthKey] ? args.requiredAuthKey : null;
+    return declaredAuthKey(args.manifest, args.requiredAuthKey);
   }
   const oauthKeys = Object.entries(args.manifest.auths ?? {})
     .filter(([, auth]) => auth.type === "oauth2")
     .map(([key]) => key);
   return oauthKeys.length === 1 ? oauthKeys[0]! : null;
+}
+
+/**
+ * `key`, but only while the manifest still DECLARES it — else `null`.
+ *
+ * Every relayed `auth_key` goes through this. A key the manifest dropped (a
+ * version bump renaming `primary` → `session`, an auth removed outright) is a
+ * connect target that cannot exist: the kickoff 404s on `/auths/{authKey}/…`,
+ * and the scopes computed from it are meaningless. Whether the stale key comes
+ * from the agent's own pin or from an existing connection row makes no
+ * difference to that, so both sites apply it. The item then carries neither
+ * `auth_key` nor `required_scopes`, which is the "let the user choose" shape.
+ */
+function declaredAuthKey(manifest: IntegrationManifest, key: string): string | null {
+  return manifest.auths?.[key] ? key : null;
 }
 
 /**
@@ -506,6 +518,11 @@ function checkHealth(
   source: ResolvedConnection["source"],
 ): ResolveOneResult {
   if (conn.needsReconnection) {
+    // A reconnect is a connect flow, so it carries the same relay as the other
+    // two — and the same staleness guard: the row's `authKey` is only a valid
+    // connect target while the manifest still declares it.
+    const authKey = declaredAuthKey(args.manifest, conn.authKey);
+    const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
       code: "needs_reconnection",
       // Thread the connection id so the modal's reconnect CTA can pass
@@ -514,11 +531,10 @@ function checkHealth(
       // duplicate row (integration-connections.ts:721 "explicit
       // connectionId = update; no id = insert").
       connectionId: conn.id,
-      // A reconnect is a connect flow, so it carries the same relay as the
-      // other two: one consent that already covers the selected tools'
-      // scopes, instead of reconnect → insufficient_scopes → upgrade.
-      authKey: conn.authKey,
-      requiredScopes: oauthScopesForAuth(args, conn.authKey),
+      // One consent that already covers the selected tools' scopes, instead of
+      // reconnect → insufficient_scopes → upgrade.
+      ...(authKey !== null ? { authKey } : {}),
+      ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
       message: `Connection for ${args.integrationId} needs to be reconnected.`,
     });
   }

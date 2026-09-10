@@ -430,5 +430,108 @@ describe("POST /api/runs/inline/validate", () => {
       expect((await launch(manifestSelecting({ tools: ["exfiltrate"] }))).status).toBe(400);
       expect(await shadowCount()).toBe(0);
     });
+
+    // ─── WHICH catalog the gate judges against ───────────────
+    //
+    // An inline run spawns the version its `dependencies.integrations` pin
+    // resolves to (`resolveRunIntegrationVersions`), never the integration
+    // author's `packages.draft_manifest`. So that pinned version is the catalog
+    // these selections must be judged against, and the preflight seeds the
+    // memo both this stage and readiness read.
+    //
+    // Judging the draft is wrong in both directions: a hard 400 `unknown_tool`
+    // for a tool the spawned version exposes (the author dropped it from their
+    // working copy mid-refactor), and a wave-through for a draft-only tool the
+    // spawned version will not register.
+    describe("judges the PINNED version, not the author's draft", () => {
+      const PINNED = "@inlineorg/pinned-svc";
+
+      /** The same integration at two different tool surfaces. */
+      function svcManifest(tools: string[]): Record<string, unknown> {
+        return localIntegrationManifest({
+          name: PINNED,
+          serverName: `${PINNED}-server`,
+          version: "1.0.0",
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://provider.example.com/authorize",
+              tokenEndpoint: "https://provider.example.com/token",
+              defaultScopes: ["base"],
+              scopeCatalog: [{ value: "base", label: "Base" }],
+            },
+          },
+          tools_policy: Object.fromEntries(tools.map((t) => [t, {}])),
+        }) as unknown as Record<string, unknown>;
+      }
+
+      /** Published 1.0.0 exposes `published_tool`; the live draft exposes only
+       *  `draft_only`. Every agent below pins `^1.0.0`. */
+      async function seedDivergedIntegration() {
+        await seedPackage({
+          id: PINNED,
+          orgId: ctx.orgId,
+          type: "integration",
+          source: "local",
+          draftManifest: svcManifest(["draft_only"]),
+        });
+        await seedPackageVersion({
+          packageId: PINNED,
+          version: "1.0.0",
+          manifest: svcManifest(["published_tool"]),
+        });
+        await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, PINNED);
+      }
+
+      function agentSelecting(tools: string[]) {
+        return {
+          ...validManifest(),
+          dependencies: { skills: {}, integrations: { [PINNED]: "^1.0.0" } },
+          integrations_configuration: { [PINNED]: { tools } },
+        };
+      }
+
+      async function errorCodes(res: Response): Promise<Set<string>> {
+        const body = (await res.json()) as { errors?: { code: string }[] };
+        return new Set(body.errors?.map((e) => e.code));
+      }
+
+      it("accepts a tool the PINNED version exposes and the draft dropped", async () => {
+        await seedDivergedIntegration();
+        const agent = agentSelecting(["published_tool"]);
+
+        // Dry run: the only thing left is the readiness verdict (nothing is
+        // connected), never a selection error.
+        const validated = await validate(agent);
+        expect(validated.status).toBe(400);
+        expect([...(await errorCodes(validated))]).toEqual(["not_connected"]);
+
+        // Launch: reaches the 412 the caller can act on, not a hard 400 about a
+        // tool the version it would spawn exposes.
+        const launched = await launch(agent);
+        expect(launched.status).toBe(412);
+        expect(((await launched.json()) as { code?: string }).code).toBe(
+          "missing_integration_connection",
+        );
+      });
+
+      it("refuses a tool only the DRAFT exposes, on both routes", async () => {
+        // The mirror case, and the control that proves the pinned catalog is
+        // what is read: `draft_only` is in the author's working copy, absent
+        // from the version this run would spawn.
+        await seedDivergedIntegration();
+        const agent = agentSelecting(["draft_only"]);
+        for (const res of [await validate(agent), await launch(agent)]) {
+          expect(res.status).toBe(400);
+          const body = (await res.json()) as {
+            code?: string;
+            errors?: { field: string; code: string }[];
+          };
+          expect(body.code).toBe("validation_failed");
+          const err = body.errors?.find((e) => e.code === "unknown_tool");
+          expect(err?.field).toBe(`integrations_configuration.${PINNED}.tools`);
+        }
+      });
+    });
   });
 });

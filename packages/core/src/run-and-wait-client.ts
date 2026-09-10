@@ -94,7 +94,7 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
  *
  * Sent on the LAUNCH request only; the poll loop never carries it.
  */
-export const RUN_CONNECT_OFFERS_HEADER = "x-appstrate-connect-offers";
+export const RUN_CONNECT_OFFERS_HEADER = "X-Appstrate-Connect-Offers";
 
 export interface RunAndWaitClientOptions {
   origin: string;

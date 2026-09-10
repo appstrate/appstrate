@@ -1005,11 +1005,18 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       // (`module-chat/src/pi-chat/mcp-tools.ts`) and renders the connect card
       // itself.
       //
-      // Opting in anyway is not a new exposure class: the same model already
-      // receives a `connect_url` from `initiateIntegrationConnect` on this very
-      // path. What it changes is that the link arrives WITH the refusal, so the
-      // model hands it to its human instead of guessing which connect kickoff
-      // to call and with which scopes.
+      // An agent RUN configured with the Appstrate MCP integration is in scope
+      // too, and there the link does not stop at a model's context: the tool
+      // result is persisted as run events, readable by anyone holding
+      // `runs:read-all` on the space. Opting in is still not a NEW exposure
+      // class — `initiateIntegrationConnect`, on this very path and into those
+      // very run events, already returns a bearer `connect_url` — but it is the
+      // same class, so a change to how these links are scoped or expired has to
+      // account for run logs, not only IDE transcripts.
+      //
+      // What opting in changes is that the link arrives WITH the refusal, so
+      // the model hands it to its human instead of guessing which connect
+      // kickoff to call and with which scopes.
       connectOffers: true,
     });
     if (!launched.ok) {

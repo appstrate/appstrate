@@ -1031,6 +1031,21 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     } as unknown as IntegrationManifest;
   }
 
+  /** An integration that declares NO auth at all — the zero-auth manifest the
+   * orphaned-auth guard cannot constrain. */
+  function noAuthManifest(): IntegrationManifest {
+    return {
+      type: "integration",
+      schema_version: "0.1",
+      name: INTEG,
+      version: "1.0.0",
+      display_name: "Test",
+      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      auths: {},
+      tools_policy: { t1: {} },
+    } as unknown as IntegrationManifest;
+  }
+
   function reqPinned(manifest: IntegrationManifest, authKey: string): IntegrationRequirement {
     return {
       integrationId: INTEG,
@@ -1160,7 +1175,9 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     const err = result.errors[0]!;
     expect(err.code).toBe("needs_reconnection");
     expect(err.authKey).toBe("pat");
-    expect(err.requiredScopes).toEqual([]);
+    // Omitted, not empty — the same shape the `not_connected` branch emits for
+    // a scope-less auth, and the same absence on the wire either way.
+    expect(err.requiredScopes).toBeUndefined();
     const field = translateResolutionError(err);
     expect(field).toMatchObject({ code: "needs_reconnection", auth_key: "pat" });
     expect(field).not.toHaveProperty("required_scopes");
@@ -1180,6 +1197,30 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     });
     const err = result.errors[0]!;
     expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBeUndefined();
+    expect(err.requiredScopes).toBeUndefined();
+    const field = translateResolutionError(err);
+    expect(field).not.toHaveProperty("auth_key");
+    expect(field).not.toHaveProperty("required_scopes");
+  });
+
+  it("needs_reconnection on a connection whose auth the manifest dropped relays neither field", () => {
+    // Same staleness rule as the pin above, one layer down: the relayed key
+    // here comes from the connection ROW. The orphaned-auth guard normally
+    // drops such rows, but it treats a zero-auth manifest as "no constraint"
+    // (`manifestAuthKeySet` → null), so the row still reaches the health check.
+    // Relaying its key would name a connect target `/auths/{key}/connect/…`
+    // that 404s.
+    const c = conn({ authKey: "oauth", needsReconnection: true });
+    const result = resolveConnections({
+      requirements: [req(noAuthManifest(), ["t1"], [])],
+      accessibleConnections: [c],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("needs_reconnection");
+    expect(err.connectionId).toBe(c.id);
     expect(err.authKey).toBeUndefined();
     expect(err.requiredScopes).toBeUndefined();
     const field = translateResolutionError(err);

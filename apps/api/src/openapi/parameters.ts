@@ -74,7 +74,7 @@ export const parameters = {
     schema: { type: "string", maxLength: 255 },
   },
   ConnectOffers: {
-    name: "x-appstrate-connect-offers",
+    name: "X-Appstrate-Connect-Offers",
     in: "header" as const,
     required: false,
     description:

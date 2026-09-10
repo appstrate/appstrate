@@ -22722,7 +22722,7 @@
         }
       },
       "ConnectOffers": {
-        "name": "x-appstrate-connect-offers",
+        "name": "X-Appstrate-Connect-Offers",
         "in": "header",
         "required": false,
         "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human.",
@@ -22929,7 +22929,7 @@
           "connect_url": {
             "type": "string",
             "format": "uri",
-            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`x-appstrate-connect-offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
+            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
           },
           "expires_at": {
             "type": "integer",
