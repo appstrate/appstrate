@@ -22,7 +22,8 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { db } from "../../helpers/db.ts";
-import { files } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { files, runs } from "@appstrate/db/schema";
 import {
   authHeaders,
   createTestContext,
@@ -277,6 +278,68 @@ describe("run read isolation between members", () => {
         `${label}: ${JSON.stringify({ detail: 404, logs: 404, cancel: 404 })}`,
       );
     }
+  });
+
+  it("404s a sink extension on a colleague's run, leaving its expiry and heartbeat alone", async () => {
+    // `/sink/extend` is a run MUTATION reached by run id, not by space path:
+    // org + space tenancy is not visibility. Extending a run the caller may not
+    // read would push out `sink_expires_at` AND bump `last_heartbeat_at`, which
+    // is what `services/run-watchdog.ts` reads to finalise a stalled run — so
+    // the 404 has to be a refusal to WRITE, not merely a hidden 200. The
+    // fixture's five rows carry no sink, so the two rows below are the only
+    // ones this route can touch at all.
+    const withOpenSink = async (userId: string) =>
+      (
+        await seedRun({
+          packageId: AGENT_ID,
+          orgId: owner.orgId,
+          spaceId: owner.defaultSpaceId,
+          userId,
+          status: "running",
+          // `runs_open_sink_has_secret` — an open sink must carry the secret
+          // its ingestion verifies against, so the fixture writes one; this
+          // route never reads it.
+          sinkSecretEncrypted: "encrypted-sink-secret",
+          sinkExpiresAt: T0,
+          lastHeartbeatAt: T0,
+        })
+      ).id;
+    const sinkOfA = await withOpenSink(operatorA.user.id);
+    const sinkOfB = await withOpenSink(operatorB.user.id);
+
+    const extend = (ctx: TestContext, runId: string) =>
+      app.request(`/api/runs/${runId}/sink/extend`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ ttl_seconds: 3600 }),
+      });
+    const sinkRow = async (runId: string) => {
+      const [row] = await db
+        .select({ expiresAt: runs.sinkExpiresAt, heartbeatAt: runs.lastHeartbeatAt })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1);
+      return { expiresAt: row!.expiresAt?.getTime(), heartbeatAt: row!.heartbeatAt.getTime() };
+    };
+
+    expect((await extend(operatorA, sinkOfB)).status).toBe(404);
+    // Untouched: both columns still hold the seeded T0, so the refusal happened
+    // in the WHERE and not after the write.
+    expect(await sinkRow(sinkOfB)).toEqual({
+      expiresAt: T0.getTime(),
+      heartbeatAt: T0.getTime(),
+    });
+
+    // The control: the very same call on A's own run succeeds and does move
+    // both columns — the 404 above is about the run, not about the route.
+    expect((await extend(operatorA, sinkOfA)).status).toBe(200);
+    const moved = await sinkRow(sinkOfA);
+    expect(moved.expiresAt).toBeGreaterThan(T0.getTime());
+    expect(moved.heartbeatAt).toBeGreaterThan(T0.getTime());
+
+    // `runs:read-all` is the space, here as everywhere: an admin supervising
+    // the space extends a member's sink, the same rows they may already cancel.
+    expect((await extend(owner, sinkOfB)).status).toBe(200);
   });
 
   it("404s ?wait on a colleague's run without waiting for it", async () => {
