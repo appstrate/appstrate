@@ -2,6 +2,9 @@
 
 import { describe, expect, it } from "bun:test";
 import { describeEnvIssues, getEeEnv, _resetEeEnvForTests } from "../../src/env.ts";
+import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
+
+applyEeFixtureEnv();
 
 describe("env", () => {
   describe("getEeEnv()", () => {
@@ -13,7 +16,7 @@ describe("env", () => {
       expect(env.STRIPE_PRICE_ID_PRO).toBeString();
     });
 
-    it("returns the test values set by preload", () => {
+    it("returns the fixture values the module declares for its tests", () => {
       const env = getEeEnv();
       expect(env.STRIPE_SECRET_KEY).toBe("sk_test_fake_key_for_testing");
       expect(env.STRIPE_WEBHOOK_SECRET).toBe("whsec_test_secret_for_webhook_verification");
