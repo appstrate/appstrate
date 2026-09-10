@@ -210,7 +210,11 @@ function ModelForm({
   const [picked, setPicked] = useState<ModelPickRow[]>([]);
   /** Ids a batch could not create — re-offered instead of silently dropped. */
   const [failedModelIds, setFailedModelIds] = useState<string[]>([]);
-  /** The credential a partially failed batch already created: a retry binds to it. */
+  /**
+   * The credential a refused submission already minted from the typed key. It
+   * outlives the model step: a retry binds to it instead of minting a second
+   * one against the same secret and orphaning the first.
+   */
   const [createdCredentialId, setCreatedCredentialId] = useState<string | null>(null);
   const [modelMode, setModelMode] = useState<"list" | "manual" | null>(null);
 
@@ -231,7 +235,15 @@ function ModelForm({
   const dropListing = () => {
     setPicked([]);
     setFailedModelIds([]);
+  };
+
+  /**
+   * The endpoint and the typed key are what a credential is minted from:
+   * editing either strands whatever a refused submission already minted.
+   */
+  const dropEndpointBinding = () => {
     setCreatedCredentialId(null);
+    dropListing();
   };
 
   const resetModelStep = () => {
@@ -249,11 +261,12 @@ function ModelForm({
     dropListing();
   };
 
-  /** A typed key never coexists with a saved credential. */
+  /** A typed key never coexists with a saved credential — nor with what it minted. */
   const bindCredential = (id: string) => {
     setValue("credentialId", id);
     setValue("inlineApiKey", "");
     clearErrors("credentialId");
+    setCreatedCredentialId(null);
   };
 
   /**
@@ -266,6 +279,8 @@ function ModelForm({
     clearErrors();
     setValue("credentialId", "");
     if (!keepTypedKey) setValue("inlineApiKey", "");
+    // A minted credential is pinned to the provider it was created for.
+    setCreatedCredentialId(null);
     const provider = getProviderById(id, registry);
     if (provider) {
       setValue("apiShape", provider.apiShape);
@@ -355,7 +370,7 @@ function ModelForm({
       fields: data,
       dirtyFields,
       provider: selectedProvider,
-      selectedCredentialId: selectedCredential?.id ?? null,
+      selectedCredentialId: selectedCredential?.id ?? createdCredentialId,
       capabilities: capabilitiesExplicit ? "explicit" : "auto",
       isEdit: !!model,
       catalogEntry: catalogEntry(data.modelId.trim()),
@@ -367,6 +382,7 @@ function ModelForm({
     // The host closes on success and reports nothing here.
     const outcome = await onSubmit(result.data);
     if (outcome.failedModelIds.length > 0) {
+      if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
       setError("modelId", { message: t("models.form.saveFailed") });
     }
   });
@@ -415,14 +431,19 @@ function ModelForm({
         providers={registry.filter((p) => p.baseUrlOverridable)}
         onApiTypeChange={(entry) => switchProvider(entry.providerId, true)}
         providerLocked={!!model}
-        baseUrlProps={register("baseUrl", { validate: baseUrlValidate, onChange: dropListing })}
+        baseUrlProps={register("baseUrl", {
+          validate: baseUrlValidate,
+          onChange: dropEndpointBinding,
+        })}
         // The URL is a property of the credential, not of the model.
         baseUrlLocked={!!selectedCredential}
         baseUrlError={showError("baseUrl") ? errors.baseUrl?.message : undefined}
-        apiKeyProps={register("inlineApiKey", { onChange: dropListing })}
+        apiKeyProps={register("inlineApiKey", { onChange: dropEndpointBinding })}
         apiKeyError={showError("credentialId") ? errors.credentialId?.message : undefined}
+        // Once the typed key HAS been minted, a retry rebinds to it — promising
+        // another automatic create would be a lie.
         apiKeyHint={
-          !selectedCredential && inlineApiKey.trim()
+          !selectedCredential && !createdCredentialId && inlineApiKey.trim()
             ? t("models.form.createCredentialHint")
             : undefined
         }
