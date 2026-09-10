@@ -54,6 +54,7 @@ import {
   dropDraftText,
   renameDraftText,
   setDraftText,
+  type DraftText,
   type DraftTexts,
 } from "../../lib/package-file-drafts";
 import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
@@ -305,7 +306,7 @@ export function PackageFilesEditor({
           id={paneId}
           packageId={packageId}
           entry={activeEntry}
-          draft={drafts[activeEntry.path]?.text}
+          draft={drafts[activeEntry.path]}
           conflicted={conflicted.has(activeEntry.path)}
           onDiscardDraft={() => setDrafts((current) => dropDraftText(current, activeEntry.path))}
           hint={isPinned(activeEntry.path) ? t("files.pinnedHint") : null}
@@ -400,6 +401,24 @@ export function PackageFilesEditor({
  *
  * `onChange` is handed the server's text alongside the new one so the buffer
  * can drop an edit the author undid — see `setDraftText`.
+ *
+ * Monaco owns its text once it mounts (see `ContentEditor`), so every text this
+ * pane must SHOW rather than receive has to arrive as a remount. What decides
+ * that is the pane's baseline — the server bytes its content was composed on:
+ * the buffer's `base` while one lives, the file's current server text when none
+ * does. Which is exactly right in all four cases:
+ *
+ * - typing: `base` is pinned on the first keystroke, so the key never moves
+ *   while the author works and the caret and focus stay put;
+ * - another file selected: a different `entry.path`, and a different baseline;
+ * - a colleague's write re-read under a live buffer: `base` is pinned, so the
+ *   author's text stays on screen and the conflict banner speaks instead;
+ * - *Voir la version du serveur*: dropping the buffer swings the baseline to
+ *   the server text — and that button is offered only on a conflicted file,
+ *   i.e. exactly when the two differ, so the remount is guaranteed.
+ *
+ * The baseline is tracked as a generation counter rather than used as the key
+ * itself: a file is up to a mebibyte, and a key is compared on every render.
  */
 function EditableFilePane({
   id,
@@ -414,7 +433,7 @@ function EditableFilePane({
   id: string;
   packageId: string;
   entry: PackageFileEntry;
-  draft: string | undefined;
+  draft: DraftText | undefined;
   /** The server bytes moved under this buffer — saving will write over them. */
   conflicted: boolean;
   onDiscardDraft: () => void;
@@ -423,6 +442,16 @@ function EditableFilePane({
 }) {
   const { t } = useTranslation("agents");
   const { text, isLoading, isError } = usePackageFile(packageId, undefined, entry);
+
+  // Adjusted during render rather than in an effect, so the remount happens in
+  // the same commit as the baseline that calls for it — an effect would paint
+  // the stale text for a frame first. React re-runs this component with the new
+  // state and drops the pass below; the guard is what bounds it to one extra.
+  const baseline = draft?.base ?? text;
+  const [mounted, setMounted] = useState({ baseline, generation: 0 });
+  if (mounted.baseline !== baseline) {
+    setMounted({ baseline, generation: mounted.generation + 1 });
+  }
 
   return (
     <div
@@ -458,7 +487,8 @@ function EditableFilePane({
         <LoadingState />
       ) : (
         <ContentEditor
-          value={draft ?? text}
+          key={`${entry.path} ${mounted.generation}`}
+          value={draft?.text ?? text}
           onChange={(next) => onChange(next, text)}
           language={languageForPath(entry.path)}
           height="520px"

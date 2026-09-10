@@ -469,6 +469,9 @@ function PackageEditorInner({
         <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
       )}
 
+      {/* No `key`: `state.content` has exactly one writer, the editor's own
+          `onChange` — the JSON tab applies the manifest and nothing else — so
+          there is never a text to push back into a mounted Monaco. */}
       {activeTab === "content" && (
         <ContentEditor
           value={state.content}

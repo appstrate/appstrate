@@ -13,6 +13,10 @@ export function PromptEditor({ value, onChange }: PromptEditorProps) {
 
   return (
     <>
+      {/* No `key`: the agent's prompt has exactly one writer, this editor's own
+          `onChange`. The JSON tab applies the manifest only, the resolved-skills
+          sync touches the manifest only, and a version restore happens on the
+          package's detail page — the editor is not mounted for it. */}
       <ContentEditor value={value} onChange={onChange} language="markdown" />
       <div className="text-muted-foreground mt-1 text-xs">{t("editor.promptHint")}</div>
     </>
