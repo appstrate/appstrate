@@ -15,7 +15,7 @@ import {
 } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { apiKeySpaceScopeGuard } from "../middleware/guards.ts";
+import { pinnedSpaceScopeGuard } from "../middleware/guards.ts";
 import { ApiError, forbidden, invalidRequest, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -260,8 +260,8 @@ async function gateSpacePackageWrite(
 export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
 
-  router.use("/:id", apiKeySpaceScopeGuard);
-  router.use("/:spaceId/*", apiKeySpaceScopeGuard);
+  router.use("/:id", pinnedSpaceScopeGuard);
+  router.use("/:spaceId/*", pinnedSpaceScopeGuard);
 
   // GET /api/spaces — list spaces the caller reaches (RBAC spec §6.3)
   router.get("/", requirePermission("spaces", "read"), async (c) => {
@@ -272,13 +272,13 @@ export function createSpacesRouter() {
       c.get("user").id,
       personaMemberships(personaFor(c, orgId)),
     );
-    // An API key never enumerates its siblings: it sees the one space it is
-    // bound to, whatever its creator reaches.
-    const keySpaceId = c.get("spaceId");
-    const scoped =
-      c.get("authMethod") === "api_key"
-        ? entries.filter((e) => e.space.id === keySpaceId)
-        : entries;
+    // A credential PINNED to a space never enumerates its siblings: it sees the
+    // one space it is bound to, whatever its subject reaches. Keyed on the
+    // pinned space rather than on `authMethod === "api_key"`, for the reason
+    // `pinnedSpaceScopeGuard` is (issue #1313) — any strategy that pins a space
+    // is confined, not just the one auth method that did when this was written.
+    const pinnedSpaceId = c.get("spaceId");
+    const scoped = pinnedSpaceId ? entries.filter((e) => e.space.id === pinnedSpaceId) : entries;
     return c.json(
       listResponse(scoped.map(({ space, role }) => spaceWireForCaller(c, space, role))),
     );
