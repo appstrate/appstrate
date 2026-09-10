@@ -4077,7 +4077,7 @@ export interface paths {
         head?: never;
         /**
          * Extend the sink expiry for a long-running remote run
-         * @description Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.
+         * @description Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, and bumps `last_heartbeat_at` (the column the stall watchdog reads). Extendable sinks are the open ones (not closed, not already expired) on a run in the caller's org and space that the caller may READ: `runs:read` is the runs they launched, `runs:read-all` the whole space. Anything else returns 404 rather than confirming the run exists.
          */
         patch: operations["extendRunSink"];
         trace?: never;
@@ -4159,7 +4159,7 @@ export interface paths {
         };
         /**
          * List runs for a schedule
-         * @description List recent runs triggered by a specific schedule.
+         * @description List recent runs triggered by a specific schedule. Takes `schedules:read` AND a run read permission: the rows are runs, so `runs:read` lists the ones the caller launched — including the runs of the caller's own schedules — and `runs:read-all` the whole space. A credential holding `schedules:read` alone is rejected with 403.
          */
         get: operations["listScheduleRuns"];
         put?: never;

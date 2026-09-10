@@ -1766,7 +1766,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Extend the sink expiry for a long-running remote run",
       description:
-        "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.",
+        "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, and bumps `last_heartbeat_at` (the column the stall watchdog reads). Extendable sinks are the open ones (not closed, not already expired) on a run in the caller's org and space that the caller may READ: `runs:read` is the runs they launched, `runs:read-all` the whole space. Anything else returns 404 rather than confirming the run exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
