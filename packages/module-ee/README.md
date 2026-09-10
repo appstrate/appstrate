@@ -607,17 +607,47 @@ therefore returning `null` in every test that touched it. The confirmation
 e-mail silently fell back to today's date, and no test noticed, because the
 fixture and the assertions were written from the same stale belief.
 
-`test/live/stripe-contract.test.ts` is the other half. It runs against real
-Stripe in **test mode** and checks the two things the mock structurally cannot:
+Two things close that gap, and they are worth separating because only one of
+them needs a Stripe key.
 
-- **Shape** — every key path a fixture claims must exist on the live object.
-  Extra live fields are ignored (the fixtures are deliberately minimal); invented
-  ones fail. This is what turns the next relocation into a red mock rather than a
-  quiet production lie.
+**Without a key — the fixtures are typed.** `test/helpers/stripe.ts` declares
+`Fixture<T>`, a deep-partial of the real SDK type: a fixture may omit any field
+production never reads, but every field it DOES carry must exist on
+`Stripe.Subscription`, `Stripe.Invoice`, … with a compatible type. The module's
+`tsconfig.json` includes `test` for exactly this reason. So a bump of `stripe`
+that RELOCATES a field fails `bunx tsc --noEmit -p packages/module-ee` on the
+fixture, on any machine, with no account involved. That is the check the
+2025-03-31 move of `current_period_end` would have tripped. Note the one hole it
+cannot see: TypeScript exempts spread properties from excess-property checking,
+so fixture fields are written as direct properties (`amount_paid: undefined`)
+rather than `...(cond ? {} : { amount_paid })`.
+
+**With a key — the live contract suite.** `test/live/stripe-contract.test.ts`
+runs against real Stripe in **test mode** and checks the two things neither the
+mock nor the typechecker can:
+
+- **Shape** — every key path a fixture claims must exist on the live object,
+  for Subscription, Customer, Checkout.Session, BillingPortal.Session and
+  Invoice. Extra live fields are ignored (the fixtures are deliberately
+  minimal); invented ones fail. It also asserts that every path production
+  dereferences resolves on the live object AND on the fixture — a path present
+  in only one of the two is a test proving nothing. The invoice set covers
+  `parent.subscription_details.subscription`, the post-basil replacement for the
+  removed top-level `invoice.subscription`, on which budget allocation hangs.
 - **Semantics** — that `subscriptions.update` replaces the priced item, that
   `current_period_end` is a timestamp on the item, that a forged webhook
   signature raises `StripeSignatureVerificationError` and an unknown id raises
-  `StripeInvalidRequestError` (both classes are branched on in `src/routes/`).
+  `StripeInvalidRequestError` (both classes are branched on in `src/routes/`),
+  and that every enabled webhook endpoint on the account renders payloads at the
+  version the module pins. That last one is a separate contract: the SDK pin
+  governs what a `retrieve` returns, while a webhook payload is rendered at the
+  version configured on the ENDPOINT, and `subscriptionPeriodEnd` is applied to
+  `event.data.object` too.
+
+The API version lives in exactly one place, `STRIPE_API_VERSION` in
+`src/stripe/client.ts`, pinned with `satisfies Stripe.LatestApiVersion` — a
+literal type, so an SDK bump makes that line a hard `TS2322`. The live suite
+imports it rather than restating it.
 
 It creates a customer and a subscription and deletes them in `afterAll`, so it
 needs a key that may mutate the account:
@@ -632,8 +662,12 @@ shape as `scripts/conformance/probes.ts`. It is deliberately **not**
 `bun test` start creating objects in an account nobody aimed at. A key that does
 not begin with `sk_test_` is refused outright rather than skipped.
 
-In CI it is `.github/workflows/stripe-live.yml` — weekly, on demand, and on any
-PR touching `packages/module-ee/**` (which includes a Dependabot bump of the
-`stripe` dependency). The repository secret is `STRIPE_LIVE_SECRET_KEY`; until it
-is provisioned the job runs green with the suite skipped, and says so in an
-annotation.
+In CI it is `.github/workflows/stripe-live.yml`: weekly, on demand, on every
+**push to `main`** touching `packages/module-ee/**`, and on any PR touching the
+same paths. The push trigger is not redundant — a Dependabot PR reads the
+_Dependabot_ secret store, not repository secrets, so `STRIPE_LIVE_SECRET_KEY`
+is empty there, every test skips, and the job would otherwise report green on
+the one PR that most needs the check. The merge of that PR is what runs the
+suite for real. Fork PRs skip for the same structural reason and are equally
+tolerated; on `push`, `schedule` and `workflow_dispatch`, where repository
+secrets ARE available, a missing key **fails** the job instead of skipping.

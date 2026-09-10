@@ -7,9 +7,20 @@
 # when a fixture claims a field the live API does not have, or when Stripe stops
 # behaving the way the module bets it does.
 #
-# Without `STRIPE_LIVE_SECRET_KEY` the suite skips itself and this job is green
-# — the same opt-in shape as `scripts/conformance/probes.ts`. That covers fork
-# PRs, which never receive secrets.
+# Without `STRIPE_LIVE_SECRET_KEY` the suite skips itself — the same opt-in
+# shape as `scripts/conformance/probes.ts`. On a pull_request that skip is
+# allowed and this job stays green, because two kinds of PR structurally cannot
+# see repository secrets:
+#
+#   * fork PRs, which never receive them; and
+#   * DEPENDABOT PRs, which receive the Dependabot secret store instead. This is
+#     the reason the `pull_request` trigger alone cannot cover an SDK bump: the
+#     variable is empty, `describe.skipIf` skips every test, and the job reports
+#     green having checked nothing.
+#
+# The `push` trigger below is the half that does cover it. On push, schedule and
+# workflow_dispatch the repository secrets ARE available, so a missing key there
+# is a real failure and this job says so rather than skipping quietly.
 name: Stripe live contract
 
 on:
@@ -18,9 +29,16 @@ on:
   schedule:
     - cron: "0 7 * * 1"
   workflow_dispatch:
-  # Anything that touches the billing module or its Stripe dependency. A
-  # Dependabot bump of `stripe` edits packages/module-ee/package.json, so it
-  # lands here without anyone remembering to label it.
+  # The guaranteed run. A Dependabot bump of `stripe` edits
+  # packages/module-ee/package.json, so its MERGE lands here — with repository
+  # secrets — even though its PR run could not see them.
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/module-ee/**"
+      - ".github/workflows/stripe-live.yml"
+  # Best-effort pre-merge signal for human PRs touching the billing module.
   pull_request:
     paths:
       - "packages/module-ee/**"
@@ -61,12 +79,22 @@ jobs:
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
+      # A skipped suite reporting green is the exact failure this job exists to
+      # prevent, so the skip is tolerated only where the secret CANNOT reach the
+      # run: a pull_request from a fork or from Dependabot.
       - name: Report coverage state
         run: |
-          if [ -z "${STRIPE_LIVE_SECRET_KEY}" ]; then
-            echo "::notice::STRIPE_LIVE_SECRET_KEY is not set — the live contract suite will skip itself."
+          if [ -n "${STRIPE_LIVE_SECRET_KEY}" ]; then
+            exit 0
           fi
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            echo "::warning::STRIPE_LIVE_SECRET_KEY is not visible to this run — the contract suite will skip itself. Expected on a fork PR, and on a Dependabot PR (those read the Dependabot secret store, not repository secrets). The push-to-main run covers the merge."
+            exit 0
+          fi
+          echo "::error::STRIPE_LIVE_SECRET_KEY is empty on a ${EVENT_NAME} run, where repository secrets ARE available — the secret is missing, and the contract suite would skip itself while reporting green."
+          exit 1
         env:
+          EVENT_NAME: ${{ github.event_name }}
           STRIPE_LIVE_SECRET_KEY: ${{ secrets.STRIPE_LIVE_SECRET_KEY }}
 
       - name: Run Stripe live contract suite
