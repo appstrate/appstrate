@@ -114,11 +114,19 @@ interface DiscoverTarget {
   apiKey: string;
 }
 
-/** Enumeration never spends a subscription token (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). */
-function assertApiKeyProvider(cfg: ModelProviderDefinition, param: string): void {
-  if (cfg.authMode !== "api_key") {
+/**
+ * Enumeration never spends a subscription token
+ * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). The declaration that keeps
+ * a credential off the listing path is `modelDiscovery: { mode: "static" }` —
+ * the same predicate `discoverAvailableModels` branches on — not the auth mode:
+ * the registry requires every oauth2 provider to declare it at boot
+ * (`assertSubscriptionNeverEnumerated`), and an api-key provider that declares
+ * it is asking for the same treatment.
+ */
+function assertEnumerableProvider(cfg: ModelProviderDefinition, param: string): void {
+  if (cfg.modelDiscovery?.mode === "static") {
     throw invalidRequest(
-      `Provider ${cfg.providerId} authenticates with OAuth; its models are not enumerated`,
+      `Provider ${cfg.providerId} declares a static model list; its endpoint is not enumerated`,
       param,
     );
   }
@@ -148,7 +156,7 @@ async function resolveDiscoverTarget(
     if (!creds) throw notFound("Model provider credential not found");
     const cfg = getModelProvider(creds.providerId);
     if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credential_id");
-    assertApiKeyProvider(cfg, "credential_id");
+    assertEnumerableProvider(cfg, "credential_id");
     return {
       providerId: creds.providerId,
       apiShape: creds.apiShape,
@@ -169,7 +177,7 @@ async function resolveDiscoverTarget(
 
   const cfg = getModelProvider(body.provider_id);
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.provider_id}`, "provider_id");
-  assertApiKeyProvider(cfg, "provider_id");
+  assertEnumerableProvider(cfg, "provider_id");
   if (body.base_url_override !== undefined && !cfg.baseUrlOverridable) {
     throw invalidRequest(
       `Provider ${cfg.providerId} does not accept a base URL override`,
