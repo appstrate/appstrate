@@ -26,7 +26,7 @@ import {
   requireCorePermission,
   enterSpaceContext,
 } from "@appstrate/core/permissions";
-import { apiKeySpaceScopeGuard } from "../../middleware/guards.ts";
+import { pinnedSpaceScopeGuard } from "../../middleware/guards.ts";
 import { notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -666,7 +666,7 @@ export function createOidcRouter() {
    * one action by design — no role wants to read a space's mail relay without
    * administering it.
    *
-   * `apiKeySpaceScopeGuard` runs first: an API key's membership is resolved
+   * `pinnedSpaceScopeGuard` runs first: an API key's membership is resolved
    * from its CREATOR, so without it a key bound to space A whose creator
    * administers space B would reach B through the path param.
    */
@@ -675,9 +675,9 @@ export function createOidcRouter() {
     return next();
   };
 
-  router.use("/api/spaces/:id/smtp-config", apiKeySpaceScopeGuard, enterParamSpace);
-  router.use("/api/spaces/:id/smtp-config/*", apiKeySpaceScopeGuard, enterParamSpace);
-  router.use("/api/spaces/:id/social-providers/*", apiKeySpaceScopeGuard, enterParamSpace);
+  router.use("/api/spaces/:id/smtp-config", pinnedSpaceScopeGuard, enterParamSpace);
+  router.use("/api/spaces/:id/smtp-config/*", pinnedSpaceScopeGuard, enterParamSpace);
+  router.use("/api/spaces/:id/social-providers/*", pinnedSpaceScopeGuard, enterParamSpace);
 
   // ── Admin: per-space SMTP configuration ─────────────────────────────
   //
