@@ -8,6 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A skill is a directory now, and the editor writes it.** The skill editor's
+  `SKILL.md` tab becomes **Fichiers**: an editable tree on the left, an editor
+  or a binary card on the right. New file, import, rename, delete and replace
+  land as they happen; typing is buffered and flushed by _Enregistrer_ as one
+  batch, alongside the manifest. Until now a file other than `SKILL.md` could
+  only reach a package by re-importing the whole archive, and no route could
+  rename or delete one at all — the ancillary scripts, references and assets a
+  skill is made of were write-once.
+
+  The write path behind it is **`PATCH /api/packages/{scope}/{name}/files`**,
+  one atomic batch of `write` / `delete` / `move` operations applied in order
+  against the whole draft tree, answering the same index the `GET` returns. It
+  is a **conditional write**: `If-Match` carrying the index `ETag` is
+  **required** (`428` without it, `412` when the tree moved since that read), so
+  two tabs editing one package get a message instead of one silently erasing
+  the other. `*` is accepted for scripted callers that mean "overwrite whatever
+  is there".
+
+  What it refuses. `manifest.json` is not writable, movable or deletable here —
+  the manifest is authored through the package `PUT` and validated there.
+  `SKILL.md` (`prompt.md` for an agent) can be written but never moved or
+  deleted, and the result still has to pass the frontmatter gate every other
+  write path runs. A `move` never overwrites: an occupied destination is
+  refused rather than silently taking the target's place. A file may not shadow
+  a directory nor a directory a file, and archive-unsafe paths (`..`, an empty
+  segment, a backslash, `__MACOSX/`) are rejected rather than dropped. Ceilings:
+  200 operations per request, 1 MiB per written file, and a resulting tree of at
+  most 50 MB and 10 000 entries — a bigger binary still goes in by importing a
+  ZIP. Enabled for **agents and skills only**; integrations and MCP servers
+  carry an executable bundle whose invariants the archive parser owns, and a
+  `PATCH` on one is refused.
+
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for
   outside collaborators. Every space now carries a **visibility** (`open`,

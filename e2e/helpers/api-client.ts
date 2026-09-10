@@ -17,7 +17,12 @@ export interface ApiClient {
   get(path: string): Promise<APIResponse>;
   post(path: string, data?: unknown): Promise<APIResponse>;
   put(path: string, data?: unknown): Promise<APIResponse>;
-  patch(path: string, data?: unknown): Promise<APIResponse>;
+  /**
+   * `extraHeaders` is how a spec sends a conditional write: `PATCH
+   * .../files` demands `If-Match`, and that validator is a per-request value
+   * the client cannot hold on the caller's behalf.
+   */
+  patch(path: string, data?: unknown, extraHeaders?: Record<string, string>): Promise<APIResponse>;
   delete(path: string): Promise<APIResponse>;
   /** Create a new client with a different spaceId (same auth + org) */
   withSpace(spaceId: string): ApiClient;
@@ -49,9 +54,9 @@ export function createApiClient(request: APIRequestContext, options: ApiClientOp
         data,
       });
     },
-    patch(path: string, data?: unknown) {
+    patch(path: string, data?: unknown, extraHeaders?: Record<string, string>) {
       return request.patch(`/api${path}`, {
-        headers: headers({ "Content-Type": "application/json" }),
+        headers: headers({ "Content-Type": "application/json", ...extraHeaders }),
         data,
       });
     },
