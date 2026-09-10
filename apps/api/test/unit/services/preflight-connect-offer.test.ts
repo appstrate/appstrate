@@ -217,6 +217,52 @@ describe("attachConnectOffers", () => {
     expect(item).not.toBe(input);
   });
 
+  it("mints nothing when the relayed scopes are outside the auth's catalog", async () => {
+    // The mint is the security boundary: `/connect/start` replays these signed
+    // claims and re-validates nothing, so it must not trust `required_scopes`.
+    // On the inline-run surface that value is derived from a caller-supplied
+    // manifest selection.
+    const catalogued = authManifest("oauth2") as unknown as {
+      auths: { primary: Record<string, unknown> };
+    };
+    catalogued.auths.primary.scope_catalog = [{ value: "mail.read", label: "Read" }];
+    const [item] = await attachConnectOffers({
+      errors: [notConnected()],
+      scope: SCOPE,
+      actor: ACTOR,
+      policy: CONNECT,
+      manifestCache: manifestCache({
+        [INTEGRATION]: catalogued as unknown as IntegrationManifest,
+      }),
+    });
+    // `mail.send` is not declared → the whole item stays bare, relay fields and all.
+    expect(item!.connect_url).toBeUndefined();
+    expect(item!.expires_at).toBeUndefined();
+    expect(item!.package_id).toBeUndefined();
+  });
+
+  it("mints when every relayed scope IS in the catalog", async () => {
+    // Discriminating control for the case above: the catalog is what refuses,
+    // not its mere presence.
+    const catalogued = authManifest("oauth2") as unknown as {
+      auths: { primary: Record<string, unknown> };
+    };
+    catalogued.auths.primary.scope_catalog = [
+      { value: "mail.read", label: "Read" },
+      { value: "mail.send", label: "Send" },
+    ];
+    const [item] = await attachConnectOffers({
+      errors: [notConnected()],
+      scope: SCOPE,
+      actor: ACTOR,
+      policy: CONNECT,
+      manifestCache: manifestCache({
+        [INTEGRATION]: catalogued as unknown as IntegrationManifest,
+      }),
+    });
+    expect(item!.connect_url).toStartWith("http");
+  });
+
   it("carries the connection id on an owned insufficient_scopes upgrade", async () => {
     const [item] = await attachConnectOffers({
       errors: [underScoped(true)],

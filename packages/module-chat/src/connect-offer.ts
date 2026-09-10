@@ -225,7 +225,7 @@ export function splitJsonText(text: string): { text: string; offers: ConnectOffe
  * `connect_url`. Each splitter already dedupes within its own payload; this is
  * the cross-source merge `mcpResultToPi` needs across a result's text blocks.
  */
-export function mergeConnectOffers(...lists: ConnectOffer[][]): ConnectOffer[] {
+export function mergeConnectOffers(lists: readonly ConnectOffer[][]): ConnectOffer[] {
   const seen = new Set<string>();
   const out: ConnectOffer[] = [];
   for (const list of lists) {

@@ -1294,9 +1294,9 @@ describe("scopesContributedByTools / requiredScopesForAgent", () => {
         manifest: m,
         authKey: "oauth",
         agentTools: ["read_tool"],
-        agentScopes: ["extra"],
+        agentScopes: ["write:org"],
       }).sort(),
-    ).toEqual(["extra", "read:org"].sort());
+    ).toEqual(["read:org", "write:org"].sort());
   });
 
   it('requiredScopesForAgent returns the auth\'s default_scopes when agentTools is "*"', () => {
@@ -1340,6 +1340,116 @@ describe("scopesContributedByTools / requiredScopesForAgent", () => {
         agentScopes: ["extra"],
       }).sort(),
     ).toEqual(["extra", "read", "write"]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// requiredScopesForAgent — per-auth catalog filter
+//
+// The agent's `scopes` selection names no auth and is validated at publish
+// against the UNION of every auth's catalog (`getAvailableScopes`), while the
+// connect kickoff is per-auth. Relaying a sibling auth's scope as this auth's
+// `required_scopes` made the kickoff reject the platform's own value.
+// ─────────────────────────────────────────────
+
+describe("requiredScopesForAgent — per-auth scope_catalog", () => {
+  /** Two oauth2 auths, each advertising a catalog the other does not. */
+  function twoAuthManifest(catalogOnA = true): IntegrationManifest {
+    const oauth = {
+      type: "oauth2",
+      issuer: "https://accounts.google.com",
+      authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      token_endpoint: "https://oauth2.googleapis.com/token",
+      authorized_uris: ["https://gmail.googleapis.com/**"],
+      delivery: {
+        http: {
+          in: "header",
+          name: "Authorization",
+          prefix: "Bearer ",
+          value: "{$credential.access_token}",
+        },
+      },
+    };
+    return parse(
+      baseManifest({
+        tools_policy: { read_tool: { required_scopes: { a: ["a:read"], b: ["b:read"] } } },
+        auths: {
+          a: {
+            ...oauth,
+            ...(catalogOnA ? { scope_catalog: [{ value: "a:read", label: "A read" }] } : {}),
+          },
+          b: {
+            ...oauth,
+            scope_catalog: [
+              { value: "b:read", label: "B read" },
+              { value: "b:write", label: "B write" },
+            ],
+          },
+        },
+      }),
+    );
+  }
+
+  it("drops an agent scope declared only by the SIBLING auth's catalog", () => {
+    expect(
+      requiredScopesForAgent({
+        manifest: twoAuthManifest(),
+        authKey: "a",
+        agentTools: [],
+        agentScopes: ["b:write"],
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps an agent scope the target auth's own catalog declares", () => {
+    expect(
+      requiredScopesForAgent({
+        manifest: twoAuthManifest(),
+        authKey: "a",
+        agentTools: [],
+        agentScopes: ["a:read"],
+      }),
+    ).toEqual(["a:read"]);
+  });
+
+  it("keeps everything when the target auth declares no catalog", () => {
+    // No closed set to filter against — the IdP arbitrates at consent time.
+    expect(
+      requiredScopesForAgent({
+        manifest: twoAuthManifest(false),
+        authKey: "a",
+        agentTools: [],
+        agentScopes: ["b:write", "anything"],
+      }).sort(),
+    ).toEqual(["anything", "b:write"]);
+  });
+
+  it("leaves tool-contributed scopes alone — they are per-auth already", () => {
+    // `tools_policy.read_tool.required_scopes.a` is `a:read` BY CONSTRUCTION,
+    // so no catalog filter applies to it (here it happens to be in the catalog;
+    // the point is that the tool map is keyed by auth and the selection is not).
+    expect(
+      requiredScopesForAgent({
+        manifest: twoAuthManifest(),
+        authKey: "b",
+        agentTools: ["read_tool"],
+        agentScopes: undefined,
+      }),
+    ).toEqual(["b:read"]);
+  });
+
+  it("missingScopesForConnection inherits the filter", () => {
+    // A connection on auth `a` is not under-scoped for a scope only `b`
+    // advertises — nothing could ever grant it there.
+    expect(
+      missingScopesForConnection({
+        manifest: twoAuthManifest(),
+        authKey: "a",
+        granted: ["a:read"],
+        agentTools: [],
+        agentScopes: ["b:write"],
+      }),
+    ).toEqual([]);
   });
 });
 

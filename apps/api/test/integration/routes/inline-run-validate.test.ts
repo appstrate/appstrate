@@ -13,10 +13,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { installPackage } from "../../../src/services/space-packages.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -278,6 +280,154 @@ describe("POST /api/runs/inline/validate", () => {
       expect(await shadowCount()).toBe(0);
       const res = await post({ manifest, prompt: "do something" });
       expect(res.status).toBe(200);
+      expect(await shadowCount()).toBe(0);
+    });
+  });
+
+  // ─── Integration tool/scope selections (#1207) ───────────
+  //
+  // The inline surface is the ONE place an agent manifest arrives in the
+  // request body, so it is the one place `integrations_configuration[id]
+  // .{tools,scopes}` was never checked against the integration's catalog —
+  // publish and import both run `validateAgentIntegrationSelections`. That is a
+  // security boundary, not just legibility: the readiness gate derives an
+  // item's `required_scopes` from these selections and the connect-offer relay
+  // signs a consent request from them.
+  describe("integrations_configuration subset gate", () => {
+    const INTEGRATION = "@inlineorg/scoped-svc";
+
+    function integrationManifest() {
+      return localIntegrationManifest({
+        name: INTEGRATION,
+        serverName: `${INTEGRATION}-server`,
+        version: "1.0.0",
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationEndpoint: "https://provider.example.com/authorize",
+            tokenEndpoint: "https://provider.example.com/token",
+            defaultScopes: ["base"],
+            scopeCatalog: [
+              { value: "base", label: "Base" },
+              { value: "search.read", label: "Search" },
+            ],
+          },
+        },
+        tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+      });
+    }
+
+    async function seedIntegration() {
+      const manifest = integrationManifest() as unknown as Record<string, unknown>;
+      await seedPackage({
+        id: INTEGRATION,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: manifest,
+      });
+      await seedPackageVersion({ packageId: INTEGRATION, version: "1.0.0", manifest });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    }
+
+    function manifestSelecting(selection: Record<string, unknown>) {
+      return {
+        ...validManifest(),
+        dependencies: { skills: {}, integrations: { [INTEGRATION]: "^1.0.0" } },
+        integrations_configuration: { [INTEGRATION]: selection },
+      };
+    }
+
+    /** The dry-run route — accumulate mode. */
+    async function validate(manifest: unknown) {
+      return post({ manifest, prompt: "do something" });
+    }
+
+    /** The launch route — fail-fast mode, where a bad selection must not run. */
+    async function launch(manifest: unknown) {
+      return app.request("/api/runs/inline", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ manifest, prompt: "do something" }),
+      });
+    }
+
+    it("refuses a tool the integration does not expose, on BOTH routes", async () => {
+      await seedIntegration();
+      for (const res of [
+        await validate(manifestSelecting({ tools: ["exfiltrate"] })),
+        await launch(manifestSelecting({ tools: ["exfiltrate"] })),
+      ]) {
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as {
+          code?: string;
+          errors?: { field: string; code: string }[];
+        };
+        expect(body.code).toBe("validation_failed");
+        const err = body.errors?.find((e) => e.code === "unknown_tool");
+        expect(err?.field).toBe(`integrations_configuration.${INTEGRATION}.tools`);
+      }
+    });
+
+    it("refuses a scope outside the integration's scope_catalog", async () => {
+      // The one that matters most: `scopes` is what the readiness 412 relays as
+      // `required_scopes`, and what a minted connect link would ask consent for.
+      await seedIntegration();
+      const res = await validate(manifestSelecting({ tools: ["search"], scopes: ["mail.send"] }));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { field: string; code: string }[] };
+      const err = body.errors?.find((e) => e.code === "scope_not_in_catalog");
+      expect(err?.field).toBe(`integrations_configuration.${INTEGRATION}.scopes`);
+    });
+
+    it("refuses the wildcard when the integration did not authorize it", async () => {
+      await seedIntegration();
+      const res = await validate(manifestSelecting({ tools: "*" }));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { field: string; code: string }[] };
+      const err = body.errors?.find((e) => e.code === "wildcard_not_authorized");
+      expect(err?.field).toBe(`integrations_configuration.${INTEGRATION}.tools`);
+    });
+
+    it("accumulates alongside the other stages on /validate", async () => {
+      // The whole point of the dry-run route: one round trip, every problem.
+      await seedIntegration();
+      const manifest = {
+        ...manifestSelecting({ tools: ["exfiltrate"], scopes: ["mail.send"] }),
+        dependencies: {
+          skills: { "@fake/no-skill": "^1.0.0" },
+          integrations: { [INTEGRATION]: "^1.0.0" },
+        },
+      };
+      const res = await validate(manifest);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      const codes = new Set(body.errors?.map((e) => e.code));
+      expect(codes.has("unknown_tool")).toBe(true);
+      expect(codes.has("scope_not_in_catalog")).toBe(true);
+      expect(codes.has("missing_skill")).toBe(true);
+    });
+
+    it("raises no selection error when the catalog declares everything picked", async () => {
+      // Discriminating control: the gate refuses what is OUTSIDE the catalog,
+      // not every manifest that names an integration. What remains is the
+      // readiness verdict — no connection was seeded — and its `required_scopes`
+      // is the selection relayed verbatim, which is exactly the value the
+      // connect kickoff will accept.
+      await seedIntegration();
+      const res = await validate(manifestSelecting({ tools: ["search"], scopes: ["search.read"] }));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        errors?: { code: string; required_scopes?: string[] }[];
+      };
+      expect(body.errors?.map((e) => e.code)).toEqual(["not_connected"]);
+      expect(body.errors?.[0]?.required_scopes).toEqual(["search.read"]);
+    });
+
+    it("does NOT insert a shadow row when the selection is refused", async () => {
+      await seedIntegration();
+      expect(await shadowCount()).toBe(0);
+      expect((await launch(manifestSelecting({ tools: ["exfiltrate"] }))).status).toBe(400);
       expect(await shadowCount()).toBe(0);
     });
   });

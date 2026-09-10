@@ -5,6 +5,7 @@
  *
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
+ *   1b. Integration tool/scope selections against each integration's catalog
  *   2. input against the manifest's own AJV schema
  *   3. Agent readiness (prompt, skills, tools, integrations)
  *
@@ -39,6 +40,7 @@ import { logger } from "../lib/logger.ts";
 import { validateInput } from "./schema.ts";
 import { resolveEffectiveInput } from "./input-resolution.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
+import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
@@ -126,6 +128,31 @@ export async function runInlinePreflight(params: {
   const manifest = validated.valid ? (validated.manifest as AgentManifest) : undefined;
   if (manifest) await params.authorizeDependencies(manifest);
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
+
+  // ----- 1b. Integration tool/scope selections against each catalog -----
+  // The SAME gate publish and import run (`routes/packages.ts`,
+  // `bundle-import.ts`). Structural validation accepts any string in
+  // `integrations_configuration[id].{tools,scopes}`, so on this surface —
+  // the one where the manifest arrives in the request body — an unknown tool,
+  // a scope outside the integration's `scope_catalog`, or an unauthorized
+  // wildcard reached the run untouched. That is not only a legibility problem:
+  // the readiness gate derives an item's `required_scopes` from these very
+  // selections (`requiredScopesForAgent`), so a caller could name arbitrary
+  // scopes and have the platform relay them as the consent to request.
+  //
+  // `requireCallableTools` stays OFF: it is the freeze-point rule (publish /
+  // import), and an inline agent freezes nothing. The subset checks below are
+  // the whole point here.
+  if (manifest) {
+    const selectionErrors = await validateAgentIntegrationSelections({
+      manifest: manifest as unknown as Record<string, unknown>,
+      orgId,
+    });
+    if (selectionErrors.length > 0) {
+      if (mode === "fail-fast") throw validationFailed(selectionErrors);
+      push(selectionErrors);
+    }
+  }
 
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;

@@ -6405,6 +6405,8 @@ export interface components {
         AppstrateVersion: string;
         /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+        ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
         /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
@@ -7397,6 +7399,8 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                "x-appstrate-connect-offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18863,6 +18867,8 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                "x-appstrate-connect-offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
             cookie?: never;

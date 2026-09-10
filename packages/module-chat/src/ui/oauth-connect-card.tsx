@@ -107,12 +107,19 @@ export function OAuthConnectCard({
   authUrl,
   state,
   packageId,
+  toolCallId,
   errorText,
 }: {
   /** Absent while the initiate call is still streaming — renders "Préparation…". */
   authUrl?: string;
   state?: string;
   packageId?: string;
+  /**
+   * Tool call this card was rendered from. Several cards share one when a
+   * run-kickoff 412 lists several integrations to connect; it is the second
+   * axis of the resume claim (see {@link claimResume}).
+   */
+  toolCallId?: string;
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
 }) {
@@ -173,10 +180,11 @@ export function OAuthConnectCard({
         return;
       }
       resumed.current = true;
-      // Another card already appended the resume for this package (same
-      // completion burst) — show the connected state without a second append,
-      // which would fork the conversation into two concurrent turns.
-      if (!claimResume(packageId)) {
+      // Another card already appended the resume for this burst — same package,
+      // or a sibling card from the same tool call — so show the connected state
+      // without a second append, which would fork the conversation into two
+      // concurrent turns.
+      if (!claimResume({ packageId, toolCallId })) {
         setPhase("connected");
         return;
       }
@@ -196,7 +204,7 @@ export function OAuthConnectCard({
         ],
       });
     },
-    [aui, label, meta, packageId],
+    [aui, label, meta, packageId, toolCallId],
   );
 
   // Listen from mount until the connection lands — NOT only after the user

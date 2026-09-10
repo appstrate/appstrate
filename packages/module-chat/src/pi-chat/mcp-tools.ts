@@ -95,7 +95,7 @@ export function mcpResultToPi(result: {
     }
     return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
   });
-  let offers = mergeConnectOffers(...blockOffers);
+  let offers = mergeConnectOffers(blockOffers);
   // `details` is Pi's in-memory UI channel (never serialized to the model,
   // stripped before persistence) — redacted all the same, so the live URLs
   // exist only in the typed `connectOffers` field the connect cards read.

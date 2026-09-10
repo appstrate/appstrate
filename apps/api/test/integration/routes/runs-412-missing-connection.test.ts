@@ -33,8 +33,21 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedMcpServer, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import {
+  seedAgent,
+  seedMcpServer,
+  seedPackage,
+  seedPackageVersion,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -473,6 +486,49 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.code).toBe("integration_not_active");
   });
 
+  it("reports an inactive integration ONCE — no downstream not_connected", async () => {
+    // The install/enable gate is documented as failing fast "rather than a
+    // downstream not_connected", and it now does: the connection resolver
+    // applies no active filter of its own, so an inactive integration used to
+    // collect BOTH errors — and a caller opted into the connect-offer relay got
+    // a live connect link for an integration nobody can use in this space.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    // No connection for the actor: without the skip this is exactly the shape
+    // that produced a second `not_connected` on the same field.
+    await db
+      .update(spacePackages)
+      .set({ enabled: false })
+      .where(
+        and(
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, INTEGRATION),
+        ),
+      );
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(ctx),
+        "Content-Type": "application/json",
+        [RUN_CONNECT_OFFERS_HEADER]: "1",
+      },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    const forIntegration = body.errors!.filter((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(forIntegration.map((e) => e.code)).toEqual(["integration_not_active"]);
+    expect(JSON.stringify(body)).not.toContain("connect/start");
+  });
+
   it("returns 412 integration_not_found when a declared integration package does not exist (#737)", async () => {
     // The agent declares `@runorg/svc` but no such package was ever seeded.
     // resolveOne would `fetchIntegrationManifest` → `not_found` → skip silently
@@ -819,6 +875,77 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       expect(err.package_id).toBeUndefined();
       // The relay phase 1 shipped is untouched either way.
       expect(err.auth_key).toBe("primary");
+    });
+
+    it("ignores a header value other than `1` — the opt-in is exact", async () => {
+      // A capability switch must be asked for in the documented spelling; a
+      // proxy's `0` or an echoed default must not turn it on by being non-empty.
+      await seedOauthIntegration();
+      for (const value of ["0", "true", "yes"]) {
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: value });
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.connect_url, `header value ${value} opted in`).toBeUndefined();
+      }
+    });
+
+    // The link is a bearer capability that connects AS the actor, so the actor
+    // must be one that could have minted it by hand — i.e. hold
+    // `integrations:connect`, the permission guarding the connect routes.
+    describe("permission gate at the request boundary", () => {
+      /** A member of `ctx`'s org holding exactly `permissions` in the space. */
+      async function memberHolding(permissions: string[]): Promise<TestContext> {
+        const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
+        const member = await createTestUser();
+        await addOrgMember(ctx.orgId, member.id, "member");
+        await seedSpaceMember({
+          spaceId: ctx.defaultSpaceId,
+          userId: member.id,
+          presetRole: null,
+          customRoleId: role.id,
+        });
+        return {
+          ...ctx,
+          user: { id: member.id, email: member.email, name: member.name },
+          cookie: member.cookie,
+        };
+      }
+
+      async function launchAs(actor: TestContext): Promise<ProblemDetails> {
+        const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+          method: "POST",
+          headers: {
+            ...authHeaders(actor),
+            "Content-Type": "application/json",
+            [RUN_CONNECT_OFFERS_HEADER]: "1",
+          },
+          body: JSON.stringify({}),
+        });
+        expect(res.status).toBe(412);
+        return (await res.json()) as ProblemDetails;
+      }
+
+      it("mints nothing for an actor without integrations:connect", async () => {
+        await seedOauthIntegration();
+        const body = await launchAs(await memberHolding(["agents:run"]));
+
+        // Not merely absent from the item we look at — absent from the whole
+        // envelope, so no other item smuggles one in.
+        expect(JSON.stringify(body)).not.toContain("connect/start");
+        for (const err of body.errors ?? []) {
+          expect(err.connect_url).toBeUndefined();
+          expect(err.expires_at).toBeUndefined();
+        }
+      });
+
+      it("mints for the same actor once it holds integrations:connect", async () => {
+        // Discriminating control: everything else about the request is equal,
+        // so the difference above is the permission and not the fixture.
+        await seedOauthIntegration();
+        const body = await launchAs(await memberHolding(["agents:run", "integrations:connect"]));
+
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.connect_url).toStartWith("http");
+      });
     });
 
     it("mints nothing for a non-oauth2 auth even with the header", async () => {

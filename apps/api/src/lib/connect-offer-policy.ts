@@ -31,12 +31,24 @@ export interface ConnectOfferPolicy {
 }
 
 /**
+ * The one header value that opts in. Exact, not truthy: a capability-granting
+ * switch must be asked for in the documented spelling, so a proxy's `0`, a
+ * `false`, or an echoed default cannot turn it on by being non-empty.
+ */
+const OPT_IN_VALUE = "1";
+
+/**
  * Read the caller's connect-offer policy. Returns `null` when the opt-in header
- * is absent — the overwhelmingly common case, and the one that must cost
- * nothing downstream.
+ * is absent or carries any other value — the overwhelmingly common case, and
+ * the one that must cost nothing downstream.
+ *
+ * `canConfigure` duplicates the one-line read `canConfigureIntegrations` does in
+ * `routes/integrations.ts`; that helper is private to the route module and this
+ * one lives in `lib/`, so importing it would invert the layering (lib → routes)
+ * to save a `permissions.has(...)`.
  */
 export function connectOfferPolicyFromRequest(c: Context<AppEnv>): ConnectOfferPolicy | null {
-  if (!c.req.header(RUN_CONNECT_OFFERS_HEADER)) return null;
+  if (c.req.header(RUN_CONNECT_OFFERS_HEADER) !== OPT_IN_VALUE) return null;
   const permissions = c.get("permissions");
   return {
     canConnect: permissions?.has("integrations:connect") ?? false,

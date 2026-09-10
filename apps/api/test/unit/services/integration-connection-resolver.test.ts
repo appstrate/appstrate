@@ -1166,6 +1166,27 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(field).not.toHaveProperty("required_scopes");
   });
 
+  it("a pin naming an auth the manifest dropped relays neither field", () => {
+    // The pin is agent-side and the integration manifest moved under it. With
+    // no connection at all the verdict is `not_connected` (auth_key_mismatch
+    // needs an existing connection to mismatch), and echoing the stale pin
+    // would name a connect target that cannot exist — `/auths/{key}/connect/…`
+    // 404s. Neither field means "let the user choose", which is the truth here.
+    const result = resolveConnections({
+      requirements: [reqPinned(scopedManifest(), "retired_auth")],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBeUndefined();
+    expect(err.requiredScopes).toBeUndefined();
+    const field = translateResolutionError(err);
+    expect(field).not.toHaveProperty("auth_key");
+    expect(field).not.toHaveProperty("required_scopes");
+  });
+
   it("a pinned non-oauth2 auth names the auth but carries no scopes", () => {
     const result = resolveConnections({
       requirements: [reqPinned(apiKeyOnlyManifest(), "pat")],

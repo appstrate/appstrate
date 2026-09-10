@@ -467,9 +467,17 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
  * (AFPS §4.1), else the integration's single `oauth2` auth. `null` when the
  * manifest declares several oauth2 auths (or none) and the dep pins nothing —
  * the resolver refuses to guess and the caller lets the user choose.
+ *
+ * A pin naming an auth the manifest no longer declares is `null` too, not the
+ * stale string: the pin is agent-side and the manifest moved under it, so
+ * relaying it would name a connect target that cannot exist and the kickoff
+ * would 404 on `/auths/{authKey}/…`. The item then carries neither `auth_key`
+ * nor `required_scopes`, which is the "let the user choose" shape.
  */
 function connectTargetAuthKey(args: ResolveOneArgs): string | null {
-  if (args.requiredAuthKey !== undefined) return args.requiredAuthKey;
+  if (args.requiredAuthKey !== undefined) {
+    return args.manifest.auths?.[args.requiredAuthKey] ? args.requiredAuthKey : null;
+  }
   const oauthKeys = Object.entries(args.manifest.auths ?? {})
     .filter(([, auth]) => auth.type === "oauth2")
     .map(([key]) => key);
@@ -607,6 +615,19 @@ interface ResolveConnectionsForRunInput {
   /** Resolve inert integrations too — see {@link ResolveConnectionsInput.includeInert}. */
   includeInert?: boolean;
   /**
+   * Declared integrations to leave out of the resolution entirely, because the
+   * caller already refused them for a more precise reason.
+   *
+   * The readiness gate passes the ids it flagged `integration_not_active`. An
+   * integration that is not installed/enabled in the space has no business also
+   * producing a `not_connected` — the run is refused either way, but the second
+   * error names a remedy (connect your account) that does not apply and, for a
+   * caller opted into the connect-offer relay, gets a live link minted for it.
+   * Manifest-unhealthy ids need no entry here: `buildRequirement` already
+   * returns `null` for them.
+   */
+  skipIntegrationIds?: ReadonlySet<string>;
+  /**
    * Per-call-graph memo for integration manifest fetches — threaded from the
    * run kickoff path so readiness, the snapshot pass, and the spawn resolver
    * share one SELECT + Zod parse per integration. See
@@ -618,7 +639,10 @@ interface ResolveConnectionsForRunInput {
 export async function resolveConnectionsForRun(
   input: ResolveConnectionsForRunInput,
 ): Promise<ConnectionResolutionResult> {
-  const entries = parseManifestIntegrations(input.agentManifest);
+  const declared = parseManifestIntegrations(input.agentManifest);
+  const entries = input.skipIntegrationIds
+    ? declared.filter((entry) => !input.skipIntegrationIds!.has(entry.id))
+    : declared;
   if (entries.length === 0) return { resolved: {}, errors: [] };
 
   // Fetch integration manifests in parallel — most agents declare 1-3.

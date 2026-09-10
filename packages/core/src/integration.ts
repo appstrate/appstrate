@@ -880,6 +880,19 @@ export function connectableAuthKeysForAgent(
  * the integration's `allow_undeclared_tools: true`), per-tool inference is
  * bypassed and the selected auth's `default_scopes` (§7.4) is used as the
  * baseline, still unioned with any explicit `agentScopes`.
+ *
+ * `agentScopes` are filtered to what `authKey`'s own `scope_catalog` declares,
+ * because the two ends of that selection are validated against DIFFERENT sets.
+ * An agent's `integrations_configuration[id].scopes` names no auth, so
+ * {@link validateAgentIntegrationScopes} accepts anything in the UNION of every
+ * auth's catalog ({@link getAvailableScopes}); the connect kickoff, in contrast,
+ * is per-auth and refuses a scope the TARGET auth does not declare. Unioning a
+ * sibling auth's scope in here relayed it as `required_scopes` on the 412, and
+ * the kickoff then rejected the platform's own value — a loop nothing in the
+ * agent could break. Tool-contributed scopes need no such filter: they are read
+ * out of `tools_policy[tool].required_scopes[authKey]`, per-auth by
+ * construction. An auth declaring no catalog declares no closed set, so nothing
+ * is filtered and the IdP arbitrates at consent time.
  */
 export function requiredScopesForAgent(input: {
   manifest: IntegrationManifest;
@@ -887,7 +900,7 @@ export function requiredScopesForAgent(input: {
   agentTools: readonly string[] | "*" | undefined;
   agentScopes: readonly string[] | undefined;
 }): string[] {
-  const viaExplicit = input.agentScopes ? [...input.agentScopes] : [];
+  const viaExplicit = scopesDeclaredByAuth(input.manifest, input.authKey, input.agentScopes);
   if (isToolsWildcard(input.agentTools)) {
     const defaultScopes = input.manifest.auths?.[input.authKey]?.default_scopes ?? [];
     return [...new Set([...defaultScopes, ...viaExplicit])];
@@ -898,6 +911,23 @@ export function requiredScopesForAgent(input: {
     agentTools: input.agentTools,
   });
   return [...new Set([...viaTools, ...viaExplicit])];
+}
+
+/**
+ * The subset of `scopes` that `authKey`'s `scope_catalog` declares — every
+ * entry when the auth declares no catalog at all (no closed set to filter
+ * against). See {@link requiredScopesForAgent} for why the filter exists.
+ */
+function scopesDeclaredByAuth(
+  manifest: IntegrationManifest,
+  authKey: string,
+  scopes: readonly string[] | undefined,
+): string[] {
+  if (!scopes || scopes.length === 0) return [];
+  const catalog = manifest.auths?.[authKey]?.scope_catalog;
+  if (!catalog || catalog.length === 0) return [...scopes];
+  const declared = new Set(catalog.map((entry) => entry.value));
+  return scopes.filter((s) => declared.has(s));
 }
 
 /**

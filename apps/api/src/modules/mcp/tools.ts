@@ -999,10 +999,17 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       headers: dispatchHeaders,
       fetch: dispatchFetch,
       signal,
-      // The MCP client is a human's own client (the chat surface, an IDE): a
-      // `connect_url` on the 412 is the link that human opens to connect their
-      // own account, which is exactly what the tool's failure text tells it to
-      // do rather than calling anything further.
+      // This is the EXTERNAL MCP surface — a human's own client (an IDE, a
+      // desktop agent) driven by a model that reads the tool result. The chat
+      // does not come through here: it registers its own Pi tool
+      // (`module-chat/src/pi-chat/mcp-tools.ts`) and renders the connect card
+      // itself.
+      //
+      // Opting in anyway is not a new exposure class: the same model already
+      // receives a `connect_url` from `initiateIntegrationConnect` on this very
+      // path. What it changes is that the link arrives WITH the refusal, so the
+      // model hands it to its human instead of guessing which connect kickoff
+      // to call and with which scopes.
       connectOffers: true,
     });
     if (!launched.ok) {

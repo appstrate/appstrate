@@ -26,27 +26,51 @@ export interface AuthOffer {
 /** Payload the connect surfaces broadcast — defined in `@appstrate/core`. */
 export type CompletionDetail = IntegrationConnectCompletion;
 
+/** What a card is: which integration it connects, and which tool call issued it. */
+interface ResumeClaim {
+  packageId?: string;
+  /** Tool call the card was rendered from — several cards can share one. */
+  toolCallId?: string;
+}
+
 /**
- * One resume append per (package, completion) across every card in this tab.
+ * One resume append per completion burst, across every card in this tab.
  *
- * A single completion signal reaches ALL mounted cards, so two cards awaiting
- * the same package — e.g. a retry card issued after an abandoned first
- * attempt — would BOTH append a resume message, forking the conversation into
- * two concurrent turns (each user turn chains onto the last message, but each
- * assistant turn chains onto its own trigger). The first card to complete
- * claims the append; siblings settle for the connected visual. The short TTL
- * only needs to outlive the fan-out burst (all cards fire within ms of one
- * broadcast) while staying well under any legitimate later reconnect in the
- * same conversation.
+ * A resume append starts a turn (each user turn chains onto the last message,
+ * but each assistant turn chains onto its own trigger), so two appends close
+ * together fork the conversation into two concurrent turns. Cards fan out along
+ * two independent axes, and the claim covers BOTH — a card claims only if
+ * neither of its keys is already held:
+ *
+ *  - PACKAGE. One completion signal reaches every mounted card, so two cards
+ *    awaiting the same package — a retry card issued after an abandoned first
+ *    attempt — would both append on the one broadcast.
+ *  - TOOL CALL. A run-kickoff 412 lists every integration still to connect and
+ *    the chat renders one card each (#1207). Those are different packages, so
+ *    the package key does not cover them: the user connects two accounts in a
+ *    row and each card appends its own "continue". The first completion of the
+ *    burst appends; the rest land in the `connected` phase, and the one resumed
+ *    turn re-runs the kickoff, which is what re-checks whether anything is
+ *    still missing.
+ *
+ * The short TTL only needs to outlive one burst while staying well under any
+ * legitimate later reconnect in the same conversation.
  */
 const RESUME_CLAIM_TTL_MS = 30_000;
 const resumeClaims = new Map<string, number>();
 
-export function claimResume(packageId: string | undefined, now = Date.now()): boolean {
-  if (!packageId) return true;
-  const prev = resumeClaims.get(packageId);
-  if (prev !== undefined && now - prev < RESUME_CLAIM_TTL_MS) return false;
-  resumeClaims.set(packageId, now);
+export function claimResume(card: ResumeClaim, now = Date.now()): boolean {
+  const keys: string[] = [];
+  if (card.packageId) keys.push(`pkg:${card.packageId}`);
+  if (card.toolCallId) keys.push(`call:${card.toolCallId}`);
+  // A card that can identify itself on neither axis takes no completion it
+  // could confuse with another card's, so there is nothing to arbitrate.
+  if (keys.length === 0) return true;
+  for (const key of keys) {
+    const prev = resumeClaims.get(key);
+    if (prev !== undefined && now - prev < RESUME_CLAIM_TTL_MS) return false;
+  }
+  for (const key of keys) resumeClaims.set(key, now);
   return true;
 }
 

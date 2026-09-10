@@ -161,6 +161,10 @@ export async function collectAgentReadinessErrors(
   // Batched: one SELECT over `space_packages` for every declared
   // integration instead of N serial single-row queries (run-kickoff hot path).
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
+  // Integrations this gate has already refused, and which the connection
+  // resolution below must therefore not look at a second time — see the
+  // `skipIntegrationIds` note on `resolveConnectionsForRun`.
+  const refusedIntegrations = new Set<string>();
   if (declaredIntegrations.length > 0) {
     // Integration manifest-health gate (#737) — mirrors the manifest drop
     // conditions in `resolveOne` (integration-spawn-resolver.ts): a declared
@@ -197,6 +201,13 @@ export async function collectAgentReadinessErrors(
     // downstream `not_connected`. Integrations already flagged for a manifest
     // failure are skipped here — a missing package is necessarily inactive too,
     // and the manifest error is the more precise cause (no double-report).
+    //
+    // "Fails fast rather than a downstream `not_connected`" is enforced, not
+    // merely ordered: each id flagged here is added to `refusedIntegrations`,
+    // which the resolution below excludes. The resolver applies no active
+    // filter of its own, so without that the same integration produced BOTH
+    // errors — and, for a caller opted into the connect-offer relay, a live
+    // connect link for an integration nobody can use in this space.
     const activeIds = await listActiveIntegrationIds(
       declaredIntegrations.map((entry) => entry.id),
       spaceId,
@@ -204,6 +215,7 @@ export async function collectAgentReadinessErrors(
     for (const entry of declaredIntegrations) {
       if (manifestUnhealthy.has(entry.id)) continue;
       if (!activeIds.has(entry.id)) {
+        refusedIntegrations.add(entry.id);
         errors.push({
           field: `integrations.${entry.id}`,
           code: "integration_not_active",
@@ -235,6 +247,7 @@ export async function collectAgentReadinessErrors(
       ...(runOverrides ? { runOverrides } : {}),
       ...(scheduleOverrides ? { scheduleOverrides } : {}),
       ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+      ...(refusedIntegrations.size > 0 ? { skipIntegrationIds: refusedIntegrations } : {}),
     });
     for (const e of resolution.errors) {
       errors.push(translateResolutionError(e));

@@ -16,15 +16,33 @@
  * reuse cache and no attempt counter here: a link's blast radius is bounded by
  * `CONNECT_SESSION_TTL_MS` and by how fast a human can click.
  *
- * The claims mirror `POST …/auths/{authKey}/connect/session` exactly — same
+ * The claims are the ones `POST …/auths/{authKey}/connect/session` signs — same
  * actor projection, same `scopes` passthrough (the union with the auth's
  * `default_scopes` and what the target connection already granted happens at
  * redemption, in `/connect/start`, for a hand-minted link and this one alike).
+ * Three differences from that route are deliberate, and none of them may be
+ * read as "the route validates something this does not":
+ *
+ *  - `force_account_select` is a caller-supplied body field there; it has no
+ *    caller here, so the claim is simply absent and the provider decides.
+ *  - the manifest comes from `fetchIntegrationManifest` (the readiness pass's
+ *    memo) rather than the route's org-scoped `readIntegrationAuth` →
+ *    `getIntegration`. Safe because the ONLY ids reaching this function are the
+ *    ones readiness just resolved for this org and space: the agent declared
+ *    them, `listActiveIntegrationIds` confirmed each is installed and enabled
+ *    HERE, and the id is what indexes the memo — an id outside the org never
+ *    reaches the mint to be looked up unscoped.
+ *  - the scope check is the same one, applied at a different moment: the route
+ *    runs `assertScopesInAuthCatalog` on `body.scopes`, and this module runs
+ *    `scopesNotInAuthCatalog` on `target.scopes` below. `/connect/start` replays
+ *    signed claims and re-validates nothing, so whichever end mints is the end
+ *    that must check.
  */
 
 import { buildConnectUrl } from "./connect-session.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "../integration-service.ts";
 import { isUserConnectionCreationBlocked } from "../integration-connection-resolver.ts";
+import { scopesNotInAuthCatalog } from "../integration-manifest-helpers.ts";
 import type { ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -112,7 +130,27 @@ export async function attachConnectOffers(params: {
         // a link that opens a blank form is not a remedy the card can present.
         const loaded = await fetchIntegrationManifest(target.integrationId, params.manifestCache);
         if (!loaded.ok) return e;
-        if (loaded.manifest.auths?.[target.authKey]?.type !== "oauth2") return e;
+        const auth = loaded.manifest.auths?.[target.authKey];
+        if (auth?.type !== "oauth2") return e;
+
+        // The mint is the security boundary — `/connect/start` replays these
+        // signed claims and re-validates nothing — so it must not trust
+        // `required_scopes`. That value is derived from the agent manifest's own
+        // `integrations_configuration[id].scopes`, which on the inline-run
+        // surface is caller-supplied; the same catalog check the connect
+        // kickoffs apply to `body.scopes` therefore applies here. A gap means
+        // the selection is wrong upstream (the inline preflight now refuses it
+        // with `scope_not_in_catalog`) — leave the item bare rather than sign a
+        // consent request for scopes this auth never advertised.
+        const undeclared = scopesNotInAuthCatalog(auth, target.scopes);
+        if (undeclared.length > 0) {
+          logger.warn("Connect offer refused: scopes outside the auth's catalog", {
+            integrationId: target.integrationId,
+            authKey: target.authKey,
+            undeclared,
+          });
+          return e;
+        }
 
         // Same carve-out as `assertConnectionCreationAllowed`: an admin may
         // create the shared connection the block exists to force everyone onto.

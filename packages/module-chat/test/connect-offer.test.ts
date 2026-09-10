@@ -142,10 +142,10 @@ describe("splitJsonText", () => {
 describe("mergeConnectOffers", () => {
   it("concatenates in order, keeping the first entry per URL", () => {
     expect(
-      mergeConnectOffers(
+      mergeConnectOffers([
         [{ connect_url: "https://a.example/one", state: "st-1" }],
         [{ connect_url: "https://a.example/one", state: "st-2" }, { connect_url: URL_ }],
-      ),
+      ]),
     ).toEqual([{ connect_url: "https://a.example/one", state: "st-1" }, { connect_url: URL_ }]);
   });
 });

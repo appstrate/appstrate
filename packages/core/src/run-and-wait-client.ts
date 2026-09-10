@@ -83,12 +83,14 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
  * error carries the remedy, so nothing has to be called to obtain it).
  *
  * A minted `connect_url` is a bearer capability that creates a connection AS
- * the calling actor. Set this header ONLY from a caller that renders the
- * connect card itself or hands the link straight to the human who is that
- * actor — never from a caller whose response is read by a model, forwarded to
- * a third party, or logged. Callers that do neither (dashboard, CLI, GitHub
- * Action, scheduler, dry-run validation) must leave it unset and keep driving
- * the connect kickoff themselves.
+ * the calling actor. Set this header ONLY from a caller that either renders the
+ * connect card itself (the chat) or hands the link straight to the human who is
+ * that actor — the external MCP `run_and_wait` tool qualifies, because the model
+ * driving it already receives a `connect_url` from `initiateIntegrationConnect`
+ * on that very same path, so this is not a new exposure class. Never set it from
+ * a caller that logs its responses, persists them, or forwards them to a third
+ * party; the dashboard, the CLI, the GitHub Action, the scheduler and dry-run
+ * validation all leave it unset and keep driving the connect kickoff themselves.
  *
  * Sent on the LAUNCH request only; the poll loop never carries it.
  */

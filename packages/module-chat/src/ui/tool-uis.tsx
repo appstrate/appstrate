@@ -331,6 +331,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
                 authUrl={offer?.authUrl}
                 state={offer?.state}
                 packageId={args?.path_params?.packageId}
+                toolCallId={props.toolCallId}
                 errorText={
                   phase === "error" && !offer
                     ? extractErrorMessage(unwrapResult(result))
@@ -431,6 +432,7 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}
+          toolCallId={props.toolCallId}
         />
       ))}
     </>

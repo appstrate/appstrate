@@ -73,6 +73,17 @@ export const parameters = {
       "“Idempotency” section of the API description).",
     schema: { type: "string", maxLength: 255 },
   },
+  ConnectOffers: {
+    name: "x-appstrate-connect-offers",
+    in: "header" as const,
+    required: false,
+    description:
+      "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable " +
+      "item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` " +
+      "(a single-use bearer link that connects AS the actor). Set only by clients that render the " +
+      "connect card or hand the link to that human.",
+    schema: { type: "string", enum: ["1"] },
+  },
   SseSpaceId: {
     name: "spaceId",
     in: "query" as const,
