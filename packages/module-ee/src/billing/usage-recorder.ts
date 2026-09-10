@@ -407,6 +407,13 @@ export async function billLedgerRows(
   // `unattributed` bucket grows without bound, so a float column's absolute
   // error would grow with it.)
   //
+  // WIDTH: `cost_credits` is `bigint` and both casts below are `::bigint`. The
+  // cumulative grows without bound on the durable `unattributed` bucket, and an
+  // `integer out of range` raised here would abort the CALLER's transaction —
+  // one org's overflowing row would stop the sweep for every tenant. See the
+  // column's note in drizzle/schema.ts. The RETURNING delta comes back as a
+  // string (postgres.js renders int8 as text), hence the `Number()` below.
+  //
   // ROUNDING INVARIANT: exactly ONE rounding rule — half away from zero — is
   // shared by `dollarsToCredits` in src/credits.ts (JS `Math.round`, which is
   // half-away-from-zero for the non-negative dollars we bill) and every `round()`
@@ -429,11 +436,11 @@ export async function billLedgerRows(
         target: [orgUsageRecords.contextType, orgUsageRecords.contextId],
         set: {
           costUsd: sql`${orgUsageRecords.costUsd} + ${dollars}`,
-          costCredits: sql`round((${orgUsageRecords.costUsd} + ${dollars}) * ${CREDITS_PER_DOLLAR})::int`,
+          costCredits: sql`round((${orgUsageRecords.costUsd} + ${dollars}) * ${CREDITS_PER_DOLLAR})::bigint`,
         },
       })
       .returning({
-        deltaCredits: sql<number>`${orgUsageRecords.costCredits} - round((${orgUsageRecords.costUsd} - ${dollars}) * ${CREDITS_PER_DOLLAR})::int`,
+        deltaCredits: sql<number>`${orgUsageRecords.costCredits} - round((${orgUsageRecords.costUsd} - ${dollars}) * ${CREDITS_PER_DOLLAR})::bigint`,
       });
     const deltaCredits = Number(row!.deltaCredits);
     if (deltaCredits > 0) perOrg.set(b.orgId, (perOrg.get(b.orgId) ?? 0) + deltaCredits);
