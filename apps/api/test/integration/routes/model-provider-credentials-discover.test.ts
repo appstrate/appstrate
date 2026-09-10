@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials } from "@appstrate/db/schema";
+import { modelProviderCredentials, auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -36,6 +36,15 @@ const app = getTestApp();
  */
 const PINNED_URL_PROVIDER = "test-discover-pinned-url";
 
+/**
+ * Synthetic api-key provider that declares a static model list. `modelDiscovery:
+ * { mode: "static" }` is what keeps a credential off the listing path — no
+ * shipped provider is in this shape today (both static providers are oauth2),
+ * so only a synthetic one can pin that the gate reads the declaration and not
+ * the auth mode.
+ */
+const STATIC_LIST_PROVIDER = "test-discover-static-list";
+
 function registerPinnedUrlProvider(): void {
   try {
     registerModelProvider({
@@ -48,6 +57,22 @@ function registerPinnedUrlProvider(): void {
       baseUrlOverridable: false,
       authMode: "api_key",
       featuredModels: [],
+    });
+  } catch {
+    // Already registered in this process — the registry rejects duplicates.
+  }
+  try {
+    registerModelProvider({
+      providerId: STATIC_LIST_PROVIDER,
+      displayName: "Test Static List",
+      iconUrl: "openai",
+      description: "Synthetic api-key provider whose served set is declared, not enumerated.",
+      apiShape: "openai-completions",
+      defaultBaseUrl: "https://static.example.test/v1",
+      baseUrlOverridable: true,
+      authMode: "api_key",
+      featuredModels: [],
+      modelDiscovery: { mode: "static" },
     });
   } catch {
     // Already registered in this process — the registry rejects duplicates.
@@ -130,6 +155,37 @@ const stub = Bun.serve({
         return Response.json({
           data: [{ id: "local-llm", max_model_len: 32768 }, { id: "gpt-4o" }],
         });
+      }
+      // An endpoint whose listing is WELL-FORMED and enormous: ~6 MB of valid
+      // JSON, chunked so no `content-length` declares it. Parsing it would
+      // succeed — only a byte budget on the read refuses it.
+      if (req.headers.get("authorization") === "Bearer flood-key") {
+        countRequest("flood");
+        const encoder = new TextEncoder();
+        const padding = "p".repeat(4_096);
+        let sent = 0;
+        let index = 0;
+        return new Response(
+          new ReadableStream({
+            pull(controller) {
+              if (sent === 0) {
+                controller.enqueue(encoder.encode('{"data":['));
+              }
+              if (sent >= 6 * 1024 * 1024) {
+                controller.enqueue(encoder.encode("]}"));
+                controller.close();
+                return;
+              }
+              const entry = encoder.encode(
+                `${index === 0 ? "" : ","}{"id":"flood-${index}","note":"${padding}"}`,
+              );
+              index += 1;
+              sent += entry.byteLength;
+              controller.enqueue(entry);
+            },
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
       }
       // An endpoint whose cursor never ends — the page cap has to stop it.
       if (req.headers.get("authorization") === "Bearer endless-key") {
@@ -448,6 +504,69 @@ describe("POST /api/model-provider-credentials/discover", () => {
     expect(body.truncated).toBe(true);
     expect(listingRequests.get("endless")).toBe(10);
     expect(body.models).toHaveLength(10);
+  });
+
+  it("refuses a listing whose body streams past the size budget", async () => {
+    const res = await discover(ctx, {
+      provider_id: "openai-compatible",
+      api_key: "flood-key",
+      base_url_override: GOOD_BASE_URL,
+    });
+
+    // The endpoint never stops sending; the read stops it. Without a byte
+    // budget the whole payload lands in the API process before it is parsed.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.outcome).toBe("bad_response");
+    expect(body.models).toEqual([]);
+    expect(listingRequests.get("flood")).toBe(1);
+  });
+
+  it("refuses an api-key provider that declares a static model list", async () => {
+    const res = await discover(ctx, {
+      provider_id: STATIC_LIST_PROVIDER,
+      api_key: "good-key",
+      base_url_override: GOOD_BASE_URL,
+    });
+
+    // The declaration is what gates enumeration, not the auth mode: this
+    // provider authenticates with an api key and must still not be listed.
+    expect(res.status).toBe(400);
+    expect(listingRequests.get("openai")).toBeUndefined();
+  });
+
+  it("records the probe in the audit trail, without the key", async () => {
+    const res = await discover(ctx, {
+      provider_id: "openai-compatible",
+      api_key: "good-key",
+      base_url_override: GOOD_BASE_URL,
+    });
+    expect(res.status).toBe(200);
+
+    const rows = await db
+      .select({
+        action: auditEvents.action,
+        resourceType: auditEvents.resourceType,
+        resourceId: auditEvents.resourceId,
+        after: auditEvents.after,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "model_provider_credential.discovered"));
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.action).toBe("model_provider_credential.discovered");
+    expect(row.resourceType).toBe("model_provider_credential");
+    // No credential exists on the inline form — the trail still names the
+    // endpoint that was reached and what came back.
+    expect(row.resourceId).toBeNull();
+    expect(row.after).toMatchObject({
+      providerId: "openai-compatible",
+      baseUrl: GOOD_BASE_URL,
+      outcome: "ok",
+      modelCount: 2,
+      truncated: false,
+    });
+    expect(JSON.stringify(row.after)).not.toContain("good-key");
   });
 
   it("returns 401 without authentication", async () => {
