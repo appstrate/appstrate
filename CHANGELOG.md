@@ -672,6 +672,17 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Typing fast into a Monaco pane no longer drops characters.** The agent
+  prompt editor, the package JSON tab and the new file editor fed Monaco a
+  controlled `value` from React state, and `@monaco-editor/react` applies a
+  controlled value as an after-commit effect that rewrites the whole model when
+  it differs from the editor's text. Under React's batching, a keystroke that
+  landed between `onChange` and the render carrying it was overwritten by the
+  older string, silently and with `onChange` suppressed — `print(1)` typed on a
+  loaded machine arrived as `prin1)`. Every authoring pane now seeds Monaco once
+  (`defaultValue`) and receives text it did not type as a remount, keyed by
+  what changed it (another file, a discarded draft, a re-read server copy).
+
 - **The hosted connect portal names the missing OAuth client instead of a
   generic "please try again" 502 (#1263).** Opening a `connect_url` for an
   oauth2 auth in a space with no registered client — and no system client or
