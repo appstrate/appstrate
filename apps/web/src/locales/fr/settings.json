@@ -1065,5 +1065,6 @@
   "viewAs.spaceRolePlaceholder": "Choisir un rôle",
   "viewAs.rolesEmpty": "Aucun rôle prévisualisable dans cet espace.",
   "viewAs.submit": "Prévisualiser",
+  "viewAs.enterFailed": "Impossible de démarrer la prévisualisation. Réessayez.",
   "viewAs.trigger": "Prévisualiser un rôle"
 }

@@ -12,6 +12,7 @@ import { z } from "zod";
 import { VIEW_AS_ORG_ROLES } from "@appstrate/core/permissions";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
+import type { components } from "../api/schema";
 import { queryClient } from "../lib/query-client";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
 import { getCurrentOrgId, orgStore } from "./org-store";
@@ -35,6 +36,9 @@ const personaSchema = z.object({
 });
 
 export type ViewAsPersona = z.infer<typeof personaSchema>;
+
+/** A row of `GET /api/orgs` — where `permissions` lives. */
+type Organization = components["schemas"]["Organization"];
 
 interface ViewAsState {
   persona: ViewAsPersona | null;
@@ -126,29 +130,41 @@ export function toViewAsPersona(
   };
 }
 
-export function enterViewAs(persona: ViewAsPersona): void {
+/**
+ * Start — or replace — a preview.
+ *
+ * `orgs` is the org listing ALREADY answered for this persona (`fetchOrgsAs`),
+ * a parameter rather than something this function goes and gets, because the
+ * two have to land in the same tick. Every `can()` gate reads `permissions` off
+ * the current org row (`usePermissions`), `["orgs"]` is the one query the cache
+ * reset spares, and React Query keeps serving the previous value for the whole
+ * of a background refetch — and forever if that refetch fails. A persona
+ * committed on its own therefore presents the previewer's own authority as the
+ * persona's: org-level admin menus under a "Lecteur" banner (#1322). Loading
+ * first also means a load that fails starts no preview at all.
+ */
+export function enterViewAs(persona: ViewAsPersona, orgs: Organization[]): void {
   viewAsStore.getState().commit(persona, null);
-  resetScopedCache();
+  queryClient.setQueryData(orgKeys.all, orgs);
+  removeOrgScopedQueries(queryClient);
 }
 
 /** The ONE exit path — "Quitter", org switch, sign-out and a refused persona. */
 export function exitViewAs(reason?: string): void {
   if (!viewAsStore.getState().persona) return;
   viewAsStore.getState().commit(null, reason ?? null);
-  resetScopedCache();
-}
-
-/**
- * `["orgs"]` is refetched, not dropped: under a persona `GET /api/orgs` answers
- * with the persona's `role`/`permissions`, which every `can()` gate reads.
- */
-function resetScopedCache(): void {
   removeOrgScopedQueries(queryClient);
-  void queryClient.refetchQueries({ queryKey: orgKeys.all });
+  // Not loaded first, unlike entering: leaving RESTORES authority, so the row
+  // left behind under-states what the caller may do rather than over-stating
+  // it, and exit must succeed with no network at all (sign-out, org switch, a
+  // persona the server just refused). Invalidated rather than merely
+  // refetched: a refetch that fails leaves the row marked stale, so the next
+  // observer to mount tries again instead of keeping it forever.
+  void queryClient.invalidateQueries({ queryKey: orgKeys.all });
 }
 
 /** The `X-View-As` grammar the server parses; `; ` separated `key=value` pairs. */
-function serializeViewAs(persona: ViewAsPersona): string {
+export function serializeViewAs(persona: ViewAsPersona): string {
   const fields = [`org_role=${persona.orgRole}`];
   if (persona.space) {
     fields.push(`space=${persona.space.spaceId}`, `role=${persona.space.role}`);
