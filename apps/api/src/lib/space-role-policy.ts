@@ -31,3 +31,23 @@ export function assertCanGrantSpaceRole(
     throw forbidden(`Cannot grant space permission '${permission}' that you do not hold`);
   }
 }
+
+/**
+ * The mirror of {@link assertCanGrantSpaceRole} on the OTHER side of a member
+ * write: a caller may only remove or re-role a member whose current standing
+ * they could have granted themselves. Without it, `space-members:remove` or
+ * `:change-role` alone is authority over a full space admin — the grant check
+ * says nothing, because a removal in a `closed` or `private` space exposes no
+ * implicit role at all (RBAC spec §6.4).
+ */
+export function assertCanManageSpaceMember(
+  actorPermissions: ReadonlySet<string> | undefined,
+  role: SpaceRoleRef | null,
+): void {
+  const permission = missingPermission(actorPermissions, spacePermissions(role));
+  if (permission !== undefined) {
+    throw forbidden(
+      `Cannot manage a member holding space permission '${permission}' that you do not hold`,
+    );
+  }
+}

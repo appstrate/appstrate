@@ -92,6 +92,10 @@ describe("persona-sensitive call sites", () => {
           "background fires revalidate the saved actor's live grants; no request persona survives into a schedule",
         ],
         [
+          "apps/api/src/services/space-members.ts",
+          "reads the TARGET member's row inside the write transaction, not the caller's",
+        ],
+        [
           "apps/api/src/services/spaces.ts",
           "the listing's own load, bypassed by the overlay `listSpacesForPrincipal` takes",
         ],

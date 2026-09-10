@@ -144,13 +144,42 @@ describe("space role delegation", () => {
 
   it("removal remains permitted when it grants no access in a closed space", async () => {
     const space = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
-    const actor = await delegated(space.id, ["space-members:remove"]);
+    const actor = await delegated(space.id, [
+      ...presetPermissions("viewer"),
+      "space-members:remove",
+    ]);
     const target = await member();
     await seedSpaceMember({ spaceId: space.id, userId: target.user.id, presetRole: "viewer" });
-    expect(
-      (await request(actor, `/api/spaces/${space.id}/members/${target.user.id}`, "DELETE")).status,
-    ).toBe(200);
+    const path = `/api/spaces/${space.id}/members`;
+    expect((await request(actor, `${path}/${target.user.id}`, "DELETE")).status).toBe(200);
     expect(await roleKey(target, space.id)).toBeUndefined();
+    // Self-removal is never blocked by the target bound: an actor holds their
+    // own role by definition.
+    expect((await request(actor, `${path}/${actor.user.id}`, "DELETE")).status).toBe(200);
+    expect(await roleKey(actor, space.id)).toBeUndefined();
+  });
+
+  it("a narrow bundle cannot eject or demote a member it could not have granted", async () => {
+    // `closed`, so removal exposes NO implicit role — the grant-side check is
+    // vacuous here and the target bound is the only thing refusing.
+    const space = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
+    const remover = await delegated(space.id, ["space-members:read", "space-members:remove"]);
+    // The changer holds `viewer`, so demoting TO `viewer` clears the grant
+    // check and only the target's own preset `admin` can be the refusal.
+    const changer = await delegated(space.id, [
+      ...presetPermissions("viewer"),
+      "space-members:change-role",
+    ]);
+    const target = await member();
+    await seedSpaceMember({ spaceId: space.id, userId: target.user.id, presetRole: "admin" });
+    const path = `/api/spaces/${space.id}/members/${target.user.id}`;
+
+    expect((await request(remover, path, "DELETE")).status).toBe(403);
+    expect((await request(changer, path, "PATCH", { preset_role: "viewer" })).status).toBe(403);
+    expect(await roleKey(target, space.id)).toBe("admin");
+    // The same two calls from someone who holds preset `admin` still work.
+    expect((await request(owner, path, "PATCH", { preset_role: "operator" })).status).toBe(200);
+    expect((await request(owner, path, "DELETE")).status).toBe(200);
   });
 
   it("settings-only authority can rename and close but cannot open a stronger default or change it", async () => {

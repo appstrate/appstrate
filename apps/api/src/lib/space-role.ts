@@ -73,12 +73,18 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   return partitionSpacePermissions(ref.role.permissions).granted;
 }
 
-/** One indexed lookup on the composite PK, custom role joined in the same query. */
+/**
+ * One indexed lookup on the composite PK, custom role joined in the same query.
+ *
+ * `executor` takes an open transaction handle so a caller that must read the
+ * row and write it in one go does not read it on a second connection.
+ */
 export async function loadSpaceMember(
   spaceId: string,
   userId: string,
+  executor: Pick<typeof db, "select"> = db,
 ): Promise<SpaceMemberRow | null> {
-  const [row] = await db
+  const [row] = await executor
     .select({
       presetRole: spaceMembers.presetRole,
       customRoleId: spaceMembers.customRoleId,

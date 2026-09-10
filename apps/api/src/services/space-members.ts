@@ -22,8 +22,8 @@ import {
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
-import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
-import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
+import { loadSpaceMember, resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
+import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import { assertCustomRolesFeature } from "./space-roles.ts";
 
 /** Accepts either the base client or an open transaction handle. */
@@ -173,13 +173,14 @@ export async function saveSpaceMember(params: {
       );
     }
     const memberFilter = and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId));
-    if (!params.requireExisting) {
-      const [existing] = await tx
-        .select({ userId: spaceMembers.userId })
-        .from(spaceMembers)
-        .where(memberFilter)
-        .limit(1);
-      if (existing) throw existingSpaceMember();
+    // Read in the SAME transaction as the write: a role change is authority
+    // over the standing the target holds NOW, not only over the one handed out.
+    const existing = await loadSpaceMember(spaceId, userId, tx);
+    if (params.requireExisting) {
+      if (!existing) throw notFound("Space member not found");
+      assertCanManageSpaceMember(params.actorPermissions, existing.ref);
+    } else if (existing) {
+      throw existingSpaceMember();
     }
     const values = await assignmentColumns(orgId, assignment, params.actorPermissions, tx);
 
