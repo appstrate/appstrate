@@ -12,7 +12,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgInvitations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permissions";
-import { isUniqueViolation } from "../lib/db-helpers.ts";
+import { isForeignKeyViolation, isUniqueViolation } from "../lib/db-helpers.ts";
 import { getAppConfig } from "../lib/app-config.ts";
 import { ApiError, conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
@@ -284,18 +284,11 @@ export async function updateSpaceRole(params: {
  * Two things hold a bundle: a `space_members` row, and a PENDING invitation
  * whose JSONB `space_assignments` name it. The second has no FK, so deleting
  * under it would strand the invitee with an assignment that never applies.
- *
- * Counted here rather than left to `ON DELETE RESTRICT`, whose error names
- * neither the role nor how many people would lose access.
  */
-export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
-  const [row] = await db
-    .select()
-    .from(spaceRoles)
-    .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
-    .limit(1);
-  if (!row) throw notFound(`Role '${id}' not found in this organization`);
-
+async function countRoleHolders(
+  orgId: string,
+  id: string,
+): Promise<{ memberCount: number; pendingInvitationCount: number }> {
   const [assigned, invited] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)::int` })
@@ -314,17 +307,59 @@ export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceR
         ),
       ),
   ]);
-  const memberCount = assigned[0]?.count ?? 0;
-  const pendingInvitationCount = invited[0]?.count ?? 0;
-  if (memberCount > 0 || pendingInvitationCount > 0) {
-    throw conflict(
-      "role_in_use",
-      `Role '${row.key}' is still held by ${memberCount} space member(s) and ` +
-        `${pendingInvitationCount} pending invitation(s). Reassign them before deleting it.`,
-      { member_count: memberCount, pending_invitation_count: pendingInvitationCount },
-    );
-  }
+  return {
+    memberCount: assigned[0]?.count ?? 0,
+    pendingInvitationCount: invited[0]?.count ?? 0,
+  };
+}
 
-  await db.delete(spaceRoles).where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)));
+function roleInUse(
+  key: string,
+  counts: { memberCount: number; pendingInvitationCount: number },
+): never {
+  throw conflict(
+    "role_in_use",
+    `Role '${key}' is still held by ${counts.memberCount} space member(s) and ` +
+      `${counts.pendingInvitationCount} pending invitation(s). Reassign them before deleting it.`,
+    {
+      member_count: counts.memberCount,
+      pending_invitation_count: counts.pendingInvitationCount,
+    },
+  );
+}
+
+/**
+ * The loser of a delete/assign race gets the same 409 as the pre-count, not a
+ * 500 naming a constraint — the same shape {@link asKeyConflict} gives the
+ * create/update races. `space_members.custom_role_id` is ON DELETE RESTRICT,
+ * so an assignment landing between the count and the delete fires the
+ * referential-integrity violation; recount to name who now holds the role.
+ */
+async function asRoleInUse(err: unknown, orgId: string, id: string, key: string): Promise<never> {
+  if (!isForeignKeyViolation(err)) throw err;
+  roleInUse(key, await countRoleHolders(orgId, id));
+}
+
+/**
+ * Holders are counted rather than left to `ON DELETE RESTRICT`, whose error
+ * names neither the role nor how many people would lose access. The count is
+ * lock-free on purpose: {@link asRoleInUse} turns the race it leaves open into
+ * the very same 409, so the delete never has to hold a lock to be honest.
+ */
+export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
+  const [row] = await db
+    .select()
+    .from(spaceRoles)
+    .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
+    .limit(1);
+  if (!row) throw notFound(`Role '${id}' not found in this organization`);
+
+  const counts = await countRoleHolders(orgId, id);
+  if (counts.memberCount > 0 || counts.pendingInvitationCount > 0) roleInUse(row.key, counts);
+
+  await db
+    .delete(spaceRoles)
+    .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
+    .catch((err: unknown) => asRoleInUse(err, orgId, id, row.key));
   return toWire(row);
 }
