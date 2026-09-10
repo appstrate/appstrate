@@ -572,8 +572,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       }
       const { orgId } = subMetadata;
 
-      const previousAttributes = (event.data as { previous_attributes?: Record<string, unknown> })
-        .previous_attributes;
+      const previousAttributes = event.data.previous_attributes;
       const itemPeriodEnd = subscriptionPeriodEnd(subscription);
       const newPlan = planForSubscription(subscription, plans);
 
@@ -644,9 +643,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         "items" in previousAttributes &&
         !subscription.cancel_at_period_end
       ) {
-        const previousPriceId = (
-          previousAttributes.items as { data?: Array<{ price?: { id?: string } }> }
-        )?.data?.[0]?.price?.id;
+        const previousPriceId = previousAttributes.items?.data[0]?.price.id;
         const oldPlan = Object.values(plans).find((p) => p?.stripePriceId === previousPriceId);
 
         if (oldPlan && oldPlan.id !== newPlan.id) {
@@ -773,8 +770,18 @@ async function processEvent(event: Stripe.Event): Promise<void> {
     }
 
     case "customer.source.expiring": {
-      // Pre-dunning: card expiring soon (sent ~30 days before expiry by Stripe)
-      const source = event.data.object as Stripe.Card;
+      // Pre-dunning: card expiring soon (sent ~30 days before expiry by Stripe).
+      // The payload is a `CustomerSource` — `Account | BankAccount | Card | Source`.
+      // Only a `Card` carries `exp_month` / `exp_year`; the other members have no
+      // expiry to announce, so there is nothing to send.
+      const source = event.data.object;
+      if (source.object !== "card") {
+        logger.debug("Source expiring is not a card — no email", {
+          eventId: event.id,
+          sourceObject: source.object,
+        });
+        break;
+      }
       const expiringCustomerId = refId(source.customer);
 
       if (expiringCustomerId) {
@@ -785,7 +792,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
 
         if (expiringAccount) {
           sendBillingEmail(expiringAccount.orgId, "card-expiring", {
-            cardLast4: source.last4 ?? "????",
+            cardLast4: source.last4,
             expiryMonth: `${String(source.exp_month).padStart(2, "0")}/${String(source.exp_year).slice(-2)}`,
             updateUrl: billingSettingsUrl(getAppUrl()),
             locale: "fr",
