@@ -18,7 +18,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const app = getTestApp();
@@ -355,7 +355,7 @@ async function startConnect(token: string): Promise<Response> {
   });
 }
 
-describe("hosted connect portal — oauth2 dispatch without a client (issue #1263)", () => {
+describe("hosted connect portal — oauth2 dispatch without a client (issues #1263, #1345)", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
@@ -363,17 +363,19 @@ describe("hosted connect portal — oauth2 dispatch without a client (issue #126
     await seedIntegration(ctx.orgId, oauthManifest("@myorg/gsuite"));
   });
 
-  it("renders the actionable 403 the programmatic path returns, not a generic 502", async () => {
+  it("renders a permanent 403, not a generic 502 — and not the operator detail", async () => {
     const token = await mintSession(ctx, "@myorg/gsuite", "google");
     const res = await startConnect(token);
-    // Parity with `POST …/connect/oauth2` on the same space: same status, same
-    // detail, naming the action to take.
+    // Status parity with `POST …/connect/oauth2` on the same space, and wording
+    // that says "permanent": no "try again", which is what a 502 would invite.
     expect(res.status).toBe(403);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
-    expect(html).toContain("Administrator must register OAuth client credentials");
-    expect(html).toContain("@myorg/gsuite");
+    expect(html).toContain("Ask an administrator");
     expect(html).not.toContain("Please try again");
+    // The `detail` that names the remedy is written for an operator, and this
+    // route has no session (issue #1345) — it belongs in the log line only.
+    expect(html).not.toContain("Administrator must register OAuth client credentials");
   });
 
   it("keeps the link reusable: a second click is the same 403, not 'already used'", async () => {
@@ -409,15 +411,47 @@ describe("hosted connect portal — oauth2 dispatch without a client (issue #126
     expect((await startConnect(token)).status).toBe(410);
   });
 
-  it("renders the auto-provisioning failure verbatim for a remote MCP auth", async () => {
+  it("keeps the auto-provisioning failure's own prose off a remote MCP popup", async () => {
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
     const res = await startConnect(token);
     expect(res.status).toBe(403);
     const html = await res.text();
-    // The remedy authored by the provisioning step reaches the user — the
-    // message the generic catch used to swallow.
-    expect(html).toContain("Could not automatically provision an OAuth client");
-    expect(html).toContain("@myorg/remote-mcp");
+    expect(html).toContain("Ask an administrator");
+    // This `detail` embeds the authorization server's OWN message verbatim
+    // (`resolveConnectClient` renders `provisioningFailure.message` as-is), so
+    // it is upstream-controlled text on a session-less page. Log only.
+    expect(html).not.toContain("Could not automatically provision an OAuth client");
+    expect(html).not.toContain("dynamic client registration");
+  });
+
+  it("never names the row or the env var when a client_secret cannot be decrypted", async () => {
+    // The ciphertext no longer opens (key rotated without re-encrypt, or
+    // corruption): `has_client_secret` still reads true from the column while
+    // the decrypt yields "", and `assertConnectClientUsable` refuses the
+    // client with a 403 whose detail names the client row's uuid and
+    // `CONNECTION_ENCRYPTION_KEY`. That is the disclosure of issue #1345.
+    const registered = await app.request(
+      "/api/integrations/@myorg/gsuite/auths/google/oauth-clients",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+      },
+    );
+    expect(registered.status).toBe(201);
+    const clientId = ((await registered.json()) as { id: string }).id;
+    await db
+      .update(integrationOauthClients)
+      .set({ clientSecretEncrypted: "not-a-valid-envelope" })
+      .where(eq(integrationOauthClients.id, clientId));
+
+    const res = await startConnect(await mintSession(ctx, "@myorg/gsuite", "google"));
+    expect(res.status).toBe(403);
+    const html = await res.text();
+    expect(html).toContain("Ask an administrator");
+    for (const internal of ["CONNECTION_ENCRYPTION_KEY", "cannot be decrypted", clientId]) {
+      expect(html).not.toContain(internal);
+    }
   });
 });

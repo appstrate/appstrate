@@ -482,9 +482,15 @@ export function createIntegrationsRouter() {
         });
         return c.html(popupHtmlError(userMessage, { state }));
       }
-      const msg = err instanceof Error ? err.message : "OAuth callback failed";
-      logger.error("Integration OAuth callback failed", { msg });
-      return c.html(popupHtmlError(`Error: ${msg}`, { state }));
+      // Not an `OAuthCallbackError`, so nothing authored this message for a
+      // reader: it is a DB fault, a TypeError, an SSRF refusal. Same rule as
+      // the branch above and as `/connect/start` (issue #1345) — this page is
+      // session-less, so the text goes to the log and the user gets the
+      // generic sentence.
+      logger.error("Integration OAuth callback failed", { err: String(err) });
+      return c.html(
+        popupHtmlError("Could not complete the connection. Please try again.", { state }),
+      );
     }
 
     // Persist via the OAuth2 strategy. The exchange above reconstructed the
@@ -968,12 +974,18 @@ export function createIntegrationsRouter() {
       //
       //  1. A client-side `ApiError` (4xx): the space has no OAuth client for
       //     this auth, auto-DCR against the provider was refused, the manifest
-      //     declares no issuer/endpoints. Permanent until someone acts, and the
-      //     `detail` names that action — the same message the programmatic
-      //     `POST …/connect/oauth2` already returns as its 403. Render it with
-      //     its own status, and hand the jti back: nothing was minted on the
-      //     strength of this click, so a retry once the admin has registered
-      //     the client can reuse the very same link instead of re-minting.
+      //     declares no issuer/endpoints. Permanent until someone acts — say
+      //     so, with its own status, so the popup does not invite a pointless
+      //     retry. Say it GENERICALLY though (issue #1345): this route carries
+      //     no session and its link is handed to end users outside the org,
+      //     while the `detail` that names the action names it in operator
+      //     terms — a client row id, `CONNECTION_ENCRYPTION_KEY`, an upstream
+      //     AS's own prose. That half stays on the log line above, exactly as
+      //     the callback keeps a provider's `error_description` there
+      //     (`oauth-error-diagnostic.ts`). Hand the jti back either way:
+      //     nothing was minted on the strength of this click, so a retry once
+      //     the admin has registered the client can reuse the very same link
+      //     instead of re-minting.
       //  2. Anything else (provider discovery error, network, an unexpected
       //     throw): transient or unknown. Keep the generic wording, keep the
       //     502, keep the jti burned — an unknown failure may have gone half
@@ -1001,9 +1013,13 @@ export function createIntegrationsRouter() {
             authKey: claims.auth_key,
           });
           await releaseJti(claims.jti);
-          // `err.message` is the problem `detail` — the public half of an
-          // ApiError by contract (never `cause`), and popupHtmlError escapes it.
-          return c.html(popupHtmlError(err.message, {}), err.status as ContentfulStatusCode);
+          return c.html(
+            popupHtmlError(
+              "This integration is not ready to be connected. Ask an administrator to finish setting it up, then open this link again.",
+              {},
+            ),
+            err.status as ContentfulStatusCode,
+          );
         }
         logger.error("Hosted connect OAuth begin failed", {
           err: String(err),

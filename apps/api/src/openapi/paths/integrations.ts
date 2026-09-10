@@ -1015,7 +1015,7 @@ export const integrationsPaths = {
         },
         "403": {
           description:
-            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint.",
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint.",
         },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
         "500": {
