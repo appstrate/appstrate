@@ -328,8 +328,11 @@ describe("GET /api/integrations/:packageId", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.tool_catalog.map((tool: { name: string }) => tool.name)).toEqual(["read"]);
+    const body = (await res.json()) as {
+      tool_catalog: Array<{ name: string }>;
+      tool_catalog_inspection: unknown;
+    };
+    expect(body.tool_catalog.map((tool) => tool.name)).toEqual(["read"]);
     expect(body.tool_catalog_inspection).toMatchObject({
       basis: "manifest",
       entries: [
