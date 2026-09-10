@@ -32,6 +32,9 @@ export const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   "agents:read": "Lister vos agents",
   "agents:run": "Lancer des agents pour vous",
   "runs:read": "Consulter votre historique d'exécutions",
+  // Supervision scope: only ever granted to a dashboard user whose role
+  // already carries it (`OIDC_DASHBOARD_ONLY_SCOPES`), never to an end-user.
+  "runs:read-all": "Consulter toutes les exécutions de l'espace, pas seulement les vôtres",
   "runs:cancel": "Annuler vos exécutions en cours",
   "files:read": "Consulter les fichiers produits par vos exécutions",
   "integrations:read": "Lister vos intégrations et connexions",

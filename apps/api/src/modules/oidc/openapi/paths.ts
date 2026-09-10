@@ -138,7 +138,7 @@ const updateClientRequest = {
       type: "array",
       items: { type: "string", minLength: 1 },
       description:
-        "OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes`. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations.",
+        "OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes` — minus the scopes no end-user token can carry (`runs:read-all`) when the client is space-level. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations.",
     },
     disabled: { type: "boolean" },
     isFirstParty: { type: "boolean" },
