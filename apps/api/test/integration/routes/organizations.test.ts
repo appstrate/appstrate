@@ -336,6 +336,36 @@ describe("Organizations API", () => {
       expect(body).not.toHaveProperty("created_by");
       expect(body).not.toHaveProperty("updatedAt");
     });
+
+    it("allows an admin to update the organization logo", async () => {
+      const ctx = await createTestContext({ orgSlug: "admin-logo-org" });
+      const admin = await createTestUser({ email: "admin-logo@test.com" });
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ logo: "emoji:🧠" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.logo).toBe("emoji:🧠");
+    });
+
+    it("rejects a regular member updating the organization", async () => {
+      const ctx = await createTestContext({ orgSlug: "member-logo-org" });
+      const member = await createTestUser({ email: "member-logo@test.com" });
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: { Cookie: member.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ logo: "emoji:🧠" }),
+      });
+
+      expect(res.status).toBe(403);
+    });
   });
 
   describe("PUT /api/orgs/:orgId/settings — api_version", () => {

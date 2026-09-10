@@ -33,6 +33,7 @@ interface OrgResult {
   id: string;
   name: string;
   slug: string;
+  logo: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -57,6 +58,7 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     id: row.id,
     name: row.name,
     slug: row.slug,
+    logo: row.logo,
     createdBy: row.createdBy ?? "",
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
@@ -130,7 +132,7 @@ export async function getOrgById(orgId: string): Promise<OrgResult | null> {
 
 export async function updateOrganization(
   orgId: string,
-  updates: { name?: string; slug?: string },
+  updates: { name?: string; slug?: string; logo?: string | null },
 ): Promise<OrgResult> {
   const [row] = await db
     .update(organizations)

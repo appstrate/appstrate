@@ -60,6 +60,15 @@ export const createOrgSchema = z.object({
 export const updateOrgSchema = z.object({
   name: z.string().min(1).optional(),
   slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
+  logo: z
+    .string()
+    .max(180_000)
+    .refine(
+      (value) => value.startsWith("emoji:") || value.startsWith("data:image/webp;base64,"),
+      "Logo must be an emoji or a normalized WebP image",
+    )
+    .nullable()
+    .optional(),
 });
 
 export const addMemberSchema = z.object({
@@ -115,6 +124,7 @@ router.get("/", async (c) => {
         id: o.id,
         name: o.name,
         slug: o.slug,
+        logo: o.logo,
         role: o.role,
         createdAt: o.createdAt,
       })),
@@ -183,6 +193,7 @@ router.post("/", async (c) => {
       id: org.id,
       name: org.name,
       slug: org.slug,
+      logo: org.logo,
       role: "owner",
       createdAt: org.createdAt,
     },
@@ -218,6 +229,7 @@ async function buildOrgDetail(orgId: string) {
     id: org.id,
     name: org.name,
     slug: org.slug,
+    logo: org.logo,
     createdAt: org.createdAt,
     storage: {
       used_bytes: org.documentsBytesUsed,
@@ -255,11 +267,11 @@ router.get("/:orgId", async (c) => {
   return c.json(await buildOrgDetail(orgId));
 });
 
-// PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
+// PUT /api/orgs/:orgId — update organization details (owner/admin)
 router.put("/:orgId", async (c) => {
   const orgId = c.req.param("orgId");
 
-  await requireOrgRole(c, orgId, ["owner"], "Only the owner can modify the organization");
+  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required");
 
   const data = await readJsonBody(c, updateOrgSchema);
 
@@ -277,6 +289,7 @@ router.put("/:orgId", async (c) => {
   await updateOrganization(orgId, {
     ...(data.name?.trim() ? { name: data.name.trim() } : {}),
     ...(data.slug ? { slug: data.slug } : {}),
+    ...(data.logo !== undefined ? { logo: data.logo } : {}),
   });
 
   await recordAuditFromContext(c, {

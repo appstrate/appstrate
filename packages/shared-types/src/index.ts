@@ -475,6 +475,10 @@ export interface BasePackageListItem {
 }
 
 export interface AgentListItem extends BasePackageListItem {
+  /** AFPS manifest `icon`, interpreted by the client icon catalogue. */
+  icon?: string;
+  /** Appstrate presentation token from `_meta["dev.appstrate/ui"].color`. */
+  color?: string;
   display_name?: string;
   schema_version?: string;
   author?: string;
@@ -492,6 +496,10 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
+  /** AFPS manifest `icon`, interpreted by the client icon catalogue. */
+  icon?: string;
+  /** Appstrate presentation token from `_meta["dev.appstrate/ui"].color`. */
+  color?: string;
   /** Manifest-derived; may be absent (the SPA falls back to the id). */
   display_name?: string;
   description?: string;

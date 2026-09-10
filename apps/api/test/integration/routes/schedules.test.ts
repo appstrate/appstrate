@@ -654,6 +654,57 @@ describe("Schedules API", () => {
   });
 
   describe("GET /api/schedules/:id/runs", () => {
+    it("filters the full schedule history before pagination and counting", async () => {
+      const agent = await seedAgent({ id: agentId("filtered-history"), orgId: ctx.orgId });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+      });
+      const base = {
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        scheduleId: schedule.id,
+      };
+      await seedRun({ ...base, status: "failed", error: "invoice mismatch" });
+      await seedRun({ ...base, status: "timeout", error: "invoice timeout" });
+      await seedRun({ ...base, status: "success" });
+      await seedRun({
+        ...base,
+        scheduleId: null,
+        status: "failed",
+        error: "invoice other schedule",
+      });
+      const response = await app.request(
+        `/api/schedules/${schedule.id}/runs?status=failed,timeout&q=invoice&limit=1`,
+        { headers: authHeaders(ctx) },
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { scheduleId: string; status: string }[];
+        total: number;
+        hasMore: boolean;
+      };
+      expect(body.total).toBe(2);
+      expect(body.data).toHaveLength(1);
+      expect(body.hasMore).toBe(true);
+      expect(body.data[0]!.scheduleId).toBe(schedule.id);
+      expect(["failed", "timeout"]).toContain(body.data[0]!.status);
+    });
+
+    it("rejects malformed filters", async () => {
+      for (const query of ["status=made-up", `q=${"x".repeat(201)}`]) {
+        const response = await app.request(`/api/schedules/unused/runs?${query}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(response.status).toBe(400);
+      }
+    });
+
     it("returns runs for a schedule", async () => {
       const fid = agentId("exec-sched");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId });

@@ -268,11 +268,16 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "role", "createdAt"],
+    required: ["id", "name", "slug", "logo", "role", "createdAt"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
+      logo: {
+        type: ["string", "null"],
+        description:
+          "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial.",
+      },
       role: { type: "string", enum: ORG_ROLES },
       createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
     },
@@ -308,6 +313,11 @@ export const schemas = {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
+      logo: {
+        type: ["string", "null"],
+        description:
+          "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial.",
+      },
       createdAt: { type: "string", format: "date-time" },
       storage: {
         type: "object",
@@ -366,6 +376,14 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
+      icon: {
+        type: "string",
+        description: "AFPS manifest icon used for the Agent identity tile.",
+      },
+      color: {
+        type: "string",
+        description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
+      },
       display_name: { type: "string" },
       description: { type: "string" },
       schema_version: { type: "string" },
@@ -414,6 +432,14 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
+      icon: {
+        type: "string",
+        description: "AFPS manifest icon used for the Agent identity tile.",
+      },
+      color: {
+        type: "string",
+        description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
+      },
       display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: ["system", "local"] },
@@ -1219,7 +1245,7 @@ export const schemas = {
       auto_installed: { type: "boolean" },
       lock_version: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
-      manifest: { type: "object", description: "Full manifest object" },
+      manifest: { type: "object", additionalProperties: true, description: "Full manifest object" },
       manifest_name: {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",

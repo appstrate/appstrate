@@ -17,6 +17,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   resolveIntegrationToolCatalog,
+  resolveIntegrationToolSurface,
   getConnectToolNames,
   validateAgentIntegrationScopes,
   apiUploadToolNameFor,
@@ -110,6 +111,79 @@ function driveLikeManifest(): IntegrationManifest {
 }
 
 describe("resolveIntegrationToolCatalog", () => {
+  it("explains hidden and policy tools without widening the effective catalog", () => {
+    const integration = localSourceManifest({
+      hidden_tools: ["delete", "unknown_hidden"],
+      connectToolName: "login",
+      tools: {
+        write: { required_scopes: { primary: ["write"] } },
+        stale: { required_scopes: { primary: ["read"] } },
+      },
+    });
+    const result = resolveIntegrationToolSurface({
+      integration,
+      mcpServerTools: [
+        { name: "read" },
+        { name: "write", description: "Write records" },
+        { name: "delete" },
+        { name: "login" },
+      ],
+    });
+    expect(result.catalog.map((tool) => tool.name)).toEqual(["read", "write"]);
+    expect(result.inspection.basis).toBe("mcp_package");
+    expect(result.inspection.entries.find((tool) => tool.name === "delete")).toMatchObject({
+      origin: "mcp_package",
+      exposure: "hidden",
+      hidden_reason: "manifest",
+    });
+    expect(result.inspection.entries.find((tool) => tool.name === "login")).toMatchObject({
+      exposure: "hidden",
+      hidden_reason: "connection",
+    });
+    expect(result.inspection.entries.find((tool) => tool.name === "stale")).toMatchObject({
+      origin: "manifest",
+      exposure: "not_in_catalog",
+    });
+    expect(result.inspection.entries.find((tool) => tool.name === "unknown_hidden")).toMatchObject({
+      origin: "manifest",
+      exposure: "hidden",
+    });
+    expect(result.inspection.entries.find((tool) => tool.name === "write")?.policy).toEqual(
+      result.catalog[1]!.policy,
+    );
+  });
+
+  it("labels fallback references as declarations, never discovered MCP tools", () => {
+    const integration = localSourceManifest({ tools: { read: {} }, hidden_tools: ["delete"] });
+    const result = resolveIntegrationToolSurface({ integration });
+    expect(result.inspection.basis).toBe("manifest");
+    expect(result.catalog).toEqual(resolveIntegrationToolCatalog({ integration }));
+    expect(result.inspection.entries.every((tool) => tool.origin === "manifest")).toBe(true);
+    expect(result.catalog.map((tool) => tool.name)).toEqual(["read"]);
+  });
+
+  it("explains automatically hidden API upload dependencies", () => {
+    const integration = { ...driveLikeManifest(), hidden_tools: ["api_call"] };
+    const result = resolveIntegrationToolSurface({ integration });
+    expect(result.catalog).toEqual([]);
+    expect(result.inspection.basis).toBe("platform");
+    expect(result.inspection.entries).toEqual([
+      { name: "api_call", origin: "appstrate", exposure: "hidden", hidden_reason: "manifest" },
+      { name: "api_upload", origin: "appstrate", exposure: "hidden", hidden_reason: "dependency" },
+    ]);
+  });
+
+  it("reports API tools as platform additions even alongside an MCP package", () => {
+    const result = resolveIntegrationToolSurface({
+      integration: apiSourceManifest(),
+      mcpServerTools: [{ name: "search" }],
+    });
+    expect(result.inspection.entries).toEqual([
+      { name: "search", origin: "mcp_package", exposure: "available" },
+      { name: "api_call", origin: "appstrate", exposure: "available" },
+    ]);
+  });
+
   it("local source: surfaces mcp-server tools as the base catalog (MCPB-canonical)", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({}),

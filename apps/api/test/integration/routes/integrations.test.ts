@@ -282,6 +282,10 @@ describe("GET /api/integrations/:packageId", () => {
         client_auto_provisioned: boolean;
       }>;
       tool_catalog: Array<{ name: string; description?: string; policy?: unknown }>;
+      tool_catalog_inspection: {
+        basis: string;
+        entries: Array<{ name: string; exposure: string; origin: string }>;
+      };
       default_tools?: string[] | "*";
     };
     expect(body.manifest.name).toBe("@myorg/gmail");
@@ -303,9 +307,36 @@ describe("GET /api/integrations/:packageId", () => {
     // falls back to the integration's `tools` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
     expect(Array.isArray(body.tool_catalog)).toBe(true);
+    expect(body.tool_catalog_inspection.basis).toBe("manifest");
+    expect(
+      body.tool_catalog_inspection.entries
+        .filter((tool) => tool.exposure === "available")
+        .map((tool) => tool.name),
+    ).toEqual(body.tool_catalog.map((tool) => tool.name));
     // AFPS §4.4 — the manifest's declared default_tools is surfaced verbatim
     // so an agent-builder sees what tools it inherits without selecting any.
     expect(body.default_tools).toEqual(["api_call"]);
+  });
+
+  it("keeps masked tools in the explanatory inventory but out of the effective catalog", async () => {
+    await seedIntegration(ctx.orgId, {
+      ...remoteMcpManifest(),
+      tools_policy: { read: {}, delete: {} },
+      hidden_tools: ["delete"],
+    });
+    const res = await app.request("/api/integrations/@myorg/remote-mcp", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tool_catalog.map((tool: { name: string }) => tool.name)).toEqual(["read"]);
+    expect(body.tool_catalog_inspection).toMatchObject({
+      basis: "manifest",
+      entries: [
+        { name: "read", origin: "manifest", exposure: "available" },
+        { name: "delete", origin: "manifest", exposure: "hidden", hidden_reason: "manifest" },
+      ],
+    });
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {

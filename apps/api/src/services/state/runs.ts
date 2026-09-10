@@ -10,7 +10,6 @@ import {
   asc,
   desc,
   isNull,
-  ilike,
   inArray,
   count,
   gte,
@@ -20,6 +19,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { runSearchCondition } from "../../lib/run-list-filters.ts";
 import { db, type Db } from "@appstrate/db/client";
 import {
   runs,
@@ -1629,20 +1629,7 @@ export async function listGlobalRuns(
     );
   }
 
-  if (search) {
-    // `%` and `_` are wildcards in LIKE: a user typing them means the
-    // characters, not the pattern.
-    const pattern = `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    const matches: SQL[] = [
-      ilike(runs.agentName, pattern),
-      ilike(runs.agentScope, pattern),
-      ilike(runs.error, pattern),
-    ];
-    // "#129" and "129" both mean the run number.
-    const asNumber = Number(search.replace(/^#/, ""));
-    if (Number.isInteger(asNumber) && asNumber > 0) matches.push(eq(runs.runNumber, asNumber));
-    conditions.push(or(...matches)!);
-  }
+  if (search) conditions.push(runSearchCondition(search));
 
   // Kind filter via JOINed `packages.ephemeral`. After migration 0017, runs
   // can outlive their source package (`runs.package_id ON DELETE SET NULL`),
@@ -1693,14 +1680,23 @@ export async function listGlobalRuns(
 export async function listScheduleRuns(
   scope: AppScope,
   scheduleId: string,
-  options: { limit?: number; offset?: number; actor?: Actor | null } = {},
+  options: {
+    limit?: number;
+    offset?: number;
+    actor?: Actor | null;
+    status?: RunStatus[];
+    search?: string;
+  } = {},
 ) {
-  const { limit = 20, offset = 0, actor = null } = options;
+  const { limit = 20, offset = 0, actor = null, status, search } = options;
+  const conditions = [eq(runs.scheduleId, scheduleId)];
+  if (status?.length) conditions.push(inArray(runs.status, status));
+  if (search) conditions.push(runSearchCondition(search));
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
       applicationId: scope.applicationId,
-      extra: [eq(runs.scheduleId, scheduleId)],
+      extra: conditions,
     })!,
     limit,
     offset,

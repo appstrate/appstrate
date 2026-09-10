@@ -404,6 +404,18 @@ export const schedulesPaths = {
           in: "query",
           schema: { type: "integer", minimum: 0, default: 0 },
         },
+        {
+          name: "status",
+          in: "query",
+          description: "Comma-separated lifecycle statuses.",
+          schema: { type: "string" },
+        },
+        {
+          name: "q",
+          in: "query",
+          description: "Search agent name, scope, error or run number.",
+          schema: { type: "string", maxLength: 200 },
+        },
       ],
       responses: {
         "200": {

@@ -57,9 +57,10 @@ import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor } from "@appstrate/connect";
 import {
-  resolveIntegrationToolCatalog,
+  resolveIntegrationToolSurface,
   readDefaultTools,
   type IntegrationManifest,
+  type IntegrationToolInspection,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import {
@@ -2650,10 +2651,11 @@ export async function getIntegrationAuthStatuses(
   /**
    * Effective agent-facing tool catalog — what the agent editor's picker
    * should display. Resolved server-side via
-   * {@link resolveIntegrationToolCatalog} so the UI doesn't need a second
+   * {@link resolveIntegrationToolSurface} so the UI doesn't need a second
    * fetch for the referenced mcp-server's MCPB tool advertisement.
    */
   tool_catalog: IntegrationToolCatalogEntry[];
+  tool_catalog_inspection: IntegrationToolInspection;
   /**
    * AFPS §4.4 — the tool(s) an agent inherits when it declares the
    * integration without an `integrations_configuration.<id>.tools`
@@ -2723,7 +2725,7 @@ export async function getIntegrationAuthStatuses(
   }
   // The resolver already emits the snake_case wire shape
   // (`policy.required_scopes`), so the catalog passes through verbatim.
-  const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
+  const toolSurface = resolveIntegrationToolSurface({
     integration: manifest,
     mcpServerTools,
   });
@@ -2791,7 +2793,8 @@ export async function getIntegrationAuthStatuses(
   return {
     manifest,
     auths,
-    tool_catalog: toolCatalog,
+    tool_catalog: toolSurface.catalog,
+    tool_catalog_inspection: toolSurface.inspection,
     default_tools: readDefaultTools(manifest),
     allow_undeclared_tools:
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,

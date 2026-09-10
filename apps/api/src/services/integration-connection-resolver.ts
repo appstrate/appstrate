@@ -26,7 +26,12 @@
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationPins, applicationPackages } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationPins,
+  applicationPackages,
+  integrationOrgDefaults,
+} from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -824,5 +829,16 @@ export async function isUserConnectionCreationBlocked(
       ),
     )
     .limit(1);
-  return rows[0]?.blocked === true;
+  if (rows[0]?.blocked === true) return true;
+  const defaults = await db
+    .select({ enforce: integrationOrgDefaults.enforce })
+    .from(integrationOrgDefaults)
+    .where(
+      and(
+        eq(integrationOrgDefaults.applicationId, applicationId),
+        eq(integrationOrgDefaults.integrationId, integrationId),
+      ),
+    )
+    .limit(1);
+  return defaults[0]?.enforce === true;
 }

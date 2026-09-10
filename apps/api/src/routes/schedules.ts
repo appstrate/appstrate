@@ -36,6 +36,7 @@ import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -440,7 +441,9 @@ export function createSchedulesRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
+    const filters = parseRunListFilters({ status: c.req.query("status"), q: c.req.query("q") });
     const result = await listScheduleRuns(scope, scheduleId, {
+      ...filters,
       limit,
       offset,
       actor: getActor(c),

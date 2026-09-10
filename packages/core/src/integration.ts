@@ -584,6 +584,19 @@ export interface IntegrationToolCatalogEntry {
   policy?: IntegrationToolPolicy;
 }
 
+/** Explanatory inventory only. Never use it as an agent allowlist. */
+export interface IntegrationToolInspectionEntry extends IntegrationToolCatalogEntry {
+  origin: "mcp_package" | "manifest" | "appstrate";
+  exposure: "available" | "hidden" | "not_in_catalog";
+  hidden_reason?: "manifest" | "connection" | "dependency";
+}
+
+export interface IntegrationToolInspection {
+  /** Package/manifest metadata only, never a live upstream MCP query. */
+  basis: "mcp_package" | "manifest" | "platform";
+  entries: IntegrationToolInspectionEntry[];
+}
+
 export interface ResolveIntegrationToolCatalogInput {
   integration: IntegrationManifest;
   /**
@@ -596,8 +609,9 @@ export interface ResolveIntegrationToolCatalogInput {
 }
 
 /**
- * Single source of truth for what the agent's picker sees and what
- * `tools/list` exposes at runtime. Resolution:
+ * Single source of truth for the catalog used by the picker and validators.
+ * The runtime separately snapshots live MCP tools/list and applies the policy.
+ * Resolution:
  *
  *   1. Base catalog (the integration's own surface)
  *      - local + mcpServerTools provided → MCPB-canonical entries
@@ -615,6 +629,14 @@ export interface ResolveIntegrationToolCatalogInput {
 export function resolveIntegrationToolCatalog(
   input: ResolveIntegrationToolCatalogInput,
 ): IntegrationToolCatalogEntry[] {
+  return resolveIntegrationToolSurface(input).catalog;
+}
+
+/** Compute the effective catalog and its explanation from the same rules. */
+export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatalogInput): {
+  catalog: IntegrationToolCatalogEntry[];
+  inspection: IntegrationToolInspection;
+} {
   const { integration, mcpServerTools } = input;
 
   // Step 1 — the integration's own MCP catalog
@@ -682,21 +704,72 @@ export function resolveIntegrationToolCatalog(
   // Step 4 — attach policy from the sparse `tools_policy{}` table
   const policyTable = integration.tools_policy ?? {};
   const out: IntegrationToolCatalogEntry[] = [];
+  const entries: IntegrationToolInspectionEntry[] = [];
+  const explicitHidden = new Set(integration.hidden_tools ?? []);
+  const connectionTools = new Set(getConnectToolNames(integration));
+  const syntheticCanonicalNames = new Set(syntheticApiEntries.map((entry) => entry.name));
+  const hiddenReason = (name: string): IntegrationToolInspectionEntry["hidden_reason"] =>
+    explicitHidden.has(name) ? "manifest" : connectionTools.has(name) ? "connection" : "dependency";
   for (const entry of base) {
-    if (hidden.has(entry.name)) continue;
     const raw = policyTable[entry.name];
-    if (!raw) {
-      out.push(entry);
-      continue;
-    }
-    out.push({
-      ...entry,
-      policy: {
-        required_scopes: raw.required_scopes as IntegrationToolPolicy["required_scopes"],
-      },
+    const resolved: IntegrationToolCatalogEntry = raw
+      ? {
+          ...entry,
+          policy: {
+            required_scopes: raw.required_scopes as IntegrationToolPolicy["required_scopes"],
+          },
+        }
+      : entry;
+    const isHidden = hidden.has(entry.name);
+    if (!isHidden) out.push(resolved);
+    entries.push({
+      ...resolved,
+      origin: syntheticCanonicalNames.has(entry.name)
+        ? "appstrate"
+        : mcpServerTools !== undefined
+          ? "mcp_package"
+          : "manifest",
+      exposure: isHidden ? "hidden" : "available",
+      ...(isHidden ? { hidden_reason: hiddenReason(entry.name) } : {}),
     });
   }
-  return out;
+  // Keep orphan policy/hide references visible without inventing upstream tools
+  // or widening the effective catalog. Legacy API aliases already resolve above.
+  const known = new Set(entries.map((entry) => entry.name));
+  for (const name of new Set([
+    ...Object.keys(policyTable),
+    ...explicitHidden,
+    ...connectionTools,
+  ])) {
+    if (known.has(name) || syntheticApiNames.has(name)) continue;
+    const raw = policyTable[name];
+    const isHidden = hidden.has(name);
+    entries.push({
+      name,
+      origin: "manifest",
+      exposure: isHidden ? "hidden" : "not_in_catalog",
+      ...(isHidden ? { hidden_reason: hiddenReason(name) } : {}),
+      ...(raw
+        ? {
+            policy: {
+              required_scopes: raw.required_scopes as IntegrationToolPolicy["required_scopes"],
+            },
+          }
+        : {}),
+    });
+  }
+  return {
+    catalog: out,
+    inspection: {
+      basis:
+        mcpServerTools !== undefined
+          ? "mcp_package"
+          : integration.source?.kind === "none"
+            ? "platform"
+            : "manifest",
+      entries,
+    },
+  };
 }
 
 /** One resolved `api_call` capability — a single opted-in auth. */

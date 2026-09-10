@@ -7,7 +7,11 @@
  * side can drift the other.
  */
 
-import type { IntegrationManifest, IntegrationToolCatalogEntry } from "@appstrate/core/integration";
+import type {
+  IntegrationManifest,
+  IntegrationToolCatalogEntry,
+  IntegrationToolInspection,
+} from "@appstrate/core/integration";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
@@ -137,6 +141,8 @@ export interface IntegrationDetail {
   auths: IntegrationAuthStatus[];
   /** Effective agent-facing tool catalog — the picker's source of truth. */
   tool_catalog: IntegrationToolCatalogEntry[];
+  /** Explanatory inventory, including tools excluded from tool_catalog. */
+  tool_catalog_inspection?: IntegrationToolInspection;
   /**
    * AFPS §7.8 opt-in surfaced verbatim from the integration manifest.
    * When `true`, the agent editor's tool picker MAY offer the

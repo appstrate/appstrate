@@ -81,11 +81,12 @@ export const organizationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "name", "slug", "role", "createdAt"],
+                required: ["id", "name", "slug", "logo", "role", "createdAt"],
                 properties: {
                   id: { type: "string", format: "uuid" },
                   name: { type: "string" },
                   slug: { type: "string" },
+                  logo: { type: ["string", "null"] },
                   role: { type: "string", enum: ["owner"] },
                   createdAt: { type: "string", format: "date-time" },
                 },
@@ -157,7 +158,7 @@ export const organizationsPaths = {
       operationId: "updateOrganization",
       tags: ["Organizations"],
       summary: "Update organization",
-      description: "Update organization name and/or slug. Owner only.",
+      description: "Update organization name, slug, and/or logo. Owner or admin required.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
@@ -168,6 +169,12 @@ export const organizationsPaths = {
               properties: {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+                logo: {
+                  type: ["string", "null"],
+                  maxLength: 180000,
+                  description:
+                    "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null restores the initial fallback.",
+                },
               },
             },
           },

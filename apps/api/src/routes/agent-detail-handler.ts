@@ -27,6 +27,7 @@ import { mergeWithDefaults, asJSONSchemaObject } from "@appstrate/core/form";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getAppScope } from "../lib/scope.ts";
+import { readAgentAppearance } from "../lib/agent-appearance.ts";
 
 /**
  * Build the canonical Agent detail DTO — the exact object the `GET` agent
@@ -109,6 +110,7 @@ export async function buildAgentDetailDto(
     : {};
 
   const parsed = parseScopedName(m.name);
+  const appearance = readAgentAppearance(m as Record<string, unknown>);
 
   const hasUnarchivedChanges = computeHasUnpublishedChanges(
     agent.source,
@@ -119,6 +121,7 @@ export async function buildAgentDetailDto(
 
   return {
     id: agent.id,
+    ...appearance,
     display_name: m.display_name,
     description: m.description,
     source: agent.source,
