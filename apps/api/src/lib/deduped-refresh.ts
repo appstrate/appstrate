@@ -32,19 +32,31 @@
 
 import { withRedisLock } from "./distributed-lock.ts";
 
-/** Distributed-lock TTL in seconds — sized as `30s network timeout` + slack. */
+/**
+ * Distributed-lock lease in seconds — sized as `30s network timeout` + slack.
+ * A watchdog renews it while the exchange runs, so this is not a cap on the
+ * critical section: it is how long a CRASHED holder's lock lingers before a
+ * peer can reclaim it.
+ */
 const REFRESH_LOCK_TTL_SECONDS = 45;
 /**
- * How long to wait for the distributed lock before proceeding unlocked.
- * Derived from the TTL so the two cannot drift apart: a waiter gives up only
- * once the holder's lock has definitively expired (holder presumed dead),
- * never at the holder's worst-case exchange duration. Trade-off: a sidecar
- * caller queued behind a wedged holder waits up to ~50 s before proceeding —
- * and a forced flight chained behind a proactive one pays that twice, once per
- * hop (~50 s acquire + the 30 s exchange timeout in `@appstrate/connect`), so
- * the honest worst case is ≈160 s. Bounded, but not one lock wait.
+ * Hard cap on how long the lock watchdog keeps renewing. Two full exchange
+ * timeouts past the lease: a holder still running then is not slow, it is
+ * wedged, and must stop renewing so the credential's refresh is not deadlocked
+ * for every other instance.
+ *
+ * `withRedisLock` derives the waiter's give-up point from this (the waiter
+ * polls until the holder's lease is guaranteed gone), so the two cannot drift
+ * apart. Trade-off: a caller queued behind a wedged holder waits up to
+ * ~2.5 min before proceeding unlocked, plus the 30 s exchange timeout in
+ * `@appstrate/connect`. Waiting is the cheaper failure — proceeding early
+ * double-spends the rotating `refresh_token` and flags a valid credential
+ * `needsReconnection`. A forced caller that arrives while a proactive flight
+ * is already exchanging pays that once, not once per hop — it adopts that
+ * exchange's token rather than queueing a second one behind it (see
+ * {@link dedupedRefresh}).
  */
-const REFRESH_LOCK_ACQUIRE_TIMEOUT_MS = REFRESH_LOCK_TTL_SECONDS * 1_000 + 5_000;
+const REFRESH_LOCK_MAX_HOLD_SECONDS = 90;
 
 interface DedupedRefreshOptions<T> {
   /** Redis lock key (e.g. `oauth-refresh:${id}` / `intg-refresh:${id}`). */
@@ -72,8 +84,19 @@ interface DedupedRefreshOptions<T> {
   doRefresh: () => Promise<T>;
 }
 
+/**
+ * A flight's value plus WHICH branch produced it. A forced joiner may adopt an
+ * in-flight proactive result only when it came from the exchange — see
+ * {@link dedupedRefresh}.
+ */
+interface FlightOutcome<T> {
+  value: T;
+  /** `true` when {@link DedupedRefreshOptions.doRefresh} minted this value. */
+  exchanged: boolean;
+}
+
 /** Per-flight-key in-flight singleflight map (`key` / `key:force`). */
-const inflightRefreshes = new Map<string, Promise<unknown>>();
+const inflightRefreshes = new Map<string, Promise<FlightOutcome<unknown>>>();
 /** Tail of the serialization chain per credential `key`, never rejecting. */
 const refreshChains = new Map<string, Promise<unknown>>();
 
@@ -82,18 +105,43 @@ const refreshChains = new Map<string, Promise<unknown>>();
  * cross-instance Redis lock, with a post-acquire freshness short-circuit.
  *
  * `force` IS part of the flight key: a flight applies only its originator's
- * verdict, so a forced caller joining a proactive flight would be handed back
- * the very token that just 401'd it — short-circuited on freshness by that
- * flight's post-acquire re-read, with no upstream exchange at all.
+ * verdict, so a forced caller sharing a proactive flight outright would be
+ * handed back the very token that just 401'd it — short-circuited on freshness
+ * by that flight's post-acquire re-read, with no upstream exchange at all.
  *
- * The resulting forced/proactive pair is chained per `key` (`refreshChains`
- * in-process, the Redis lock across instances), so the split costs one EXTRA
- * exchange when the two overlap, never a concurrent one.
+ * A forced caller does not therefore have to *wait out* an overlapping
+ * proactive flight before starting its own. It awaits that flight and adopts
+ * its result when the flight actually exchanged: a token minted upstream is by
+ * construction not the stored one the caller 401'd on, so it is exactly what
+ * the caller asked for, one lock-wait + exchange hop earlier than queueing.
+ * When the proactive flight instead short-circuits on freshness (or fails),
+ * the forced caller falls through to a flight of its own — the chain tail has
+ * cleared by then, so it starts immediately rather than queueing.
+ *
+ * Flights that DO run concurrently are chained per `key` (`refreshChains`
+ * in-process, the Redis lock across instances): the forced/proactive split
+ * costs at most one EXTRA exchange, never a concurrent one.
  */
 export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): Promise<T> {
-  const flightKey = opts.force === true ? `${key}:force` : key;
-  const cached = inflightRefreshes.get(flightKey) as Promise<T> | undefined;
-  if (cached) return cached;
+  const force = opts.force === true;
+  const flightKey = force ? `${key}:force` : key;
+  const cached = inflightRefreshes.get(flightKey) as Promise<FlightOutcome<T>> | undefined;
+  if (cached) return cached.then((outcome) => outcome.value);
+
+  if (force) {
+    // No forced flight to join, but a proactive one may already be exchanging
+    // for this credential. Adopt its token if it gets one; on anything else
+    // (freshness short-circuit, failure) re-enter with our own flight, which
+    // by then heads the chain. Re-entry cannot storm the upstream: the first
+    // re-entrant publishes a `key:force` flight the rest collapse into.
+    const proactive = inflightRefreshes.get(key) as Promise<FlightOutcome<T>> | undefined;
+    if (proactive) {
+      return proactive.then(
+        (outcome) => (outcome.exchanged ? outcome.value : dedupedRefresh(key, opts)),
+        () => dedupedRefresh(key, opts),
+      );
+    }
+  }
 
   const previous = refreshChains.get(key) ?? Promise.resolve();
   const promise = previous.then(() =>
@@ -101,18 +149,18 @@ export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): 
       opts.lockKey,
       {
         ttlSeconds: REFRESH_LOCK_TTL_SECONDS,
-        acquireTimeoutMs: REFRESH_LOCK_ACQUIRE_TIMEOUT_MS,
+        maxHoldSeconds: REFRESH_LOCK_MAX_HOLD_SECONDS,
         label: opts.lockLabel,
       },
-      async () => {
+      async (): Promise<FlightOutcome<T>> => {
         // A peer instance may have refreshed while we waited for the lock. If
         // the stored token is now comfortably unexpired, return it without
         // burning the (possibly just-rotated) refresh_token — unless the caller
         // forced this refresh, in which case remaining lifetime says nothing
         // about whether the token still works.
-        const fresh = await opts.reReadFreshness({ force: opts.force === true });
-        if (fresh !== null) return fresh;
-        return opts.doRefresh();
+        const fresh = await opts.reReadFreshness({ force });
+        if (fresh !== null) return { value: fresh, exchanged: false };
+        return { value: await opts.doRefresh(), exchanged: true };
       },
     ),
   );
@@ -121,8 +169,10 @@ export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): 
   const tail = promise.catch(() => {});
   inflightRefreshes.set(flightKey, promise);
   refreshChains.set(key, tail);
-  return promise.finally(() => {
-    inflightRefreshes.delete(flightKey);
-    if (refreshChains.get(key) === tail) refreshChains.delete(key);
-  });
+  return promise
+    .finally(() => {
+      inflightRefreshes.delete(flightKey);
+      if (refreshChains.get(key) === tail) refreshChains.delete(key);
+    })
+    .then((outcome) => outcome.value);
 }
