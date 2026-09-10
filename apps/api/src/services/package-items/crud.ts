@@ -3,7 +3,7 @@
 import { eq, and, or, ne, desc, sql, isNotNull } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages } from "@appstrate/db/schema";
+import { spacePackages, packages, packageShares } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -295,15 +295,19 @@ export async function listOrgItems(
   // picker so it only offers usable integrations (server-side filter — the
   // full catalogue can be large).
   // The catalogue branch mirrors `placementGrantsRead` (`lib/package-access.ts`,
-  // RBAC spec §6.9): installed here OR homed here. Without the home half a
-  // package this space governs but has uninstalled disappears from its own
-  // type's index page while staying editable — write without read.
-  // `activeOnly` stays install-only: the home is not a usable instance.
+  // RBAC spec §6.9, §6.10): installed here OR shared here OR homed here.
+  // Without the home half a package this space governs but has uninstalled
+  // disappears from its own type's index page while staying editable — write
+  // without read; without the share half a package offered to this space is
+  // invisible on the page the recipient would go looking for it.
+  // `activeOnly` stays install-only: neither a home nor an offer is a usable
+  // instance.
   const installFilter = opts?.activeOnly
     ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
     : or(
         eq(packages.source, "system"),
         isNotNull(spacePackages.packageId),
+        isNotNull(packageShares.packageId),
         eq(packages.homeSpaceId, spaceId),
       );
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
@@ -328,6 +332,10 @@ export async function listOrgItems(
     .leftJoin(
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
+    )
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
     )
     .where(
       and(

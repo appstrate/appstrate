@@ -3506,6 +3506,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/packages/{scope}/{name}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the spaces a package is shared with
+         * @description The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space (organization owner or admin when the package has none); a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.
+         */
+        get: operations["listPackageShares"];
+        put?: never;
+        /**
+         * Share a package with a person or a space
+         * @description Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. Idempotent: sharing the same pair twice answers 200 with the same entry.
+         */
+        post: operations["sharePackage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/packages/{scope}/{name}/shares/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a shared package to your own space
+         * @description Install a package that was shared with you into your OWN personal space, pinned to the `latest` published version. Deliberately requires neither the `share` permission nor the package type's install grant: the space's owner consented by calling this, and a `guest` holds only the `operator` preset in their own space. The package must have a share row for that space, otherwise 404 — an offer the caller never received is indistinguishable from a package that does not exist. Idempotent in the useful direction: calling it again RE-PINS the installation to `latest`, which is how the owner takes a version the author has since published. API keys, end-users and role previews have no personal space and answer 404.
+         */
+        post: operations["acceptPackageShare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/packages/{scope}/{name}/shares/{target}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Withdraw a package share
+         * @description Remove the offer AND the installation it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.
+         */
+        delete: operations["revokePackageShare"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/packages/{scope}/{name}/{version}/download": {
         parameters: {
             query?: never;
@@ -4952,6 +5016,8 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the four `/shares` routes enforce. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            home_shareable: boolean;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
@@ -5387,8 +5453,12 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the four `/shares` routes enforce. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            home_shareable: boolean;
             /** @description Space ids (`spc_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
+            /** @description The caller's own personal space has this package installed at a version PIN older than the `latest` dist-tag. An installation in a personal space is pinned at install time so a newly published version never executes with the recipient's credentials unseen; re-calling `POST /api/packages/{scope}/{name}/shares/accept` re-pins it to `latest`. Always `false` for team-space installations, which follow `latest`. */
+            update_available: boolean;
         }[];
         /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
         ModelGenerationCapabilities: {
@@ -5605,6 +5675,8 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the four `/shares` routes enforce. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -5640,6 +5712,8 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the four `/shares` routes enforce. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            home_shareable: boolean;
             agents: {
                 id: string;
                 display_name: string;
@@ -5666,6 +5740,8 @@ export interface components {
         };
         /** @description Organization settings (extensible) */
         OrgSettings: {
+            /** @description When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork` and `GET /api/packages/{scope}/{name}/{version}/download` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt in both settings: the CLI's skills sync downloads them into a local checkout by design. Agent RUNS are unaffected; a run's bundle is assembled server-side and never travels as a copy. */
+            restrict_package_copy?: boolean;
             /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
             api_version?: string;
             /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
@@ -5706,6 +5782,19 @@ export interface components {
         PackageFileIndex: {
             /** @description Files in the artifact, sorted by `path`. */
             entries: components["schemas"]["PackageFileEntry"][];
+        };
+        /** @description One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to install; it is never an installation, and no execution path consults it. */
+        PackageShare: {
+            /** @enum {string} */
+            object: "package_share";
+            target: components["schemas"]["ShareTargetView"];
+            /** @description Who shared it. `null` once that account is gone. */
+            shared_by: {
+                user_id: string;
+                name: string;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
         };
         PackageVersionDetail: {
             /** @description Version row id */
@@ -6013,6 +6102,29 @@ export interface components {
             unread_count: number;
             /** @description Highest run number this schedule ever produced; 0 when it never fired. */
             last_run_number: number;
+        };
+        /** @description Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id. */
+        ShareTarget: {
+            /** @enum {string} */
+            kind: "user";
+            /** @description Organization member's user id. */
+            user_id: string;
+        } | {
+            /** @enum {string} */
+            kind: "space";
+            /** @description Space id (`spc_…`) the caller can reach. */
+            space_id: string;
+        };
+        /** @description A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds. */
+        ShareTargetView: {
+            /** @enum {string} */
+            kind: "user" | "space";
+            /** @description Present when `kind` is `user`. */
+            user_id?: string;
+            /** @description Present when `kind` is `space`. */
+            space_id?: string;
+            /** @description The member's display name, or the space's name. */
+            name: string;
         };
         SmtpConfigView: {
             spaceId: string;
@@ -12548,9 +12660,11 @@ export interface operations {
                      *             "description": "Sorts incoming Gmail threads into priority buckets.",
                      *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *             "home_writable": true,
+                     *             "home_shareable": true,
                      *             "installed_in": [
                      *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
-                     *             ]
+                     *             ],
+                     *             "update_available": false
                      *           }
                      *         ],
                      *         "skill": [],
@@ -12564,13 +12678,30 @@ export interface operations {
                      *             "description": "Google Mail OAuth integration.",
                      *             "home_space_id": null,
                      *             "home_writable": false,
+                     *             "home_shareable": false,
                      *             "installed_in": [
                      *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
-                     *             ]
+                     *             ],
+                     *             "update_available": false
                      *           }
                      *         ]
-                     *       }
+                     *       },
+                     *       "shared": [
+                     *         {
+                     *           "id": "@acme/weekly-digest",
+                     *           "type": "agent",
+                     *           "source": "local",
+                     *           "name": "Weekly Digest",
+                     *           "description": "Summarises the week's threads.",
+                     *           "space_id": "spc_9a1b3c5d-7e9f-4a1b-8c3d-5e7f9a1b3c5d",
+                     *           "personal": true,
+                     *           "shared_by": {
+                     *             "user_id": "usr_1",
+                     *             "name": "Alex"
+                     *           }
+                     *         }
+                     *       ]
                      *     }
                      */
                     "application/json": {
@@ -12590,6 +12721,25 @@ export interface operations {
                             "mcp-server": components["schemas"]["LibraryPackageList"];
                             integration: components["schemas"]["LibraryPackageList"];
                         };
+                        /** @description Packages OFFERED to a space the caller reads and not installed there — "shared with me", i.e. the offers still waiting on a decision. An accepted offer leaves this list and appears as an installation in `packages`. Empty for a caller nobody has shared anything with. */
+                        shared: {
+                            /** @description Package id (`@scope/name`). */
+                            id: string;
+                            /** @enum {string} */
+                            type: "agent" | "skill" | "mcp-server" | "integration";
+                            source: string;
+                            name: string;
+                            description: string;
+                            /** @description The space the package is offered to (`spc_…`) — always one the caller reads, so no private id is disclosed. */
+                            space_id: string;
+                            /** @description The offered space is the caller's OWN personal space, i.e. `POST /api/packages/{scope}/{name}/shares/accept` applies. When false the offer targets a team space and is installed through `POST /api/spaces/{spaceId}/packages` by someone holding the type's install grant there. */
+                            personal: boolean;
+                            /** @description Who shared it. `null` once that account is gone. */
+                            shared_by: {
+                                user_id: string;
+                                name: string;
+                            } | null;
+                        }[];
                     };
                 };
             };
@@ -15744,6 +15894,8 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork` and `GET /api/packages/{scope}/{name}/{version}/download` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt in both settings: the CLI's skills sync downloads them into a local checkout by design. Agent RUNS are unaffected; a run's bundle is assembled server-side and never travels as a copy. */
+                    restrict_package_copy?: boolean;
                     /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
                     api_version?: string;
                     /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
@@ -17377,6 +17529,7 @@ export interface operations {
                      *           "forked_from": null,
                      *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "home_writable": true,
+                     *           "home_shareable": true,
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
                      *         }
@@ -18070,6 +18223,182 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    listPackageShares: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The package's shares, oldest first. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["PackageShare"][];
+                        /** @description Always false — a package's audience is not paginated. */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    sharePackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    target: components["schemas"]["ShareTarget"];
+                };
+            };
+        };
+        responses: {
+            /** @description The share, new or already present. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageShare"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target space is the package's own home (`share_target_is_home`). RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    acceptPackageShare: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installed (or re-pinned) in the caller's personal space. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "space_package";
+                        package_id: string;
+                        /** @description The pinned version's id — the `latest` dist-tag at accept time. */
+                        version_id: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The package has no published version to pin (`package_has_no_version`). A shared package is always installed at a pin, so there is nothing to install until its author publishes. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            422: components["responses"]["PackageArchiveUnreadable"];
+        };
+    };
+    revokePackageShare: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+                /** @description The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. The two are told apart by the space-id shape. There is no third spelling: the id of another member's personal space is never on the wire, so it cannot be the handle here. */
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Share (and any installation behind it) removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     downloadPackageVersion: {

@@ -35,7 +35,7 @@ export const libraryPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "spaces", "packages"],
+                required: ["object", "spaces", "packages", "shared"],
                 properties: {
                   object: { type: "string", enum: ["library"] },
                   spaces: {
@@ -65,6 +65,53 @@ export const libraryPaths = {
                       integration: { $ref: "#/components/schemas/LibraryPackageList" },
                     },
                   },
+                  shared: {
+                    type: "array",
+                    description:
+                      'Packages OFFERED to a space the caller reads and not installed there — "shared with me", i.e. the offers still waiting on a decision. An accepted offer leaves this list and appears as an installation in `packages`. Empty for a caller nobody has shared anything with.',
+                    items: {
+                      type: "object",
+                      required: [
+                        "id",
+                        "type",
+                        "source",
+                        "name",
+                        "description",
+                        "space_id",
+                        "personal",
+                        "shared_by",
+                      ],
+                      properties: {
+                        id: { type: "string", description: "Package id (`@scope/name`)." },
+                        type: {
+                          type: "string",
+                          enum: ["agent", "skill", "mcp-server", "integration"],
+                        },
+                        source: { type: "string" },
+                        name: { type: "string" },
+                        description: { type: "string" },
+                        space_id: {
+                          type: "string",
+                          description:
+                            "The space the package is offered to (`spc_…`) — always one the caller reads, so no private id is disclosed.",
+                        },
+                        personal: {
+                          type: "boolean",
+                          description:
+                            "The offered space is the caller's OWN personal space, i.e. `POST /api/packages/{scope}/{name}/shares/accept` applies. When false the offer targets a team space and is installed through `POST /api/spaces/{spaceId}/packages` by someone holding the type's install grant there.",
+                        },
+                        shared_by: {
+                          type: ["object", "null"],
+                          description: "Who shared it. `null` once that account is gone.",
+                          required: ["user_id", "name"],
+                          properties: {
+                            user_id: { type: "string" },
+                            name: { type: "string" },
+                          },
+                        },
+                      },
+                    },
+                  },
                 },
               },
               example: {
@@ -91,7 +138,9 @@ export const libraryPaths = {
                       description: "Sorts incoming Gmail threads into priority buckets.",
                       home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       home_writable: true,
+                      home_shareable: true,
                       installed_in: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+                      update_available: false,
                     },
                   ],
                   skill: [],
@@ -105,13 +154,27 @@ export const libraryPaths = {
                       description: "Google Mail OAuth integration.",
                       home_space_id: null,
                       home_writable: false,
+                      home_shareable: false,
                       installed_in: [
                         "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                         "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                       ],
+                      update_available: false,
                     },
                   ],
                 },
+                shared: [
+                  {
+                    id: "@acme/weekly-digest",
+                    type: "agent",
+                    source: "local",
+                    name: "Weekly Digest",
+                    description: "Summarises the week's threads.",
+                    space_id: "spc_9a1b3c5d-7e9f-4a1b-8c3d-5e7f9a1b3c5d",
+                    personal: true,
+                    shared_by: { user_id: "usr_1", name: "Alex" },
+                  },
+                ],
               },
             },
           },

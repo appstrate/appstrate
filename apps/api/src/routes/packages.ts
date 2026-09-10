@@ -13,7 +13,12 @@ import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
-import { installPackage } from "../services/space-packages.ts";
+import { acceptSharedPackage, installPackage } from "../services/space-packages.ts";
+import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
+import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
+import { createPackageShareNotification } from "../services/state/notifications.ts";
+import { getOrgMember } from "../services/organizations.ts";
+import { callerOrgRole, callerPersonalOwnerId } from "../lib/view-as.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -63,12 +68,14 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import {
   assertCatalogPackageAccess,
+  assertPackageCopyAllowed,
   assertPackageDependenciesAccessible,
   assertForkSourceAccess,
   authorizeBundlePackages,
   assertExistingPackageInstallAccess,
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
+  assertPackageShareAccess,
   homeWireForCaller,
   isPackageReadableInSpace,
   managesOrgCatalog,
@@ -86,6 +93,7 @@ import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { isSpaceId } from "../lib/ids.ts";
 import {
   resolvePackageFileValidator,
   readPackageSnapshot,
@@ -301,6 +309,25 @@ export const createVersionBodySchema = z.object({ version: z.string().min(1).opt
  * draft editor: the draft is `PUT`, with its optimistic lock.
  */
 export const packageHomeSpaceSchema = z.object({ home_space_id: z.string().nullable() }).strict();
+
+/**
+ * Body of `POST /api/packages/{scope}/{name}/shares` — WHO the package is
+ * offered to (RBAC spec §6.10).
+ *
+ * Two kinds, and a person is not a space: a `user` target is resolved
+ * server-side to that member's personal space, so the sharer never handles
+ * (nor learns) the id of a space §3.6 says does not exist for them. A `space`
+ * target must be one the sharer can already reach. `.strict()` on both arms —
+ * a typo'd key is a 400, not a share to the wrong subject.
+ */
+export const shareTargetSchema = z
+  .object({
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("user"), user_id: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("space"), space_id: z.string().min(1) }).strict(),
+    ]),
+  })
+  .strict();
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -1949,6 +1976,189 @@ export function createPackagesRouter() {
     return c.json(detail, 201);
   });
 
+  // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
+  //
+  // THREE of the four routes — offer, list, revoke — are authorized by
+  // `<type>:share` in the package's HOME space, the same authority helper the
+  // write routes use, so they have no route-level permission guard either.
+  // `share` is in no API key's allowlist, so those three are session-borne in
+  // effect without a transport check of their own.
+  //
+  // `accept` is the fourth and is NOT one of them: it is the recipient's act on
+  // their own space and requires neither `share` nor the type's install grant —
+  // the offer plus the owner's own call is the whole authorization (§3.6).
+  //
+  // Registered BEFORE `/{scope}/{name}/:version/download`: `:version` would
+  // otherwise match the literal segment `shares`.
+
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const accessible = await packageAccessSpaces(c);
+    // Authority first, before the body is read: a caller who may not share this
+    // package learns nothing about the body's shape (or the package's existence).
+    const pkg = await assertPackageShareAccess(c, packageId, accessible);
+    const { target } = await readJsonBody(c, shareTargetSchema);
+
+    let spaceId: string;
+    let recipientUserId: string | null = null;
+    if (target.kind === "user") {
+      // Naming a person means reading the org directory — the same permission
+      // the member picker needs. A `guest` does not hold it, which is why a
+      // guest shares to a space they reach and not to a colleague.
+      await makePermissionGuard("members:read")(c, async () => {});
+      const membership = await getOrgMember(orgId, target.user_id);
+      if (!membership) throw notFound(`User '${target.user_id}' not found in this organization`);
+      const space = await ensurePersonalSpaceFor(orgId, target.user_id);
+      spaceId = space.id;
+      recipientUserId = target.user_id;
+    } else {
+      // A space the caller cannot reach must not be confirmed to exist. Since
+      // `packageAccessSpaces` never loads somebody else's personal space, this
+      // is also what makes such a space untargetable by a guessed id.
+      const destination = accessible.find((space) => space.id === target.space_id);
+      if (!destination) throw notFound(`Space '${target.space_id}' not found`);
+      spaceId = destination.id;
+    }
+
+    if (spaceId === pkg.homeSpaceId) {
+      throw conflict(
+        "share_target_is_home",
+        "This package already lives in that space — sharing it there would offer it to itself.",
+      );
+    }
+
+    const { created } = await sharePackage({ packageId, spaceId, sharedBy: c.get("user").id });
+    if (created) {
+      await recordAuditFromContext(c, {
+        action: "package.shared",
+        resourceType: "package",
+        resourceId: packageId,
+        // The SUBJECT as the sharer named it. A `user` target records the
+        // person, never the personal space it resolved to: that id is withheld
+        // from the sharer on the wire (plan decision 5b), so writing it into
+        // the trail would publish through the audit log what §3.6 withholds
+        // everywhere else — and it names the wrong thing besides, since the
+        // space is an implementation of "Bob" and not the audited act.
+        after: recipientUserId
+          ? { recipientUserId, targetKind: "user" }
+          : { spaceId, targetKind: "space" },
+      });
+      if (recipientUserId) {
+        // Best-effort: the share is committed, and a notification row that
+        // will not write must not report it as failed.
+        try {
+          await createPackageShareNotification({
+            orgId,
+            spaceId,
+            recipientUserId,
+            packageId,
+            packageType: pkg.type,
+            sharedByName: c.get("user").name,
+          });
+        } catch (err) {
+          logger.warn("package share notification failed", {
+            packageId,
+            spaceId,
+            err: String(err),
+          });
+        }
+      }
+    }
+
+    // 200 either way — sharing the same pair twice is the same state, not a
+    // conflict. Rendered through the SAME projection as the listing, so a
+    // personal-space target comes back as its owner here too.
+    const [view] = await listPackageShares(packageId, orgId, spaceId);
+    if (!view) {
+      logger.error("Share could not be re-read", { packageId, spaceId, orgId });
+      throw internalError();
+    }
+    return c.json({ object: "package_share", ...view });
+  });
+
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    await assertPackageShareAccess(c, packageId);
+    const shares = await listPackageShares(packageId, orgId);
+    return c.json(listResponse(shares.map((share) => ({ object: "package_share", ...share }))));
+  });
+
+  // Accept a share into the caller's OWN personal space. Deliberately NOT
+  // guarded by `share` or by the type's install grant: the recipient consented
+  // by calling it, and a `guest` holds only `operator` in their own space
+  // (RBAC spec §3.6, forward constraint). Re-calling it RE-PINS to `latest` —
+  // that is how the owner takes a version the author has since published.
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares/accept`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    // `null` for an API key, an end-user and a role preview — none of them has
+    // a personal space, so none of them has anything to accept INTO.
+    const userId = callerPersonalOwnerId(c, orgId);
+    if (userId === null) throw notFound(`Package '${packageId}' not found`);
+
+    const space = await ensurePersonalSpaceFor(orgId, userId);
+    // The offer is the whole authorization, and it is checked INSIDE
+    // `acceptSharedPackage`'s transaction, next to the insert it authorizes —
+    // checking it here would leave a revoke racing an accept able to commit an
+    // installation the share no longer backs, which is exactly what the
+    // one-transaction revoke exists to prevent.
+    const { versionId } = await acceptSharedPackage({ orgId, spaceId: space.id }, packageId);
+    await recordAuditFromContext(c, {
+      action: "package.share_accepted",
+      resourceType: "package",
+      resourceId: packageId,
+      after: { spaceId: space.id, versionId },
+    });
+    return c.json({ object: "space_package", package_id: packageId, version_id: versionId });
+  });
+
+  // The path segment is the target as the LISTING published it: a space id for
+  // a space share, a member's user id for a share made to a person. There is
+  // deliberately no third spelling — the id of somebody else's personal space
+  // is never on the wire (plan decision 5b), so it cannot be the handle here.
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
+    const packageId = getItemId(c);
+    const target = c.req.param("target")!;
+    const orgId = c.get("orgId");
+    await assertPackageShareAccess(c, packageId);
+
+    let spaceId: string;
+    let recipientUserId: string | null = null;
+    if (isSpaceId(target)) {
+      spaceId = target;
+    } else {
+      const membership = await getOrgMember(orgId, target);
+      if (!membership) throw notFound(`User '${target}' not found in this organization`);
+      // READ-ONLY, unlike the offer route: a revoke must not be the act that
+      // brings the recipient's personal space into existence. No space means no
+      // share to withdraw, which is the same 404 the missing row answers.
+      const space = await findPersonalSpace(orgId, target);
+      if (!space) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
+      spaceId = space.id;
+      recipientUserId = target;
+    }
+
+    // Withdrawing the offer withdraws the installation it backs, in one
+    // transaction (plan decision 3) — otherwise the package keeps running in a
+    // space that is no longer allowed to see it.
+    const revoked = await revokePackageShare({ packageId, spaceId, orgId });
+    if (!revoked) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
+    await recordAuditFromContext(c, {
+      action: "package.unshared",
+      resourceType: "package",
+      resourceId: packageId,
+      // The subject as the caller named it — a person for a `user` target, and
+      // never the personal space it resolved to, for the reason `package.shared`
+      // states. `uninstalled` is the other half of what this act did.
+      after: recipientUserId
+        ? { recipientUserId, targetKind: "user", uninstalled: revoked.uninstalled }
+        : { spaceId, targetKind: "space", uninstalled: revoked.uninstalled },
+    });
+    return c.body(null, 204);
+  });
+
   // --- Package import/download/publish routes ---
 
   // --- Shared import logic (used by /import and /import-github) ---
@@ -2490,7 +2700,12 @@ export function createPackagesRouter() {
 
     // Verify org ownership (or system package). Ephemeral shadows are hidden.
     const [pkg] = await db
-      .select({ id: packages.id, type: packages.type })
+      .select({
+        id: packages.id,
+        type: packages.type,
+        source: packages.source,
+        homeSpaceId: packages.homeSpaceId,
+      })
       .from(packages)
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
       .limit(1);
@@ -2501,6 +2716,23 @@ export function createPackagesRouter() {
     // The ZIP carries the manifest and every authored file, so it is at least
     // as sensitive as the detail route — it needs the same `<type>:read`.
     await requirePackageReadPermission(c, pkg.type);
+
+    // …and, when the organization restricts copying (plan decision 12), the
+    // source's `<type>:share`. This is the route the archive leaves through,
+    // so reading it and taking it away are two different permissions there.
+    // Skills and system packages are exempt inside the helper: the CLI's
+    // skills sync is this route's other consumer and its copies are local by
+    // design, and a shipped system package has no owning space to protect.
+    const orgRole = callerOrgRole(c, orgId);
+    await assertPackageCopyAllowed(
+      c,
+      { ...pkg, type: pkg.type as PackageType },
+      {
+        orgId,
+        orgRole,
+        accessible: await packageAccessSpaces(c, orgId, orgRole),
+      },
+    );
 
     const ver = await getVersionForDownload(packageId, versionSpec);
     if (!ver) {

@@ -1480,6 +1480,7 @@ export function IntegrationDetailPage() {
   // id (withheld unless this caller reaches that space) and the write verdict.
   const homeSpaceId = pkg?.home_space_id;
   const homeWritable = pkg?.home_writable;
+  const homeShareable = pkg?.home_shareable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const canConfigure = can("integrations:configure");
   const canActivate = can("integrations:install");
@@ -1550,6 +1551,7 @@ export function IntegrationDetailPage() {
               isHistoricalVersion={false}
               homeSpaceId={homeSpaceId}
               homeWritable={homeWritable}
+              homeShareable={homeShareable}
               downloadVersion={version}
               onDownload={downloadPackage}
               onFork={() => setForkOpen(true)}

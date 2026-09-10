@@ -36,11 +36,11 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
  * from drifting on the descriptions.
  */
 /**
- * The `home_space_id` / `home_writable` pair, on every shape that carries a
- * package's home (`AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail`,
- * `LibraryPackageList`). ONE definition: the server computes both in one place
- * (`homeWireForCaller`), and four hand-copied descriptions drifted the moment
- * the contract changed.
+ * The `home_space_id` / `home_writable` / `home_shareable` trio, on every shape
+ * that carries a package's home (`AgentDetail`, `OrgPackageItem`,
+ * `OrgPackageItemDetail`, `LibraryPackageList`). ONE definition: the server
+ * computes all three in one place (`homeWireForCaller`), and four hand-copied
+ * descriptions drifted the moment the contract changed.
  */
 const PACKAGE_HOME_PROPERTIES = {
   home_space_id: {
@@ -53,9 +53,19 @@ const PACKAGE_HOME_PROPERTIES = {
     description:
       "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld.",
   },
+  home_shareable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the four `/shares` routes enforce. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+  },
 } as const;
 
 export const ORG_SETTINGS_PROPERTIES = {
+  restrict_package_copy: {
+    type: "boolean",
+    description:
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork` and `GET /api/packages/{scope}/{name}/{version}/download` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt in both settings: the CLI's skills sync downloads them into a local checkout by design. Agent RUNS are unaffected; a run's bundle is assembled server-side and never travels as a copy.",
+  },
   api_version: {
     type: "string",
     description:
@@ -564,6 +574,7 @@ export const schemas = {
       "effective_timeout_seconds",
       "home_space_id",
       "home_writable",
+      "home_shareable",
     ],
     properties: {
       id: { type: "string" },
@@ -1297,6 +1308,7 @@ export const schemas = {
       "forked_from",
       "home_space_id",
       "home_writable",
+      "home_shareable",
     ],
     properties: {
       id: { type: "string" },
@@ -1338,6 +1350,7 @@ export const schemas = {
       "forked_from",
       "home_space_id",
       "home_writable",
+      "home_shareable",
       "agents",
     ],
     properties: {
@@ -2076,7 +2089,9 @@ export const schemas = {
         "description",
         "home_space_id",
         "home_writable",
+        "home_shareable",
         "installed_in",
+        "update_available",
       ],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
@@ -2103,7 +2118,73 @@ export const schemas = {
             "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
           items: { type: "string" },
         },
+        update_available: {
+          type: "boolean",
+          description:
+            "The caller's own personal space has this package installed at a version PIN older than the `latest` dist-tag. An installation in a personal space is pinned at install time so a newly published version never executes with the recipient's credentials unseen; re-calling `POST /api/packages/{scope}/{name}/shares/accept` re-pins it to `latest`. Always `false` for team-space installations, which follow `latest`.",
+        },
       },
+    },
+  },
+  ShareTarget: {
+    type: "object",
+    description:
+      "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+    required: ["kind"],
+    oneOf: [
+      {
+        type: "object",
+        required: ["kind", "user_id"],
+        properties: {
+          kind: { type: "string", enum: ["user"] },
+          user_id: { type: "string", description: "Organization member's user id." },
+        },
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        required: ["kind", "space_id"],
+        properties: {
+          kind: { type: "string", enum: ["space"] },
+          space_id: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
+        },
+        additionalProperties: false,
+      },
+    ],
+  },
+  ShareTargetView: {
+    type: "object",
+    description:
+      "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
+    required: ["kind", "name"],
+    properties: {
+      kind: { type: "string", enum: ["user", "space"] },
+      user_id: { type: "string", description: "Present when `kind` is `user`." },
+      space_id: { type: "string", description: "Present when `kind` is `space`." },
+      name: {
+        type: "string",
+        description: "The member's display name, or the space's name.",
+      },
+    },
+  },
+  PackageShare: {
+    type: "object",
+    description:
+      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to install; it is never an installation, and no execution path consults it.",
+    required: ["object", "target", "shared_by", "created_at"],
+    properties: {
+      object: { type: "string", enum: ["package_share"] },
+      target: { $ref: "#/components/schemas/ShareTargetView" },
+      shared_by: {
+        type: ["object", "null"],
+        description: "Who shared it. `null` once that account is gone.",
+        required: ["user_id", "name"],
+        properties: {
+          user_id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      created_at: { type: "string", format: "date-time" },
     },
   },
 } as const;

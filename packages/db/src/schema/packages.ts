@@ -73,6 +73,47 @@ export const spacePackages = pgTable(
   ],
 );
 
+/**
+ * Package sharing — AUDIENCE, not installation (RBAC spec §6.10).
+ *
+ * A row here says "this package is OFFERED to that space". It grants READ (the
+ * metadata a recipient needs to decide, and the "add to my space" affordance)
+ * and NOTHING else: running a package, resolving its pins, resolving its
+ * credentials all read `space_packages`, which the recipient writes for
+ * themselves by accepting. That separation is the whole point of a second
+ * table — an agent runs with the recipient's credentials, so activating it has
+ * to be the recipient's own act, and a state carried on `space_packages` would
+ * have had to be filtered at each of its readers, where one miss executes a
+ * package nobody consented to.
+ *
+ * Revoking a share deletes the installation it backs, in the same transaction.
+ *
+ * `shared_by` is `SET NULL` rather than `RESTRICT`: the sharer leaving the
+ * organization must not keep the audience alive as a foreign-key obstacle, and
+ * the audit event records who shared it anyway.
+ */
+export const packageShares = pgTable(
+  "package_shares",
+  {
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    spaceId: text("space_id")
+      .notNull()
+      .references(() => spaces.id, { onDelete: "cascade" }),
+    sharedBy: text("shared_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.packageId, table.spaceId] }),
+    // "What is shared WITH this space" — the library's `shared` section and the
+    // read predicate both ask it, and it backs the `spaces` cascade.
+    index("idx_package_shares_space_id").on(table.spaceId),
+    // Referencing-side index for the `user` SET NULL action.
+    index("idx_package_shares_shared_by").on(table.sharedBy),
+  ],
+);
+
 export const packages = pgTable(
   "packages",
   {

@@ -7,7 +7,14 @@
 
 import { eq, and, or, sql, isNotNull, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
+import {
+  spacePackages,
+  packages,
+  packageShares,
+  packageVersions,
+  packageDistTags,
+  spaces,
+} from "@appstrate/db/schema";
 import { notFound, conflict, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -100,6 +107,81 @@ export async function getCatalogPackageType(
   return row ? (row.type as PackageType) : null;
 }
 
+/** Transaction-local reads the personal-space install rules need. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** The owner of `spaceId` when it is a personal space, `null` when it is a team one. */
+async function personalSpaceOwner(tx: Tx, spaceId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ ownerUserId: spaces.ownerUserId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
+    .limit(1);
+  return row?.ownerUserId ?? null;
+}
+
+/** Is the package OFFERED to this space (`package_shares`)? */
+async function sharedWith(tx: Tx, packageId: string, spaceId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ packageId: packageShares.packageId })
+    .from(packageShares)
+    .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, spaceId)))
+    .limit(1);
+  return !!row;
+}
+
+/** The `latest` dist-tag's version id, read inside the caller's transaction. */
+async function latestVersionIdIn(tx: Tx, packageId: string): Promise<number | null> {
+  const [tag] = await tx
+    .select({ versionId: packageDistTags.versionId })
+    .from(packageDistTags)
+    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
+    .limit(1);
+  return tag?.versionId ?? null;
+}
+
+/**
+ * The two rules an install into a PERSONAL space obeys (RBAC spec §6.10), and
+ * the version to pin. A team space is unchanged: `null` pin, no precondition
+ * beyond the caller's install grant.
+ *
+ * 1. The package must be OFFERED there (`package_shares`) or HOMED there. A
+ *    404, never a 403: the space id is private, so a named refusal would be an
+ *    oracle. That the caller is the space's owner is already settled upstream —
+ *    `resolveSpaceRole` answers `null` for anybody else and the space is
+ *    `private`, so no other principal ever reaches this route.
+ * 2. An accepted share is PINNED to `latest` (plan decision 6). Without it the
+ *    author publishes a v3 the recipient executes, with the recipient's
+ *    credentials, having never seen it. A share with nothing published yet is
+ *    refused rather than installed unpinned, which would be that same
+ *    follow-`latest` behaviour under another name.
+ *
+ * A package homed HERE is NOT pinned: it is the owner's own, they are its
+ * author, and the risk the pin exists to remove — executing a version you have
+ * not seen — is not a risk they run against themselves. Pinning it would also
+ * strand it, since a draft-only package has no version to pin and the update
+ * path for a personal space is re-accepting a share it does not have.
+ */
+async function resolvePersonalSpaceInstall(
+  tx: Tx,
+  scope: SpaceScope,
+  pkg: { id: string; homeSpaceId: string | null },
+): Promise<number | null> {
+  if ((await personalSpaceOwner(tx, scope.spaceId)) === null) return null;
+  if (pkg.homeSpaceId === scope.spaceId) return null;
+  if (!(await sharedWith(tx, pkg.id, scope.spaceId))) {
+    throw notFound(`Package '${pkg.id}' not found in organization catalog`);
+  }
+  const versionId = await latestVersionIdIn(tx, pkg.id);
+  if (versionId === null) {
+    throw conflict(
+      "package_has_no_version",
+      `Package '${pkg.id}' has no published version to install — ask its author to publish one.`,
+    );
+  }
+  return versionId;
+}
+
 export async function installPackage(scope: SpaceScope, packageId: string) {
   await assertSpaceInScope(scope);
   await assertMcpServerInstallable(scope, packageId);
@@ -112,7 +194,7 @@ export async function installPackage(scope: SpaceScope, packageId: string) {
     // Verify the package exists in the org catalog (or is a system package).
     // Ephemeral shadow packages are never installable.
     const [pkg] = await tx
-      .select({ id: packages.id, type: packages.type })
+      .select({ id: packages.id, type: packages.type, homeSpaceId: packages.homeSpaceId })
       .from(packages)
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
       .limit(1);
@@ -135,15 +217,87 @@ export async function installPackage(scope: SpaceScope, packageId: string) {
       );
     }
 
+    const versionId = await resolvePersonalSpaceInstall(tx, scope, pkg);
+
     const [row] = await tx
       .insert(spacePackages)
       .values({
         spaceId: scope.spaceId,
         packageId,
+        ...(versionId !== null ? { versionId } : {}),
       })
       .returning();
 
     return row!;
+  });
+}
+
+/**
+ * Accept a share into the recipient's OWN personal space — install it, pinned
+ * to `latest`, on the space owner's behalf (RBAC spec §3.6, §6.10).
+ *
+ * Two things separate it from {@link installPackage}. It runs WITHOUT the
+ * type's install grant: the space's owner consented by calling it, and a
+ * `guest` holds only the `operator` preset in their own space, which carries
+ * none of `agents:configure` / `integrations:install` / `<type>:write`. And it
+ * is IDEMPOTENT in the useful direction — an already-installed package is
+ * RE-PINNED to `latest`, which is how the owner takes a new version after the
+ * author publishes one. Calling it twice is not an error; it is the update
+ * button.
+ *
+ * The OFFER is checked here rather than by the caller, so that the check and
+ * the insert it authorizes commit or fail together.
+ *
+ * @returns the pinned version id.
+ * @throws 404 when the package does not exist or is not offered to this space —
+ *   one message for both, since the caller may not know which.
+ */
+export async function acceptSharedPackage(
+  scope: SpaceScope,
+  packageId: string,
+): Promise<{ versionId: number }> {
+  await assertSpaceInScope(scope);
+  await assertMcpServerInstallable(scope, packageId);
+
+  return db.transaction(async (tx) => {
+    const [pkg] = await tx
+      .select({ id: packages.id })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
+      .limit(1);
+    if (!pkg) {
+      throw notFound(`Package '${packageId}' not found`);
+    }
+
+    // The offer IS the authorization, so it is read here — in the transaction
+    // that inserts the installation — and not by the route. A check outside it
+    // is a check against a state that may already be gone: a revoke deletes the
+    // share and the installation together (`revokePackageShare`), and an accept
+    // that read the offer before that transaction committed would put the
+    // installation back with nothing backing it. A package that was never
+    // offered here is a 404, not a 403: the caller may have no other way to see
+    // it, and the space id is private.
+    if (!(await sharedWith(tx, packageId, scope.spaceId))) {
+      throw notFound(`Package '${packageId}' not found`);
+    }
+
+    const versionId = await latestVersionIdIn(tx, packageId);
+    if (versionId === null) {
+      throw conflict(
+        "package_has_no_version",
+        `Package '${packageId}' has no published version to install — ask its author to publish one.`,
+      );
+    }
+
+    await tx
+      .insert(spacePackages)
+      .values({ spaceId: scope.spaceId, packageId, versionId })
+      .onConflictDoUpdate({
+        target: [spacePackages.spaceId, spacePackages.packageId],
+        set: { versionId, updatedAt: new Date() },
+      });
+
+    return { versionId };
   });
 }
 

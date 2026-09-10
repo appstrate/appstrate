@@ -19,10 +19,13 @@ import {
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
+import { packageDetailPath } from "../lib/package-paths";
 
 /** One notification as returned by `GET /api/notifications`. */
 type NotificationItem = {
   id: string;
+  /** The KIND, which decides how the row reads — `run_completed`, `package_shared`, … */
+  type: string;
   run_id: string | null;
   payload: Record<string, unknown> | null;
   created_at: string;
@@ -34,7 +37,12 @@ function payloadString(payload: Record<string, unknown> | null, key: string): st
   return typeof v === "string" ? v : null;
 }
 
-function NotificationContent({
+/**
+ * The bell's list, exported for the rendering tests: a Radix popover mounts
+ * nothing under `renderToStaticMarkup`, so the trigger's chrome is not what a
+ * test can look at.
+ */
+export function NotificationContent({
   unread,
   notifications,
   agentNameMap,
@@ -87,14 +95,31 @@ function NotificationContent({
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
             const agentId = payloadString(notification.payload, "agent_id");
-            const status = payloadString(notification.payload, "status");
-            const displayName = agentId
-              ? (agentNameMap.get(agentId) ?? agentId)
-              : t("runs.deletedAgent", { ns: "agents" });
+            const packageId = payloadString(notification.payload, "package_id");
+            // A SHARE names the sharer and the package and has no run behind
+            // it, so it carries no status to badge — reading every row as a
+            // finished run titled it "Agent supprimé", the fallback for a run
+            // whose agent is gone.
+            const shared = notification.type === "package_shared";
+            const status = shared ? null : payloadString(notification.payload, "status");
+            const displayName = shared
+              ? t("notifications.packageShared", {
+                  name: payloadString(notification.payload, "shared_by_name") ?? "",
+                  package: packageId ?? "",
+                })
+              : agentId
+                ? (agentNameMap.get(agentId) ?? agentId)
+                : t("runs.deletedAgent", { ns: "agents" });
             // Source agent gone → fall back to the run-scoped route. Marking
             // it read still flows through `onItemClick`.
-            const linkTarget =
-              agentId && notification.run_id
+            const linkTarget = shared
+              ? packageId
+                ? packageDetailPath(
+                    payloadString(notification.payload, "package_type") ?? "agent",
+                    packageId,
+                  )
+                : "/library"
+              : agentId && notification.run_id
                 ? `/agents/${agentId}/runs/${notification.run_id}`
                 : notification.run_id
                   ? `/runs/${notification.run_id}`

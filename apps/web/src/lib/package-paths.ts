@@ -2,9 +2,15 @@
 
 import { PACKAGE_CONFIG, type PackageType } from "../hooks/use-packages";
 
-/** /agents/{id} or /{type}s/{id} */
+/**
+ * /agents/{id} or /{type}s/{id} — the ONE type→route map the SPA has.
+ *
+ * Total over an arbitrary string because one caller's type comes from a
+ * notification's jsonb payload rather than from the typed client: an unknown
+ * type lands on the agent list instead of rendering `/undefined/…`.
+ */
 export function packageDetailPath(type: PackageType | string, packageId: string): string {
-  return `/${PACKAGE_CONFIG[type as PackageType].path}/${packageId}`;
+  return `/${PACKAGE_CONFIG[type as PackageType]?.path ?? "agents"}/${packageId}`;
 }
 
 /** /agents for agents, /{type}s for others */

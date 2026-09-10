@@ -488,13 +488,45 @@ export function assertSpaceAdminAct(
 }
 
 /**
- * The caller's own personal space, provisioned if missing — the lazy repair
- * `GET /api/spaces` performs (plan decision 4). Its own transaction, because
- * there is nothing else to commit with it; the membership doors call
- * `ensurePersonalSpace` inside theirs instead.
+ * The personal space `userId` owns in `orgId`, provisioned if missing — its own
+ * transaction, because there is nothing else to commit with it; the membership
+ * doors call `ensurePersonalSpace` inside theirs instead.
+ *
+ * `userId` is the CALLER for the lazy repair `GET /api/spaces` performs (plan
+ * decision 4), and ANOTHER MEMBER when a share is resolved to its recipient's
+ * space. Both are the same act on the same row, so they are the same function:
+ * "share with Bob" means "share with Bob's personal space" (plan decision 2),
+ * and a member who has not opened the dashboard since the feature shipped has
+ * none — refusing the share would make sharing depend on the recipient having
+ * logged in first. The sharer never learns the id: `POST …/shares` renders a
+ * personal-space target as its OWNER (RBAC spec §6.10), which is what they
+ * asked for anyway.
+ *
+ * Provisioning is for the paths that GRANT something. A path that WITHDRAWS one
+ * must not create a space to then find nothing in it — those read
+ * {@link findPersonalSpace} instead.
+ *
+ * The caller has already established that `userId` is a member of `orgId`.
  */
-export async function ensureOwnPersonalSpace(orgId: string, userId: string): Promise<SpaceRow> {
+export async function ensurePersonalSpaceFor(orgId: string, userId: string): Promise<SpaceRow> {
   return ensurePersonalSpace(db, orgId, userId);
+}
+
+/**
+ * The personal space `userId` owns in `orgId`, or `null` — a pure READ, and the
+ * counterpart {@link ensurePersonalSpaceFor} must not be used for.
+ *
+ * `DELETE …/shares/{target}` is the caller: revoking a share that was never
+ * made must not be the act that brings the recipient's space into existence,
+ * and provisioning one there wrote a row on the way to a 404.
+ */
+export async function findPersonalSpace(orgId: string, userId: string): Promise<SpaceRow | null> {
+  const [space] = await db
+    .select()
+    .from(spaces)
+    .where(and(eq(spaces.orgId, orgId), eq(spaces.ownerUserId, userId)))
+    .limit(1);
+  return space ?? null;
 }
 
 /**

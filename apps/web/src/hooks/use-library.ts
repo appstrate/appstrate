@@ -9,7 +9,7 @@ import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (GET /api/library response). */
-type LibraryResponse =
+export type LibraryResponse =
   paths["/api/library"]["get"]["responses"][200]["content"]["application/json"];
 
 export type LibraryPackageItem = components["schemas"]["LibraryPackageList"][number];

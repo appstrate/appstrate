@@ -95,6 +95,7 @@ export function AgentActions({
         isHistoricalVersion={isHistoricalVersion}
         homeSpaceId={detail.home_space_id}
         homeWritable={detail.home_writable}
+        homeShareable={detail.home_shareable}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}

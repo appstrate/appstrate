@@ -16,6 +16,7 @@ import {
   PowerOff,
   SlidersHorizontal,
   FolderInput,
+  Share2,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -30,6 +31,7 @@ import { packageEditPath } from "../../lib/package-paths";
 import { PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
 import { usePermissions } from "../../hooks/use-permissions";
 import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
+import { SharePackageDialog } from "./share-package-dialog";
 
 interface PackageActionsDropdownProps {
   packageId: string;
@@ -51,6 +53,12 @@ interface PackageActionsDropdownProps {
    * own. `undefined` while the detail is loading, which reads as "no".
    */
   homeWritable?: boolean;
+  /**
+   * `home_shareable` off the same read: whether this caller holds the type's
+   * `share` in the home space. Gates "Share…" on its own — a custom role may
+   * grant `write` without it, or it without `write` (RBAC spec §6.10).
+   */
+  homeShareable?: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
   /** Agent-only: export the full transitive bundle (.afps-bundle). */
@@ -100,6 +108,7 @@ export function PackageActionsDropdown({
   isHistoricalVersion,
   homeSpaceId,
   homeWritable,
+  homeShareable,
   downloadVersion,
   onDownload,
   onDownloadBundle,
@@ -128,6 +137,7 @@ export function PackageActionsDropdown({
   const navigate = useNavigate();
   const { can } = usePermissions();
   const [moveHomeOpen, setMoveHomeOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const isAgent = type === "agent";
   // Each package family is its own permission resource, so every gate below
@@ -143,6 +153,10 @@ export function PackageActionsDropdown({
   // Same verdict: `<type>:delete` and `<type>:write` travel together in every
   // preset, and the server checks delete in its own right anyway.
   const canDelete = canWrite;
+  // Its own verdict, not `canWrite`'s: sharing is a third verb on the home
+  // space, and a system package answers `false` (it is already readable
+  // everywhere, and the route refuses it).
+  const canShare = homeShareable === true && !isBuiltIn && !isHistoricalVersion && isOwned;
   // Deactivating / uninstalling an integration is the same route pair as
   // `integrations:uninstall`; the props say whether the action EXISTS here.
   const showDeactivate = !!canDeactivate && can("integrations:uninstall") && !!onDeactivate;
@@ -165,9 +179,15 @@ export function PackageActionsDropdown({
         type={type}
         homeSpaceId={homeSpaceId}
       />
+      <SharePackageDialog
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        packageId={packageId}
+        homeSpaceId={homeSpaceId}
+      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="icon">
+          <Button variant="outline" size="icon" data-testid="package-actions-trigger">
             <MoreHorizontal size={16} />
           </Button>
         </DropdownMenuTrigger>
@@ -231,6 +251,16 @@ export function PackageActionsDropdown({
             <DropdownMenuItem onSelect={() => setMoveHomeOpen(true)}>
               <FolderInput size={14} />
               {t("packages.moveHome", { ns: "settings" })}
+            </DropdownMenuItem>
+          )}
+
+          {/* ── Share — the package's audience (RBAC spec §6.10). Offering it to
+              a space is not installing it there: the recipient activates it,
+              because it runs with THEIR credentials. */}
+          {canShare && (
+            <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+              <Share2 size={14} />
+              {t("packages.share", { ns: "settings" })}
             </DropdownMenuItem>
           )}
 

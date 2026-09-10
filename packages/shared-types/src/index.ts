@@ -607,6 +607,13 @@ export interface AgentDetail {
    */
   home_writable: boolean;
   /**
+   * Whether THIS caller holds `agents:share` in the home space — the predicate
+   * the four `/shares` routes enforce, from the same server-side computation.
+   * Sharing is a third verb on the home, not a synonym for writing: a custom
+   * role may hold one without the other. Always emitted.
+   */
+  home_shareable: boolean;
+  /**
    * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
    * platform default when it declares none) clamped to this deployment's
    * `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with
@@ -644,6 +651,12 @@ export interface OrgPackageItem extends BasePackageListItem {
    * (`homeWireForCaller`). Always emitted.
    */
   home_writable: boolean;
+  /**
+   * Whether THIS caller holds the type's `share` in the home space — the
+   * predicate the four `/shares` routes enforce, from the same computation.
+   * Always emitted.
+   */
+  home_shareable: boolean;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is

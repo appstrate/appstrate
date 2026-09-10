@@ -9,7 +9,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
-import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
+import type { LibraryPackageItem, LibraryResponse, LibrarySpace } from "../hooks/use-library";
 import { useSpaces } from "../hooks/use-spaces";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
@@ -24,6 +24,9 @@ import {
 } from "@appstrate/ui/components/table";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Button } from "@appstrate/ui/components/button";
+import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { useAcceptPackageShare } from "../hooks/use-package-shares";
 
 const TABS = ["agents", "skills", "integrations"] as const;
 type Tab = (typeof TABS)[number];
@@ -32,12 +35,6 @@ const TYPE_MAP: Record<Tab, PackageType> = {
   agents: "agent",
   skills: "skill",
   integrations: "integration",
-};
-
-const DETAIL_PATH_MAP: Record<string, string> = {
-  agent: "/agents",
-  skill: "/skills",
-  integration: "/integrations",
 };
 
 export function LibraryPage() {
@@ -52,6 +49,7 @@ export function LibraryPage() {
   return (
     <div className="p-6">
       <PageHeader title={t("library.title")} />
+      <SharedWithMe shared={data.shared} spaces={data.spaces} />
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
         <TabsList>
           {TABS.map((tab) => (
@@ -77,6 +75,105 @@ export function LibraryPage() {
   );
 }
 
+/**
+ * The offers still waiting on a decision (RBAC spec §6.10). A share makes a
+ * package READABLE; it never installs it, because it would run with the
+ * recipient's own credentials — so accepting is a button the recipient presses.
+ *
+ * Which button depends on the destination, and there are two. An offer to the
+ * caller's OWN personal space is accepted (`POST …/shares/accept`), which needs
+ * no permission at all and pins the version. An offer to a TEAM space is an
+ * ordinary install into that space, so it is offered only to a caller who holds
+ * the type's install grant THERE — without a button of its own the row said
+ * "offered in « T »" and left the reader to find the package in the matrix
+ * below, having been told it was shared with them.
+ */
+function SharedWithMe({
+  shared,
+  spaces,
+}: {
+  shared: LibraryResponse["shared"];
+  spaces: LibrarySpace[];
+}) {
+  const { t } = useTranslation();
+  const accept = useAcceptPackageShare();
+  const install = useTogglePackageInstall();
+  const { data: accessibleSpaces } = useSpaces();
+  if (shared.length === 0) return null;
+  const spaceName = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
+  /** The install grant in the OFFERED space — the target of this row's button. */
+  const canInstallThere = (spaceId: string, type: string) =>
+    accessibleSpaces
+      ?.find((space) => space.id === spaceId)
+      ?.permissions.includes(PACKAGE_PERMISSIONS[type as PackageType].install) ?? false;
+
+  return (
+    <div className="mb-6 rounded-lg border p-4">
+      <h2 className="text-sm font-medium">{t("library.shared.title")}</h2>
+      <p className="text-muted-foreground mt-0.5 text-xs">{t("library.shared.hint")}</p>
+      <ul className="mt-3 divide-y">
+        {shared.map((offer) => (
+          <li key={`${offer.id}:${offer.space_id}`} className="flex items-center gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <Link
+                to={packageDetailPath(offer.type, offer.id)}
+                className="text-sm font-medium hover:underline"
+              >
+                {offer.name}
+              </Link>
+              <p className="text-muted-foreground truncate text-xs">
+                {offer.personal
+                  ? offer.shared_by
+                    ? t("library.shared.by", { name: offer.shared_by.name })
+                    : offer.description
+                  : t("library.shared.inSpace", { space: spaceName(offer.space_id) })}
+              </p>
+            </div>
+            {offer.personal ? (
+              <Button
+                size="sm"
+                disabled={accept.isPending}
+                onClick={() =>
+                  accept.mutate(
+                    { params: { path: splitPackageRef(offer.id) } },
+                    {
+                      onSuccess: () => toast.success(t("library.shared.added")),
+                      onError: (err) => toast.error(getErrorMessage(err)),
+                    },
+                  )
+                }
+              >
+                {t("library.shared.add")}
+              </Button>
+            ) : (
+              canInstallThere(offer.space_id, offer.type) && (
+                <Button
+                  size="sm"
+                  disabled={install.isPending}
+                  onClick={() =>
+                    install.mutate(
+                      { spaceId: offer.space_id, packageId: offer.id, installed: false },
+                      {
+                        onSuccess: () =>
+                          toast.success(
+                            t("library.shared.installed", { space: spaceName(offer.space_id) }),
+                          ),
+                        onError: (err) => toast.error(getErrorMessage(err)),
+                      },
+                    )
+                  }
+                >
+                  {t("library.shared.installIn", { space: spaceName(offer.space_id) })}
+                </Button>
+              )
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function LibraryMatrix({
   packages: pkgs,
   spaces,
@@ -89,6 +186,9 @@ function LibraryMatrix({
   const { t } = useTranslation();
   const { data: accessibleSpaces } = useSpaces();
   const toggle = useTogglePackageInstall();
+  // Re-accepting a share re-pins the caller's personal-space installation to
+  // `latest` — the update button of the badge below.
+  const update = useAcceptPackageShare();
   const permissionsBySpace = new Map(accessibleSpaces?.map((s) => [s.id, s.permissions]));
   const { install: installPermission, uninstall: uninstallPermission } = PACKAGE_PERMISSIONS[type];
   // Every column targets a different space. Installation state chooses the
@@ -119,8 +219,6 @@ function LibraryMatrix({
     );
   };
 
-  const basePath = DETAIL_PATH_MAP[type] ?? "/agents";
-
   return (
     <Table>
       <TableHeader>
@@ -143,13 +241,40 @@ function LibraryMatrix({
           <TableRow key={pkg.id}>
             <TableCell>
               <div className="flex items-center gap-2">
-                <Link to={`${basePath}/${pkg.id}`} className="font-medium hover:underline">
+                <Link to={packageDetailPath(type, pkg.id)} className="font-medium hover:underline">
                   {pkg.name}
                 </Link>
                 {pkg.source === "system" && (
                   <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
                     {t("library.system")}
                   </Badge>
+                )}
+                {/* The caller's own personal space holds it at a version PIN
+                    older than `latest`. Re-accepting is what takes the new
+                    version — the same act that installed it. */}
+                {pkg.update_available && (
+                  <Badge variant="outline" className="px-1.5 py-0 text-[0.6rem]">
+                    {t("library.updateAvailable")}
+                  </Badge>
+                )}
+                {pkg.update_available && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs"
+                    disabled={update.isPending}
+                    onClick={() =>
+                      update.mutate(
+                        { params: { path: splitPackageRef(pkg.id) } },
+                        {
+                          onSuccess: () => toast.success(t("library.updateApplied")),
+                          onError: (err) => toast.error(getErrorMessage(err)),
+                        },
+                      )
+                    }
+                  >
+                    {t("library.updateApply")}
+                  </Button>
                 )}
               </div>
               {pkg.description && (

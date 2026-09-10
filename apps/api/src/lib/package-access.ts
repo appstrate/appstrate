@@ -3,14 +3,14 @@
 import type { Context } from "hono";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, spacePackages, spaces } from "@appstrate/db/schema";
+import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
-import { getOrgMember } from "../services/organizations.ts";
+import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import { callerPermissions, type Permission } from "./permissions.ts";
@@ -22,7 +22,7 @@ import {
 } from "./view-as.ts";
 import { resolveSpaceRole } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
-import { forbidden, notFound, invalidRequest } from "./errors.ts";
+import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 
 const PACKAGE_RESOURCES = {
   agent: "agents",
@@ -33,7 +33,7 @@ const PACKAGE_RESOURCES = {
 
 export function packagePermission(
   type: PackageType,
-  action: "read" | "write" | "delete",
+  action: "read" | "write" | "delete" | "share",
 ): Permission {
   return `${PACKAGE_RESOURCES[type]}:${action}`;
 }
@@ -178,12 +178,15 @@ export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerO
 /**
  * Does a package's PLACEMENT grant read from these spaces?
  *
- * One rule, one place (RBAC spec §6.9): a package is readable where it is
- * INSTALLED and where it is HOMED. The home is a grant of its own — a draft
- * nobody has installed yet is readable where it lives, and an author does not
- * lose sight of their own package because a space uninstalled it. Without the
- * home half, write authority could exceed read access, which is how a builder
- * ended up able to `PUT` a package they could not `GET`.
+ * One rule, one place (RBAC spec §6.9, §6.10): a package is readable where it
+ * is INSTALLED, where it is SHARED, and where it is HOMED. The home is a grant
+ * of its own — a draft nobody has installed yet is readable where it lives, and
+ * an author does not lose sight of their own package because a space uninstalled
+ * it. Without the home half, write authority could exceed read access, which is
+ * how a builder ended up able to `PUT` a package they could not `GET`. The
+ * SHARE half is what makes "Shared with me" a listing at all: an offered package
+ * has to be readable (its name, its description, the button that installs it)
+ * before the recipient has decided to install it.
  *
  * The readers of this rule differ only in the set they compare against: the
  * org-wide catalog check below, the current-space gate of the package read
@@ -192,16 +195,23 @@ export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerO
  * `<type>:read` in one of those spaces is the other half of the rule and stays
  * with each reader.
  *
- * READ only. RUNNING a package still requires an installation in the space it
- * runs in — `hasPackageAccess`, deliberately untouched.
+ * READ only. RUNNING a package still requires an INSTALLATION in the space it
+ * runs in — `hasPackageAccess`, deliberately untouched, and the reason a share
+ * is not an activation: an agent runs with the recipient's credentials, so the
+ * recipient installs it themselves.
+ *
+ * `placedIn` is the disjunction's data half: every space of the caller's
+ * organization where the package is installed OR shared. One iterable rather
+ * than two arguments because the rule does not distinguish them — a reader that
+ * needed to would be reading something other than this rule.
  */
 export function placementGrantsRead(
   pkg: { homeSpaceId: string | null },
-  installedIn: Iterable<string>,
+  placedIn: Iterable<string>,
   readable: ReadonlySet<string>,
 ): boolean {
   if (pkg.homeSpaceId !== null && readable.has(pkg.homeSpaceId)) return true;
-  for (const spaceId of installedIn) if (readable.has(spaceId)) return true;
+  for (const spaceId of placedIn) if (readable.has(spaceId)) return true;
   return false;
 }
 
@@ -221,18 +231,23 @@ export async function isPackageReadableInSpace(
       source: packages.source,
       homeSpaceId: packages.homeSpaceId,
       installedHere: spacePackages.packageId,
+      sharedHere: packageShares.packageId,
     })
     .from(packages)
     .leftJoin(
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
     )
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
+    )
     .where(and(eq(packages.id, packageId), notEphemeralFilter()))
     .limit(1);
   if (!row) return false;
   if (row.source === "system") return true;
   const here = new Set([spaceId]);
-  return placementGrantsRead(row, row.installedHere ? here : [], here);
+  return placementGrantsRead(row, (row.installedHere ?? row.sharedHere) ? here : [], here);
 }
 
 /** Catalog reachability permits copying between accessible spaces, never guessing a private id. */
@@ -242,12 +257,12 @@ export async function assertCatalogPackageAccess(
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
   source = { orgId: c.get("orgId"), orgRole: callerOrgRole(c, c.get("orgId")) },
 ) {
-  const [pkg, accessible, installations] = await Promise.all([
+  const [pkg, accessible, placements] = await Promise.all([
     loadPackageRow(packageId, source.orgId),
     resolvedSpaces ?? packageAccessSpaces(c),
-    loadPackageInstallations(packageId, source.orgId),
+    loadPackagePlacements(packageId, source.orgId),
   ]);
-  assertPackageIsReachable(c, packageId, pkg, installations, accessible, source.orgRole);
+  assertPackageIsReachable(c, packageId, pkg, placements, accessible, source.orgRole);
   return pkg;
 }
 
@@ -271,17 +286,36 @@ async function loadPackageRow(packageId: string, orgId: string) {
 }
 
 /**
- * Every space of `orgId` the package is installed in. Split out from the row
- * read because the write path never needs it: authority is the home alone, so
- * the installations are loaded only when a refusal has to decide between 403
- * and 404.
+ * Every space of `orgId` the package is PLACED in — installed and shared, the
+ * two halves KEPT APART. {@link placementGrantsRead} does not distinguish them
+ * and receives their union; the org-catalogue exception in
+ * {@link assertPackageIsReachable} reads the INSTALLED half alone, and merging
+ * them here is what made a single share cancel that exception (see there).
+ *
+ * Split out from the row read because the write path never needs either half:
+ * authority is the home alone, so the placements are loaded only when a refusal
+ * has to decide between 403 and 404.
  */
-function loadPackageInstallations(packageId: string, orgId: string) {
-  return db
-    .select({ spaceId: spacePackages.spaceId })
-    .from(spacePackages)
-    .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
-    .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId)));
+async function loadPackagePlacements(
+  packageId: string,
+  orgId: string,
+): Promise<{ installed: string[]; shared: string[] }> {
+  const [installed, shared] = await Promise.all([
+    db
+      .select({ spaceId: spacePackages.spaceId })
+      .from(spacePackages)
+      .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+      .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId))),
+    db
+      .select({ spaceId: packageShares.spaceId })
+      .from(packageShares)
+      .innerJoin(spaces, eq(spaces.id, packageShares.spaceId))
+      .where(and(eq(packageShares.packageId, packageId), eq(spaces.orgId, orgId))),
+  ]);
+  return {
+    installed: installed.map((row) => row.spaceId),
+    shared: shared.map((row) => row.spaceId),
+  };
 }
 
 /** 404 unless the caller may know this id exists — {@link placementGrantsRead} + `<type>:read`. */
@@ -289,7 +323,7 @@ function assertPackageIsReachable(
   c: Context<AppEnv>,
   packageId: string,
   pkg: PackageAccessRow,
-  installations: { spaceId: string }[],
+  placements: { installed: string[]; shared: string[] },
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
   orgRole: OrgRole,
 ): void {
@@ -301,16 +335,24 @@ function assertPackageIsReachable(
   if (
     permitted.length === 0 ||
     (pkg.source !== "system" &&
-      !placementGrantsRead(
-        pkg,
-        installations.map((row) => row.spaceId),
-        readable,
-      ) &&
+      !placementGrantsRead(pkg, [...placements.installed, ...placements.shared], readable) &&
       // The org-catalogue exception is for a package with NO home. One homed in
       // a space is reachable through that space or not at all — otherwise an
       // admin would read a draft that lives, uninstalled, in a member's
       // personal space (§3.6).
-      !(pkg.homeSpaceId === null && installations.length === 0 && managesOrgCatalog(c, orgRole)))
+      //
+      // "Placed nowhere" here means INSTALLED nowhere, and the share half is
+      // deliberately not consulted: a NULL-home package is the organization's,
+      // and offering it to somebody must not take it away from the catalogue
+      // it belongs to. Reading the union instead made one share turn the
+      // owner's own package into a 404 on its versions, its fork and its
+      // installation. `GET /api/library` states the same rule as
+      // `!row.installedAnywhere` — one rule, two readers, the same reading.
+      !(
+        pkg.homeSpaceId === null &&
+        placements.installed.length === 0 &&
+        managesOrgCatalog(c, orgRole)
+      ))
   ) {
     throw notFound(`Package '${packageId}' not found`);
   }
@@ -340,6 +382,36 @@ export async function assertPackageMutationAccess(
   action: "write" | "delete",
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<PackageAccessRow> {
+  return assertHomeAuthority(c, packageId, action, resolvedSpaces);
+}
+
+/**
+ * Authority to change a package's AUDIENCE — `<type>:share` in its home space
+ * (RBAC spec §6.10). The same rule, the same reader and the same 404/403 split
+ * as a mutation: the home decides, an unreachable id stays a 404, and a NULL
+ * home is the organization catalogue.
+ *
+ * It is a THIRD verb rather than a reuse of `write`, because an organization
+ * may want Notion's split — authors who edit but do not distribute — and it
+ * expresses that by dropping `share` from a custom role. Every preset that
+ * writes also shares (`admin`, `builder`, both derived from the catalog), so
+ * nothing narrows for a preset-only organization.
+ */
+export async function assertPackageShareAccess(
+  c: Context<AppEnv>,
+  packageId: string,
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<PackageAccessRow> {
+  return assertHomeAuthority(c, packageId, "share", resolvedSpaces);
+}
+
+/** The home rule itself, for each of the three verbs that ask it. */
+async function assertHomeAuthority(
+  c: Context<AppEnv>,
+  packageId: string,
+  action: "write" | "delete" | "share",
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<PackageAccessRow> {
   const orgId = c.get("orgId");
   const [pkg, accessible] = await Promise.all([
     loadPackageRow(packageId, orgId),
@@ -351,27 +423,32 @@ export async function assertPackageMutationAccess(
   // where both spellings live, because `homeWireForCaller` has to answer the
   // same way with only one of the two columns to hand.
   if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) {
-    throw forbidden("Cannot modify a system package.");
+    throw forbidden(
+      action === "share"
+        ? "Cannot share a system package — it is already readable in every space."
+        : "Cannot modify a system package.",
+    );
   }
   const permission = packagePermission(pkg.type, action);
   if (holdsHomeAuthority(c, pkg, accessible, permission)) return pkg;
   // Refused. Whether the caller may even KNOW this id exists is the read
   // question, answered by the one predicate that answers it — an unreachable
   // package stays a 404 rather than becoming an existence oracle. Only this
-  // path pays for the installations.
+  // path pays for the placements.
   assertPackageIsReachable(
     c,
     packageId,
     pkg,
-    await loadPackageInstallations(packageId, orgId),
+    await loadPackagePlacements(packageId, orgId),
     accessible,
     callerOrgRole(c, orgId),
   );
   reportPermissionDenial(c, permission);
+  const verb = action === "share" ? "Sharing" : "Modifying";
   throw forbidden(
     pkg.homeSpaceId === null
-      ? `Modifying '${packageId}' requires organization owner or admin authority — it belongs to the organization catalog.`
-      : `Modifying '${packageId}' requires '${permission}' in its home space.`,
+      ? `${verb} '${packageId}' requires organization owner or admin authority — it belongs to the organization catalog.`
+      : `${verb} '${packageId}' requires '${permission}' in its home space.`,
   );
 }
 
@@ -399,19 +476,27 @@ export async function assertPackageMutationAccess(
  * too, and the server still checks `<type>:delete` in its own right (they
  * diverge only under a custom role that grants one without the other, where the
  * API refuses and the UI over-offered).
+ *
+ * `home_shareable` is the same answer for the type's `share` (RBAC spec §6.10)
+ * — what the "Share…" action is gated on. It is a field of its own rather than
+ * an alias of `home_writable` because a custom role may hold one without the
+ * other, and false on a system package for the same reason `home_writable` is:
+ * the route refuses it before the home is consulted.
  */
 export function homeWireForCaller(
   c: Context<AppEnv>,
   pkg: { type: PackageType; source: string; homeSpaceId: string | null },
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
-): { home_space_id: string | null; home_writable: boolean } {
+): { home_space_id: string | null; home_writable: boolean; home_shareable: boolean } {
   const reached =
     pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId);
+  const system = isSystemPackageRow(pkg);
   return {
     home_space_id: reached ? pkg.homeSpaceId : null,
     home_writable:
-      !isSystemPackageRow(pkg) &&
-      holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "write")),
+      !system && holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "write")),
+    home_shareable:
+      !system && holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "share")),
   };
 }
 
@@ -425,16 +510,81 @@ function isSystemPackageRow(pkg: { source: string }): boolean {
   return pkg.source === "system";
 }
 
-/** `<type>:<action>` in the home space, or org-catalog authority when it has none. */
+/**
+ * `<type>:<action>` in the home space, or org-catalog authority when it has
+ * none. `orgRole` is the caller's standing in the organization that OWNS the
+ * package, which is the caller's own org everywhere except the cross-org fork
+ * reader — there it is their membership role in the source org.
+ */
 function holdsHomeAuthority(
   c: Context<AppEnv>,
   pkg: { homeSpaceId: string | null },
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
   permission: Permission,
+  orgRole: OrgRole = callerOrgRole(c),
 ): boolean {
-  if (pkg.homeSpaceId === null) return managesOrgCatalog(c);
+  if (pkg.homeSpaceId === null) return managesOrgCatalog(c, orgRole);
   const home = accessible.find((space) => space.id === pkg.homeSpaceId);
   return home?.permissions.has(permission) ?? false;
+}
+
+/**
+ * Does READING this package let the caller COPY it out (plan decision 12)?
+ *
+ * By default yes — the behaviour of Notion, Drive and Figma, and what a reader
+ * can approximate by hand anyway. An organization that sets
+ * `org_settings.restrict_package_copy` narrows the two routes that hand over a
+ * whole package — `POST …/fork` and `GET …/{version}/download` — to callers who
+ * hold `<type>:share` in the SOURCE's home space (owners and admins when it has
+ * none). Without that key, personal spaces open "fork it into mine, then share
+ * it on" to every reader, i.e. `share` would protect the link and not the
+ * content.
+ *
+ * SKILLS are exempt in both settings: the CLI's skills sync downloads them into
+ * a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`), and a
+ * skill's audience is already the space it is installed in. RUNS are unaffected
+ * — a run's bundle is assembled server-side and never travels as a copy.
+ *
+ * SYSTEM packages are exempt too, and they are the reason the exemption is
+ * stated here rather than left to the home rule: the platform ships them
+ * readable in every space of every organization, so there is no "space that
+ * owns them" for a setting about copying OUT of one to protect. Their home is
+ * `NULL`, which the home rule reads as the organization catalogue — that turned
+ * the key into "only owners and admins may install the shipped catalogue", a
+ * refusal about somebody else's content that this setting never meant to make.
+ *
+ * The setting is read UNCACHED for the same reason the SSO gate is: a security
+ * gate must not answer from a TTL. `c.get("orgSettings")` is the row the
+ * session pipeline already loaded; an API key never passes through it.
+ */
+export async function assertPackageCopyAllowed(
+  c: Context<AppEnv>,
+  pkg: { id: string; type: PackageType; source: string; homeSpaceId: string | null },
+  source: {
+    orgId: string;
+    orgRole: OrgRole;
+    accessible: Awaited<ReturnType<typeof packageAccessSpaces>>;
+  },
+): Promise<void> {
+  if (pkg.type === "skill" || isSystemPackageRow(pkg)) return;
+  // The SOURCE organization's setting and the caller's standing THERE — a fork
+  // may cross organizations, and it is the source's content being protected.
+  const settings =
+    source.orgId === c.get("orgId")
+      ? (c.get("orgSettings") ?? (await getOrgSettings(source.orgId)))
+      : await getOrgSettings(source.orgId);
+  if (settings.restrict_package_copy !== true) return;
+  const permission = packagePermission(pkg.type, "share");
+  if (holdsHomeAuthority(c, pkg, source.accessible, permission, source.orgRole)) return;
+  reportPermissionDenial(c, permission);
+  throw new ApiError({
+    status: 403,
+    code: "package_copy_restricted",
+    title: "Package Copy Restricted",
+    detail:
+      `This organization restricts copying packages out of the space that owns them. ` +
+      `Copying '${pkg.id}' requires '${permission}' in its home space.`,
+  });
 }
 
 /** Forking reads source bytes, including when the destination is another organization. */
@@ -445,17 +595,30 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
     .where(and(eq(packages.id, packageId), notEphemeralFilter()))
     .limit(1);
   if (!pkg) throw notFound(`Package '${packageId}' not found`);
-  if (!pkg.orgId || pkg.orgId === c.get("orgId")) return assertCatalogPackageAccess(c, packageId);
+  if (!pkg.orgId || pkg.orgId === c.get("orgId")) {
+    const orgId = c.get("orgId");
+    const orgRole = callerOrgRole(c, orgId);
+    const accessible = await packageAccessSpaces(c, orgId, orgRole);
+    const source = await assertCatalogPackageAccess(c, packageId, accessible);
+    await assertPackageCopyAllowed(c, source, { orgId, orgRole, accessible });
+    return source;
+  }
   if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) {
     throw notFound(`Package '${packageId}' not found`);
   }
   const membership = await getOrgMember(pkg.orgId, c.get("user").id);
   if (!membership) throw notFound(`Package '${packageId}' not found`);
   const accessible = await packageAccessSpaces(c, pkg.orgId, membership.role);
-  return assertCatalogPackageAccess(c, packageId, accessible, {
+  const source = await assertCatalogPackageAccess(c, packageId, accessible, {
     orgId: pkg.orgId,
     orgRole: membership.role,
   });
+  await assertPackageCopyAllowed(c, source, {
+    orgId: pkg.orgId,
+    orgRole: membership.role,
+    accessible,
+  });
+  return source;
 }
 
 /** Shared authorization for REST and MCP bundle validation/import, before metadata or writes. */

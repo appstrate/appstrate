@@ -8,6 +8,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A package can be SHARED with a person or with a space.** Sharing writes an
+  AUDIENCE row (`package_shares`, migration **0063**, a brand-new table with no
+  backfill); installing stays the recipient's own act on `space_packages`. Two
+  tables, because a package runs with the RECIPIENT's credentials: activating
+  one is a consent, and an "offered but not accepted" state carried on
+  `space_packages` would have had to be filtered at each of that table's
+  thirteen readers, where one miss executes a package nobody agreed to. The
+  subject is always a SPACE — "share with Bob" is a share with Bob's personal
+  space, resolved server-side from his user id and created if he has none, and
+  the sharer never learns that id: the listing renders such a target as its
+  owner. Three routes are authorized by a THIRD verb on the package's home space
+  (§6.9's authority, `<type>:share`): `POST /api/packages/{scope}/{name}/shares`
+  (idempotent, 409 `share_target_is_home` when the target is the home itself,
+  404 for a space the caller cannot reach — so another member's personal space
+  is not targetable by a guessed id), `GET …/shares` and
+  `DELETE …/shares/{target}` (which removes the installation behind the share in
+  the SAME transaction — otherwise the package keeps running where it may no
+  longer be seen). A fourth, `POST …/shares/accept`, is the recipient's own act
+  and requires NEITHER `share` NOR the type's install grant: the owner of the
+  space consented by calling it, and a `guest` holds only the `operator` preset
+  in their own space. It installs pinned to `latest`, so an author publishing a
+  v3 never changes what the recipient executes; calling it again re-pins, which
+  is the update path. A share is a READ grant and nothing more — `placementGrantsRead`
+  becomes `installed ∨ shared ∨ home` and `GET /api/library` gains a `shared`
+  section listing the offers not yet installed — while execution, the version
+  pin, the per-space model and the credential resolution all stay on
+  `space_packages`. No execution path reads `package_shares`.
+
+- **New permission `share`** on `agents`, `skills`, `mcp-servers` and
+  `integrations` (`@appstrate/core`, additive): held by the `admin` and
+  `builder` presets, by no API key (the share decides who runs what with whose
+  credentials, so it is session-only like `integrations:configure`), and
+  droppable from a custom role by an organization that wants Notion's split of
+  authoring from distributing. Every package read now carries a third home field
+  beside `home_space_id` / `home_writable`: `home_shareable`, the same predicate
+  for `share`, which is what the SPA's "Partager…" action is gated on.
+
+- **Organization setting `restrict_package_copy`** (default `false`). Reading a
+  package implies being able to copy it, as in Notion, Drive and Figma. An
+  organization may close that: at `true`, `POST …/fork` and
+  `GET …/{version}/download` require `<type>:share` in the SOURCE package's home
+  space (owners and admins when it has none) and answer
+  `403 package_copy_restricted` otherwise. Without it, personal spaces open
+  "fork it into mine, then share it on" to every reader — `share` would protect
+  the link and not the content. **Skills and system packages are exempt** in
+  both settings: the CLI's skills sync downloads skills into a local checkout by
+  design and a skill's audience is already the space it is installed in, while a
+  system package is shipped readable in every space of every organization and so
+  has no owning space for the setting to protect. Agent runs are unaffected; a run's bundle is assembled server-side and never travels as a
+  copy. Toggled from the organization's general settings page under
+  `org:settings`.
+
 - **Every member of an organization now has a personal space — "Mon espace".**
   It is created at the moment they join (organization creation, invitation
   accept, SSO auto-provision and first-boot bootstrap all go through one

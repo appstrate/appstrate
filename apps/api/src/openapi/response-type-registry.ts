@@ -246,6 +246,12 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   User: "Better-Auth-shaped minimal user; no shared-type",
   ProfileBatchItem: "profiles/batch list item; SPA uses the generated spec type",
   LibraryPackageList: "SPA consumes components['schemas']['LibraryPackageList'] directly",
+  PackageShare:
+    "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
+  ShareTarget:
+    "request-body value object of POST /packages/{scope}/{name}/shares; never a response",
+  ShareTargetView:
+    "PackageShare.target sub-object; read through PackageShare's generated spec type",
   OrgDetail: "composite org-detail response (members+invitations+settings); no single shared-type",
   // Drizzle-derived types whose shared-type shape intentionally diverges from
   // the wire (Date vs ISO string / joined-resource shape) — the SPA consumes

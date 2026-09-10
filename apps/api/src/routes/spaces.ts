@@ -26,7 +26,7 @@ import {
   convertPersonalSpaceToTeam,
   createSpace,
   emptyAndDeletePersonalSpace,
-  ensureOwnPersonalSpace,
+  ensurePersonalSpaceFor,
   isSpaceVisibleTo,
   listSpacesForPrincipal,
   getSpace,
@@ -334,7 +334,7 @@ export function createSpacesRouter() {
     // their back. `ensurePersonalSpace` reads before it writes, so the common
     // case costs one indexed lookup and no row lock.
     const personalOwnerId = callerPersonalOwnerId(c);
-    if (personalOwnerId) await ensureOwnPersonalSpace(orgId, personalOwnerId);
+    if (personalOwnerId) await ensurePersonalSpaceFor(orgId, personalOwnerId);
     const entries = await listSpacesForPrincipal(
       orgId,
       callerOrgRole(c),

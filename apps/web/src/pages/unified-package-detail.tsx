@@ -209,6 +209,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // as "no".
   const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
   const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
+  const homeShareable = (agentDetail ?? pkgDetail)?.home_shareable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
@@ -392,6 +393,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 isHistoricalVersion={isHistoricalVersion}
                 homeSpaceId={homeSpaceId}
                 homeWritable={homeWritable}
+                homeShareable={homeShareable}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
