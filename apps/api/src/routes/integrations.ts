@@ -68,6 +68,7 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
+import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
@@ -922,7 +923,16 @@ export function createIntegrationsRouter() {
   // GET /connect/start?token=… — the single dispatch entry point. Verifies the
   // capability token, consumes its jti (single-use), pins a page cookie, then
   // redirects: oauth2 → provider screen; else → the hosted SPA form at /connect.
-  router.get("/connect/start", async (c) => {
+  //
+  // Rate-limited per IP because the route carries no session: the signed token
+  // is its only credential, and every refusal that hands the jti back (below)
+  // leaves the link replayable for its whole 10-minute TTL. One click is a
+  // manifest load plus client lookups, so an unlimited public entry point turns
+  // a single link into an unbounded amplifier (issue #1344). 60/min is far
+  // above what a human clicking a popup ever needs. A 429 is the platform's
+  // standard problem+json — this limit answers abuse, not a flow failure, so it
+  // deliberately does not spend a popup page on it.
+  router.get("/connect/start", rateLimitByIp(60), async (c) => {
     // The single-use capability token rides this request's query string. Strip
     // the Referer entirely so the token can never leak to the provider (oauth2
     // redirect) or any downstream navigation — defence in depth on top of the
@@ -950,8 +960,9 @@ export function createIntegrationsRouter() {
     // exists, the capability token stays unburned so the caller can retry once
     // the integration is back, rather than being forced to re-mint.
     let auth: Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
+    let manifest: Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"];
     try {
-      ({ auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
+      ({ auth, manifest } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
     } catch {
       return c.html(
         popupHtmlError("This integration is no longer available.", completionDetail),
@@ -1027,10 +1038,8 @@ export function createIntegrationsRouter() {
       //     terms — a client row id, `CONNECTION_ENCRYPTION_KEY`, an upstream
       //     AS's own prose. That half stays on the log line above, exactly as
       //     the callback keeps a provider's `error_description` there
-      //     (`oauth-error-diagnostic.ts`). Hand the jti back either way:
-      //     nothing was minted on the strength of this click, so a retry once
-      //     the admin has registered the client can reuse the very same link
-      //     instead of re-minting.
+      //     (`oauth-error-diagnostic.ts`). Whether the jti comes back depends
+      //     on what the refusal cost upstream — see the guard in the handler.
       //  2. Anything else (provider discovery error, network, an unexpected
       //     throw): transient or unknown. Keep the generic wording, keep the
       //     502, keep the jti burned — an unknown failure may have gone half
@@ -1057,7 +1066,29 @@ export function createIntegrationsRouter() {
             packageId: claims.package_id,
             authKey: claims.auth_key,
           });
-          await releaseJti(claims.jti);
+          // Hand the jti back only when the refusal PROVABLY precedes any
+          // egress — the same criterion the scope-resolution guard above
+          // applies to itself.
+          //
+          // For a classic auth that holds: `begin` resolves its client from
+          // OUR database (`ensureIntegrationOAuthClient` early-returns a plain
+          // row lookup) and every 4xx it can raise is thrown before
+          // `initiateIntegrationOAuth`, the first line that talks to anyone.
+          // Nothing left the process, so the very same link works once an
+          // administrator registers the client — no re-mint.
+          //
+          // An auto-provisioned (DCR/CIMD) auth is the exact opposite. Its
+          // client is acquired AT the third-party authorization server:
+          // discovery probes, then an RFC 7591 registration POST — and the
+          // refusal that lands here is raised precisely when that registration
+          // came back unusable, leaving an orphan client behind ("The upstream
+          // registration is abandoned unused", `ensureIntegrationOAuthClient`).
+          // Releasing the jti would let one 10-minute link replay that
+          // registration on every click of an unauthenticated route: a client
+          // spam amplifier attributable to this deployment (issue #1344). Burn
+          // it. The refusal is permanent anyway, so the retry this forbids was
+          // never going to succeed.
+          if (!usesAutoProvisionedClient(manifest, auth)) await releaseJti(claims.jti);
           return c.html(
             popupHtmlError(
               "This integration is not ready to be connected. Ask an administrator to finish setting it up, then open this link again.",

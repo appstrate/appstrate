@@ -1011,13 +1011,14 @@ export const integrationsPaths = {
         "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
         "400": {
           description:
-            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable.",
+            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
         },
         "403": {
           description:
-            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint.",
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned: reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click.",
         },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
           description: "Integration cannot be connected / unexpected failure (HTML error page).",
         },
