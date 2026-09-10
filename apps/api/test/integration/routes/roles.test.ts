@@ -40,6 +40,7 @@ interface RoleWire {
   name: string;
   description: string | null;
   permissions: string[];
+  unavailable_permissions: string[];
 }
 
 describe("custom space roles", () => {
@@ -129,6 +130,48 @@ describe("custom space roles", () => {
       const listed = data.find((r) => r.kind === "custom")!;
       expect(listed.id).toBe(custom.id);
       expect(listed.permissions).toEqual(["agents:read"]);
+    });
+
+    it("separates what a bundle grants from what it merely spells, and round-trips", async () => {
+      // A write refuses an unknown string, so this row is what a module leaving
+      // `MODULES` leaves behind. The listing must not report it as a grant —
+      // enforcement (`spacePermissions`) already drops it — and must not hide
+      // it either, or a bundle degraded by a module removal reads as merely
+      // shorter. And the array it reports has to be one a PATCH accepts back.
+      const stale = await seedSpaceRole({
+        orgId: owner.orgId,
+        key: "stale",
+        permissions: ["agents:read", "ghostmodule:write"],
+      });
+      const allGhosts = await seedSpaceRole({
+        orgId: owner.orgId,
+        key: "all-ghosts",
+        permissions: ["ghostmodule:write"],
+      });
+
+      const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
+      const listed = data.find((r) => r.id === stale.id)!;
+      expect(listed.permissions).toEqual(["agents:read"]);
+      expect(listed.unavailable_permissions).toEqual(["ghostmodule:write"]);
+      // Granting nothing is a legible state, not an empty role.
+      const degraded = data.find((r) => r.id === allGhosts.id)!;
+      expect(degraded.permissions).toEqual([]);
+      expect(degraded.unavailable_permissions).toEqual(["ghostmodule:write"]);
+      // A preset is code, so it can spell nothing this deployment lacks.
+      expect(data.find((r) => r.key === "viewer")!.unavailable_permissions).toEqual([]);
+
+      // The permitted twin of the 400 below: what was listed is accepted back,
+      // and accepting it is what drops the ghost from the row.
+      const echoed = await patch(stale.id, { permissions: listed.permissions });
+      expect(echoed.status).toBe(200);
+      const saved = (await echoed.json()) as RoleWire;
+      expect(saved.permissions).toEqual(["agents:read"]);
+      expect(saved.unavailable_permissions).toEqual([]);
+      // …and the string that is NOT listed as a grant is still refused, so the
+      // round-trip comes from the projection agreeing, not validation going soft.
+      await expectProblem(await patch(stale.id, { permissions: ["ghostmodule:write"] }), 400, {
+        param: "permissions",
+      });
     });
 
     it("does not list another org's bundles", async () => {

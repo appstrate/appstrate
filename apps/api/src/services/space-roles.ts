@@ -16,7 +16,11 @@ import { isUniqueViolation } from "../lib/db-helpers.ts";
 import { getAppConfig } from "../lib/app-config.ts";
 import { ApiError, conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
-import { knownSpaceLevelPermissions, presetPermissions } from "../lib/permissions.ts";
+import {
+  knownSpaceLevelPermissions,
+  partitionSpacePermissions,
+  presetPermissions,
+} from "../lib/permissions.ts";
 
 /** One entry of `GET /api/roles`; `id` is null for a preset (it has no row). */
 export interface SpaceRoleWire {
@@ -27,6 +31,12 @@ export interface SpaceRoleWire {
   name: string;
   description: string | null;
   permissions: string[];
+  /**
+   * Stored entries this deployment cannot name — always empty for a preset.
+   * Never part of `permissions`: the two are what the role grants and what it
+   * merely spells here.
+   */
+  unavailable_permissions: string[];
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -71,7 +81,16 @@ export function assertCustomRolesFeature(): void {
 
 type SpaceRoleRow = typeof spaceRoles.$inferSelect;
 
+/**
+ * `permissions` is what the bundle GRANTS here, projected through the same
+ * narrowing enforcement uses, so an admin and a holder never read the platform
+ * differently and the array a listing returns is one a `PATCH` accepts back.
+ * What the row spells and this deployment cannot name is not dropped in
+ * silence — it is `unavailable_permissions`, which is what makes a bundle
+ * degraded by a module removal legible instead of merely shorter.
+ */
 function toWire(row: SpaceRoleRow): SpaceRoleWire {
+  const { granted, unavailable } = partitionSpacePermissions(row.permissions);
   return {
     object: "role",
     kind: "custom",
@@ -79,7 +98,8 @@ function toWire(row: SpaceRoleRow): SpaceRoleWire {
     key: row.key,
     name: row.name,
     description: row.description,
-    permissions: [...row.permissions].sort(),
+    permissions: [...granted].sort(),
+    unavailable_permissions: unavailable.sort(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -94,6 +114,9 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     name: preset,
     description: null,
     permissions: [...presetPermissions(preset)].sort(),
+    // A preset is code, not a row: nothing can be stored on it that the
+    // deployment does not name.
+    unavailable_permissions: [],
     createdAt: null,
     updatedAt: null,
   };
