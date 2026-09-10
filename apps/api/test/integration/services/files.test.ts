@@ -1470,7 +1470,13 @@ describe("files service + routes", () => {
     await seedPackage({ id: "@chain/consumer", orgId: ctx.orgId });
     const runA = await seedRunRow(scope, { packageId: "@chain/producer" });
     const runB = await seedRunRow(scope, { packageId: "@chain/consumer" });
-    const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes");
+    // Published with the run's attribution, exactly as `runs-events.ts` does
+    // (`getRunAttribution` → `createFileFromStream`) — the mirroring invariant
+    // the detached-visibility check below rests on.
+    const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes", {
+      userId: runOwner,
+      endUserId: null,
+    });
     await db.insert(fileLinks).values({ fileId: docX.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
@@ -1479,24 +1485,39 @@ describe("files service + routes", () => {
     await deletePackageRuns(scope, "@chain/producer");
 
     // Producer run gone; docX survives, DETACHED (both containers NULL), bytes +
-    // counter untouched, and still resolvable for a member (org-wide read).
+    // counter untouched, and still resolvable for the member who produced it.
     const [gone] = await db.select().from(runs).where(eq(runs.id, runA));
     expect(gone).toBeUndefined();
     const [row] = await db.select().from(files).where(eq(files.id, docX.id));
     expect(row).toBeDefined();
     expect(row!.runId).toBeNull();
     expect(row!.chatSessionId).toBeNull();
+    // The teardown drops the container, never the attribution — that is what
+    // keeps the ownership question answerable once the run is gone.
+    expect(row!.userId).toBe(runOwner);
     expect(await orgBytesUsed(ctx.orgId)).toBe(usedBefore);
     const resolved = await getFileForActor(scope, userActor, docX.id, NO_GRANTS);
     expect(resolved?.row.id).toBe(docX.id);
-    // A detached `agent_output` stays org-readable + listed for ANY member (it
-    // always was, via its run container) — unlike a detached user_upload.
+    expect(
+      (await listFilesForActor(scope, userActor, {}, NO_GRANTS)).data.map((d) => d.id),
+    ).toContain(docX.id);
+    // Detaching must not WIDEN: a member who could not read the producing run
+    // still cannot read its deliverable once the run is deleted — neither by id
+    // nor in the gallery.
     const stranger = await createTestUser({ email: "stranger@producer.test" });
     await addOrgMember(ctx.orgId, stranger.id, "member");
     const strangerActor: Actor = { type: "user", id: stranger.id };
-    expect((await getFileForActor(scope, strangerActor, docX.id, NO_GRANTS))?.row.id).toBe(docX.id);
+    expect(await getFileForActor(scope, strangerActor, docX.id, NO_GRANTS)).toBeNull();
     expect(
       (await listFilesForActor(scope, strangerActor, {}, NO_GRANTS)).data.map((d) => d.id),
+    ).not.toContain(docX.id);
+    // …and must not NARROW either: the supervision grant that read the run
+    // reads the detached deliverable on the same terms.
+    expect((await getFileForActor(scope, strangerActor, docX.id, READS_EVERY_RUN))?.row.id).toBe(
+      docX.id,
+    );
+    expect(
+      (await listFilesForActor(scope, strangerActor, {}, READS_EVERY_RUN)).data.map((d) => d.id),
     ).toContain(docX.id);
     // The consumer run + its link are untouched — a rerun still finds the doc.
     const links = await db.select().from(fileLinks).where(eq(fileLinks.fileId, docX.id));

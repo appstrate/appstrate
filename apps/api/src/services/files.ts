@@ -287,6 +287,19 @@ const GENERIC_FILE_NAME = "file";
 const GENERIC_FILE_MIME = "application/octet-stream";
 
 /**
+ * Did this actor produce the file? The in-memory twin of `actorFilter` on a
+ * file row — the same predicate the run surfaces spell `ownsRun`, and the one
+ * every creator gate here reads through rather than re-deriving the
+ * `user`/`end_user` column split inline.
+ */
+function isFileCreator(
+  doc: { userId: string | null; endUserId: string | null },
+  actor: Actor,
+): boolean {
+  return actor.type === "user" ? doc.userId === actor.id : doc.endUserId === actor.id;
+}
+
+/**
  * The one access-capability computation (D2 / Anthropic rule + the locked
  * `user_upload` privacy decision). Pure — every consumer (REST route, DTO,
  * preview mint, MCP read) derives its gates from here rather than re-deriving.
@@ -325,7 +338,7 @@ export function getFileCapabilities(
     };
   }
   const isAgentOutput = doc.purpose === "agent_output";
-  const isCreator = actor.type === "user" ? doc.userId === actor.id : doc.endUserId === actor.id;
+  const isCreator = isFileCreator(doc, actor);
   // agent_output → any container reader; user_upload → creator/uploader only.
   const download = isAgentOutput || isCreator;
   // Sensitive metadata (real name / mime / sha256) follows the same boundary as
@@ -1238,22 +1251,21 @@ export async function getFileForActor(
     if (!session || session.userId !== actor.id) return null;
   } else {
     // Detached (both containers NULL — the legal state under
-    // `chk_files_single_container`): no container to inherit an ACL from.
-    // Org+space already matched above; apply the same end-user guard the run
-    // container would (an end_user reads only its own rows).
-    if (actor.type === "end_user" && row.endUserId !== actor.id) return null;
-    // Conservative invariant: a detached `user_upload` is creator-only, fully
-    // (metadata included) — never widened by deletion. The `download` capability
-    // IS the creator check for a `user_upload` (true only for its creator), so a
-    // non-creator resolves it to null. A detached `agent_output` stays
-    // org-readable (its `download` is always true). This intentionally also
-    // narrows a run-origin detached upload to creator-only — least surprise.
-    if (
-      row.purpose === "user_upload" &&
-      !getFileCapabilities(row, actor, { visible: true }).download
-    ) {
-      return null;
-    }
+    // `chk_files_single_container`): there is no container left to inherit an
+    // ACL from, so the ROW's own attribution answers the question its run used
+    // to — a published file copies its run's attribution (the mirroring
+    // invariant in `lib/run-visibility.ts`), and a teardown that NULLs
+    // `run_id` leaves both actor columns intact.
+    //
+    // Detaching must therefore not WIDEN: an `agent_output` stays exactly as
+    // readable as it was inside its run — its producer, or a `runs:read-all`
+    // holder, the same disjunction the run branch above applies. A
+    // `user_upload` is creator-only, fully (metadata included) and not even
+    // widened by `read-all`: it was creator-only in its container and deletion
+    // never opens it. This intentionally also narrows a run-origin detached
+    // upload to creator-only — least surprise.
+    const supervises = row.purpose === "agent_output" && canReadEveryRun(permissions);
+    if (!isFileCreator(row, actor) && !supervises) return null;
   }
 
   const capabilities = getFileCapabilities(row, actor, {
@@ -1429,7 +1441,9 @@ async function chatContextFileFilter(
  *
  *  - A dashboard `user` (member) sees the run-contained files of the runs it may
  *    read — the whole space with `runs:read-all`, else its own runs — plus
- *    chat-contained files only from their OWN sessions (chat sessions are private).
+ *    chat-contained files only from their OWN sessions (chat sessions are private),
+ *    plus the DETACHED rows it produced (and, with `runs:read-all`, every
+ *    detached deliverable): a lost container never widens a row.
  *  - An `end_user` sees only their own rows (`actorScopeFilter`).
  *
  * Keyset pagination on `(createdAt, id)` DESC — the same stable tuple cursor as
@@ -1449,26 +1463,34 @@ export async function listFilesForActor(
     eq(files.spaceId, scope.spaceId),
     actor.type === "end_user"
       ? actorScopeFilter(actor, { userId: files.userId, endUserId: files.endUserId })
-      : // Members — three visibility arms so a detached (both containers NULL)
-        // `user_upload` is NOT widened by deletion (it was creator-only in its
-        // chat/run origin and stays so):
-        //   1. every run-contained (run_id set) row — the supervision arm, and
-        //      `runs:read-all` is the whole of it. A member's OWN run outputs
-        //      come through arm 2 instead: a published file copies its run's
+      : // Members — the supervision arms, then ownership. Losing a container
+        // never widens a row (a detached `user_upload` was creator-only in its
+        // chat/run origin and stays so; a detached `agent_output` stays exactly
+        // as readable as it was inside its run):
+        //   1. every run-contained (run_id set) row, and
+        //   2. every DETACHED `agent_output` — the two supervision arms, and
+        //      `runs:read-all` is the whole of both. A teardown NULLs `run_id`
+        //      but leaves the attribution, so a detached deliverable is still
+        //      one member's; only the grant that reads every member's runs
+        //      reads it. Without that grant these arms drop out entirely.
+        //   3. own rows (user_id = me) → own run outputs + own chat docs + own
+        //      detached rows, attached or not: a published file copies its run's
         //      attribution (the mirroring invariant in `lib/run-visibility.ts`),
-        //      so `user_id = me` already names them and `read-all` is precisely
-        //      what adds the colleagues';
-        //   2. own rows (user_id = me) → own run outputs + own chat docs + own
-        //      detached uploads;
-        //   3. detached `agent_output` → org-readable (it always was, via its
-        //      run): it has lost its run container, so there is nothing left to
-        //      inherit visibility from.
+        //      so `user_id = me` names them whether or not the run still exists.
         // A chat-contained doc (chat_session_id set, run_id null) is covered by
-        // arm 2 only — unchanged owner-only visibility.
+        // arm 3 only — unchanged owner-only visibility.
         or(
-          ...(canReadEveryRun(permissions) ? [isNotNull(files.runId)] : []),
+          ...(canReadEveryRun(permissions)
+            ? [
+                isNotNull(files.runId),
+                and(
+                  isNull(files.runId),
+                  isNull(files.chatSessionId),
+                  eq(files.purpose, "agent_output"),
+                )!,
+              ]
+            : []),
           eq(files.userId, actor.id),
-          and(isNull(files.runId), isNull(files.chatSessionId), eq(files.purpose, "agent_output")),
         )!,
   ];
   if (filters.purpose) conditions.push(eq(files.purpose, filters.purpose));
