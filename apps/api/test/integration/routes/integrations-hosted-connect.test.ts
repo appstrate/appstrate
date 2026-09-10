@@ -18,8 +18,12 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  buildConnectUrl,
+  connectClaimsFor,
+} from "../../../src/services/connect/connect-session.ts";
 
 const app = getTestApp();
 
@@ -355,7 +359,7 @@ async function startConnect(token: string): Promise<Response> {
   });
 }
 
-describe("hosted connect portal — oauth2 dispatch without a client (issue #1263)", () => {
+describe("hosted connect portal — oauth2 dispatch without a client (issues #1263, #1345)", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
@@ -363,17 +367,19 @@ describe("hosted connect portal — oauth2 dispatch without a client (issue #126
     await seedIntegration(ctx.orgId, oauthManifest("@myorg/gsuite"));
   });
 
-  it("renders the actionable 403 the programmatic path returns, not a generic 502", async () => {
+  it("renders a permanent 403, not a generic 502 — and not the operator detail", async () => {
     const token = await mintSession(ctx, "@myorg/gsuite", "google");
     const res = await startConnect(token);
-    // Parity with `POST …/connect/oauth2` on the same space: same status, same
-    // detail, naming the action to take.
+    // Status parity with `POST …/connect/oauth2` on the same space, and wording
+    // that says "permanent": no "try again", which is what a 502 would invite.
     expect(res.status).toBe(403);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
-    expect(html).toContain("Administrator must register OAuth client credentials");
-    expect(html).toContain("@myorg/gsuite");
+    expect(html).toContain("Ask an administrator");
     expect(html).not.toContain("Please try again");
+    // The `detail` that names the remedy is written for an operator, and this
+    // route has no session (issue #1345) — it belongs in the log line only.
+    expect(html).not.toContain("Administrator must register OAuth client credentials");
   });
 
   it("keeps the link reusable: a second click is the same 403, not 'already used'", async () => {
@@ -409,15 +415,181 @@ describe("hosted connect portal — oauth2 dispatch without a client (issue #126
     expect((await startConnect(token)).status).toBe(410);
   });
 
-  it("renders the auto-provisioning failure verbatim for a remote MCP auth", async () => {
+  it("keeps the auto-provisioning failure's own prose off a remote MCP popup", async () => {
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
     const res = await startConnect(token);
     expect(res.status).toBe(403);
     const html = await res.text();
-    // The remedy authored by the provisioning step reaches the user — the
-    // message the generic catch used to swallow.
-    expect(html).toContain("Could not automatically provision an OAuth client");
-    expect(html).toContain("@myorg/remote-mcp");
+    expect(html).toContain("Ask an administrator");
+    // This `detail` embeds the authorization server's OWN message verbatim
+    // (`resolveConnectClient` renders `provisioningFailure.message` as-is), so
+    // it is upstream-controlled text on a session-less page. Log only.
+    expect(html).not.toContain("Could not automatically provision an OAuth client");
+    expect(html).not.toContain("dynamic client registration");
+  });
+
+  it("burns a remote MCP link: its refusal follows a registration attempt (issue #1344)", async () => {
+    // The mirror image of the reusable classic 403 above. Client acquisition
+    // for this auth happens AT the authorization server — discovery, then an
+    // RFC 7591 registration POST — so by the time the refusal lands, the click
+    // has already spent outbound calls and may have left an orphan client
+    // registered upstream. A link that survived its own refusal would replay
+    // that on every click, for its whole TTL, on a route with no session.
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
+    expect((await startConnect(token)).status).toBe(403);
+
+    const again = await startConnect(token);
+    expect(again.status).toBe(410);
+    expect(await again.text()).toContain("already been used");
+  });
+
+  it("never names the row or the env var when a client_secret cannot be decrypted", async () => {
+    // The ciphertext no longer opens (key rotated without re-encrypt, or
+    // corruption): `has_client_secret` still reads true from the column while
+    // the decrypt yields "", and `assertConnectClientUsable` refuses the
+    // client with a 403 whose detail names the client row's uuid and
+    // `CONNECTION_ENCRYPTION_KEY`. That is the disclosure of issue #1345.
+    const registered = await app.request(
+      "/api/integrations/@myorg/gsuite/auths/google/oauth-clients",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+      },
+    );
+    expect(registered.status).toBe(201);
+    const clientId = ((await registered.json()) as { id: string }).id;
+    await db
+      .update(integrationOauthClients)
+      .set({ clientSecretEncrypted: "not-a-valid-envelope" })
+      .where(eq(integrationOauthClients.id, clientId));
+
+    const res = await startConnect(await mintSession(ctx, "@myorg/gsuite", "google"));
+    expect(res.status).toBe(403);
+    const html = await res.text();
+    expect(html).toContain("Ask an administrator");
+    for (const internal of ["CONNECTION_ENCRYPTION_KEY", "cannot be decrypted", clientId]) {
+      expect(html).not.toContain(internal);
+    }
+  });
+});
+
+/**
+ * The completion payload the popup broadcasts, as the browser would read it.
+ *
+ * The page inlines it as a single `var detail = {…};` statement of flat JSON
+ * (`buildIntegrationConnectCompletion` produces no nested object), so the line
+ * itself is the whole payload.
+ */
+function completionDetail(html: string): Record<string, unknown> {
+  const match = /^\s*var detail = (\{.*\});$/m.exec(html);
+  expect(match).not.toBeNull();
+  return JSON.parse(match![1]!) as Record<string, unknown>;
+}
+
+describe("hosted connect portal — error completions are addressed (issue #1346)", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, apiKeyManifest("@myorg/gmail"));
+    await seedIntegration(ctx.orgId, oauthManifest("@myorg/gsuite"));
+  });
+
+  // A completion naming NOTHING is delivered to every waiting surface by
+  // contract (`completionMatches`), and both carriers fan out — so a failing
+  // Gmail link used to drive an open ClickUp card into an error naming Gmail.
+  it("names the package on the OAuth-begin refusal", async () => {
+    const res = await startConnect(await mintSession(ctx, "@myorg/gsuite", "google"));
+    expect(res.status).toBe(403);
+    expect(completionDetail(await res.text())).toMatchObject({
+      ok: false,
+      packageId: "@myorg/gsuite",
+    });
+  });
+
+  it("names the package when the link has already been used", async () => {
+    const token = await mintSession(ctx, "@myorg/gmail", "api");
+    expect((await startConnect(token)).status).toBe(302);
+    const again = await startConnect(token);
+    expect(again.status).toBe(410);
+    const detail = completionDetail(await again.text());
+    expect(detail).toMatchObject({ ok: false, packageId: "@myorg/gmail" });
+  });
+
+  it("names the package when the integration is gone", async () => {
+    const token = await mintSession(ctx, "@myorg/gmail", "api");
+    await db.delete(packages).where(eq(packages.id, "@myorg/gmail"));
+    const res = await startConnect(token);
+    expect(res.status).toBe(410);
+    expect(completionDetail(await res.text())).toMatchObject({
+      ok: false,
+      packageId: "@myorg/gmail",
+    });
+  });
+
+  // The other half of the rule: the two pages that run BEFORE the claims are
+  // decoded resolved no package and no state, so they stay context-less — that
+  // is the case `completionMatches`'s permissive tail exists for, and widening
+  // it is not what this fix does.
+  it("leaves the pre-claims pages context-less", async () => {
+    for (const query of ["", "?token=not-a-token"]) {
+      const res = await app.request(`/api/integrations/connect/start${query}`, {
+        redirect: "manual",
+      });
+      const detail = completionDetail(await res.text());
+      expect(detail.packageId).toBeUndefined();
+      expect(detail.state).toBeUndefined();
+    }
+  });
+});
+
+describe("hosted connect portal — a fault while resolving scopes (issue #1352)", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, oauthManifest("@myorg/gsuite"));
+  });
+
+  /**
+   * Mint a capability token straight from claims. The mint route validates
+   * `connection_id` against the caller's rows, and this case needs claims it
+   * would refuse: a malformed id makes `getCurrentScopesGranted`'s row read
+   * throw at the database the way a real fault there would. That read runs
+   * after the jti is burned and before anything is sent upstream — the window
+   * this test pins.
+   */
+  function mintUnreadableConnection(): string {
+    const { connectUrl } = buildConnectUrl(
+      connectClaimsFor({
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user", id: ctx.user.id },
+        packageId: "@myorg/gsuite",
+        authKey: "google",
+        connectionId: "not-a-uuid",
+      }),
+    );
+    return new URL(connectUrl).searchParams.get("token")!;
+  }
+
+  it("renders the popup error page, not raw problem+json", async () => {
+    const res = await startConnect(mintUnreadableConnection());
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("Please try again");
+    // Addressed like every other completion this handler emits (issue #1346).
+    expect(completionDetail(html)).toMatchObject({ ok: false, packageId: "@myorg/gsuite" });
+  });
+
+  it("hands the link back — this click spent nothing", async () => {
+    const token = mintUnreadableConnection();
+    expect((await startConnect(token)).status).toBe(500);
+    const again = await startConnect(token);
+    expect(again.status).toBe(500);
+    expect(await again.text()).not.toContain("already been used");
   });
 });
