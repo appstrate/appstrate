@@ -64,7 +64,7 @@ interface UseEditorStateReturn<S extends EditorStateBase> {
   updateManifest: (patch: Record<string, unknown>) => void;
   isDirty: boolean;
   blocker: ReturnType<typeof useUnsavedChanges>["blocker"];
-  allowNavigation: () => void;
+  allowNavigation: (allowed?: boolean) => void;
   error: string | null;
   setError: (err: string | null) => void;
   jsonEditorKey: number;
@@ -204,7 +204,6 @@ export function useEditorState<S extends EditorStateBase>(
         }
       }
 
-      allowNavigation();
       const body = toWireBody(state);
       if (isEdit) {
         // Unlike saveDraft, this path does NOT read back the response's
@@ -223,17 +222,32 @@ export function useEditorState<S extends EditorStateBase>(
           } finally {
             setIsFlushing(false);
           }
+          // The blocker opens here and not a line earlier: everything above can
+          // fail with the author's work still in the page — the flush writes the
+          // files through a route of its own — and a save that fails must leave
+          // the leave-this-page guard exactly as it found it. Same for the
+          // request itself, which is why `onError` closes it again.
+          allowNavigation();
           updatePkg.mutate(
             {
               ...(body as Parameters<typeof updatePkg.mutate>[0]),
               lock_version: lockVersion,
             },
-            { onError: (err) => setError(translateError?.(err) ?? err.message) },
+            {
+              onError: (err) => {
+                allowNavigation(false);
+                setError(translateError?.(err) ?? err.message);
+              },
+            },
           );
         })();
       } else {
+        allowNavigation();
         createPkg.mutate(body as Parameters<typeof createPkg.mutate>[0], {
-          onError: (err) => setError(translateError?.(err) ?? err.message),
+          onError: (err) => {
+            allowNavigation(false);
+            setError(translateError?.(err) ?? err.message);
+          },
         });
       }
     },

@@ -202,7 +202,13 @@ export function PackageFilesEditor({
 
   const pickFiles = (intent: UploadIntent) => {
     uploadIntent.current = intent;
-    uploadRef.current?.click();
+    const input = uploadRef.current;
+    if (!input) return;
+    // *Importer* takes any number of files, *Remplacer* takes the one whose
+    // bytes it replaces. The picker is told which before it opens, so a replace
+    // cannot end on the browser handing over three files and this dropping two.
+    input.multiple = intent.kind === "add";
+    input.click();
   };
 
   /**
@@ -318,12 +324,12 @@ export function PackageFilesEditor({
         />
       )}
 
-      {/* Reset after every pick so choosing the same file twice in a row still
-          fires a change event. */}
+      {/* `multiple` is set by `pickFiles` from the gesture that opens this, so
+          it is not declared here — one place decides. Reset after every pick so
+          choosing the same file twice in a row still fires a change event. */}
       <input
         ref={uploadRef}
         type="file"
-        multiple
         className="hidden"
         onChange={(event) => {
           const picked = [...(event.target.files ?? [])];

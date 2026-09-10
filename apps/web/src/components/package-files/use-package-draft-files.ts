@@ -65,15 +65,20 @@ export function usePackageDraftFiles(packageId: string): DraftFiles {
 
   const mutation = useMutation({
     mutationFn: async (operations: PackageFileWriteOperation[]) => {
+      // The editor never writes blind. `If-Match: *` is the RFC 9110 "overwrite
+      // whatever is there" opt-out, and it belongs to scripted callers that mean
+      // it — an editor's whole claim is that its batch was composed against the
+      // tree it read. The tree, hence every gesture that can produce an
+      // operation, renders only once the index has landed, so a missing
+      // validator is a broken invariant rather than a case to fall back from.
+      const etag = etagRef.current;
+      if (etag === null) {
+        throw new Error("package files: a write needs the index ETag it was composed against");
+      }
       const { data, response } = await client.PATCH("/api/packages/{scope}/{name}/files", {
         params: {
           path: splitPackageRef(packageId),
-          // `*` only stands in for the window before the first index lands, and
-          // the tree — hence every gesture that can produce an operation — is
-          // not rendered until it has. Sending it is the RFC 9110 "write over
-          // whatever is there" opt-out, which is exactly right for a batch that
-          // cannot have been composed against a stale tree.
-          header: { ...scope.header, "If-Match": etagRef.current ?? "*" },
+          header: { ...scope.header, "If-Match": etag },
         },
         body: { operations },
       });
