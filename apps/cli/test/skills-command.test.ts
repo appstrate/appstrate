@@ -1243,6 +1243,18 @@ async function snapshot(root: string): Promise<Record<string, string>> {
  * therefore not be a skill source. */
 const MEMBER = { access: "member" as const, permissions: ["skills:read"] };
 
+/**
+ * Answer `GET /api/spaces` with a problem detail, serving everything else — the
+ * shape the platform sends when it refuses the listing outright.
+ */
+function failSpaceListing(status: number): void {
+  const serve = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+    new URL(String(input)).pathname === "/api/spaces"
+      ? Response.json({ status, title: "Forbidden", code: "forbidden" }, { status })
+      : serve(input, init)) as unknown as typeof fetch;
+}
+
 describe("skills sync — multiple spaces", () => {
   it("never sources a listed space this member never joined", async () => {
     // The org lists its `closed` spaces to every member so they can ask to be
@@ -1277,6 +1289,41 @@ describe("skills sync — multiple spaces", () => {
     await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toContain("older than the CLI");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+  });
+
+  it("removes every synced skill when the organization has revoked this profile", async () => {
+    // Offboarding deletes the membership row and nothing else — the CLI's
+    // refresh token survives it — so the profile still authenticates and
+    // `GET /api/spaces` answers 403. That is the server stating the grants are
+    // gone, and applying it is the point: reported as a fault it exited 1 and
+    // left the ex-member's machine holding every one of those skills forever,
+    // which under `--print-path` no amount of re-running ever cleared
+    // (issue #1362).
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    failSpaceListing(403);
+    const { io, stderr } = createMemoryIO();
+
+    await skillsSyncCommand({}, io);
+
+    expect(stderr()).toContain("no longer grants this profile access to its spaces");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
+  });
+
+  it("keeps every skill when the space listing fails for anything but a revocation", async () => {
+    // A 5xx says nothing about this profile's grants, so the tree is left
+    // exactly as it was and the run fails — the revocation branch must not
+    // widen into "the listing did not come back".
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    failSpaceListing(503);
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).not.toContain("no longer grants");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
   });
 

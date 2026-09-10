@@ -11,6 +11,7 @@
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { resolveActiveProfile, type Profile } from "../lib/config.ts";
+import { ApiError } from "../lib/api.ts";
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
@@ -583,6 +584,42 @@ function unusableReason(space: Space): string {
 }
 
 /**
+ * The spaces this profile reaches, or `null` when the organization no longer
+ * lets it reach any.
+ *
+ * `GET /api/spaces` answers 403 to a caller the pinned organization does not
+ * admit: `orgContext` refuses one with no membership row ("You are not a member
+ * of this organization"), and `requirePermission("spaces", "read")` refuses one
+ * whose org role cannot read the catalog. Either way the server has stated that
+ * this profile draws no skills from this organization any more — a REVOCATION,
+ * which the sync must APPLY, not a fault to retry. Reported as a fault it exits
+ * 1, and under `--print-path` Claude Code then discards the run and keeps
+ * serving the stale plugin, so an offboarded machine kept every one of that
+ * organization's skills forever (issue #1362).
+ *
+ * Only 403 is a statement about this profile's grants. A 401 is about the
+ * SESSION — `apiFetch` turns it into a re-login `AuthError` after a refresh
+ * attempt, and a lapsed login must never take working skills away (same reason
+ * `bootstrapPlugin` keeps an existing plugin) — and a 5xx or a network error is
+ * a fault that leaves the tree untouched.
+ */
+async function reachableSpaces(
+  profileName: string,
+  profile: Profile,
+  report: Report,
+): Promise<Space[] | null> {
+  try {
+    return await listSpaces(profileName);
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 403) throw err;
+    report.note(
+      `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill synced from it. Run: appstrate org switch`,
+    );
+    return null;
+  }
+}
+
+/**
  * Which spaces supply skills. The default is every space this profile is a
  * MEMBER of with `skills:read` there: being granted a space is what puts its
  * skills on the machine, and losing one is what takes them off again — neither
@@ -598,7 +635,10 @@ async function selectedSpaces(
   explicit: string[] | undefined,
   report: Report,
 ): Promise<string[]> {
-  const spaces = await listSpaces(profileName);
+  const spaces = await reachableSpaces(profileName, profile, report);
+  // The organization revoked this profile: no space supplies skills any more,
+  // so the ordinary removal plan takes every one of them off the disk.
+  if (!spaces) return [];
   // Skill sources no longer depend on the pin, so a pin that died would sync
   // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
   // else notices any more: say it here, where the space list is already in hand.
