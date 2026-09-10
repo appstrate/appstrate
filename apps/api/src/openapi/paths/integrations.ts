@@ -364,6 +364,26 @@ const integrationDetailSchema = {
  * the hand-written pair it replaces. Same technique as `paths/files.ts`'s
  * `pipelineResponses`.
  */
+/**
+ * The two fields a caller relays verbatim from a readiness `integrations.<id>`
+ * error onto either connect kickoff (`connect/oauth2`, `connect/session`).
+ * Declared once so both surfaces document the relay identically.
+ */
+const connectKickoffRelayProperties = {
+  scopes: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+  },
+  connection_id: {
+    type: "string",
+    format: "uuid",
+    description:
+      "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.",
+  },
+} as const;
+
 const connectRunResponses = {
   "503": {
     description:
@@ -877,9 +897,9 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                scopes: { type: "array", items: { type: "string" } },
+                scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
-                connection_id: { type: "string", format: "uuid" },
+                connection_id: connectKickoffRelayProperties.connection_id,
               },
               additionalProperties: false,
             },
@@ -929,13 +949,9 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                scopes: { type: "array", items: { type: "string" } },
+                scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
-                connection_id: {
-                  type: "string",
-                  format: "uuid",
-                  description: "Reconnect/upgrade an existing connection in place.",
-                },
+                connection_id: connectKickoffRelayProperties.connection_id,
               },
               additionalProperties: false,
             },

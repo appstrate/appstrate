@@ -36,6 +36,7 @@ import { getOrchestrator } from "./orchestrator/index.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
+import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import type { FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -199,6 +200,12 @@ export async function resolveRunPreflight(params: {
    * one is created below, because the seeding is not optional.
    */
   manifestCache?: IntegrationManifestCache;
+  /**
+   * Run-kickoff connect-link relay (#1207) — forwarded to readiness verbatim.
+   * Request paths pass `connectOfferPolicyFromRequest(c)`; the scheduler has no
+   * request and no human to hand a link to, so it passes nothing.
+   */
+  connectOffers?: ConnectOfferPolicy | null;
 }): Promise<void> {
   const { agent, spaceId, orgId, actor } = params;
 
@@ -262,6 +269,7 @@ export async function resolveRunPreflight(params: {
       ? { scheduleOverrides: params.scheduleConnectionOverrides }
       : {}),
     manifestCache,
+    ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
   });
 }
 

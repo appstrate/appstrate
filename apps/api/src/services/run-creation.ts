@@ -67,6 +67,13 @@ interface CreateRunInput {
   /** Resolved by `lib/runner-context.ts` from request headers + auth context. */
   runnerName?: string | null;
   runnerKind?: string | null;
+  /**
+   * Per-call-graph memo for integration manifest fetches. The inline branch of
+   * `POST /api/runs/remote` passes the one its preflight already seeded, so
+   * this path shares it the way the platform kickoff does; the registry branch
+   * has none and gets the Map created below.
+   */
+  manifestCache?: IntegrationManifestCache;
 }
 
 type CreateRunResult =
@@ -159,7 +166,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   //     served the same to remote runs) reads it back. Without this a remote
   //     run silently served the mutable draft and never failed loud on an
   //     unsatisfiable pin. A shared `manifestCache` dedupes the cascade reads.
-  const manifestCache: IntegrationManifestCache = new Map();
+  const manifestCache: IntegrationManifestCache = input.manifestCache ?? new Map();
   let resolvedIntegrationVersions: ResolvedIntegrationVersionMap;
   try {
     resolvedIntegrationVersions = await freezeRunSpawnDependencies({

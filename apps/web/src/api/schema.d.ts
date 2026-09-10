@@ -5695,12 +5695,25 @@ export interface components {
             connection_id?: string;
             /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
             missing_scopes?: string[];
-            /** @description Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error). */
+            /** @description Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error). */
             owned_by_actor?: boolean;
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them. */
+            required_scopes?: string[];
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
+            auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
             required_auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
             available_auth_keys?: string[];
+            /**
+             * Format: uri
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             */
+            connect_url?: string;
+            /** @description Absolute expiry of `connect_url`, epoch ms. */
+            expires_at?: number;
+            /** @description Integration package id `connect_url` connects (`@scope/name`). */
+            package_id?: string;
         };
         /** @description A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle. */
         RoleObject: {
@@ -6392,6 +6405,8 @@ export interface components {
         AppstrateVersion: string;
         /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+        ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
         /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
@@ -7384,6 +7399,8 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -11520,9 +11537,13 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
-                    /** Format: uuid */
+                    /**
+                     * Format: uuid
+                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
+                     */
                     connection_id?: string;
                 };
             };
@@ -11568,11 +11589,12 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect/upgrade an existing connection in place.
+                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
                      */
                     connection_id?: string;
                 };
@@ -18845,6 +18867,8 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
             cookie?: never;

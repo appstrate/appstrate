@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import {
   fetchRunFiles,
   launchRunAndWait,
+  RUN_CONNECT_OFFERS_HEADER,
   runAndWaitSteps,
   runAndWaitStepsWithFiles,
 } from "../src/run-and-wait-client.ts";
@@ -879,6 +880,57 @@ describe("launchRunAndWait launch body", () => {
     expect(Object.keys(captured()?.body as Record<string, unknown>)).not.toContain(
       "connection_overrides",
     );
+  });
+
+  it("sends the connect-offer opt-in on the LAUNCH only, never on the poll", async () => {
+    const seen: Array<{ method: string; header: string | null }> = [];
+    const responses = [
+      jsonResponse({ id: "run_1", status: "pending" }),
+      jsonResponse({ id: "run_1", status: "success" }),
+    ];
+    const fetchImpl = fakeFetch(async (_input, init) => {
+      seen.push({
+        method: init?.method ?? "GET",
+        header: new Headers(init?.headers).get(RUN_CONNECT_OFFERS_HEADER),
+      });
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    });
+
+    for await (const _step of runAndWaitSteps(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      {
+        origin: "https://test.local",
+        headers: { authorization: "Bearer tok" },
+        fetch: fetchImpl,
+        connectOffers: true,
+      },
+    )) {
+      // Drained for the effect on `seen`.
+    }
+
+    expect(seen).toEqual([
+      { method: "POST", header: "1" },
+      // The poll can only ever answer 200/404 — a connect link on it would be a
+      // capability minted for nothing, so the opt-in must not survive here.
+      { method: "GET", header: null },
+    ]);
+  });
+
+  it("omits the connect-offer opt-in when the caller does not ask for it", async () => {
+    let header: string | null | undefined;
+    const fetchImpl = fakeFetch(async (_input, init) => {
+      header = new Headers(init?.headers).get(RUN_CONNECT_OFFERS_HEADER);
+      return jsonResponse({ id: "run_1", status: "pending" });
+    });
+
+    await launchRunAndWait(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(header).toBeNull();
   });
 
   it("exposes the launch HTTP status on success", async () => {

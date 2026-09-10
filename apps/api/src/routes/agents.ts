@@ -336,8 +336,18 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/connection-readiness — bulk integration
-  // connection readiness for the agent: authoritative run-blocking verdict
-  // (identical to the run-kickoff 412) + per-integration management DTO.
+  // connection readiness for the agent: run-blocking CONNECTION verdict + the
+  // per-integration management DTO.
+  //
+  // Same resolver, same pinned manifests as the run-kickoff 412 — but not the
+  // whole kickoff gate: readiness also refuses an integration that is not
+  // installed/enabled in the space and excludes those ids from the resolver
+  // (`skipIntegrationIds`). This endpoint runs no install/enable gate, so such
+  // an integration surfaces here as a connection problem. Adding the skip alone
+  // would make it worse (the item would drop out of `blocks_run` while the run
+  // still refuses it); closing the gap means giving this DTO the install/enable
+  // verdict too — a wire change to the Connexions tab. The kickoff remains the
+  // authority; this is what the badge renders.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/connection-readiness`,
     requireAgent(),

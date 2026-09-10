@@ -5,6 +5,7 @@
  *
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
+ *   1b. Integration tool/scope selections against each integration's PINNED catalog
  *   2. input against the manifest's own AJV schema
  *   3. Agent readiness (prompt, skills, tools, integrations)
  *
@@ -25,6 +26,7 @@
  * Throws `ApiError` on any failure (same shape the routes already emit).
  */
 import type { Actor } from "../lib/actor.ts";
+import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import type { AgentManifest } from "../types/index.ts";
 import {
   ApiError,
@@ -38,6 +40,11 @@ import { logger } from "../lib/logger.ts";
 import { validateInput } from "./schema.ts";
 import { resolveEffectiveInput } from "./input-resolution.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
+import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
+import {
+  resolveRunIntegrationVersions,
+  type IntegrationManifestCache,
+} from "./integration-service.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
@@ -60,6 +67,14 @@ export interface InlineRunPreflightResult {
    * the run uses.
    */
   connectionOverrides: ConnectionOverrides | null;
+  /**
+   * The manifest memo this preflight seeded with the PINNED integration
+   * versions. Handed to the kickoff (`triggerInlineRun` → `prepareAndExecuteRun`)
+   * so the inline path shares ONE memo across preflight and pipeline, exactly
+   * as the registered-agent route does; a fresh Map there resolved every pin a
+   * second time.
+   */
+  manifestCache: IntegrationManifestCache;
 }
 
 type Mode = "fail-fast" | "accumulate";
@@ -72,6 +87,20 @@ export async function runInlinePreflight(params: {
   mode?: Mode;
   /** The transport must authorize caller-selected sources before readiness reads their metadata. */
   authorizeDependencies: (manifest: AgentManifest) => Promise<void>;
+  /**
+   * Run-kickoff connect-link relay (#1207), honoured on the fail-fast branch
+   * only: accumulate mode serves the dry-run validator, which launches nothing
+   * and so must not burn a single-use capability nobody will open. See
+   * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
+   */
+  connectOffers?: ConnectOfferPolicy | null;
+  /**
+   * Caller-selected integration versions (`body.dependency_overrides`). Must be
+   * the SAME map the kickoff freezes with, so the memo seeded here holds the
+   * versions the run will spawn — the platform run route keeps its two seeds
+   * in step the same way.
+   */
+  dependencyOverrides?: Record<string, string> | null;
 }): Promise<InlineRunPreflightResult> {
   const { orgId, spaceId, actor, body, mode = "fail-fast" } = params;
 
@@ -117,6 +146,56 @@ export async function runInlinePreflight(params: {
   const manifest = validated.valid ? (validated.manifest as AgentManifest) : undefined;
   if (manifest) await params.authorizeDependencies(manifest);
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
+
+  // ----- 1b. Integration tool/scope selections against each catalog -----
+  // The SAME gate publish and import run (`routes/packages.ts`,
+  // `bundle-import.ts`). Structural validation accepts any string in
+  // `integrations_configuration[id].{tools,scopes}`, so on this surface —
+  // the one where the manifest arrives in the request body — an unknown tool,
+  // a scope outside the integration's `scope_catalog`, or an unauthorized
+  // wildcard reached the run untouched. That is not only a legibility problem:
+  // the readiness gate derives an item's `required_scopes` from these very
+  // selections (`requiredScopesForAgent`), so a caller could name arbitrary
+  // scopes and have the platform relay them as the consent to request.
+  //
+  // `requireCallableTools` stays OFF: it is the freeze-point rule (publish /
+  // import), and an inline agent freezes nothing. The subset checks below are
+  // the whole point here.
+  //
+  // The memo below is what makes those checks judge the PINNED integration
+  // versions this run will spawn — `resolveRunIntegrationVersions` is the same
+  // resolver the kickoff calls, and the same seeding `resolveRunPreflight` does
+  // for the registered-agent path (`run-pipeline.ts`). Unseeded, both this
+  // stage and readiness fall through to `packages.draft_manifest`, i.e. they
+  // judge the integration AUTHOR'S LIVE DRAFT: an inline run pinning `^1.0.0`
+  // and selecting a tool that version exposes was refused with `unknown_tool`
+  // because the author had since dropped it from their working copy.
+  //
+  // Resolved ONCE, before stage 1b, shared with the readiness pass below AND
+  // returned so the kickoff reuses it: one resolution per inline run.
+  //
+  // The result is deliberately ignored, for the reason spelled out in
+  // `resolveRunPreflight`: an unsatisfiable pin is a `dependency_unresolved`
+  // (422) the kickoff raises on its own, and the ids left unseeded keep the
+  // pre-existing draft fallback rather than blanking either verdict.
+  const manifestCache: IntegrationManifestCache = new Map();
+  if (manifest) {
+    await resolveRunIntegrationVersions({
+      agentManifest: manifest as unknown as Record<string, unknown>,
+      orgId,
+      ...(params.dependencyOverrides ? { dependencyOverrides: params.dependencyOverrides } : {}),
+      manifestCache,
+    });
+    const selectionErrors = await validateAgentIntegrationSelections({
+      manifest: manifest as unknown as Record<string, unknown>,
+      orgId,
+      manifestCache,
+    });
+    if (selectionErrors.length > 0) {
+      if (mode === "fail-fast") throw validationFailed(selectionErrors);
+      push(selectionErrors);
+    }
+  }
 
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;
@@ -180,7 +259,9 @@ export async function runInlinePreflight(params: {
         orgId,
         spaceId,
         actor,
+        manifestCache,
         ...(runOverrides ? { runOverrides } : {}),
+        ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
       });
     } else {
       push(
@@ -189,6 +270,7 @@ export async function runInlinePreflight(params: {
           orgId,
           spaceId,
           actor,
+          manifestCache,
           ...(runOverrides ? { runOverrides } : {}),
         }),
       );
@@ -221,6 +303,7 @@ export async function runInlinePreflight(params: {
     modelIdOverride,
     proxyIdOverride,
     connectionOverrides: runOverrides,
+    manifestCache,
   };
 }
 

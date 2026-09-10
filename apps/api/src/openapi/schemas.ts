@@ -87,8 +87,8 @@ export const schemas = {
   // @appstrate/core/api-errors). Extracted into one component so every
   // consumer (ProblemDetail.errors, and any future readiness DTO) shares one
   // shape and can't drift. The base four (`field`/`code`/`message`/`title`)
-  // come from ValidationFieldError; the six snake_case extras are each
-  // populated only for the matching resolution `code` and so are all optional.
+  // come from ValidationFieldError; the eleven snake_case extras are each
+  // populated only for the matching resolution `code`(s) and so are all optional.
   ResolutionFieldError: {
     type: "object",
     required: ["field", "code", "message"],
@@ -122,7 +122,18 @@ export const schemas = {
       owned_by_actor: {
         type: "boolean",
         description:
-          "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error).",
+          "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error).",
+      },
+      required_scopes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.",
+      },
+      auth_key: {
+        type: "string",
+        description:
+          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`).",
       },
       required_auth_key: {
         type: "string",
@@ -134,6 +145,20 @@ export const schemas = {
         items: { type: "string" },
         description:
           "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
+      },
+      connect_url: {
+        type: "string",
+        format: "uri",
+        description:
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+      },
+      expires_at: {
+        type: "integer",
+        description: "Absolute expiry of `connect_url`, epoch ms.",
+      },
+      package_id: {
+        type: "string",
+        description: "Integration package id `connect_url` connects (`@scope/name`).",
       },
     },
   },

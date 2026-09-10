@@ -76,6 +76,26 @@ export interface RunAndWaitLaunch {
 
 export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string, string]>;
 
+/**
+ * Request header asking the run-kickoff routes to mint a hosted-connect session
+ * for every actor-actionable item of a `missing_integration_connection` 412 and
+ * return it as `connect_url` on that item (RFC 6750 / Arcade.dev pattern: the
+ * error carries the remedy, so nothing has to be called to obtain it).
+ *
+ * A minted `connect_url` is a bearer capability that creates a connection AS
+ * the calling actor. Set this header ONLY from a caller that either renders the
+ * connect card itself (the chat) or hands the link straight to the human who is
+ * that actor — the external MCP `run_and_wait` tool qualifies, because the model
+ * driving it already receives a `connect_url` from `initiateIntegrationConnect`
+ * on that very same path, so this is not a new exposure class. Never set it from
+ * a caller that logs its responses, persists them, or forwards them to a third
+ * party; the dashboard, the CLI, the GitHub Action, the scheduler and dry-run
+ * validation all leave it unset and keep driving the connect kickoff themselves.
+ *
+ * Sent on the LAUNCH request only; the poll loop never carries it.
+ */
+export const RUN_CONNECT_OFFERS_HEADER = "X-Appstrate-Connect-Offers";
+
 export interface RunAndWaitClientOptions {
   origin: string;
   headers: RunAndWaitHeaders;
@@ -83,6 +103,12 @@ export interface RunAndWaitClientOptions {
   signal?: AbortSignal;
   maxMs?: number;
   backoffMs?: number;
+  /**
+   * Opt into {@link RUN_CONNECT_OFFERS_HEADER} on the launch request. Read the
+   * header's note before setting it: it decides whether a live connect link
+   * reaches this caller's error payload.
+   */
+  connectOffers?: boolean;
 }
 
 export interface RunAndWaitLaunchResult {
@@ -503,7 +529,10 @@ export async function launchRunAndWait(
 
   const args = asRecordOrUndefined(rawArgs) ?? {};
   const kind = asString(args.kind);
+  // Launch-only: `waitForRunAndWaitCompletion` polls with `opts.headers`, so the
+  // opt-in cannot leak onto a request that has no 412 to enrich.
   const headers = jsonHeaders(opts.headers);
+  if (opts.connectOffers) headers.set(RUN_CONNECT_OFFERS_HEADER, "1");
 
   const unknownArgs = unknownArgumentsError(args);
   if (unknownArgs) {

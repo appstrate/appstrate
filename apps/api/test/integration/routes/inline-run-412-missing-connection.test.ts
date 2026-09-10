@@ -41,6 +41,11 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
+import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
 
 const app = getTestApp();
 
@@ -53,6 +58,9 @@ interface ValidationFieldError {
   title?: string;
   message: string;
   candidate_connection_ids?: string[];
+  connect_url?: string;
+  expires_at?: number;
+  package_id?: string;
 }
 
 interface ProblemDetails {
@@ -226,6 +234,119 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       );
 
       expect(await db.select().from(runs)).toHaveLength(0);
+    });
+  });
+
+  // ─── Connect-offer relay (#1207) ───────────
+  //
+  // The inline route is the one the chat's `run_and_wait` actually launches
+  // through, so the relay has to reach the fail-fast preflight and not just the
+  // cataloged-agent route. `/inline/validate` is the deliberate exception: it
+  // launches nothing, and a dry run must not burn a single-use capability.
+  describe("connect_url relay", () => {
+    const OAUTH_INTEGRATION = "@inlineconn/oauth-svc";
+
+    function oauthManifest() {
+      return localIntegrationManifest({
+        name: OAUTH_INTEGRATION,
+        serverName: `${OAUTH_INTEGRATION}-server`,
+        version: "1.0.0",
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationEndpoint: "https://provider.example.com/authorize",
+            tokenEndpoint: "https://provider.example.com/token",
+            defaultScopes: ["base"],
+          },
+        },
+        tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+      }) as unknown as Record<string, unknown>;
+    }
+
+    async function seedOauthIntegration() {
+      await seedPackage({
+        id: OAUTH_INTEGRATION,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: oauthManifest(),
+      });
+      await seedPackageVersion({
+        packageId: OAUTH_INTEGRATION,
+        version: "1.0.0",
+        manifest: oauthManifest(),
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
+    }
+
+    async function launch(path: string, headers: Record<string, string>) {
+      return app.request(path, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({
+          manifest: inlineManifest([OAUTH_INTEGRATION]),
+          prompt: "do the thing",
+        }),
+      });
+    }
+
+    // The offer's full wire shape (`package_id`, `expires_at`, the permission
+    // gate, the non-oauth2 refusal) is the mint's own contract and is pinned
+    // once, on the cataloged-agent route in the sibling suite. What is proven
+    // HERE is only what that suite cannot: that this route reaches the same
+    // mint, with this route's own actor and space in the claims.
+    it("routes the launch through the same mint when the caller opts in", async () => {
+      await seedOauthIntegration();
+
+      const res = await launch("/api/runs/inline", { [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      expect(res.status).toBe(412);
+      const body = (await res.json()) as ProblemDetails;
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.connect_url).toStartWith("http");
+
+      // A URL that opens is worthless if it asks for the wrong scopes on the
+      // wrong auth in the wrong space — the claims are the security-relevant
+      // output, and the manifest here selects `search`, whose
+      // `required_scopes.primary` is `search.read`.
+      const token = new URL(err.connect_url!).searchParams.get("token");
+      expect(readConnectToken(token!)).toMatchObject({
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        user_id: ctx.user.id,
+        package_id: OAUTH_INTEGRATION,
+        auth_key: "primary",
+        scopes: ["search.read"],
+      });
+
+      // Refused before any durable side effect, link or no link.
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
+
+    it("mints nothing on the launch route without the header", async () => {
+      await seedOauthIntegration();
+
+      const res = await launch("/api/runs/inline", {});
+      expect(res.status).toBe(412);
+      const body = (await res.json()) as ProblemDetails;
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.connect_url).toBeUndefined();
+    });
+
+    it("never mints on /inline/validate, header or not", async () => {
+      await seedOauthIntegration();
+
+      const headerSets: Record<string, string>[] = [{}, { [RUN_CONNECT_OFFERS_HEADER]: "1" }];
+      for (const headers of headerSets) {
+        const res = await launch("/api/runs/inline/validate", headers);
+        // Accumulate mode answers `validation_failed` (400), not the launch
+        // route's 412 envelope — the readiness entries ride the same `errors[]`.
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as ProblemDetails;
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.code).toBe("not_connected");
+        expect(err.connect_url).toBeUndefined();
+      }
     });
   });
 });

@@ -54,12 +54,41 @@ export interface ResolutionFieldError extends ValidationFieldError {
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
-  /** `insufficient_scopes` — true when the under-scoped connection belongs to the calling actor. */
+  /**
+   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — OAuth
+   * scopes the run's selected tools require on `auth_key`. Forward as `scopes`
+   * when starting the connect flow so the consent covers them.
+   */
+  required_scopes?: string[];
+  /**
+   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — auth key
+   * of the integration manifest the connect flow must target
+   * (`/auths/{authKey}/connect/...`).
+   */
+  auth_key?: string;
+  /**
+   * `insufficient_scopes` / `needs_reconnection` — true when the connection to
+   * repair belongs to the calling actor. Both remedies re-consent that row, so
+   * a foreign-owned one is a read-only error.
+   */
   owned_by_actor?: boolean;
   /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
+  /**
+   * Ready-to-open hosted-connect link for THIS item. Present only on a
+   * run-kickoff 412 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
+   * docblock states who may), and only on the items an oauth2 connect flow can
+   * clear for the calling actor. Single-use and short-lived (`expires_at`):
+   * open it — never store it, and never call the connect kickoff as well,
+   * which would mint a second link.
+   */
+  connect_url?: string;
+  /** Absolute expiry (epoch ms) of `connect_url`. */
+  expires_at?: number;
+  /** Integration package id `connect_url` connects (`@scope/name`). */
+  package_id?: string;
 }
 
 // ---------------------------------------------------------------------------

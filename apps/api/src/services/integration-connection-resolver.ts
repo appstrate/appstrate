@@ -39,6 +39,7 @@ import {
 import {
   resolveEffectiveToolSelection,
   missingScopesForConnection,
+  requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
   type IntegrationManifest,
@@ -283,6 +284,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       connectionIndex: filteredIndex,
       actorUserId: input.actorUserId ?? null,
       actorEndUserId: input.actorEndUserId ?? null,
+      ...(req.requiredAuthKey !== undefined ? { requiredAuthKey: req.requiredAuthKey } : {}),
     });
 
     if (result.kind === "resolved") {
@@ -311,6 +313,13 @@ interface ResolveOneArgs {
   connectionIndex: Map<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
+  /**
+   * AFPS §4.1 `auth_key` from the agent dep — already applied as a candidate
+   * filter by {@link resolveConnections}. Threaded in so the `not_connected`
+   * branch can name the auth the connect flow must target: with nothing
+   * connected there is no row whose `authKey` could answer that.
+   */
+  requiredAuthKey?: string;
 }
 
 type ResolveOneResult =
@@ -408,8 +417,16 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   );
 
   if (candidates.length === 0) {
+    // Nothing connected, so nothing carries an `authKey` — name the auth the
+    // connect flow must target and the scopes that consent has to cover, or
+    // the user connects with `default_scopes` only and the very next
+    // resolution fails with `insufficient_scopes` on the tools that need more.
+    const authKey = connectTargetAuthKey(args);
+    const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
       code: "not_connected",
+      ...(authKey !== null ? { authKey } : {}),
+      ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
       message: `Integration '${args.integrationId}' has no connection accessible to this actor.`,
     });
   }
@@ -444,12 +461,88 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   return checkHealth(args, candidates[0]!, "fallback_auto");
 }
 
+/**
+ * Which manifest auth a fresh connect flow must target when the actor has NO
+ * connection on the integration. In order: the agent dep's pinned `auth_key`
+ * (AFPS §4.1), else the integration's single `oauth2` auth. `null` when the
+ * manifest declares several oauth2 auths (or none) and the dep pins nothing —
+ * the resolver refuses to guess and the caller lets the user choose.
+ *
+ * A pin naming an auth the manifest no longer declares is `null` too — see
+ * {@link declaredAuthKey}.
+ */
+function connectTargetAuthKey(args: ResolveOneArgs): string | null {
+  if (args.requiredAuthKey !== undefined) {
+    return declaredAuthKey(args.manifest, args.requiredAuthKey);
+  }
+  const oauthKeys = Object.entries(args.manifest.auths ?? {})
+    .filter(([, auth]) => auth.type === "oauth2")
+    .map(([key]) => key);
+  return oauthKeys.length === 1 ? oauthKeys[0]! : null;
+}
+
+/**
+ * `key`, but only while the manifest still DECLARES it — else `null`.
+ *
+ * A key the manifest dropped (a version bump renaming `primary` → `session`,
+ * an auth removed outright) is a connect target that cannot exist: the kickoff
+ * 404s on `/auths/{authKey}/…`, and the scopes computed from it are
+ * meaningless. The item then carries neither `auth_key` nor `required_scopes`,
+ * which is the "let the user choose" shape.
+ *
+ * Three relay sites, two of which apply it — the asymmetry is deliberate:
+ *
+ *  - {@link connectTargetAuthKey} — load-bearing. The key is the AGENT's pin,
+ *    which nothing filters against the integration manifest.
+ *  - `needs_reconnection` — residual. The key is a connection ROW's, and
+ *    {@link resolveConnections} already drops rows whose auth the manifest no
+ *    longer declares… except when `manifestAuthKeySet` returns `null` (a
+ *    manifest declaring NO auth at all is "no constraint"), which is the one
+ *    shape that still reaches here.
+ *  - `insufficient_scopes` relays `conn.authKey` unguarded, and cannot need
+ *    the guard: `missingScopesForConnection` returns no gap unless the
+ *    manifest declares that auth as `oauth2`, so an undeclared key never
+ *    produces this code.
+ */
+function declaredAuthKey(manifest: IntegrationManifest, key: string): string | null {
+  return manifest.auths?.[key] ? key : null;
+}
+
+/**
+ * The scopes the agent's selection requires on `authKey`, short-circuiting to
+ * none for non-oauth2 auths — the same guard `missingScopesForConnection`
+ * applies, since api_key/basic auths grant access wholesale and carry no
+ * scope catalog.
+ */
+function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
+  if (args.manifest.auths?.[authKey]?.type !== "oauth2") return [];
+  return requiredScopesForAgent({
+    manifest: args.manifest,
+    authKey,
+    agentTools: args.agentTools,
+    agentScopes: args.agentScopes,
+  });
+}
+
 function checkHealth(
   args: ResolveOneArgs,
   conn: ConnectionRow,
   source: ResolvedConnection["source"],
 ): ResolveOneResult {
+  // Whose account this row is. Relayed on both connection-bound connect-flow
+  // codes because both remedies re-consent THIS row: the UI offers the repair
+  // only to its owner, and the connect-offer mint refuses to sign claims
+  // against a colleague's credential (`connectOfferTarget`).
+  const ownedByActor =
+    (args.actorUserId !== null && conn.userId === args.actorUserId) ||
+    (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
+
   if (conn.needsReconnection) {
+    // A reconnect is a connect flow, so it carries the same relay as the other
+    // two — and the same staleness guard: the row's `authKey` is only a valid
+    // connect target while the manifest still declares it.
+    const authKey = declaredAuthKey(args.manifest, conn.authKey);
+    const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
       code: "needs_reconnection",
       // Thread the connection id so the modal's reconnect CTA can pass
@@ -458,6 +551,11 @@ function checkHealth(
       // duplicate row (integration-connections.ts:721 "explicit
       // connectionId = update; no id = insert").
       connectionId: conn.id,
+      // One consent that already covers the selected tools' scopes, instead of
+      // reconnect → insufficient_scopes → upgrade.
+      ...(authKey !== null ? { authKey } : {}),
+      ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
+      ownedByActor,
       message: `Connection for ${args.integrationId} needs to be reconnected.`,
     });
   }
@@ -475,13 +573,16 @@ function checkHealth(
     agentScopes: args.agentScopes,
   });
   if (missing.length > 0) {
-    const ownedByActor =
-      (args.actorUserId !== null && conn.userId === args.actorUserId) ||
-      (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
     return errorOf(args, {
       code: "insufficient_scopes",
       connectionId: conn.id,
+      authKey: conn.authKey,
       missingScopes: missing,
+      // The FULL requirement, not the diff: the connect kickoff unions
+      // `body.scopes` with the already-granted set, and an upgrade consent
+      // that listed only the diff would drop scopes on providers that treat
+      // each authorization as the complete grant.
+      requiredScopes: oauthScopesForAuth(args, conn.authKey),
       ownedByActor,
       source,
       message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
@@ -548,6 +649,19 @@ interface ResolveConnectionsForRunInput {
   /** Resolve inert integrations too — see {@link ResolveConnectionsInput.includeInert}. */
   includeInert?: boolean;
   /**
+   * Declared integrations to leave out of the resolution entirely, because the
+   * caller already refused them for a more precise reason.
+   *
+   * The readiness gate passes the ids it flagged `integration_not_active`. An
+   * integration that is not installed/enabled in the space has no business also
+   * producing a `not_connected` — the run is refused either way, but the second
+   * error names a remedy (connect your account) that does not apply and, for a
+   * caller opted into the connect-offer relay, gets a live link minted for it.
+   * Manifest-unhealthy ids need no entry here: `buildRequirement` already
+   * returns `null` for them.
+   */
+  skipIntegrationIds?: ReadonlySet<string>;
+  /**
    * Per-call-graph memo for integration manifest fetches — threaded from the
    * run kickoff path so readiness, the snapshot pass, and the spawn resolver
    * share one SELECT + Zod parse per integration. See
@@ -559,7 +673,10 @@ interface ResolveConnectionsForRunInput {
 export async function resolveConnectionsForRun(
   input: ResolveConnectionsForRunInput,
 ): Promise<ConnectionResolutionResult> {
-  const entries = parseManifestIntegrations(input.agentManifest);
+  const declared = parseManifestIntegrations(input.agentManifest);
+  const entries = input.skipIntegrationIds
+    ? declared.filter((entry) => !input.skipIntegrationIds!.has(entry.id))
+    : declared;
   if (entries.length === 0) return { resolved: {}, errors: [] };
 
   // Fetch integration manifests in parallel — most agents declare 1-3.
@@ -644,6 +761,17 @@ export async function resolveRunConnectionsOrError(
 }
 
 /**
+ * The resolution codes a connect flow can clear, and so the ones that carry
+ * the `auth_key` + `required_scopes` relay: a first connect, a reconnect in
+ * place, and a scope upgrade all end at the same consent screen.
+ */
+const CONNECT_FLOW_CODES: ReadonlySet<ConnectionResolutionError["code"]> = new Set([
+  "not_connected",
+  "needs_reconnection",
+  "insufficient_scopes",
+]);
+
+/**
  * Map a `ConnectionResolutionError` to the wire-format `ResolutionFieldError`
  * (a `ValidationFieldError` plus the resolution smuggle fields) the upstream
  * 412 envelope expects.
@@ -664,6 +792,23 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
       ? { candidate_connection_ids: e.candidateConnectionIds }
       : {}),
+    // The connect-flow relay, on every code a connect flow can clear: the
+    // kickoff computes no scopes of its own, so it forwards `required_scopes`
+    // as `body.scopes` on `/auths/{auth_key}/connect/...` and the one consent
+    // covers the tools the run actually selected. Without it a fresh connect
+    // or a reconnect can only request the auth's `default_scopes` and the
+    // very next resolution fails on insufficient_scopes. Both fields are
+    // absent when the auth is not oauth2, when the selection needs no scopes,
+    // or when the resolver could not name a single target auth (several
+    // oauth2 auths, no dep pin).
+    ...(CONNECT_FLOW_CODES.has(e.code)
+      ? {
+          ...(e.authKey ? { auth_key: e.authKey } : {}),
+          ...(e.requiredScopes && e.requiredScopes.length > 0
+            ? { required_scopes: e.requiredScopes }
+            : {}),
+        }
+      : {}),
     // Smuggle scope-diff detail on insufficient_scopes so the UI can offer
     // an upgrade (own connection) or a read-only error (foreign owner).
     ...(e.code === "insufficient_scopes"
@@ -678,8 +823,15 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     // Surface the dead connection id on needs_reconnection so the modal's
     // reconnect CTA can UPDATE the existing row in place. Omitting it makes
     // the OAuth callback INSERT a duplicate (single-writer contract in
-    // integration-connections.ts).
-    ...(e.code === "needs_reconnection" && e.connectionId ? { connection_id: e.connectionId } : {}),
+    // integration-connections.ts). `owned_by_actor` rides along for the same
+    // reason it does on insufficient_scopes: repairing the row in place is the
+    // owner's to do, and the connect-offer mint gates on it.
+    ...(e.code === "needs_reconnection"
+      ? {
+          ...(e.connectionId ? { connection_id: e.connectionId } : {}),
+          ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
+        }
+      : {}),
     // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
     // and which auth_keys the actor's existing connections use, so the UI
     // can guide the user to connect via the right auth method.

@@ -999,6 +999,15 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       headers: dispatchHeaders,
       fetch: dispatchFetch,
       signal,
+      // The external MCP surface hands the link to the human driving its
+      // client (see `RUN_CONNECT_OFFERS_HEADER`). One thing that is NOT obvious
+      // from there: an agent run configured with the Appstrate MCP integration
+      // comes through here too, and persists tool results as run events
+      // readable with `runs:read-all`. Not a new exposure class —
+      // `initiateIntegrationConnect` already returns a bearer `connect_url` on
+      // this very path — but any change to how these links are scoped or
+      // expired has to account for run logs, not only IDE transcripts.
+      connectOffers: true,
     });
     if (!launched.ok) {
       // A launch HTTP failure (payload carries a numeric `status`) reached the

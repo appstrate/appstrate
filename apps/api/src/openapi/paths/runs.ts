@@ -68,6 +68,7 @@ const canonicalRunsPaths = {
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
         { $ref: "#/components/parameters/IdempotencyKey" },
+        { $ref: "#/components/parameters/ConnectOffers" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -411,6 +412,7 @@ const canonicalRunsPaths = {
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
         { $ref: "#/components/parameters/IdempotencyKey" },
+        { $ref: "#/components/parameters/ConnectOffers" },
       ],
       requestBody: {
         required: true,
