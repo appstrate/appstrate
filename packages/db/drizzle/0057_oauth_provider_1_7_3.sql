@@ -176,18 +176,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_oauth_client_resources_pair" ON "oauth_cli
 --   repo already writes `token_endpoint_auth_method`, so on most databases this
 --   rewrites nothing.
 --
--- OPERATOR PRE-FLIGHT, to run BEFORE this migration. 1.7.3 reads a stored NULL
--- `token_endpoint_auth_method` as `client_secret_basic` and then enforces it
--- strictly, so a confidential client that sends its secret in the POST body is
--- answered `invalid_client` the moment the fold below writes that value in.
--- Count those rows first:
+-- OPERATOR PRE-FLIGHT, to run BEFORE the 1.7.3 image is deployed — which is
+-- earlier than this file, since migrations apply at boot under that image.
+-- 1.7.3 reads a stored NULL `token_endpoint_auth_method` as
+-- `client_secret_basic` and then refuses every other method, so a confidential
+-- client that sends its secret in the POST body is answered `invalid_client`
+-- the moment the new code serves. The fold below neither causes that break nor
+-- widens it — it writes the value the runtime was already assuming — but it is
+-- what leaves those rows unfindable afterwards: a written `client_secret_basic`
+-- is indistinguishable from a registered one.
 --
---     SELECT count(*) FROM oauth_clients
---     WHERE token_endpoint_auth_method IS NULL AND "public" = false;
---
--- A non-zero count is a decision to take, not a detail: fold those rows to
--- `client_secret_post` by hand instead, or notify their owners that they must
--- move to `client_secret_basic`.
+-- The query, and what to do with a non-zero result, live in
+-- `scripts/migration/README.md` under "OAuth-provider 1.7.3 rollout", step 1.
+-- It carries no `public` predicate: `public` is nullable, so the rows this fold
+-- skips (`public IS NULL`) keep a NULL method and break in exactly the same
+-- way.
 UPDATE oauth_clients SET application_type = "type" WHERE application_type IS NULL AND "type" IS NOT NULL;--> statement-breakpoint
 UPDATE oauth_clients SET token_endpoint_auth_method = CASE WHEN "public" THEN 'none' ELSE 'client_secret_basic' END WHERE token_endpoint_auth_method IS NULL AND "public" IS NOT NULL;--> statement-breakpoint
 ALTER TABLE "oauth_clients" DROP COLUMN IF EXISTS "public";--> statement-breakpoint
