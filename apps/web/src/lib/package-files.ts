@@ -2,6 +2,7 @@
 
 import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
+import { ApiError } from "../api/errors";
 
 /**
  * A file surfaced in the package UI: the editor's content tab label, the diff
@@ -19,7 +20,14 @@ interface DisplayFile {
   source: "manifest" | "content";
 }
 
-const MANIFEST_FILE = "manifest.json";
+/**
+ * The archive entry that carries a package's manifest.
+ *
+ * Exported because it is not only a display name: the draft file editor refuses
+ * to write, rename or delete it (the write route answers `reserved_entry`), so
+ * the tree and the path validator both have to recognize it.
+ */
+export const MANIFEST_FILE = "manifest.json";
 
 /**
  * Primary file of a package type — the editor's content tab, and the entry the
@@ -49,4 +57,42 @@ export function primaryDisplayFile(type: PackageType): DisplayFile {
 export function companionDisplayFile(type: PackageType): DisplayFile | undefined {
   const primary = primaryDisplayFile(type);
   return primary.source === "content" ? primary : undefined;
+}
+
+/**
+ * The message an author reads when a draft-tree write is refused, keyed by the
+ * route's machine-readable `code` rather than by its status or its English
+ * `detail` — or `null` for a failure this surface does not own.
+ *
+ * `null` is the load-bearing half: the same save button sends the file batch
+ * AND the manifest, so the editor's error banner asks both translators. A
+ * blanket "saving the files failed" here would swallow the manifest's own
+ * messages, which are the specific ones.
+ *
+ * Only the refusals the editor can actually provoke are named. The two it
+ * cannot — `content_entry_immovable` and `not_found` — are deliberately absent:
+ * the tree offers no rename or delete on a pinned entry, and every path it
+ * sends comes from the index it is showing, so either one means the client's
+ * picture of the package is wrong in a way no specific sentence would help
+ * with.
+ */
+export function packageFilesErrorKey(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null;
+  switch (error.code) {
+    // The tree moved under this editor: the fix is to re-read it, and the
+    // buffered edits are kept so the author can save them again.
+    case "precondition_failed":
+      return "files.errorConflict";
+    case "invalid_path":
+      return "files.errorInvalidPath";
+    case "reserved_entry":
+      return "files.errorReserved";
+    case "path_conflict":
+      return "files.errorConflictPath";
+    case "file_too_large":
+    case "tree_too_large":
+      return "files.errorTooLarge";
+    default:
+      return null;
+  }
 }

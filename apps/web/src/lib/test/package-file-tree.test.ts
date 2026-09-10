@@ -14,11 +14,14 @@ import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import {
   baseName,
   buildFileTree,
+  fileActionForKey,
   flattenVisibleRows,
+  isPinnedEntry,
   languageForPath,
   nextTreeFocus,
   pickActiveEntry,
   previewBlockReason,
+  validateNewPath,
   type PackageFileEntry,
   type TreeNode,
 } from "../package-file-tree.ts";
@@ -534,5 +537,82 @@ describe("baseName", () => {
     expect(baseName("")).toBe("");
     expect(baseName("a/")).toBe("");
     expect(baseName("/leading")).toBe("leading");
+  });
+});
+
+describe("isPinnedEntry", () => {
+  it("pins the type's content entry — deleting it is what makes the package that type", () => {
+    expect(isPinnedEntry("skill", "SKILL.md")).toBe(true);
+    expect(isPinnedEntry("agent", "prompt.md")).toBe(true);
+  });
+
+  it("pins the manifest, which the write route answers `reserved_entry` for", () => {
+    expect(isPinnedEntry("skill", "manifest.json")).toBe(true);
+    expect(isPinnedEntry("mcp-server", "manifest.json")).toBe(true);
+  });
+
+  it("leaves every other file free, including one type's entry under another type", () => {
+    expect(isPinnedEntry("skill", "docs/notes.md")).toBe(false);
+    // `prompt.md` is only special inside an agent.
+    expect(isPinnedEntry("skill", "prompt.md")).toBe(false);
+    // Nested is a different path, and the route only pins the bundle root.
+    expect(isPinnedEntry("skill", "sub/SKILL.md")).toBe(false);
+  });
+});
+
+describe("validateNewPath", () => {
+  const tree = [file("SKILL.md"), file("manifest.json"), file("docs/a.md"), file("bin")];
+
+  it("accepts an ordinary new path, nested or not", () => {
+    expect(validateNewPath(tree, "notes.md")).toBeNull();
+    expect(validateNewPath(tree, "docs/b.md")).toBeNull();
+    expect(validateNewPath(tree, "scripts/deep/run.py")).toBeNull();
+  });
+
+  it("refuses every shape the archive cannot carry", () => {
+    expect(validateNewPath(tree, "")).toBe("invalid");
+    expect(validateNewPath(tree, "../escape.md")).toBe("invalid");
+    expect(validateNewPath(tree, "a/../b.md")).toBe("invalid");
+    expect(validateNewPath(tree, "/absolute.md")).toBe("invalid");
+    expect(validateNewPath(tree, "trailing/")).toBe("invalid");
+    expect(validateNewPath(tree, "double//slash.md")).toBe("invalid");
+    expect(validateNewPath(tree, "back\\slash.md")).toBe("invalid");
+    expect(validateNewPath(tree, "__MACOSX/x.md")).toBe("invalid");
+  });
+
+  it("refuses the manifest, which is authored through the package PUT", () => {
+    expect(validateNewPath(tree, "manifest.json")).toBe("reserved");
+  });
+
+  it("refuses a path the tree already holds — neither dialog overwrites", () => {
+    expect(validateNewPath(tree, "docs/a.md")).toBe("exists");
+    expect(validateNewPath(tree, "SKILL.md")).toBe("exists");
+  });
+
+  it("refuses a path that would be both a file and a directory, in either direction", () => {
+    // `docs` is a directory here…
+    expect(validateNewPath(tree, "docs")).toBe("conflict");
+    // …and `bin` is a file, so nothing can live under it.
+    expect(validateNewPath(tree, "bin/run.sh")).toBe("conflict");
+  });
+
+  it("is not fooled by a shared prefix that stops mid-segment", () => {
+    expect(validateNewPath(tree, "doc")).toBeNull();
+    expect(validateNewPath(tree, "docs-extra/a.md")).toBeNull();
+    expect(validateNewPath(tree, "binary.md")).toBeNull();
+  });
+});
+
+describe("fileActionForKey", () => {
+  it("maps the two editing keys of a focused row", () => {
+    expect(fileActionForKey("F2")).toBe("rename");
+    expect(fileActionForKey("Delete")).toBe("delete");
+  });
+
+  it("claims nothing else — Backspace and the navigation keys stay the tree's", () => {
+    expect(fileActionForKey("Backspace")).toBeNull();
+    expect(fileActionForKey("ArrowDown")).toBeNull();
+    expect(fileActionForKey("Enter")).toBeNull();
+    expect(fileActionForKey("d")).toBeNull();
   });
 });

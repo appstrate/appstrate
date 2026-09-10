@@ -400,7 +400,12 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   return useMutation({
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
-      content: string;
+      /**
+       * Omitted by an editor that authors its files elsewhere (the skill
+       * editor's `PATCH .../files`): the route then carries the stored draft
+       * content forward untouched.
+       */
+      content?: string;
       lock_version: number;
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {

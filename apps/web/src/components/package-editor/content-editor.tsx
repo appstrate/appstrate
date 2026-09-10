@@ -8,7 +8,8 @@ import { useTheme } from "../../stores/theme-store";
 interface ContentEditorProps {
   value: string;
   onChange: (value: string) => void;
-  language: "markdown" | "typescript";
+  /** Monaco language id — `languageForPath` for a file, a literal for a fixed one. */
+  language: string;
   height?: string;
 }
 

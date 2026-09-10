@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePackageDetail } from "../hooks/use-packages";
@@ -23,6 +23,14 @@ import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-grou
 import { PromptEditor } from "../components/agent-editor/prompt-editor";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
+import {
+  PackageFilesEditor,
+  type PackageFilesEditorHandle,
+} from "../components/package-files/package-files-editor";
+import { hasDraftTexts, type DraftTexts } from "../lib/package-file-drafts";
+import { packageFilesErrorKey } from "../lib/package-files";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import { formatBytes } from "@appstrate/core/format";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
@@ -68,6 +76,7 @@ type GenericEditorTab =
   | "auths"
   | "tools"
   | "content"
+  | "files"
   | "json";
 
 // ─── Agent Editor Inner Form ────────────────────────────────────────
@@ -356,7 +365,13 @@ function PackageEditorInner({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
+  const contentTab: GenericEditorTab = isEdit ? "files" : "content";
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+  // Buffered file edits live here, beside the manifest, because the two
+  // together are what "unsaved changes" means for this editor. The files editor
+  // below owns the route that sends them.
+  const [drafts, setDrafts] = useState<DraftTexts>({});
+  const filesRef = useRef<PackageFilesEditorHandle>(null);
 
   const {
     state,
@@ -374,29 +389,48 @@ function PackageEditorInner({
     packageType: type,
     packageId,
     isEdit,
-    toWireBody: (s) => ({
-      manifest: s.manifest,
-      content: s.content,
-    }),
+    extraDirty: hasDraftTexts(drafts),
+    // Buffered file edits go first, as one atomic batch, and hand the manifest
+    // save the token they left on the row. A save with nothing buffered writes
+    // no files and keeps the token the editor already holds.
+    beforeUpdate: useCallback(async () => filesRef.current?.flush(), []),
+    // On an existing skill `SKILL.md` is a file like any other, authored
+    // through `PATCH .../files`; the manifest save carries the stored draft
+    // forward. On create there is no package to patch yet, so the single
+    // Monaco below IS the content and the create route requires it.
+    toWireBody: (s) =>
+      isEdit ? { manifest: s.manifest } : { manifest: s.manifest, content: s.content },
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
       if (!id) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
-      if (!s.content.trim()) {
-        return {
-          error: t("editor.errorContent", { defaultValue: "Le contenu est requis." }),
-          tab: "content",
-        };
+      // While editing, the authoritative copy of the content entry is whatever
+      // the files editor holds — its buffer if the author typed, else the
+      // index. `undefined` means the index has not landed: the server runs the
+      // same checker on the bytes it stores, so there is nothing to add here.
+      const content = isEdit ? filesRef.current?.contentEntryText() : s.content;
+      if (content === undefined) return null;
+      if (!content.trim()) {
+        return { error: t("editor.errorContent"), tab: contentTab };
       }
       // The same checker the write routes run — fixed here, not via a 400.
-      const frontmatter = skillFrontmatterError(s.content);
+      const frontmatter = skillFrontmatterError(content);
       if (frontmatter) {
-        return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: "content" };
+        return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: contentTab };
       }
       return null;
     },
-    translateError: (err) => translateSkillFrontmatterError(err, t),
+    // One save sends two requests, so the banner asks both translators: the
+    // file batch goes first and can be refused on its own terms (a `412` from a
+    // second tab, above all), and only what it does not own falls through to
+    // the manifest's frontmatter messages.
+    translateError: (err) => {
+      const fileRefusal = packageFilesErrorKey(err);
+      return fileRefusal
+        ? t(fileRefusal, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) })
+        : translateSkillFrontmatterError(err, t);
+    },
   });
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
@@ -407,7 +441,7 @@ function PackageEditorInner({
 
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "content", label: primaryDisplayFile(type).name },
+    { id: contentTab, label: isEdit ? t("files.tabLabel") : primaryDisplayFile(type).name },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -440,6 +474,21 @@ function PackageEditorInner({
           value={state.content}
           onChange={(content) => setState((s) => ({ ...s, content }))}
           language="markdown"
+        />
+      )}
+
+      {/* Mounted on every tab, rendering only on its own: the buffered edits it
+          sends and the ETag it writes with must survive a trip to the General
+          tab, and the save bar reaches it from anywhere. */}
+      {isEdit && (
+        <PackageFilesEditor
+          ref={filesRef}
+          packageId={packageId!}
+          type={type}
+          active={activeTab === "files"}
+          drafts={drafts}
+          setDrafts={setDrafts}
+          onLockVersion={(lock_version) => setState((s) => ({ ...s, lock_version }))}
         />
       )}
 
@@ -664,11 +713,15 @@ export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-se
   // Skill editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 
+  // `content` is the CREATE form's single Monaco buffer and nothing else: an
+  // existing skill authors `SKILL.md` through the files editor, which reads it
+  // from the file index. Seeding it here would leave a second copy of the file
+  // in editor state, free to go stale behind every save.
   const initialState: PackageEditorState =
     isEdit && pkgDetail
       ? {
           manifest: pkgDetail.manifest ?? {},
-          content: pkgDetail.content ?? "",
+          content: "",
           lock_version: pkgDetail.lock_version,
         }
       : {

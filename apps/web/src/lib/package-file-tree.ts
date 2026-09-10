@@ -10,11 +10,20 @@
  * coverable at all — and it keeps the React layer to "draw these rows".
  */
 
-import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import {
+  PACKAGE_CONTENT_ENTRY,
+  PACKAGE_FILE_INLINE_MAX_BYTES,
+} from "@appstrate/core/package-files";
+import { isSafeArchivePath } from "@appstrate/core/zip";
+import type { PackageType } from "@appstrate/core/validation";
 import type { components } from "../api/schema";
+import { MANIFEST_FILE } from "./package-files";
 
 /** One real file in the artifact, as returned by `GET .../files`. */
 export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
+
+/** One edit of the draft tree, as `PATCH .../files` takes it. */
+export type PackageFileWriteOperation = components["schemas"]["PackageFileWriteOperation"];
 
 /**
  * Stable, unique row identity.
@@ -343,6 +352,72 @@ export function languageForPath(path: string): string {
   // `dot <= 0` covers both "no extension" and dotfiles like `.gitignore`.
   if (dot <= 0) return "plaintext";
   return LANGUAGE_BY_EXTENSION[base.slice(dot + 1).toLowerCase()] ?? "plaintext";
+}
+
+/**
+ * Whether an entry is one the draft write route refuses to move or delete —
+ * the tree therefore offers it no rename and no delete affordance.
+ *
+ * Two entries qualify, for two different reasons, and both come from the
+ * server's own rules (`applyFileOperations`): `manifest.json` is a projection
+ * of the package's draft manifest, authored on the JSON tab and answered
+ * `reserved_entry` here; the type's content entry (`SKILL.md`, `prompt.md`) is
+ * what makes the package a package of that type, and is answered
+ * `content_entry_immovable`. The content entry is still WRITABLE — it is the
+ * file the editor opens on — while `manifest.json` is not.
+ */
+export function isPinnedEntry(type: PackageType, path: string): boolean {
+  return path === MANIFEST_FILE || path === PACKAGE_CONTENT_ENTRY[type]?.path;
+}
+
+/**
+ * Why a path the author typed cannot be created in this tree, or `null` when it
+ * can.
+ *
+ * Restates the write route's refusals so a mistyped path is answered while the
+ * dialog is still open instead of by a `400` after a round trip. The server
+ * stays the authority: it runs the same rules under the lock, against the tree
+ * as it is at that instant rather than against the index this client read.
+ *
+ * - `invalid` — {@link isSafeArchivePath} refuses the shape (`invalid_path`).
+ * - `reserved` — it names the manifest (`reserved_entry`).
+ * - `exists` — the tree already holds it. A `write` would silently overwrite,
+ *   which is not what "new file" or "rename" mean; both dialogs refuse it.
+ * - `conflict` — it would make one path both a file and a directory
+ *   (`path_conflict`), in either direction.
+ */
+export type NewPathRejection = "invalid" | "reserved" | "exists" | "conflict";
+
+export function validateNewPath(
+  entries: readonly PackageFileEntry[],
+  path: string,
+): NewPathRejection | null {
+  if (!isSafeArchivePath(path)) return "invalid";
+  if (path === MANIFEST_FILE) return "reserved";
+
+  for (const entry of entries) {
+    if (entry.path === path) return "exists";
+    // `path` names a directory that `entry` sits in — `docs` under an existing
+    // `docs/a.md`.
+    if (entry.path.startsWith(`${path}/`)) return "conflict";
+    // The reverse: an ancestor of `path` is already a file — `docs/a.md` under
+    // an existing `docs`.
+    if (path.startsWith(`${entry.path}/`)) return "conflict";
+  }
+  return null;
+}
+
+/**
+ * The structural action a key press asks of the focused file row, or `null`.
+ *
+ * Pure, and here rather than inline in the tree, for the same reason
+ * {@link nextTreeFocus} is: the rows are virtualized, so no DOM-less render
+ * ever produces one to press a key on.
+ */
+export function fileActionForKey(key: string): "rename" | "delete" | null {
+  if (key === "F2") return "rename";
+  if (key === "Delete") return "delete";
+  return null;
 }
 
 /** Last path segment — the preview header's title and the download filename. */

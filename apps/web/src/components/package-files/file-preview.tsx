@@ -28,6 +28,7 @@
  * rendering mode exists.
  */
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, FileWarning } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -50,9 +51,16 @@ interface FilePreviewProps {
   packageId: string;
   version: string | undefined;
   entry: PackageFileEntry;
+  /**
+   * Extra controls in the header, right of the download button. The authoring
+   * surface puts *Remplacer* and *Supprimer* here: a binary or oversized file
+   * has no editable body, so its header is the only place those two gestures
+   * can live.
+   */
+  actions?: ReactNode;
 }
 
-export function FilePreview({ id, packageId, version, entry }: FilePreviewProps) {
+export function FilePreview({ id, packageId, version, entry, actions }: FilePreviewProps) {
   const { t } = useTranslation("agents");
   const { resolvedTheme } = useTheme();
   const { text, isLoading, isError } = usePackageFile(packageId, version, entry);
@@ -87,6 +95,7 @@ export function FilePreview({ id, packageId, version, entry }: FilePreviewProps)
           <Download size={14} />
           {t("files.downloadFile")}
         </Button>
+        {actions}
       </div>
 
       {blocked ? (
