@@ -11,7 +11,7 @@ import { eq, sql, type SQL } from "drizzle-orm";
 import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 import { getAppUrl, getPlatformServices } from "../platform.ts";
-import { getEeEnv } from "../env.ts";
+import { getEeEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
 import { dollarsToCredits, CREDITS_PER_DOLLAR } from "../credits.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { billingSettingsUrl } from "../emails/layout.ts";
@@ -19,13 +19,6 @@ import { getPlans, isPlanId } from "../config.ts";
 
 /** Threshold at which we send a quota warning email (80%) */
 const QUOTA_WARNING_THRESHOLD = 0.8;
-
-/**
- * The platform's `usage.list` hard ceiling (`LLM_USAGE_LIST_MAX_LIMIT`). A read
- * asking for more is capped server-side, so the sweep clamps here explicitly
- * rather than requesting a limit it will not get.
- */
-const LEDGER_LIST_MAX_LIMIT = 1000;
 
 /**
  * Decimal places of `ee_usage_records.cost_usd` (`numeric(24,12)`). Every
@@ -612,10 +605,10 @@ export async function sweepLedgerBatch(
   //    Read the replay span ON TOP of the batch, never out of it: at most
   //    `replaySpan` returned rows can have `id <= fromId`, so the FORWARD slice
   //    still gets its full `batchSize` and the drain loop's backlog accounting
-  //    keeps meaning what it says. Clamped at the platform ceiling; the env
-  //    bounds (replay ≤ 500, batch ≤ 1000) keep forward capacity ≥ 500 rows
-  //    even at that clamp, so no combination of the two knobs can wedge the
-  //    sweeper.
+  //    keeps meaning what it says. The `min` is defensive, not load-bearing —
+  //    the env schema rejects a `replayWindow + batchSize` above the ceiling at
+  //    boot, precisely so this clamp can never be the thing that silently
+  //    shortens the forward slice.
   const limit = Math.min(replaySpan + batchSize, LEDGER_LIST_MAX_LIMIT);
   const rows = await services.usage.list({ afterId: scanFromId, limit });
   if (rows.length === 0) {
