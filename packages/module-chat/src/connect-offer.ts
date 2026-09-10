@@ -9,8 +9,8 @@
  *  - MODEL channel — never. Every `connect_url`/`auth_url` string is replaced
  *    by {@link REDACTED_CONNECT_LINK} so the model cannot paste a link it never
  *    receives.
- *  - UI channel — only in the typed `connectOffer` field the splitters attach
- *    to the tool output. The connect card reads that field; it never scrapes
+ *  - UI channel — only in the typed `connectOffers` field the splitters attach
+ *    to the tool output. The connect cards read that field; they never scrape
  *    the payload (issue #906: the scraper used to grab the placeholder from the
  *    model channel and render it as a relative URL).
  *
@@ -18,8 +18,13 @@
  * scrubbed from the payload is what surfaces as the offer, so the two can never
  * drift apart.
  *
+ * A payload may carry SEVERAL connect URLs — a readiness error listing two
+ * unconnected integrations carries one link each — so the walk captures every
+ * one of them, in walk order, deduped by normalized URL. Capturing only the
+ * first scrubbed the rest for the UI as well as for the model (issue #1207).
+ *
  * `ui/auth-offer.ts` (bundled into the SPA) imports the {@link ConnectOffer}
- * type and {@link readConnectOffer} from here, so this module may only pull in
+ * type and {@link readConnectOffers} from here, so this module may only pull in
  * client-safe leaf imports — never server-only modules (MCP client, logger).
  */
 
@@ -28,7 +33,7 @@ import { normalizeHttpUrl } from "@appstrate/core/url";
 /**
  * Placeholder that replaces a connect/authorize URL in the MODEL-visible tool
  * output. The model can't paste a link it never receives; the UI renders the
- * native connect card from the typed `connectOffer` field instead.
+ * native connect cards from the typed `connectOffers` field instead.
  */
 export const REDACTED_CONNECT_LINK = "[connect link hidden — the chat renders the connect card]";
 
@@ -81,8 +86,16 @@ interface SplitResult {
   /** Redacted value; the ORIGINAL reference when nothing changed (prompt-cache friendly). */
   value: unknown;
   changed: boolean;
-  /** First valid offer found, in walk order. */
-  offer: ConnectOffer | null;
+}
+
+/**
+ * Offers collected by one walk, in walk order. `seen` holds the normalized URLs
+ * already captured, so the same link appearing twice in a payload (a summary
+ * block repeating a detail block) yields one card, not two.
+ */
+interface OfferSink {
+  offers: ConnectOffer[];
+  seen: Set<string>;
 }
 
 /**
@@ -101,6 +114,12 @@ interface SplitResult {
  * endpoint emits, not the carve-out; the tension is in the policy document,
  * and reconciling it there is out of this module's scope.
  */
+function captureOffer(sink: OfferSink, obj: Record<string, unknown>, url: string): void {
+  if (sink.seen.has(url)) return;
+  sink.seen.add(url);
+  sink.offers.push(offerFromNode(obj, url));
+}
+
 function offerFromNode(obj: Record<string, unknown>, url: string): ConnectOffer {
   const state = typeof obj.state === "string" ? obj.state : undefined;
   const expiresAt = typeof obj.expires_at === "number" ? obj.expires_at : undefined;
@@ -112,31 +131,28 @@ function offerFromNode(obj: Record<string, unknown>, url: string): ConnectOffer 
 }
 
 /**
- * Deep-walk `value`, replacing any `connect_url`/`auth_url` string with the
- * placeholder and capturing the first absolute-URL offer. When nothing changed
- * the original reference is returned so callers can keep text byte-identical
- * (prompt caching).
+ * Deep-walk `value`, replacing every `connect_url`/`auth_url` string with the
+ * placeholder and capturing each absolute-URL offer into `sink`. When nothing
+ * changed the original reference is returned so callers can keep text
+ * byte-identical (prompt caching).
  */
-function splitValue(value: unknown, depth: number): SplitResult {
+function splitValue(value: unknown, depth: number, sink: OfferSink): SplitResult {
   if (depth > MAX_REDACT_DEPTH || value == null || typeof value !== "object") {
-    return { value, changed: false, offer: null };
+    return { value, changed: false };
   }
 
   if (Array.isArray(value)) {
     let changed = false;
-    let offer: ConnectOffer | null = null;
     const out = value.map((item) => {
-      const r = splitValue(item, depth + 1);
+      const r = splitValue(item, depth + 1, sink);
       if (r.changed) changed = true;
-      offer ??= r.offer;
       return r.value;
     });
-    return changed ? { value: out, changed: true, offer } : { value, changed: false, offer };
+    return changed ? { value: out, changed: true } : { value, changed: false };
   }
 
   const obj = value as Record<string, unknown>;
   let changed = false;
-  let offer: ConnectOffer | null = null;
   const out: Record<string, unknown> = {};
   for (const [key, v] of Object.entries(obj)) {
     if (CONNECT_URL_KEYS.has(key) && typeof v === "string") {
@@ -145,33 +161,39 @@ function splitValue(value: unknown, depth: number): SplitResult {
       // Capture only parsed absolute HTTP(S) URLs — an already-redacted
       // placeholder, malformed value or other scheme is scrubbed but never
       // offered. Persist the same normalized href the browser will navigate.
-      const connectUrl = !offer ? normalizeHttpUrl(v) : null;
-      if (connectUrl) offer = offerFromNode(obj, connectUrl);
+      const connectUrl = normalizeHttpUrl(v);
+      if (connectUrl) captureOffer(sink, obj, connectUrl);
       continue;
     }
-    const r = splitValue(v, depth + 1);
+    const r = splitValue(v, depth + 1, sink);
     if (r.changed) changed = true;
-    offer ??= r.offer;
     out[key] = r.value;
   }
-  return changed ? { value: out, changed: true, offer } : { value, changed: false, offer };
+  return changed ? { value: out, changed: true } : { value, changed: false };
+}
+
+/** One walk with a fresh sink — the shape every exported splitter builds on. */
+function splitWithOffers(value: unknown): SplitResult & { offers: ConnectOffer[] } {
+  const sink: OfferSink = { offers: [], seen: new Set() };
+  const r = splitValue(value, 0, sink);
+  return { ...r, offers: sink.offers };
 }
 
 /**
- * Split an arbitrary (already parsed) payload: redacted copy + first offer.
- * `redacted` is the same reference when nothing changed.
+ * Split an arbitrary (already parsed) payload: redacted copy + every offer it
+ * carried, in walk order. `redacted` is the same reference when nothing changed.
  */
 export function splitConnectPayload(payload: unknown): {
   redacted: unknown;
-  offer: ConnectOffer | null;
+  offers: ConnectOffer[];
 } {
-  const r = splitValue(payload, 0);
-  return { redacted: r.value, offer: r.offer };
+  const r = splitWithOffers(payload);
+  return { redacted: r.value, offers: r.offers };
 }
 
 /** Redact-only view of {@link splitConnectPayload} (model-channel scrubbing). */
 export function redactConnectPayload(payload: unknown): unknown {
-  return splitValue(payload, 0).value;
+  return splitWithOffers(payload).value;
 }
 
 /**
@@ -179,32 +201,60 @@ export function redactConnectPayload(payload: unknown): unknown {
  * re-stringifies ONLY when something changed — non-JSON text passes through
  * byte-identical, never regex-mangled.
  */
-export function splitJsonText(text: string): { text: string; offer: ConnectOffer | null } {
+export function splitJsonText(text: string): { text: string; offers: ConnectOffer[] } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { text, offer: null };
+    return { text, offers: [] };
   }
-  const r = splitValue(parsed, 0);
-  return { text: r.changed ? JSON.stringify(r.value) : text, offer: r.offer };
+  const r = splitWithOffers(parsed);
+  return { text: r.changed ? JSON.stringify(r.value) : text, offers: r.offers };
 }
 
 /**
- * Read the typed `connectOffer` off a persisted tool output (top level, or one
+ * Concatenate offer lists in order, keeping the first entry per normalized
+ * `connect_url`. Each splitter already dedupes within its own payload; this is
+ * the cross-source merge `mcpResultToPi` needs across a result's text blocks.
+ */
+export function mergeConnectOffers(...lists: ConnectOffer[][]): ConnectOffer[] {
+  const seen = new Set<string>();
+  const out: ConnectOffer[] = [];
+  for (const list of lists) {
+    for (const offer of list) {
+      if (seen.has(offer.connect_url)) continue;
+      seen.add(offer.connect_url);
+      out.push(offer);
+    }
+  }
+  return out;
+}
+
+/**
+ * Read the typed `connectOffers` off a persisted tool output (top level, or one
  * `output` level down for bridges that nest the result). Shape-checked — this
- * is the ONLY sanctioned way for the UI to obtain a connect URL from a tool
+ * is the ONLY sanctioned way for the UI to obtain connect URLs from a tool
  * result produced after the typed channel shipped.
  */
-export function readConnectOffer(result: unknown): ConnectOffer | null {
-  if (result == null || typeof result !== "object") return null;
+export function readConnectOffers(result: unknown): ConnectOffer[] {
+  if (result == null || typeof result !== "object") return [];
   const o = result as Record<string, unknown>;
-  const direct = asConnectOffer(o.connectOffer);
-  if (direct) return direct;
+  const direct = asConnectOffers(o.connectOffers);
+  if (direct.length > 0) return direct;
   if (o.output != null && typeof o.output === "object") {
-    return asConnectOffer((o.output as Record<string, unknown>).connectOffer);
+    return asConnectOffers((o.output as Record<string, unknown>).connectOffers);
   }
-  return null;
+  return [];
+}
+
+function asConnectOffers(value: unknown): ConnectOffer[] {
+  if (!Array.isArray(value)) return [];
+  const out: ConnectOffer[] = [];
+  for (const item of value) {
+    const offer = asConnectOffer(item);
+    if (offer) out.push(offer);
+  }
+  return out;
 }
 
 function asConnectOffer(value: unknown): ConnectOffer | null {

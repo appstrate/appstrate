@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure helper (no React) that pulls the connect offer out of an
+ * Pure helper (no React) that pulls the connect offers out of an
  * `invoke_operation` tool result.
  *
- * Single channel: the typed `connectOffer` field the engine attaches to the
- * tool output ({@link ../connect-offer.ts}) — the only place the live URL
- * exists in a persisted result. The payload itself is never scraped; in the
+ * Single channel: the typed `connectOffers` field the engine attaches to the
+ * tool output ({@link ../connect-offer.ts}) — the only place the live URLs
+ * exist in a persisted result. The payload itself is never scraped; in the
  * model channel every connect URL is replaced by the redaction placeholder, and
  * scraping it rendered that placeholder as a relative href (issue #906).
  *
@@ -14,9 +14,9 @@
  */
 
 import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
-import { readConnectOffer } from "../connect-offer.ts";
+import { readConnectOffers } from "../connect-offer.ts";
 
-interface AuthOffer {
+export interface AuthOffer {
   authUrl: string;
   state?: string;
 }
@@ -93,8 +93,10 @@ export function parseResume(text: string): ResumeMeta | null {
   return { packageId: "" };
 }
 
-export function extractAuthOffer(result: unknown): AuthOffer | null {
-  const offer = readConnectOffer(result);
-  if (!offer) return null;
-  return { authUrl: offer.connect_url, ...(offer.state ? { state: offer.state } : {}) };
+/** Every offer the result carries, in walk order — one connect card each. */
+export function extractAuthOffers(result: unknown): AuthOffer[] {
+  return readConnectOffers(result).map((offer) => ({
+    authUrl: offer.connect_url,
+    ...(offer.state ? { state: offer.state } : {}),
+  }));
 }

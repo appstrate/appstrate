@@ -44,7 +44,7 @@ import {
   extractRunStatus,
   isRunLaunchOp,
 } from "./run-events.ts";
-import { extractAuthOffer } from "./auth-offer.ts";
+import { extractAuthOffers, type AuthOffer } from "./auth-offer.ts";
 import {
   asRecord,
   definedEntries,
@@ -317,17 +317,28 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     // place (same geometry). Only the anomalous success-without-offer shape
     // falls through to the generic row.
     if (opId === INITIATE_CONNECT_OP) {
-      const offer = extractAuthOffer(result);
-      if (offer || phase !== "success") {
+      const offers = extractAuthOffers(result);
+      if (offers.length > 0 || phase !== "success") {
+        // One card per offer — a result may carry several connect links (one
+        // per integration still to connect). With none yet, a single card in
+        // its preparing/error state holds the geometry.
+        const cards: Array<AuthOffer | null> = offers.length > 0 ? offers : [null];
         return (
-          <OAuthConnectCard
-            authUrl={offer?.authUrl}
-            state={offer?.state}
-            packageId={args?.path_params?.packageId}
-            errorText={
-              phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
-            }
-          />
+          <>
+            {cards.map((offer, i) => (
+              <OAuthConnectCard
+                key={offer?.authUrl ?? i}
+                authUrl={offer?.authUrl}
+                state={offer?.state}
+                packageId={args?.path_params?.packageId}
+                errorText={
+                  phase === "error" && !offer
+                    ? extractErrorMessage(unwrapResult(result))
+                    : undefined
+                }
+              />
+            ))}
+          </>
         );
       }
     }
