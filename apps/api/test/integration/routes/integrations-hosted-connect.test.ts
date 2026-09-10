@@ -20,6 +20,10 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  buildConnectUrl,
+  connectClaimsFor,
+} from "../../../src/services/connect/connect-session.ts";
 
 const app = getTestApp();
 
@@ -523,5 +527,53 @@ describe("hosted connect portal — error completions are addressed (issue #1346
       expect(detail.packageId).toBeUndefined();
       expect(detail.state).toBeUndefined();
     }
+  });
+});
+
+describe("hosted connect portal — a fault while resolving scopes (issue #1352)", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, oauthManifest("@myorg/gsuite"));
+  });
+
+  /**
+   * Mint a capability token straight from claims. The mint route validates
+   * `connection_id` against the caller's rows, and this case needs claims it
+   * would refuse: a malformed id makes `getCurrentScopesGranted`'s row read
+   * throw at the database the way a real fault there would. That read runs
+   * after the jti is burned and before anything is sent upstream — the window
+   * this test pins.
+   */
+  function mintUnreadableConnection(): string {
+    const { connectUrl } = buildConnectUrl(
+      connectClaimsFor({
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user", id: ctx.user.id },
+        packageId: "@myorg/gsuite",
+        authKey: "google",
+        connectionId: "not-a-uuid",
+      }),
+    );
+    return new URL(connectUrl).searchParams.get("token")!;
+  }
+
+  it("renders the popup error page, not raw problem+json", async () => {
+    const res = await startConnect(mintUnreadableConnection());
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("Please try again");
+    // Addressed like every other completion this handler emits (issue #1346).
+    expect(completionDetail(html)).toMatchObject({ ok: false, packageId: "@myorg/gsuite" });
+  });
+
+  it("hands the link back — this click spent nothing", async () => {
+    const token = mintUnreadableConnection();
+    expect((await startConnect(token)).status).toBe(500);
+    const again = await startConnect(token);
+    expect(again.status).toBe(500);
+    expect(await again.text()).not.toContain("already been used");
   });
 });

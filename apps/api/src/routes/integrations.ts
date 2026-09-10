@@ -967,19 +967,44 @@ export function createIntegrationsRouter() {
     }
 
     if (auth.type === "oauth2") {
-      // Same scope-union semantics as POST /connect/oauth2.
-      const granted = claims.connection_id
-        ? await getCurrentScopesGranted({
-            scope,
-            integrationId: claims.package_id,
-            authKey: claims.auth_key,
-            actor,
-            connectionId: claims.connection_id,
-          })
-        : [];
-      const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
-      const scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
-      const strategy = resolveStrategy(auth);
+      // Same scope-union semantics as POST /connect/oauth2 — except that here
+      // it runs AFTER the burn and reads the database, so an unguarded fault
+      // escaped to the global error handler and rendered raw
+      // `application/problem+json` inside the popup, on top of a link the click
+      // had already spent (issue #1352).
+      //
+      // Nothing is granted, minted or sent upstream until `begin` runs below,
+      // so a click that dies here is indistinguishable from no click at all:
+      // hand the jti back and the very same link works once the fault passes.
+      // That is the opposite of what the `begin` guard further down does with
+      // its unknown failures, which may have gone half way.
+      let scopes: string[];
+      let strategy: ReturnType<typeof resolveStrategy>;
+      try {
+        const granted = claims.connection_id
+          ? await getCurrentScopesGranted({
+              scope,
+              integrationId: claims.package_id,
+              authKey: claims.auth_key,
+              actor,
+              connectionId: claims.connection_id,
+            })
+          : [];
+        const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
+        scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
+        strategy = resolveStrategy(auth);
+      } catch (err) {
+        logger.error("Hosted connect scope resolution failed", {
+          err: String(err),
+          packageId: claims.package_id,
+          authKey: claims.auth_key,
+        });
+        await releaseJti(claims.jti);
+        return c.html(
+          popupHtmlError("Could not start the connection. Please try again.", completionDetail),
+          500,
+        );
+      }
       if (!strategy.begin) {
         return c.html(
           popupHtmlError("This integration cannot be connected.", completionDetail),
