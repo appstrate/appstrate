@@ -290,6 +290,21 @@ export function preconditionFailed(detail: string): ApiError {
   });
 }
 
+/**
+ * 428 (RFC 6585 §3) — the request omitted a validator the resource REQUIRES on
+ * a write. Distinct from {@link preconditionFailed}: a 412 means a condition
+ * was evaluated and failed, a 428 means none was supplied at all, so the server
+ * refuses to apply a blind overwrite. The detail names the header to send.
+ */
+export function preconditionRequired(detail: string): ApiError {
+  return new ApiError({
+    status: 428,
+    code: "precondition_required",
+    title: "Precondition Required",
+    detail,
+  });
+}
+
 export function gone(code: string, detail: string): ApiError {
   return new ApiError({
     status: 410,

@@ -247,7 +247,7 @@ async function gateSpacePackageWrite(
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every
-  // other RBAC call site — the move `requirePackageReadPermission` makes in
+  // other RBAC call site — the move `requirePackagePermission` makes in
   // `routes/packages.ts`. An unmapped type fails CLOSED.
   await makePermissionGuard(spacePackagePermission(type, op))(c, async () => {});
   return type;

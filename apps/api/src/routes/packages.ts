@@ -90,6 +90,10 @@ import {
   buildFileIndex,
   indexEtag,
   fileEtag,
+  applyFileOperations,
+  PackageFileWriteError,
+  type PackageFileOperation,
+  type PackageFileWriteErrorCode,
   type PackageFileSource,
 } from "../services/package-files.ts";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
@@ -105,6 +109,7 @@ import {
   notFound,
   conflict,
   internalError,
+  preconditionRequired,
   validationFailed,
   type ValidationFieldError,
 } from "../lib/errors.ts";
@@ -289,6 +294,57 @@ export const packageJsonUpdateSchema = z
  * no override is chosen — so `version` is the only member and it is optional.
  */
 export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
+
+/**
+ * An archive-relative entry name an operation names. The shape rules (no `..`
+ * segment, no empty segment, no `\`, no `__MACOSX/`) are NOT restated here:
+ * `isSafeArchivePath` owns them, and it runs inside `applyFileOperations` on
+ * the same path — one predicate, checked once, in the place that also knows
+ * whether the entry is reserved. This bound is the wire-level ceiling that
+ * stops a multi-megabyte string from ever reaching it.
+ */
+const packageFilePathSchema = z.string().min(1).max(1024);
+
+/**
+ * Body of `PATCH /api/packages/{scope}/{name}/files` — a batch of edits applied
+ * to the draft tree IN ORDER and persisted once, so a rename is one request and
+ * every intermediate tree is allowed to be invalid.
+ *
+ * A `write` carries exactly one of `text` (encoded UTF-8) or `bytes_base64`
+ * (decoded as standard base64). Both, or neither, is a 400: "write this file"
+ * has to name one set of bytes, and silently preferring one field over the
+ * other would drop the author's content without a word.
+ */
+export const patchPackageFilesSchema = z
+  .object({
+    operations: z
+      .array(
+        z.discriminatedUnion("op", [
+          z
+            .object({
+              op: z.literal("write"),
+              path: packageFilePathSchema,
+              text: z.string().optional(),
+              bytes_base64: z.string().optional(),
+            })
+            .strict()
+            .refine((op) => (op.text === undefined) !== (op.bytes_base64 === undefined), {
+              error: "A write operation carries exactly one of `text` or `bytes_base64`",
+            }),
+          z.object({ op: z.literal("delete"), path: packageFilePathSchema }).strict(),
+          z
+            .object({
+              op: z.literal("move"),
+              from: packageFilePathSchema,
+              to: packageFilePathSchema,
+            })
+            .strict(),
+        ]),
+      )
+      .min(1)
+      .max(200),
+  })
+  .strict();
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -1524,7 +1580,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  *   nothing about what the caller is ALLOWED to do — a credential with
  *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
  *   had to undo across the rest of the package surface.
- * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
+ * - `requirePackagePermission` is AUTHORIZATION: the resolved row's
  *   `<type>:read` scope. Both file-explorer routes are registered on the
  *   router ROOT, so the RBAC resource is not knowable from the path — only
  *   from the row — which is why the guard runs here and not as route-level
@@ -1571,7 +1627,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
   // The index lists every file and inlines text content; `/files/content`
   // serves any byte of the artifact. Both are at least as sensitive as the
   // detail route, so both need the same `<type>:read`.
-  await requirePackageReadPermission(c, pkg.type);
+  await requirePackagePermission(c, pkg.type, "read");
 
   return pkg;
 }
@@ -1588,7 +1644,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * the space, and the cached 200 keeps being handed out until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
  * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
- * `requirePackageReadPermission` run on every hit.
+ * `requirePackagePermission` run on every hit.
  *
  * The revalidation this costs is nearly free: `resolvePackageFileValidator`
  * answers a version's 304 from one DB read, with no storage GET and no unzip.
@@ -1611,39 +1667,198 @@ function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string>
 }
 
 // ═══════════════════════════════════════════════
-// Read permission
+// Draft tree writes
 // ═══════════════════════════════════════════════
 
-type ReadGuard = (c: Context<AppEnv>, next: () => Promise<void>) => Promise<unknown>;
+/**
+ * Resolve the package a `PATCH .../files` targets, and settle every gate that
+ * does not depend on the request body — the write counterpart of
+ * {@link loadFileExplorerPackage}.
+ *
+ * The two loaders ask different questions, so they are two functions:
+ *
+ * - The read side gates on VISIBILITY (`hasPackageAccess`: a system package, or
+ *   one installed in THIS space), because a reader reaches a package through a
+ *   space.
+ * - The write side gates on OWNERSHIP, exactly as the package `PUT` does
+ *   (`loadOrgItemOr404`): an author edits their organization's package whether
+ *   or not it happens to be installed where they are standing. Adding a space
+ *   gate here would make the file tree editable from fewer places than the
+ *   `PUT` that writes the same tree.
+ *
+ * Order is forced, not chosen. The row has to be read first — this route is
+ * registered on the router ROOT, so the RBAC resource is knowable only from the
+ * row's `type`, never from the path — which is why the `<type>:write` guard runs
+ * here and not as route-level middleware. Everything that could tell an
+ * unauthorized caller something (a system package's existence, whether the type
+ * is editable) therefore sits AFTER that guard.
+ */
+async function loadDraftFilesWriteTarget(
+  c: Context<AppEnv>,
+): Promise<{ id: string; type: PackageType; orgId: string; label: string }> {
+  const packageId = getItemId(c);
+  const orgId = c.get("orgId");
+
+  const [pkg] = await db
+    .select({ id: packages.id, type: packages.type, orgId: packages.orgId })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .limit(1);
+  if (!pkg) {
+    throw notFound(`Package '${packageId}' not found`);
+  }
+
+  await requirePackagePermission(c, pkg.type, "write");
+
+  // `requirePackagePermission` is built from this same map and fails closed, so
+  // a type that gets past it has a route config.
+  const rcfg = ROUTE_CONFIGS[pkg.type]!;
+
+  // A system package's tree is owned by the `system-packages/` sync, which
+  // rewrites it at boot: an edit here would be silently reverted. Same wording
+  // as the package `PUT`, which refuses them for the same reason.
+  if (pkg.orgId === null) {
+    throw forbidden(
+      `${rcfg.labelSingular} '${packageId}' is a system package and cannot be modified`,
+    );
+  }
+
+  if (!CONFIG_BY_TYPE[pkg.type].draftFilesWritable) {
+    throw new ApiError({
+      status: 400,
+      code: "package_type_not_editable",
+      title: "Package Type Not Editable",
+      detail: `${rcfg.labelSingular} '${packageId}' has files that are authored by importing an archive, not edited through the file tree`,
+    });
+  }
+
+  return { id: pkg.id, type: pkg.type, orgId: pkg.orgId, label: rcfg.labelSingular };
+}
 
 /**
- * `type` → the `*:read` guard for that type's RBAC resource.
+ * `PackageFileWriteError` → the HTTP answer, in one place.
+ *
+ * `applyFileOperations` answers WHAT is wrong with a batch and deliberately
+ * knows no status codes; this is the boundary that says it with a number. The
+ * error's own `code` is carried through as the problem code rather than
+ * flattened into `invalid_request`: the editor renders a different message for
+ * a bad path, a protected entry and a taken destination, and it needs the
+ * machine-readable half to pick one.
+ */
+const DRAFT_FILE_WRITE_PROBLEM: Record<
+  PackageFileWriteErrorCode,
+  { status: number; title: string }
+> = {
+  invalid_path: { status: 400, title: "Invalid Request" },
+  reserved_entry: { status: 400, title: "Invalid Request" },
+  content_entry_immovable: { status: 400, title: "Invalid Request" },
+  path_conflict: { status: 400, title: "Invalid Request" },
+  not_found: { status: 404, title: "Not Found" },
+  file_too_large: { status: 413, title: "Payload Too Large" },
+  tree_too_large: { status: 413, title: "Payload Too Large" },
+};
+
+function draftFileWriteApiError(err: PackageFileWriteError): ApiError {
+  const { status, title } = DRAFT_FILE_WRITE_PROBLEM[err.code];
+  return new ApiError({
+    status,
+    code: err.code,
+    title,
+    detail: err.message,
+    param: "operations",
+    cause: err,
+  });
+}
+
+/** Standard base64 alphabet, padding stripped before the test. */
+const BASE64_ALPHABET_RE = /^[A-Za-z0-9+/]*$/;
+
+/**
+ * Decode one `bytes_base64` payload.
+ *
+ * `Buffer.from(s, "base64")` never fails — it drops every character outside the
+ * alphabet and returns whatever is left — so a truncated or mistyped payload
+ * would be stored as a shorter file the author never wrote. The alphabet and
+ * the length are therefore checked first: a `length % 4 === 1` remainder is
+ * unreachable for any valid base64 string, which is what makes it the signal of
+ * a truncated one. Trailing padding is optional — it carries no information the
+ * length does not already give. URL-safe base64 is refused rather than folded:
+ * this payload is produced by the editor, and accepting a second spelling would
+ * mean two encodings of the same bytes reach the same tree.
+ */
+function decodeOperationBytes(value: string, index: number): Uint8Array {
+  const normalized = value.replace(/=+$/, "");
+  if (!BASE64_ALPHABET_RE.test(normalized) || normalized.length % 4 === 1) {
+    throw invalidRequest(
+      `operations[${index}].bytes_base64 is not valid base64`,
+      `operations[${index}].bytes_base64`,
+    );
+  }
+  return new Uint8Array(Buffer.from(normalized, "base64"));
+}
+
+/**
+ * Wire operations → the service's byte-level ones. This is the only place the
+ * two `write` spellings collapse: `text` is encoded UTF-8, `bytes_base64` is
+ * decoded, and everything below sees one shape.
+ */
+function toDraftFileOperations(
+  operations: z.infer<typeof patchPackageFilesSchema>["operations"],
+): PackageFileOperation[] {
+  const encoder = new TextEncoder();
+  return operations.map((op, index) => {
+    if (op.op !== "write") return op;
+    // The schema refuses a `write` that carries neither field, so the absence
+    // of one is the presence of the other.
+    return op.text !== undefined
+      ? { op: "write", path: op.path, bytes: encoder.encode(op.text) }
+      : { op: "write", path: op.path, bytes: decodeOperationBytes(op.bytes_base64!, index) };
+  });
+}
+
+// ═══════════════════════════════════════════════
+// Row-resolved permission
+// ═══════════════════════════════════════════════
+
+type PackageGuard = (c: Context<AppEnv>, next: () => Promise<void>) => Promise<unknown>;
+
+/** The actions a router-root package route resolves from the row it loaded. */
+type PackageGuardAction = "read" | "write";
+
+/**
+ * `type` → the `*:read` and `*:write` guards for that type's RBAC resource.
  *
  * The per-type routes get their resource straight from the route path
  * (`skills` → `skills:read`), but a route registered on the router ROOT
- * (`/:scope/:name/...`, e.g. `/{version}/download`) does not name a type in
- * its path — the resource is only knowable from the resolved package row.
- * This map is what lets such a route reach the same guard, so downloading a
- * skill's ZIP is gated on `skills:read` exactly like `GET /skills/@scope/name`.
+ * (`/:scope/:name/...`, e.g. `/{version}/download` or `/files`) does not name a
+ * type in its path — the resource is only knowable from the resolved package
+ * row. This map is what lets such a route reach the same guard, so downloading
+ * a skill's ZIP is gated on `skills:read` exactly like
+ * `GET /skills/@scope/name`, and writing a skill's file tree on `skills:write`
+ * exactly like `PUT /skills/@scope/name`.
  *
  * Built from `ROUTE_CONFIGS` rather than hand-written so a new package type
  * cannot land with a per-type guard and no root-route guard.
  */
-const READ_GUARD_BY_TYPE = new Map<PackageType, ReadGuard>(
-  Object.entries(ROUTE_CONFIGS).flatMap(([type, rcfg]) =>
-    rcfg
-      ? [
-          [
-            type as PackageType,
-            requirePermission(rcfg.path as import("../lib/permissions.ts").Resource, "read"),
-          ] as const,
-        ]
-      : [],
-  ),
+const GUARD_BY_TYPE = new Map<PackageType, Record<PackageGuardAction, PackageGuard>>(
+  Object.entries(ROUTE_CONFIGS).flatMap(([type, rcfg]) => {
+    if (!rcfg) return [];
+    const resource = rcfg.path as import("../lib/permissions.ts").Resource;
+    return [
+      [
+        type as PackageType,
+        {
+          read: requirePermission(resource, "read"),
+          write: requirePermission(resource, "write"),
+        },
+      ] as const,
+    ];
+  }),
 );
 
 /**
- * Enforce the resolved package's `*:read` permission from INSIDE a handler.
+ * Enforce the resolved package's `<type>:<action>` permission from INSIDE a
+ * handler.
  *
  * Route-level middleware cannot do this job on the router-root routes: the
  * resource depends on the row, and the row is only read once the handler runs.
@@ -1652,14 +1867,18 @@ const READ_GUARD_BY_TYPE = new Map<PackageType, ReadGuard>(
  * every other RBAC call site.
  *
  * An unmapped type fails CLOSED — a package type with no route config has no
- * read scope to satisfy, so nobody may read its bytes.
+ * scope to satisfy, so nobody may reach its bytes.
  */
-async function requirePackageReadPermission(c: Context<AppEnv>, type: string): Promise<void> {
-  const guard = READ_GUARD_BY_TYPE.get(type as PackageType);
-  if (!guard) {
-    throw forbidden(`Insufficient permissions: no read scope is defined for type '${type}'`);
+async function requirePackagePermission(
+  c: Context<AppEnv>,
+  type: string,
+  action: PackageGuardAction,
+): Promise<void> {
+  const guards = GUARD_BY_TYPE.get(type as PackageType);
+  if (!guards) {
+    throw forbidden(`Insufficient permissions: no ${action} scope is defined for type '${type}'`);
   }
-  await guard(c, async () => {});
+  await guards[action](c, async () => {});
 }
 
 /** Reject non-authors before parsing uploads or fetching a GitHub archive. */
@@ -2361,6 +2580,62 @@ export function createPackagesRouter() {
     });
   });
 
+  // PATCH /api/packages/:scope/:name/files — one atomic batch of edits to the
+  // package's DRAFT tree. Registered here for the same reason as the two GETs
+  // above: the literal `files` segment must be matched before `/:version` can
+  // capture it as a version spec.
+  //
+  // Draft only, and there is no `?version`: a published version is immutable,
+  // so the way to change what a version holds is to publish another one.
+  router.patch(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(30), async (c) => {
+    const target = await loadDraftFilesWriteTarget(c);
+
+    // The tree the caller is editing has to be the tree they read. An absent
+    // validator is refused rather than defaulted to "overwrite": two editor tabs
+    // on one skill is the ordinary case, and a blind write is how one of them
+    // loses a file with nothing to show for it. `*` is the explicit opt-out.
+    const ifMatch = c.req.header("if-match")?.trim();
+    if (!ifMatch) {
+      throw preconditionRequired(
+        "Send `If-Match` with the ETag from `GET /api/packages/{scope}/{name}/files`, or `*` to write over whatever the tree currently holds.",
+      );
+    }
+
+    const body = await readJsonBody(c, patchPackageFilesSchema);
+    const operations = toDraftFileOperations(body.operations);
+
+    let written;
+    try {
+      written = await mutatePackageDraftFiles(
+        { id: target.id, type: target.type, orgId: target.orgId },
+        {
+          label: target.label,
+          precondition: { etag: ifMatch },
+          mutate: (files) => applyFileOperations(files, operations, { type: target.type }),
+        },
+      );
+    } catch (err) {
+      if (err instanceof PackageFileWriteError) throw draftFileWriteApiError(err);
+      throw err;
+    }
+
+    await recordAuditFromContext(c, {
+      action: "package.updated",
+      resourceType: "package",
+      resourceId: target.id,
+      after: { type: target.type, file_operations: operations.length },
+    });
+
+    // Exactly what a subsequent `GET .../files` reports — body, ETag and cache
+    // policy — so the client replaces its cached index with this response
+    // instead of re-reading a tree it just wrote.
+    return c.json(
+      { entries: buildFileIndex(written.snapshot), lock_version: written.lockVersion },
+      200,
+      fileCacheHeaders(indexEtag(written.snapshot.snapshotId), false),
+    );
+  });
+
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
   router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
     const packageId = getItemId(c);
@@ -2388,7 +2663,7 @@ export function createPackagesRouter() {
 
     // The ZIP carries the manifest and every authored file, so it is at least
     // as sensitive as the detail route — it needs the same `<type>:read`.
-    await requirePackageReadPermission(c, pkg.type);
+    await requirePackagePermission(c, pkg.type, "read");
 
     const ver = await getVersionForDownload(packageId, versionSpec);
     if (!ver) {
