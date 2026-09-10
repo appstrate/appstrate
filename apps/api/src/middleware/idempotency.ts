@@ -8,8 +8,8 @@
  */
 
 import type { Context, Next } from "hono";
-import { findTargetHandler } from "hono/utils/handler";
 import type { AppEnv } from "../types/index.ts";
+import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 import { ApiError } from "../lib/errors.ts";
 import {
   acquireIdempotencyLock,
@@ -30,29 +30,17 @@ const MAX_KEY_LENGTH = 255;
  * handler part of this request's chain?" — instead of consulting a
  * hand-maintained list that could drift away from the mounts.
  *
- * A symbol property rather than `handler.name`: a name survives neither
- * wrapping nor minification. The property survives minification, and survives
- * wrapping only because `isIdempotencyAware` explicitly unwraps — see below.
+ * Stamped and read through `handler-marker.ts`, which owns the symbol-vs-name
+ * reasoning and the unwrapping of Hono's own handler wrapping.
  */
 const IDEMPOTENCY_AWARE = Symbol.for("appstrate.idempotencyAware");
 
 /**
  * True when `handler` is a middleware produced by `idempotency()` — i.e. the
  * route it is mounted on genuinely de-duplicates on `Idempotency-Key`.
- *
- * The marker is read *through* Hono's own handler wrapping. `app.route(path,
- * sub)` re-wraps every handler of `sub` when the sub-app installed its own
- * `onError()` (hono 4.12 `hono-base.js` `route()`), keeping the original only
- * under the `COMPOSED_HANDLER` property. A naive property read on the wrapper
- * returns `undefined`, so a sub-router with an `onError()` would silently lose
- * its idempotency support and the guard would 400 a header the route does
- * honour. `findTargetHandler` is Hono's own recursive unwrapper for exactly
- * that property, so this tracks their wrapping instead of guessing at it.
  */
 export function isIdempotencyAware(handler: unknown): boolean {
-  if (typeof handler !== "function") return false;
-  const target = findTargetHandler(handler as (...args: never[]) => unknown);
-  return (target as unknown as Record<symbol, unknown>)[IDEMPOTENCY_AWARE] === true;
+  return hasHandlerMarker(handler, IDEMPOTENCY_AWARE);
 }
 
 /**
@@ -172,6 +160,5 @@ export function idempotency() {
     });
   };
 
-  Object.defineProperty(middleware, IDEMPOTENCY_AWARE, { value: true });
-  return middleware;
+  return markHandler(middleware, IDEMPOTENCY_AWARE);
 }

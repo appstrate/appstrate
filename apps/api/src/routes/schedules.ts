@@ -303,8 +303,8 @@ export function createSchedulesRouter() {
   router.post(
     `/agents/${SCOPED_PACKAGE_ROUTE}/schedules`,
     rateLimit(10),
-    requireAgent(),
     requirePermission("schedules", "write"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
 

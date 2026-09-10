@@ -24,6 +24,22 @@ import type { AppEnv } from "../types/index.ts";
 import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { forbidden } from "../lib/errors.ts";
 import type { Resource, Action } from "../lib/permissions.ts";
+import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
+
+/**
+ * Marker stamped on every route-level permission guard this module produces.
+ *
+ * Read by the conformance test that proves no route resolves an agent (and so
+ * 404s on an unreachable one) before it has proven the caller may ask — see
+ * `test/integration/middleware/agent-lookup-permission-order.test.ts`.
+ */
+const PERMISSION_GUARD = Symbol.for("appstrate.permissionGuard");
+
+/** True when `handler` is a route-level permission guard, i.e. it 403s a
+ *  caller lacking the permission before the handler chain continues. */
+export function isPermissionGuard(handler: unknown): boolean {
+  return hasHandlerMarker(handler, PERMISSION_GUARD);
+}
 
 /**
  * Middleware factory: require a specific permission.
@@ -32,7 +48,7 @@ import type { Resource, Action } from "../lib/permissions.ts";
  */
 export function requirePermission<R extends Resource>(resource: R, action: Action<R>) {
   const guard = makePermissionGuard(`${resource as string}:${action as string}`);
-  return (c: Context<AppEnv>, next: Next) => guard(c, next);
+  return markHandler((c: Context<AppEnv>, next: Next) => guard(c, next), PERMISSION_GUARD);
 }
 
 /**
@@ -61,12 +77,12 @@ export function assertPermission<R extends Resource>(
  */
 export function requireAnyPermission(permissions: readonly string[]) {
   const required = permissions.join("|");
-  return async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const held = c.get("permissions");
     if (!permissions.some((permission) => held?.has(permission))) {
       reportPermissionDenial(c, required);
       throw forbidden(`Insufficient permissions: ${required} required`);
     }
     return next();
-  };
+  }, PERMISSION_GUARD);
 }

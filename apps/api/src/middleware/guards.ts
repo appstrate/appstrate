@@ -6,11 +6,32 @@ import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts
 import { assertPackageMutationAccess } from "../lib/package-access.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
+import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
+
+/**
+ * Marker stamped on every middleware that resolves an agent from the route
+ * params and 404s when it is unreachable.
+ *
+ * Such a middleware answers "does this agent exist?" before the route has
+ * proven the caller may ask. Mounted ahead of the permission guard it turns
+ * 403-vs-404 into an enumeration oracle over the space's private catalog, so
+ * the mount ORDER is a security property — and one no reviewer reliably sees.
+ * The marker lets a conformance test read the real order off Hono's route
+ * table instead (see
+ * `test/integration/middleware/agent-lookup-permission-order.test.ts`).
+ */
+const AGENT_LOOKUP = Symbol.for("appstrate.agentLookup");
+
+/** True when `handler` is a middleware produced by {@link requireAgent} or
+ *  {@link requireOrgAgent} — i.e. it can 404 on an unreachable agent. */
+export function isAgentLookup(handler: unknown): boolean {
+  return hasHandlerMarker(handler, AGENT_LOOKUP);
+}
 
 /** Middleware: load an agent by route param and set it on context, or 404.
  *  Also checks that the current space has access to the package. */
 export function requireAgent() {
-  return async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
@@ -28,14 +49,14 @@ export function requireAgent() {
     }
     c.set("package", agent);
     return next();
-  };
+  }, AGENT_LOOKUP);
 }
 
 /** Middleware: load an agent by route param and set it on context, or 404.
  *  Checks org ownership only — does NOT check space-level access.
  *  Use for org-level operations (editing manifest, skills, tools). */
 export function requireOrgAgent() {
-  return async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
@@ -52,7 +73,7 @@ export function requireOrgAgent() {
     }
     c.set("package", agent);
     return next();
-  };
+  }, AGENT_LOOKUP);
 }
 
 /** Extract the package ID from route params (scoped `@scope/name` or unscoped `id`). */
