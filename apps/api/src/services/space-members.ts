@@ -22,8 +22,9 @@ import {
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
-import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
-import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
+import { loadSpaceMember, resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
+import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
+import { assertCustomRolesFeature } from "./space-roles.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -172,13 +173,14 @@ export async function saveSpaceMember(params: {
       );
     }
     const memberFilter = and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId));
-    if (!params.requireExisting) {
-      const [existing] = await tx
-        .select({ userId: spaceMembers.userId })
-        .from(spaceMembers)
-        .where(memberFilter)
-        .limit(1);
-      if (existing) throw existingSpaceMember();
+    // Read in the SAME transaction as the write: a role change is authority
+    // over the standing the target holds NOW, not only over the one handed out.
+    const existing = await loadSpaceMember(spaceId, userId, tx);
+    if (params.requireExisting) {
+      if (!existing) throw notFound("Space member not found");
+      assertCanManageSpaceMember(params.actorPermissions, existing.ref);
+    } else if (existing) {
+      throw existingSpaceMember();
     }
     const values = await assignmentColumns(orgId, assignment, params.actorPermissions, tx);
 
@@ -261,7 +263,13 @@ export async function deleteSpaceMembershipsInOrg(
     });
 }
 
-/** The FK alone would accept another org's bundle, so the org is checked here. */
+/**
+ * The FK alone would accept another org's bundle, so the org is checked here.
+ *
+ * Granting a bundle is the licensed half of the feature, not just defining one
+ * — the gate comes before the lookup so the refusal is about the deployment
+ * and says nothing about which `srl_` ids exist. Presets never ask.
+ */
 async function assignmentColumns(
   orgId: string,
   assignment: SpaceRoleAssignment,
@@ -272,6 +280,7 @@ async function assignmentColumns(
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
+  assertCustomRolesFeature("assign");
   const [role] = await tx
     .select({
       id: spaceRoles.id,

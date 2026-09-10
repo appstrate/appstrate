@@ -74,8 +74,12 @@ import {
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { listSpaceRoles } from "../services/space-roles.ts";
-import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
+import { hasCustomRoles, listSpaceRoles } from "../services/space-roles.ts";
+import {
+  assertCanGrantSpaceRole,
+  assertCanManageSpaceMember,
+  canGrantSpaceRole,
+} from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
   assertExplicitModelExists,
@@ -432,16 +436,23 @@ export function createSpacesRouter() {
     ]),
     async (c) => {
       const permissions = c.get("permissions");
+      // This listing answers "what can I assign HERE", so it is filtered by the
+      // same two things the assignment refuses on: the feature, then the
+      // caller's own permissions. A bundle nobody can grant is not offered —
+      // the org catalogue (`GET /api/roles`) still lists leftovers, which is
+      // where a downgraded deployment finds them to delete.
+      const customGrantable = hasCustomRoles();
       const roles = await listSpaceRoles(c.get("orgId"));
       return c.json(
         listResponse(
           roles.filter((role) =>
-            canGrantSpaceRole(
-              permissions,
-              role.kind === "preset"
-                ? { kind: "preset", preset: role.key as SpaceRolePreset }
-                : { kind: "custom", role: { ...role, id: role.id! } },
-            ),
+            role.kind === "preset"
+              ? canGrantSpaceRole(permissions, {
+                  kind: "preset",
+                  preset: role.key as SpaceRolePreset,
+                })
+              : customGrantable &&
+                canGrantSpaceRole(permissions, { kind: "custom", role: { ...role, id: role.id! } }),
           ),
         ),
       );
@@ -523,10 +534,16 @@ export function createSpacesRouter() {
     const space = c.get("space")!;
     const userId = c.req.param("userId")!;
 
-    // Dropping an explicit restriction can grant the open-space default.
+    // Two bounds, not one. The standing being DROPPED must be one the caller
+    // could have granted — otherwise `space-members:remove` alone ejects a
+    // space admin, since the grant check below sees nothing in a `closed` or
+    // `private` space. Then: dropping an explicit restriction can grant the
+    // open-space default.
+    const permissions = c.get("permissions");
     const member = await getOrgMember(orgId, userId);
+    assertCanManageSpaceMember(permissions, (await loadSpaceMember(space.id, userId))?.ref ?? null);
     assertCanGrantSpaceRole(
-      c.get("permissions"),
+      permissions,
       member ? resolveSpaceRole(member.role, space, null) : null,
     );
     if (!(await removeSpaceMember(space.id, userId))) {

@@ -3800,7 +3800,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom space role
-         * @description Requires the `custom_roles` feature. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
+         * @description Never requires the `custom_roles` feature: removing a leftover bundle is what an EE → OSS downgrade needs, and it is the one verb that only ever shrinks what a bundle reaches. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
          */
         delete: operations["deleteRole"];
         options?: never;
@@ -4237,7 +4237,7 @@ export interface paths {
         put?: never;
         /**
          * Add a space member
-         * @description Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.
+         * @description Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise); a `preset_role` never does.
          */
         post: operations["addSpaceMember"];
         delete?: never;
@@ -4258,14 +4258,14 @@ export interface paths {
         post?: never;
         /**
          * Remove a space member
-         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold.
          */
         delete: operations["removeSpaceMember"];
         options?: never;
         head?: never;
         /**
          * Change a space member's role
-         * @description Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.
+         * @description Change the role of an EXISTING explicit membership row (404 when there is none). Both ends are bounded by the caller: the new role may only grant permissions they hold, and the member's CURRENT role must be one they could have granted (403 otherwise) — including when changing their own role. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise), so moving a holder OFF a leftover bundle and onto a preset stays available where moving another one onto it does not.
          */
         patch: operations["updateSpaceMember"];
         trace?: never;
@@ -4279,7 +4279,7 @@ export interface paths {
         };
         /**
          * List assignable space roles
-         * @description Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.
+         * @description Returns presets and organization roles whose permissions are held by the caller in this space, and nothing the caller could not actually grant: where `custom_roles` is unavailable the bundles are omitted here (the org catalogue `GET /api/roles` still lists them, which is where a leftover is deleted). Requires space-members:invite, space-members:change-role, or space-settings:write.
          */
         get: operations["listAssignableSpaceRoles"];
         put?: never;
@@ -5726,8 +5726,10 @@ export interface components {
             key: string;
             name: string;
             description: string | null;
-            /** @description Space-level permission strings the role grants, sorted. */
+            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. */
             permissions: string[];
+            /** @description Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset. */
+            unavailable_permissions: string[];
             /** Format: date-time */
             createdAt: string | null;
             /** Format: date-time */
@@ -6196,6 +6198,15 @@ export interface components {
                  *       "requestId": "req_abc123"
                  *     }
                  */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description `forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature. */
+        CustomRoleFeatureForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
@@ -15406,7 +15417,7 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     role: "guest" | "member" | "admin";
-                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting. */
                     space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
@@ -15436,7 +15447,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["CustomRoleFeatureForbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15485,7 +15496,7 @@ export interface operations {
                      * @enum {string}
                      */
                     role?: "guest" | "member" | "admin";
-                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting. */
                     space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
@@ -15520,7 +15531,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["CustomRoleFeatureForbidden"];
             404: components["responses"]["NotFound"];
             /** @description Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token. */
             409: {
@@ -18630,15 +18641,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
+            403: components["responses"]["CustomRoleFeatureForbidden"];
             /** @description A role with this key already exists (`role_key_taken`) */
             409: {
                 headers: {
@@ -18708,15 +18711,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description The role is still assigned (`role_in_use`) */
             409: {
@@ -18771,15 +18766,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
+            403: components["responses"]["CustomRoleFeatureForbidden"];
             404: components["responses"]["NotFound"];
             /** @description A role with this key already exists (`role_key_taken`) */
             409: {
@@ -20708,7 +20695,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["CustomRoleFeatureForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`) */
             409: {
@@ -20788,7 +20775,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["CustomRoleFeatureForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The target is an owner or admin — an explicit space role would grant nothing */
             409: {
