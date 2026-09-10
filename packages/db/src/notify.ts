@@ -27,8 +27,9 @@ export interface RunMetricNotifyPayload {
   /**
    * The run's actor — the run-read gate on the SSE fan-out
    * (`services/realtime.ts`): a subscriber without `runs:read-all` receives a
-   * metric frame only for the runs it launched. Exactly one of the two is set
-   * on a live run; both are NULL only on rows older than #735.
+   * metric frame only for the runs it launched. Exactly one of the two is set:
+   * no live launch path writes a row with both NULL, and such a row reaches
+   * `runs:read-all` subscribers alone.
    */
   user_id: string | null;
   end_user_id: string | null;

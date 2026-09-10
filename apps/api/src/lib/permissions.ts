@@ -40,6 +40,8 @@
  * @see packages/core/src/permissions.ts (the extension surface)
  */
 
+import type { Context } from "hono";
+import type { AppEnv } from "../types/index.ts";
 import { invalidRequest } from "./errors.ts";
 import {
   type ModuleResources,
@@ -413,6 +415,22 @@ export function effectivePermissions(input: {
     }
   }
   return effective;
+}
+
+/**
+ * The caller's effective permissions for this request, as a set that is always
+ * there. The auth pipeline writes `c.get("permissions")` before any guard runs,
+ * so a handler behind a guard always finds one; the empty fallback is
+ * fail-closed cover for the typed optionality, never a branch a caller is meant
+ * to take.
+ *
+ * It exists so that everything taking a REQUIRED permission set — the file ACL
+ * (`services/files.ts`), the chat attachment resolver, the run-visibility
+ * predicates — reads the context in one place instead of each call site
+ * re-deriving the same fallback beside its own argument.
+ */
+export function callerPermissions(c: Context<AppEnv>): ReadonlySet<string> {
+  return c.get("permissions") ?? new Set<string>();
 }
 
 /**

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- New action `read-all` on the `runs` resource of `CoreResources` (`@appstrate/core/permissions`), hence the new permission string `runs:read-all`. `runs:read` narrows to the runs the principal launched — its own manual runs and its own schedules' — and `runs:read-all` is the space-wide view over every run, colleagues', end-users' and the actor-less rows older launch paths left. A guard written `requireCorePermission("runs", "read")` keeps compiling and now gates the narrower thing; a module that wants the supervision view must ask for `read-all`.
+- New action `read-all` on the `runs` resource of `CoreResources` (`@appstrate/core/permissions`), hence the new permission string `runs:read-all`. `runs:read` narrows to the runs the principal launched — its own manual runs and its own schedules' — and `runs:read-all` is the space-wide view over every run, colleagues', end-users' and rows with no actor. A guard written `requireCorePermission("runs", "read")` keeps compiling and now gates the narrower thing; a module that wants the supervision view must ask for `read-all`.
 
 - New space-role preset `runner` in `SPACE_ROLE_PRESETS` (`@appstrate/core/permissions`), between `operator` and `viewer`: launch agents without reading them. Two consequences for a module that names presets. Any exhaustive `Record<SpaceRolePreset, …>` gains a fifth key — a compile error until it does. And the tuple stops being a strength ordering: `runner` and `viewer` are incomparable (a runner launches what it cannot read, a viewer reads what it cannot launch), so `SPACE_ROLE_PRESETS` is a display order and a `permissionsContribution` `presets` list is upward-closed under grant containment, not tuple position — naming `viewer` no longer implies `runner`, and naming `runner` requires `admin`, `builder` and `operator`.
 
@@ -21,9 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
 
-- New optional member `ChatAttachmentRequest.permissions` (`@appstrate/core/chat-contract`), a `ReadonlySet<string>`: the caller's effective permission set in the space, which decides how wide the container ACL of an `appfile://` attachment reads. With `runs:read-all` a file anchored to a colleague's run resolves — the same set the file gallery the user picked it from answers; absent, the resolution is strict ownership and the file's run must be the session owner's. A module resolving attachments through `ctx.services.resolveChatAttachment` should forward `c.get("permissions")`, or its users see a 404 on a file the picker just offered them.
-
 ### Changed
+
+- **BREAKING: `ChatAttachmentRequest.permissions` is required**
+  (`@appstrate/core/chat-contract`), a `ReadonlySet<string>`: the caller's
+  effective permission set in the space, as the platform auth pipeline resolved
+  it. It decides how wide the container ACL of an `appfile://` attachment
+  reads — with `runs:read-all` a file anchored to a colleague's run resolves,
+  which is the same set the file gallery the user picked it from answers, and
+  without it only the session owner's own runs. There is no default: a module
+  resolving attachments through `ctx.services.resolveChatAttachment` forwards
+  `c.get("permissions")` or fails to compile, instead of silently answering a
+  narrower ACL than the picker that offered the file.
 
 - **BREAKING: `invalidatePrincipalPermissions(orgId, userId)` requires
   `userId`.** The org-wide clear is removed: a call names exactly one principal

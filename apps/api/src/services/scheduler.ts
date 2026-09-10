@@ -735,14 +735,14 @@ export async function listPackageSchedules(
 }
 
 /** The bare schedule row, before any enrichment — what a write path reads to diff against. */
-async function loadSchedule(id: string, scope?: SpaceScope): Promise<ScheduleWireDto | null> {
+async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
   const rows = await db
     .select()
     .from(schedules)
     .where(
       scopedWhere(schedules, {
-        orgId: scope?.orgId,
-        spaceId: scope?.spaceId,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )
@@ -752,7 +752,7 @@ async function loadSchedule(id: string, scope?: SpaceScope): Promise<ScheduleWir
 
 export async function getSchedule(
   id: string,
-  scope: SpaceScope | undefined,
+  scope: SpaceScope,
   viewer: Actor | null,
   visibility: SQL | undefined,
 ): Promise<EnrichedSchedule | null> {

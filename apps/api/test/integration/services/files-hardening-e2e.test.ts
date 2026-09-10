@@ -128,6 +128,9 @@ function publishStream(scope: Scope, runId: string, name: string, content: strin
   });
 }
 
+/** A member holding no grant beyond the resource itself — reads its own runs. */
+const NO_GRANTS: ReadonlySet<string> = new Set();
+
 describe("files hardening — cross-phase interactions", () => {
   let ctx: TestContext;
   let scope: Scope;
@@ -213,9 +216,9 @@ describe("files hardening — cross-phase interactions", () => {
     const [doc1] = await db.select().from(files).where(eq(files.name, "keep-1.txt"));
 
     // Existing content stays fully readable (list, resolve, download) over-limit.
-    const listed = await listFilesForActor(scope, userActor, { runId });
+    const listed = await listFilesForActor(scope, userActor, { runId }, NO_GRANTS);
     expect(listed.data).toHaveLength(2);
-    const resolved = await getFileForActor(scope, userActor, doc1!.id);
+    const resolved = await getFileForActor(scope, userActor, doc1!.id, NO_GRANTS);
     expect(resolved?.capabilities.download).toBe(true);
     const stream = await streamFileContent(doc1!.storageKey);
     expect(stream).not.toBeNull();

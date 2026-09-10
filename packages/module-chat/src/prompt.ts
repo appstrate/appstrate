@@ -48,12 +48,15 @@ export type ChatEnv = {
     orgName?: string;
     orgSlug?: string;
     /**
-     * Caller's resolved RBAC permission set (from the platform auth pipeline).
-     * Forwarded into the scoped platform-MCP bearer the Pi engine
-     * hands its external binary, so the meta-tools authorize with exactly the
-     * caller's own permissions — no amplification.
+     * Caller's resolved RBAC permission set. Always set, for the same reason
+     * `space` above is: entering the space is what writes it, and every
+     * `/api/chat/*` route enters one before a handler runs. Two things read it,
+     * and both need the whole set — the scoped platform-MCP bearer the Pi engine
+     * hands its external binary (so the meta-tools authorize with exactly the
+     * caller's own permissions, no amplification), and the container ACL of an
+     * `appfile://` attachment.
      */
-    permissions?: Set<string>;
+    permissions: Set<string>;
   };
 };
 

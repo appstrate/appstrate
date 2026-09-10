@@ -103,8 +103,8 @@ function anyAccepts(channel: RealtimeChannel): boolean {
  * `readAll` is the whole space; without it a principal receives only the frames
  * of the runs it launched — `user_id` for a dashboard session or an API key,
  * `end_user_id` for an end-user. Strict: a frame whose actor column is NULL (an
- * end-user's run seen from a dashboard stream, or a row from a launch path that
- * predates #735) reaches `readAll` subscribers alone.
+ * end-user's run seen from a dashboard stream, or a row with no actor at all —
+ * no live launch path writes one) reaches `readAll` subscribers alone.
  *
  * Closed by default: a subscriber that declares neither `readAll` nor an
  * identity to match the frame against is one this gate cannot place, so it

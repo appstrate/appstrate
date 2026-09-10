@@ -13,7 +13,7 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import { getOrgMember } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
-import type { Permission } from "./permissions.ts";
+import { callerPermissions, type Permission } from "./permissions.ts";
 import { callerOrgRole, callerSpaceMemberships, effectiveInSpace } from "./view-as.ts";
 import { resolveSpaceRole } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
@@ -52,7 +52,7 @@ export const requireAgentRead = requireAnyPermission(["agents:read", "agents:run
  * none of them re-derives the condition.
  */
 export function agentReadIsSummary(c: Context<AppEnv>): boolean {
-  return !c.get("permissions")?.has("agents:read");
+  return !callerPermissions(c).has("agents:read");
 }
 
 export function spacePackagePermission(
@@ -115,9 +115,7 @@ export async function packageAccessSpaces(
   ]);
   return rows.flatMap((space) => {
     if (c.get("endUser") && !c.get("orgRole")) {
-      return space.id === c.get("spaceId")
-        ? [{ ...space, permissions: c.get("permissions") ?? new Set<Permission>() }]
-        : [];
+      return space.id === c.get("spaceId") ? [{ ...space, permissions: callerPermissions(c) }] : [];
     }
     const ref = resolveSpaceRole(orgRole, space, memberships.get(space.id) ?? null);
     if (!ref) return [];

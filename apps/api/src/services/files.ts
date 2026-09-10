@@ -1199,13 +1199,13 @@ const fileSelect = {
  * one. The full {@link FileCapabilities} are derived once here (the single
  * source) — `permissions` supplies the `files:delete` grant that decides the
  * `keep` / `delete` capabilities, and the `runs:read-all` grant that widens a
- * run container beyond the caller's own runs (default: neither).
+ * run container beyond the caller's own runs.
  */
 export async function getFileForActor(
   scope: SpaceScope,
   actor: Actor,
   fileId: string,
-  permissions: ReadonlySet<string> = new Set(),
+  permissions: ReadonlySet<string>,
 ): Promise<ResolvedFile | null> {
   if (!FILE_ID_RE.test(fileId)) return null;
   const [row] = await db
@@ -1438,8 +1438,8 @@ async function chatContextFileFilter(
 export async function listFilesForActor(
   scope: SpaceScope,
   actor: Actor,
-  filters: ListFilesFilters = {},
-  permissions: ReadonlySet<string> = new Set(),
+  filters: ListFilesFilters,
+  permissions: ReadonlySet<string>,
 ): Promise<ListEnvelope<FileDto>> {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
   const fetchLimit = limit + 1;

@@ -307,7 +307,7 @@ describe("handleChatStream", () => {
     expect(res.status).toBe(200);
     await collectUiChunks(res);
     expect(requests).toHaveLength(1);
-    expect([...(requests[0]!.permissions ?? [])]).toEqual(["runs:read-all"]);
+    expect([...requests[0]!.permissions]).toEqual(["runs:read-all"]);
     await waitForAssistantPersist(sessionId);
   });
 

@@ -60,6 +60,7 @@ import {
 } from "./files.ts";
 import { isUploadUri, isFileUri, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getActor } from "../lib/actor.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { assertRunVisible } from "../lib/run-visibility.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
@@ -686,7 +687,7 @@ export async function parseRequestInput(
                     { orgId, spaceId },
                     actor,
                     id,
-                    c.get("permissions"),
+                    callerPermissions(c),
                   );
                   // Cross-actor ACL (S2): the container ACL is the outer gate
                   // and narrows a run-contained output to the runs the caller

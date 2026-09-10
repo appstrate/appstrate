@@ -1143,7 +1143,11 @@ export async function listRecentForActor(
  * predicate (`lib/run-visibility.ts`) — without `runs:read-all` the "last run"
  * an agent reports must be the caller's own, not whatever a colleague fired.
  */
-export async function getLastRun(scope: SpaceScope, packageId: string, visibility?: SQL) {
+export async function getLastRun(
+  scope: SpaceScope,
+  packageId: string,
+  visibility: SQL | undefined,
+) {
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
@@ -1510,8 +1514,8 @@ type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 async function listRunsWithFilter(
   filter: SQL,
   limit: number,
-  offset = 0,
-  actor: Actor | null = null,
+  offset: number,
+  actor: Actor | null,
 ): Promise<RunListPage> {
   // The `total` count and the page share the same filter but are independent
   // reads — issued concurrently so the endpoint costs one round trip instead

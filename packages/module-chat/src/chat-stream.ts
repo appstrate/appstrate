@@ -575,7 +575,7 @@ export async function handleChatStream(
       name: user.name,
       orgId,
       orgRole,
-      permissions: [...(c.get("permissions") ?? [])],
+      permissions: [...c.get("permissions")],
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,

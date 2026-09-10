@@ -343,7 +343,12 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const found = await getSchedule(created.id, undefined, null, undefined);
+      const found = await getSchedule(
+        created.id,
+        { orgId: orgId, spaceId: defaultSpaceId },
+        null,
+        undefined,
+      );
 
       expect(found).not.toBeNull();
       expect(found!.id).toBe(created.id);
@@ -354,7 +359,12 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("returns null for a non-existent ID", async () => {
-      const found = await getSchedule("sched_nonexistent", undefined, null, undefined);
+      const found = await getSchedule(
+        "sched_nonexistent",
+        { orgId: orgId, spaceId: defaultSpaceId },
+        null,
+        undefined,
+      );
       expect(found).toBeNull();
     });
   });
@@ -578,7 +588,12 @@ describeRequiresRedis("scheduler service", () => {
       const deleted = await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id);
       expect(deleted).toBe(true);
 
-      const found = await getSchedule(created.id, undefined, null, undefined);
+      const found = await getSchedule(
+        created.id,
+        { orgId: orgId, spaceId: defaultSpaceId },
+        null,
+        undefined,
+      );
       expect(found).toBeNull();
     });
 

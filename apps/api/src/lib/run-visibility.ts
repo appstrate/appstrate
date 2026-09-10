@@ -6,8 +6,8 @@
  * `runs:read` is ownership: the runs the caller launched, including the runs
  * of the caller's own schedules (a schedule carries its frozen actor, so its
  * runs are attributed to it). `runs:read-all` widens that to the whole space
- * — other members' runs, end-users' runs, and the actor-less rows older launch
- * paths left behind.
+ * — other members' runs, end-users' runs, and rows with no actor at all (both
+ * columns NULL — no live launch path writes one).
  *
  * The narrowing predicate is `actorFilter`, never `actorScopeFilter`: the
  * latter's `user_id IS NULL` arm matches every end-user's run for a member
@@ -30,6 +30,7 @@ import type { Actor } from "@appstrate/connect";
 import { runs } from "@appstrate/db/schema";
 import { actorFilter, getActor } from "./actor.ts";
 import { notFound } from "./errors.ts";
+import { callerPermissions } from "./permissions.ts";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -39,8 +40,8 @@ import type { AppEnv } from "../types/index.ts";
  * subscriber filter's `readAll` each keep the name their own neighbours gave
  * them (`canReadDebugLogs`, `isAdmin`) while asking this one predicate.
  */
-export function canReadEveryRun(permissions: ReadonlySet<string> | undefined): boolean {
-  return permissions?.has("runs:read-all") ?? false;
+export function canReadEveryRun(permissions: ReadonlySet<string>): boolean {
+  return permissions.has("runs:read-all");
 }
 
 /**
@@ -82,7 +83,7 @@ export function ownRunsFilter(actor: Actor): SQL {
 
 /** WHERE fragment narrowing `runs` to what the caller may read; `undefined` = no narrowing. */
 export function runVisibilityFilter(c: Context<AppEnv>): SQL | undefined {
-  if (canReadEveryRun(c.get("permissions"))) return undefined;
+  if (canReadEveryRun(callerPermissions(c))) return undefined;
   return ownRunsFilter(getActor(c));
 }
 
@@ -94,6 +95,6 @@ export function assertRunVisible(
   c: Context<AppEnv>,
   row: { userId: string | null; endUserId: string | null },
 ): void {
-  if (canReadEveryRun(c.get("permissions"))) return;
+  if (canReadEveryRun(callerPermissions(c))) return;
   if (!ownsRun(getActor(c), row)) throw notFound("Run not found");
 }

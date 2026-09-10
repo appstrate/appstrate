@@ -32,6 +32,7 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
@@ -90,7 +91,7 @@ export function createFilesRouter() {
     if (startingAfter) filters.startingAfter = startingAfter;
     filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
 
-    const page = await listFilesForActor(scope, actor, filters, c.get("permissions"));
+    const page = await listFilesForActor(scope, actor, filters, callerPermissions(c));
     return c.json(page);
   });
 
@@ -99,7 +100,7 @@ export function createFilesRouter() {
   router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
-    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
+    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, callerPermissions(c));
     if (!resolved) throw notFound("File not found");
     return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
   });
@@ -119,7 +120,7 @@ export function createFilesRouter() {
         scope,
         actor,
         c.req.param("id")!,
-        c.get("permissions"),
+        callerPermissions(c),
       );
       if (!resolved) throw notFound("File not found");
       if (!resolved.capabilities.download) {
@@ -173,7 +174,7 @@ export function createFilesRouter() {
   router.delete("/files/:id", rateLimit(60), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
-    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
+    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, callerPermissions(c));
     if (!resolved) throw notFound("File not found");
     const { row } = resolved;
 
@@ -199,7 +200,7 @@ export function createFilesRouter() {
   router.post("/files/:id/keep", rateLimit(60), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
-    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
+    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, callerPermissions(c));
     if (!resolved) throw notFound("File not found");
     const { row } = resolved;
 

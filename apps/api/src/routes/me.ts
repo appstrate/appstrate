@@ -46,6 +46,7 @@ import { listMeConnections, type MeConnectionAuthority } from "../services/me-co
 import { getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
@@ -402,9 +403,9 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // disclosure `GET /api/packages/skills` makes, so they answer to `skills:read`.
   // A runner launches what someone else composed and never learns what it is
   // composed of (RBAC spec §3.4, D-B4).
-  const permissions = c.get("permissions") as Set<string> | undefined;
-  const canRun = permissions?.has("agents:run") ?? false;
-  const canReadSkills = permissions?.has("skills:read") ?? false;
+  const permissions = callerPermissions(c);
+  const canRun = permissions.has("agents:run");
+  const canReadSkills = permissions.has("skills:read");
   const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
     listUsableIntegrationsForActor(scope, actor),
     canRun

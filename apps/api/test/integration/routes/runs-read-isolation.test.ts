@@ -12,8 +12,8 @@
  * the failure mode this pins is a predicate that is right for the easy pair and
  * wrong for the rest: A's manual run, B's manual run, the run of A's schedule
  * (attributed to A, since a schedule carries a frozen actor), an end-user's run
- * (`user_id NULL`, `end_user_id` set) and an actor-less row (both NULL) from a
- * launch path that predates #735. The narrowing predicate is `actorFilter`, not
+ * (`user_id NULL`, `end_user_id` set) and a row with no actor at all (both
+ * columns NULL). The narrowing predicate is `actorFilter`, not
  * `actorScopeFilter`: the latter's `user_id IS NULL` arm would hand A the last
  * two — exactly the supervision `read-all` exists to gate.
  */
@@ -72,7 +72,7 @@ describe("run read isolation between members", () => {
   let runB: string;
   let runAScheduled: string;
   let runEndUser: string;
-  let runLegacy: string;
+  let runActorless: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -146,7 +146,7 @@ describe("run read isolation between members", () => {
 
     // Both actor columns NULL — unreachable from any live launch path, and
     // therefore visible to `read-all` alone.
-    runLegacy = (await seedRun({ ...common, status: "success" })).id;
+    runActorless = (await seedRun(common)).id;
   });
 
   /**
@@ -270,7 +270,7 @@ describe("run read isolation between members", () => {
     for (const [label, runId] of [
       ["colleague", runB],
       ["end-user", runEndUser],
-      ["actor-less", runLegacy],
+      ["actor-less", runActorless],
     ] as const) {
       const statuses = await statusesFor(authHeaders(operatorA), runId);
       expect(`${label}: ${JSON.stringify(statuses)}`).toBe(
@@ -303,9 +303,9 @@ describe("run read isolation between members", () => {
 
   it("gives an admin holding runs:read-all every run in the space", async () => {
     expect((await listedRuns(authHeaders(owner))).sort()).toEqual(
-      [runA, runB, runAScheduled, runEndUser, runLegacy].sort(),
+      [runA, runB, runAScheduled, runEndUser, runActorless].sort(),
     );
-    for (const runId of [runB, runEndUser, runLegacy]) {
+    for (const runId of [runB, runEndUser, runActorless]) {
       const res = await app.request(`/api/runs/${runId}`, { headers: authHeaders(owner) });
       expect(`${runId}: ${res.status}`).toBe(`${runId}: 200`);
     }
@@ -368,14 +368,14 @@ describe("run read isolation between members", () => {
     // The key's principal is its creator (the owner), who launched nothing.
     expect(await listedRuns(await headersFor(["runs:read"]))).toEqual([]);
     expect((await listedRuns(await headersFor(["runs:read", "runs:read-all"]))).sort()).toEqual(
-      [runA, runB, runAScheduled, runEndUser, runLegacy].sort(),
+      [runA, runB, runAScheduled, runEndUser, runActorless].sort(),
     );
 
     // `read-all` is the wider of the two, not a companion to `read`: a key
     // minted with it alone opens every surface `read` opens.
     const readAllOnly = await headersFor(["runs:read-all"]);
     expect((await listedRuns(readAllOnly)).sort()).toEqual(
-      [runA, runB, runAScheduled, runEndUser, runLegacy].sort(),
+      [runA, runB, runAScheduled, runEndUser, runActorless].sort(),
     );
     const colleague = await app.request(`/api/runs/${runB}`, { headers: readAllOnly });
     expect(colleague.status).toBe(200);

@@ -77,10 +77,10 @@ export interface CoreResources {
   "mcp-servers": "read" | "write" | "delete";
   // `read` = the runs the principal launched (its own manual runs, and the
   // runs of its own schedules). `read-all` = every run in the space, whoever
-  // launched it: other members', end-users', and the actor-less rows left by
-  // launch paths that predate #735. `read-all` IMPLIES `read` — it is the wider
-  // of the two, so it opens every run read surface on its own and a role
-  // holding it alone is not a role that reads nothing.
+  // launched it: other members', end-users', and rows with no actor at all
+  // (both columns NULL — no live launch path writes one). `read-all` IMPLIES
+  // `read` — it is the wider of the two, so it opens every run read surface on
+  // its own and a role holding it alone is not a role that reads nothing.
   runs: "read" | "read-all" | "cancel" | "delete";
   // Durable file store. `read` gates the family the same way `runs:read`
   // gates runs — it answers "may this principal touch files at all",

@@ -43,12 +43,11 @@ import { runVisibilityFilter } from "../lib/run-visibility.ts";
  * empty array: `skills: []` would say the agent declares none, which is false.
  *
  * Both skill branches project off the EFFECTIVE manifest, never off the package
- * object (#878), but they expose different sets — a wire inconsistency that
- * predates this code: a versioned detail lists every DECLARED skill (bare
- * id + range, straight from the manifest — no catalog read) so the
- * dependency-override UI can offer a pin for one that is missing, while the
- * draft detail lists only skills the org catalog resolves, enriched with
- * display metadata. `use-agent-readiness.ts` mirrors the server's
+ * object (#878), but they expose different sets: a versioned detail lists every
+ * DECLARED skill (bare id + range, straight from the manifest — no catalog
+ * read) so the dependency-override UI can offer a pin for one that is missing,
+ * while the draft detail lists only skills the org catalog resolves, enriched
+ * with display metadata. `use-agent-readiness.ts` mirrors the server's
  * missing-skill check against the draft array, so widening it here would
  * silently stop the client flagging a missing skill. Unifying the two — one
  * array of declared skills carrying `resolved` — is a wire change, tracked

@@ -86,6 +86,9 @@ const app = getTestApp();
  */
 const READS_EVERY_RUN: ReadonlySet<string> = new Set(["runs:read-all"]);
 
+/** The counterpart set: a member holding no grant beyond the resource itself. */
+const NO_GRANTS: ReadonlySet<string> = new Set();
+
 /** Stage an upload row + write its bytes into the uploads bucket (FS). */
 async function stageUpload(
   scope: { orgId: string; spaceId: string },
@@ -283,7 +286,7 @@ describe("files service + routes", () => {
     const doc = await createFileFromUpload(scope, userActor, uploadId, { runId });
 
     // Same space: resolvable, downloadable by its creator.
-    const ok = await getFileForActor(scope, userActor, doc.id);
+    const ok = await getFileForActor(scope, userActor, doc.id, NO_GRANTS);
     expect(ok?.row.id).toBe(doc.id);
     expect(ok?.capabilities.download).toBe(true);
 
@@ -293,6 +296,7 @@ describe("files service + routes", () => {
       { orgId: other.orgId, spaceId: other.defaultSpaceId },
       userActor,
       doc.id,
+      NO_GRANTS,
     );
     expect(crossOrg).toBeNull();
 
@@ -301,6 +305,7 @@ describe("files service + routes", () => {
       { orgId: ctx.orgId, spaceId: "spc_does_not_exist" },
       userActor,
       doc.id,
+      NO_GRANTS,
     );
     expect(crossSpace).toBeNull();
   });
@@ -318,12 +323,17 @@ describe("files service + routes", () => {
     const doc = await createFileFromUpload(scope, userActor, uploadId, { runId });
 
     const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Files Space B" });
-    const fromB = await listFilesForActor({ orgId: ctx.orgId, spaceId: spaceB.id }, userActor, {});
+    const fromB = await listFilesForActor(
+      { orgId: ctx.orgId, spaceId: spaceB.id },
+      userActor,
+      {},
+      NO_GRANTS,
+    );
     expect(fromB.data.map((d) => d.id)).not.toContain(doc.id);
 
     // Control: the same actor, the same org, the owning space — listed. So the
     // absence above is the space predicate, not the visibility arms.
-    const fromA = await listFilesForActor(scope, userActor, {});
+    const fromA = await listFilesForActor(scope, userActor, {}, NO_GRANTS);
     expect(fromA.data.map((d) => d.id)).toContain(doc.id);
   });
 
@@ -338,18 +348,23 @@ describe("files service + routes", () => {
     const doc = await createFileFromUpload(scope, ownerActor, uploadId, { runId });
 
     // Owner end-user resolves + downloads (creator).
-    const asOwner = await getFileForActor(scope, ownerActor, doc.id);
+    const asOwner = await getFileForActor(scope, ownerActor, doc.id, NO_GRANTS);
     expect(asOwner?.row.id).toBe(doc.id);
     expect(asOwner?.capabilities.download).toBe(true);
 
     // A different end-user cannot see it at all.
-    const asOther = await getFileForActor(scope, { type: "end_user", id: euOther.id }, doc.id);
+    const asOther = await getFileForActor(
+      scope,
+      { type: "end_user", id: euOther.id },
+      doc.id,
+      NO_GRANTS,
+    );
     expect(asOther).toBeNull();
 
     // A dashboard user (member) reaches an end-user's run only with
     // `runs:read-all` — and even then cannot download an upload it did not
     // create (the per-file grant is a separate layer).
-    expect(await getFileForActor(scope, userActor, doc.id)).toBeNull();
+    expect(await getFileForActor(scope, userActor, doc.id, NO_GRANTS)).toBeNull();
     const asSupervisor = await getFileForActor(scope, userActor, doc.id, READS_EVERY_RUN);
     expect(asSupervisor?.row.id).toBe(doc.id);
     expect(asSupervisor?.capabilities.download).toBe(false);
@@ -460,7 +475,7 @@ describe("files service + routes", () => {
     });
 
     const runId = await seedRunRow(scope, { input: { a: { b: [`appfile://${docA.id}`] } } });
-    const page = await listFilesForActor(scope, userActor, { runId });
+    const page = await listFilesForActor(scope, userActor, { runId }, NO_GRANTS);
     expect(page.data.map((d) => d.id)).toContain(docA.id);
   });
 
@@ -571,7 +586,12 @@ describe("files service + routes", () => {
       chatSessionId: sessionId,
     });
 
-    const own = await listFilesForActor(scope, userActor, { contextChatSessionId: sessionId });
+    const own = await listFilesForActor(
+      scope,
+      userActor,
+      { contextChatSessionId: sessionId },
+      NO_GRANTS,
+    );
     expect(own.data.map((d) => d.id)).toEqual([file.id]);
 
     const otherSpace = await seedSpace({ orgId: ctx.orgId });
@@ -579,6 +599,7 @@ describe("files service + routes", () => {
       { orgId: ctx.orgId, spaceId: otherSpace.id },
       userActor,
       { contextChatSessionId: sessionId },
+      NO_GRANTS,
     );
     expect(fromOther.data).toEqual([]);
   });
@@ -596,9 +617,12 @@ describe("files service + routes", () => {
     const runId = await seedRunRow(scope, { chatSessionId: sessionId });
     await publishStream(scope, runId, "private-context.txt", "context");
 
-    const page = await listFilesForActor(scope, userActor, {
-      contextChatSessionId: sessionId,
-    });
+    const page = await listFilesForActor(
+      scope,
+      userActor,
+      { contextChatSessionId: sessionId },
+      NO_GRANTS,
+    );
     expect(page.data).toEqual([]);
   });
 
@@ -918,7 +942,7 @@ describe("files service + routes", () => {
 
     // Member A sees neither: the run doc inherits B's run, which A may not
     // read without `runs:read-all`, and the chat doc is B's session.
-    const asA = await listFilesForActor(scope, actorA, {});
+    const asA = await listFilesForActor(scope, actorA, {}, NO_GRANTS);
     const idsA = asA.data.map((d) => d.id);
     expect(idsA).not.toContain(runDoc.id);
     expect(idsA).not.toContain(chatDoc.id);
@@ -931,14 +955,14 @@ describe("files service + routes", () => {
     expect(idsASupervising).not.toContain(chatDoc.id);
 
     // Member B sees both (owns the run and the chat session).
-    const asB = await listFilesForActor(scope, actorB, {});
+    const asB = await listFilesForActor(scope, actorB, {}, NO_GRANTS);
     const idsB = asB.data.map((d) => d.id);
     expect(idsB).toContain(runDoc.id);
     expect(idsB).toContain(chatDoc.id);
 
     // An end-user sees neither (isolation unchanged).
     const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
-    const asEu = await listFilesForActor(scope, { type: "end_user", id: eu.id }, {});
+    const asEu = await listFilesForActor(scope, { type: "end_user", id: eu.id }, {}, NO_GRANTS);
     expect(asEu.data).toHaveLength(0);
   });
 
@@ -1128,7 +1152,9 @@ describe("files service + routes", () => {
     const { row: output } = await publishStream(scope, runId, "o.txt", "output");
 
     // Creator of the user_upload → full metadata + download + lifecycle.
-    expect((await getFileForActor(scope, creatorActor, upload.id))?.capabilities).toMatchObject({
+    expect(
+      (await getFileForActor(scope, creatorActor, upload.id, NO_GRANTS))?.capabilities,
+    ).toMatchObject({
       visible: true,
       metadata: true,
       download: true,
@@ -1137,7 +1163,7 @@ describe("files service + routes", () => {
     });
     // Other member without `runs:read-all` → the creator's run is not theirs to
     // read, so the file is not theirs to resolve.
-    expect(await getFileForActor(scope, otherActor, upload.id)).toBeNull();
+    expect(await getFileForActor(scope, otherActor, upload.id, NO_GRANTS)).toBeNull();
     // Other member reading the run, not the creator, no grant → visible but OPAQUE.
     expect(
       (await getFileForActor(scope, otherActor, upload.id, READS_EVERY_RUN))?.capabilities,
@@ -1189,24 +1215,24 @@ describe("files service + routes", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
-    const attach = (fileId: string, permissions?: ReadonlySet<string>) =>
+    const attach = (fileId: string, permissions: ReadonlySet<string>) =>
       resolveChatAttachment({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         chatSessionId,
         uri: `appfile://${fileId}`,
-        ...(permissions ? { permissions } : {}),
+        permissions,
       });
 
     // The colleague's run output: readable with the grant, indistinguishable
     // from a missing file without it.
     expect((await attach(theirOutput.id, READS_EVERY_RUN)).uri).toBe(`appfile://${theirOutput.id}`);
-    await expect(attach(theirOutput.id)).rejects.toMatchObject({ status: 404 });
+    await expect(attach(theirOutput.id, NO_GRANTS)).rejects.toMatchObject({ status: 404 });
 
     // The session owner's own run output is theirs either way — the grant
     // widens the set, it never gates ownership.
-    expect((await attach(ownOutput.id)).uri).toBe(`appfile://${ownOutput.id}`);
+    expect((await attach(ownOutput.id, NO_GRANTS)).uri).toBe(`appfile://${ownOutput.id}`);
     expect((await attach(ownOutput.id, READS_EVERY_RUN)).uri).toBe(`appfile://${ownOutput.id}`);
   });
 
@@ -1461,17 +1487,17 @@ describe("files service + routes", () => {
     expect(row!.runId).toBeNull();
     expect(row!.chatSessionId).toBeNull();
     expect(await orgBytesUsed(ctx.orgId)).toBe(usedBefore);
-    const resolved = await getFileForActor(scope, userActor, docX.id);
+    const resolved = await getFileForActor(scope, userActor, docX.id, NO_GRANTS);
     expect(resolved?.row.id).toBe(docX.id);
     // A detached `agent_output` stays org-readable + listed for ANY member (it
     // always was, via its run container) — unlike a detached user_upload.
     const stranger = await createTestUser({ email: "stranger@producer.test" });
     await addOrgMember(ctx.orgId, stranger.id, "member");
     const strangerActor: Actor = { type: "user", id: stranger.id };
-    expect((await getFileForActor(scope, strangerActor, docX.id))?.row.id).toBe(docX.id);
-    expect((await listFilesForActor(scope, strangerActor, {})).data.map((d) => d.id)).toContain(
-      docX.id,
-    );
+    expect((await getFileForActor(scope, strangerActor, docX.id, NO_GRANTS))?.row.id).toBe(docX.id);
+    expect(
+      (await listFilesForActor(scope, strangerActor, {}, NO_GRANTS)).data.map((d) => d.id),
+    ).toContain(docX.id);
     // The consumer run + its link are untouched — a rerun still finds the doc.
     const links = await db.select().from(fileLinks).where(eq(fileLinks.fileId, docX.id));
     expect(links).toHaveLength(1);
@@ -1639,20 +1665,20 @@ describe("files service + routes", () => {
     // + downloads it; another member cannot resolve it at all (404-null), and it
     // does not appear in that member's list, while it stays in the creator's.
     const creatorActor: Actor = { type: "user", id: ctx.user.id };
-    const asCreator = await getFileForActor(scope, creatorActor, doc.id);
+    const asCreator = await getFileForActor(scope, creatorActor, doc.id, NO_GRANTS);
     expect(asCreator?.row.id).toBe(doc.id);
     expect(asCreator?.capabilities.download).toBe(true);
-    expect((await listFilesForActor(scope, creatorActor, {})).data.map((d) => d.id)).toContain(
-      doc.id,
-    );
+    expect(
+      (await listFilesForActor(scope, creatorActor, {}, NO_GRANTS)).data.map((d) => d.id),
+    ).toContain(doc.id);
 
     const stranger = await createTestUser({ email: "stranger@chain.test" });
     await addOrgMember(ctx.orgId, stranger.id, "member");
     const strangerActor: Actor = { type: "user", id: stranger.id };
-    expect(await getFileForActor(scope, strangerActor, doc.id)).toBeNull();
-    expect((await listFilesForActor(scope, strangerActor, {})).data.map((d) => d.id)).not.toContain(
-      doc.id,
-    );
+    expect(await getFileForActor(scope, strangerActor, doc.id, NO_GRANTS)).toBeNull();
+    expect(
+      (await listFilesForActor(scope, strangerActor, {}, NO_GRANTS)).data.map((d) => d.id),
+    ).not.toContain(doc.id);
   });
 
   it("deletes an unconsumed chat-session file when the session is deleted", async () => {
@@ -1802,9 +1828,14 @@ describe("files service + routes", () => {
     // (the detached-branch end-user guard mirrors the run-container guard).
     const [row] = await db.select().from(files).where(eq(files.id, doc.id));
     expect(row!.runId).toBeNull();
-    const asOwner = await getFileForActor(scope, ownerActor, doc.id);
+    const asOwner = await getFileForActor(scope, ownerActor, doc.id, NO_GRANTS);
     expect(asOwner?.row.id).toBe(doc.id);
-    const asOther = await getFileForActor(scope, { type: "end_user", id: euOther.id }, doc.id);
+    const asOther = await getFileForActor(
+      scope,
+      { type: "end_user", id: euOther.id },
+      doc.id,
+      NO_GRANTS,
+    );
     expect(asOther).toBeNull();
   });
 
@@ -1914,9 +1945,9 @@ describe("files service + routes", () => {
     await setOrgFileStorageLimit(ctx.orgId, 20);
 
     // Existing files are NEVER auto-deleted — still resolvable + downloadable.
-    const resolvedA = await getFileForActor(scope, userActor, docA.id);
+    const resolvedA = await getFileForActor(scope, userActor, docA.id, NO_GRANTS);
     expect(resolvedA?.capabilities.download).toBe(true);
-    const listed = await listFilesForActor(scope, userActor, {});
+    const listed = await listFilesForActor(scope, userActor, {}, NO_GRANTS);
     expect(listed.data.map((d) => d.id)).toContain(docA.id);
 
     // A NEW write is rejected while used (30) ≥ limit (20).
