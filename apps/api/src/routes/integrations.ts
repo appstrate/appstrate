@@ -49,7 +49,13 @@ import {
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, internalError, notFound } from "../lib/errors.ts";
+import {
+  ApiError,
+  invalidRequest,
+  internalError,
+  notFound,
+  validationFailed,
+} from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -89,6 +95,7 @@ import { isUserConnectionCreationBlocked } from "../services/integration-connect
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+  scopesNotInAuthCatalog,
 } from "../services/integration-manifest-helpers.ts";
 import {
   deleteIntegrationPin,
@@ -352,6 +359,34 @@ async function assertConnectionBelongsToActor(
   if (!ownedByActor) {
     throw notFound("Connection not found");
   }
+}
+
+/**
+ * Guard the caller-supplied `scopes` on both caller-facing kickoffs against the
+ * auth's `scope_catalog` (§7.4). `body.scopes` is the ONLY delta the caller
+ * contributes to the consent request (defaults and already-granted scopes are
+ * computed server-side), so a typo there is otherwise carried all the way to
+ * the provider's consent screen, where it fails as an opaque `invalid_scope`.
+ *
+ * An auth declaring no catalog declares no closed set — nothing is rejected
+ * and the IdP arbitrates, the same contract `validateAgentIntegrationScopes`
+ * applies to an agent manifest's selection.
+ */
+function assertScopesInAuthCatalog(
+  auth: { scope_catalog?: readonly { value: string }[] },
+  authKey: string,
+  scopes: readonly string[] | undefined,
+): void {
+  const undeclared = scopesNotInAuthCatalog(auth, scopes ?? []);
+  if (undeclared.length === 0) return;
+  throw validationFailed([
+    {
+      field: "scopes",
+      code: "scope_not_in_catalog",
+      title: "Scope Not in Catalog",
+      message: `Scopes not declared in scope_catalog of auth '${authKey}': ${undeclared.join(", ")}`,
+    },
+  ]);
 }
 
 // ─────────────────────────────────────────────
@@ -788,6 +823,7 @@ export function createIntegrationsRouter() {
           `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
         );
       }
+      assertScopesInAuthCatalog(auth, authKey, body.scopes);
       // Request exactly what the caller scopes the connect to:
       //   - manifest defaults (`auth.scopes`) — always
       //   - caller-supplied (`body.scopes`) — the agent surface forwards its
@@ -860,7 +896,10 @@ export function createIntegrationsRouter() {
         await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
       }
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
-      await readIntegrationAuth(scope, packageId, authKey);
+      const { auth } = await readIntegrationAuth(scope, packageId, authKey);
+      // `scopes` are checked HERE, at the mint: `/connect/start` replays our own
+      // signed claims, so it re-validates nothing.
+      assertScopesInAuthCatalog(auth, authKey, body.scopes);
       const { connectUrl, expiresAt } = buildConnectUrl({
         org_id: scope.orgId,
         space_id: scope.spaceId,

@@ -15,6 +15,7 @@ import {
   getLocalServerRef,
   getRemoteSource,
   getAppstrateConnectMeta,
+  scopesNotInAuthCatalog,
   type AfpsManifestConnect,
 } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -175,5 +176,39 @@ describe("getAppstrateConnectMeta", () => {
   it("returns undefined when the connect block or meta is absent", () => {
     expect(getAppstrateConnectMeta(undefined)).toBeUndefined();
     expect(getAppstrateConnectMeta({ tool: {} })).toBeUndefined();
+  });
+});
+
+describe("scopesNotInAuthCatalog", () => {
+  const auth = {
+    scope_catalog: [{ value: "gmail.readonly" }, { value: "gmail.send" }],
+  };
+
+  it("accepts every scope the auth's catalog declares", () => {
+    expect(scopesNotInAuthCatalog(auth, ["gmail.send", "gmail.readonly"])).toEqual([]);
+  });
+
+  it("returns the undeclared scopes, deduped, in caller order", () => {
+    expect(
+      scopesNotInAuthCatalog(auth, ["gmail.send", "drive.file", "gmail.modify", "drive.file"]),
+    ).toEqual(["drive.file", "gmail.modify"]);
+  });
+
+  it("enforces nothing when the auth declares no catalog", () => {
+    // No catalog = no closed set: the IdP arbitrates at consent time, the same
+    // contract `validateAgentIntegrationScopes` applies to an agent selection.
+    expect(scopesNotInAuthCatalog({}, ["anything.at.all"])).toEqual([]);
+    expect(scopesNotInAuthCatalog({ scope_catalog: [] }, ["anything.at.all"])).toEqual([]);
+  });
+
+  it("is keyed by ONE auth — a sibling auth's catalog does not widen it", () => {
+    // The connect kickoff is keyed by `authKey`, so unlike the agent-manifest
+    // side (`getAvailableScopes`, which unions every auth) a scope advertised
+    // only by a sibling auth stays undeclared here.
+    expect(scopesNotInAuthCatalog(auth, ["calendar.events"])).toEqual(["calendar.events"]);
+  });
+
+  it("accepts an empty request", () => {
+    expect(scopesNotInAuthCatalog(auth, [])).toEqual([]);
   });
 });
