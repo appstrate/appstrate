@@ -34,7 +34,15 @@ function space(id: string, permissions: string[]): Space {
 }
 
 function packageRow(type: Package["type"], installed_in: string[], source = "local"): Package {
-  return { id: "@org/example", name: "Example", description: "", type, source, installed_in };
+  return {
+    id: "@org/example",
+    name: "Example",
+    description: "",
+    type,
+    source,
+    home_space_id: null,
+    installed_in,
+  };
 }
 
 /**

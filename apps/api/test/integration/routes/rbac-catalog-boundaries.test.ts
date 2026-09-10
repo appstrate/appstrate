@@ -46,6 +46,15 @@ let privateId: string;
 
 const installIn = (spaceId: string) => seedInstalledPackage(spaceId, ID);
 
+/**
+ * Give the seeded skill a home space — the ONE authority over its draft
+ * (`packages.home_space_id`). The fixture seeds it without one on purpose: no
+ * home is the ORG CATALOG, which is the shape of an admin-level import and of
+ * every row that predates the column.
+ */
+const homeIn = (spaceId: string | null) =>
+  db.update(packages).set({ homeSpaceId: spaceId }).where(eq(packages.id, ID));
+
 async function keyHeaders(scopes: string[]) {
   const key = await seedApiKey({
     orgId: ctx.orgId,
@@ -227,31 +236,63 @@ describe("shared package authority", () => {
     await assertDbCount(packages, eq(packages.id, ID), 1);
   });
 
-  it("allows a builder to delete a package installed only in their space", async () => {
+  it("refuses a builder on a package with no home, and admits them once it has theirs", async () => {
     await installIn(ctx.defaultSpaceId);
+    // No home = the org catalog: the guest is a builder where it is installed,
+    // and that is deliberately not enough.
+    expect((await deleteSkill(headers)).status).toBe(403);
+    await assertDbCount(packages, eq(packages.id, ID), 1);
+
+    await homeIn(ctx.defaultSpaceId);
     expect((await deleteSkill(headers)).status).toBe(204);
     await assertDbCount(packages, eq(packages.id, ID), 0);
   });
 
-  it("requires deletion authority in every shared installation, not only visibility", async () => {
+  it("authorizes deletion from the home space alone, whatever other spaces hold it", async () => {
+    await homeIn(ctx.defaultSpaceId);
     await installIn(ctx.defaultSpaceId);
     await installIn(privateId);
+    // A `viewer` row in the other installation used to veto the delete. The
+    // home is the authority now, so it does not.
     await seedSpaceMember({ spaceId: privateId, userId: guestId, presetRole: "viewer" });
-    expect((await deleteSkill(headers)).status).toBe(403);
-    await db
-      .update(spaceMembers)
-      .set({ presetRole: "builder" })
-      .where(eq(spaceMembers.spaceId, privateId));
     expect((await deleteSkill(headers)).status).toBe(204);
   });
 
-  it("cannot use an owner key in A to mutate a package shared with B", async () => {
+  it("refuses a builder of another installation once the home moves away", async () => {
+    await homeIn(privateId);
     await installIn(ctx.defaultSpaceId);
     await installIn(privateId);
-    expect((await deleteSkill(await keyHeaders(["skills:delete"]))).status).toBe(403);
+    // Reachable through its installation in their own space — so 403, not 404 —
+    // but governed elsewhere.
+    expect((await deleteSkill(headers)).status).toBe(403);
+    await assertDbCount(packages, eq(packages.id, ID), 1);
   });
 
-  it("preserves write-only credentials for packages installed exclusively in their pinned space", async () => {
+  it("tells a write-only key nothing about a package homed elsewhere", async () => {
+    await homeIn(privateId);
+    await installIn(ctx.defaultSpaceId);
+    await installIn(privateId);
+    // 404 because `skills:delete` alone holds `skills:read` in NO space, so the
+    // key may not know this id exists at all — the home never enters it. The
+    // sibling below is the case where the home IS the reason.
+    expect((await deleteSkill(await keyHeaders(["skills:delete"]))).status).toBe(404);
+  });
+
+  it("cannot use a key pinned to A to mutate a package homed in B", async () => {
+    await homeIn(privateId);
+    await installIn(ctx.defaultSpaceId);
+    await installIn(privateId);
+    // With `skills:read` the key sees the package through the installation in
+    // its own pinned space — so the refusal owes the caller a 403 — and the
+    // home, in a space the key cannot reach, is what refuses it.
+    expect((await deleteSkill(await keyHeaders(["skills:read", "skills:delete"]))).status).toBe(
+      403,
+    );
+    await assertDbCount(packages, eq(packages.id, ID), 1);
+  });
+
+  it("preserves write-only credentials for packages homed in their pinned space", async () => {
+    await homeIn(ctx.defaultSpaceId);
     await installIn(ctx.defaultSpaceId);
     expect((await deleteSkill(await keyHeaders(["skills:delete"]))).status).toBe(204);
   });
@@ -287,6 +328,7 @@ describe("shared package authority", () => {
     await seedPackage({
       id: agentId,
       orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       draftManifest: {
         name: agentId,

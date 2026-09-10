@@ -93,10 +93,12 @@ export function AgentActions({
         isOwned={isOwned}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}
+        homeSpaceId={detail.home_space_id}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}
         hasPublishedVersion={(detail.version_count ?? 0) > 0}
+        isInstalledHere={isInstalledInCurrentSpace}
         onCreateVersion={onCreateVersion}
         onFork={onFork}
         runningRuns={detail.running_runs}

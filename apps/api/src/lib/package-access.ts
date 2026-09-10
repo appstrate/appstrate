@@ -7,7 +7,7 @@ import { packages, spacePackages, spaces } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
-import { makePermissionGuard } from "@appstrate/core/permissions";
+import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { getOrgMember } from "../services/organizations.ts";
@@ -132,6 +132,66 @@ export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerO
   return c.get("authMethod") !== "api_key" && (orgRole === "owner" || orgRole === "admin");
 }
 
+/**
+ * Does a package's PLACEMENT grant read from these spaces?
+ *
+ * One rule, one place (RBAC spec §6.9): a package is readable where it is
+ * INSTALLED and where it is HOMED. The home is a grant of its own — a draft
+ * nobody has installed yet is readable where it lives, and an author does not
+ * lose sight of their own package because a space uninstalled it. Without the
+ * home half, write authority could exceed read access, which is how a builder
+ * ended up able to `PUT` a package they could not `GET`.
+ *
+ * The readers of this rule differ only in the set they compare against: the
+ * org-wide catalog check below, the current-space gate of the package read
+ * routes ({@link isPackageReadableInSpace}), the library listing, and the
+ * per-type index listing (`listOrgItems`, which expresses it in SQL). Holding
+ * `<type>:read` in one of those spaces is the other half of the rule and stays
+ * with each reader.
+ *
+ * READ only. RUNNING a package still requires an installation in the space it
+ * runs in — `hasPackageAccess`, deliberately untouched.
+ */
+export function placementGrantsRead(
+  pkg: { homeSpaceId: string | null },
+  installedIn: Iterable<string>,
+  readable: ReadonlySet<string>,
+): boolean {
+  if (pkg.homeSpaceId !== null && readable.has(pkg.homeSpaceId)) return true;
+  for (const spaceId of installedIn) if (readable.has(spaceId)) return true;
+  return false;
+}
+
+/**
+ * "Is this package readable from THIS space?" — VISIBILITY, not authorization:
+ * the caller's `<type>:read` is a separate guard (the route's `readGuard`, or
+ * `requirePackageReadPermission` where the type comes from the row). System
+ * packages are readable from every space, and like `hasPackageAccess` this does
+ * not filter `orgId`: its callers add the org boundary on the row they read next.
+ */
+export async function isPackageReadableInSpace(
+  spaceId: string,
+  packageId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({
+      source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
+      installedHere: spacePackages.packageId,
+    })
+    .from(packages)
+    .leftJoin(
+      spacePackages,
+      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
+    )
+    .where(and(eq(packages.id, packageId), notEphemeralFilter()))
+    .limit(1);
+  if (!row) return false;
+  if (row.source === "system") return true;
+  const here = new Set([spaceId]);
+  return placementGrantsRead(row, row.installedHere ? here : [], here);
+}
+
 /** Catalog reachability permits copying between accessible spaces, never guessing a private id. */
 export async function assertCatalogPackageAccess(
   c: Context<AppEnv>,
@@ -139,79 +199,139 @@ export async function assertCatalogPackageAccess(
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
   source = { orgId: c.get("orgId"), orgRole: callerOrgRole(c, c.get("orgId")) },
 ) {
-  const { pkg, accessible, installations } = await loadPackageAccess(
-    c,
-    packageId,
-    resolvedSpaces,
-    source.orgId,
-  );
-  const permitted = accessible.filter((space) =>
-    space.permissions.has(packagePermission(pkg.type, "read")),
-  );
-  const allowed = new Set(permitted.map((space) => space.id));
-  if (
-    permitted.length === 0 ||
-    (pkg.source !== "system" &&
-      !installations.some((row) => allowed.has(row.spaceId)) &&
-      !(installations.length === 0 && managesOrgCatalog(c, source.orgRole)))
-  ) {
-    throw notFound(`Package '${packageId}' not found`);
-  }
+  const [pkg, accessible, installations] = await Promise.all([
+    loadPackageRow(packageId, source.orgId),
+    resolvedSpaces ?? packageAccessSpaces(c),
+    loadPackageInstallations(packageId, source.orgId),
+  ]);
+  assertPackageIsReachable(c, packageId, pkg, installations, accessible, source.orgRole);
   return pkg;
 }
 
-async function loadPackageAccess(
-  c: Context<AppEnv>,
-  packageId: string,
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
-  orgId = c.get("orgId"),
-) {
-  const [[pkg], accessible, installations] = await Promise.all([
-    db
-      .select({
-        id: packages.id,
-        type: packages.type,
-        source: packages.source,
-        orgId: packages.orgId,
-      })
-      .from(packages)
-      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
-      .limit(1),
-    resolvedSpaces ?? packageAccessSpaces(c),
-    db
-      .select({ spaceId: spacePackages.spaceId })
-      .from(spacePackages)
-      .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
-      .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId))),
-  ]);
+type PackageAccessRow = Awaited<ReturnType<typeof loadPackageRow>>;
+
+/** The five columns every access decision reads. 404 when the org cannot see the id at all. */
+async function loadPackageRow(packageId: string, orgId: string) {
+  const [pkg] = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      source: packages.source,
+      orgId: packages.orgId,
+      homeSpaceId: packages.homeSpaceId,
+    })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .limit(1);
   if (!pkg) throw notFound(`Package '${packageId}' not found`);
-  return { pkg, accessible, installations };
+  return pkg;
 }
 
-/** A package draft/version is shared: authority is required in every affected installation. */
+/**
+ * Every space of `orgId` the package is installed in. Split out from the row
+ * read because the write path never needs it: authority is the home alone, so
+ * the installations are loaded only when a refusal has to decide between 403
+ * and 404.
+ */
+function loadPackageInstallations(packageId: string, orgId: string) {
+  return db
+    .select({ spaceId: spacePackages.spaceId })
+    .from(spacePackages)
+    .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+    .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId)));
+}
+
+/** 404 unless the caller may know this id exists — {@link placementGrantsRead} + `<type>:read`. */
+function assertPackageIsReachable(
+  c: Context<AppEnv>,
+  packageId: string,
+  pkg: PackageAccessRow,
+  installations: { spaceId: string }[],
+  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
+  orgRole: OrgRole,
+): void {
+  const permitted = accessible.filter((space) =>
+    space.permissions.has(packagePermission(pkg.type, "read")),
+  );
+  const readable = new Set(permitted.map((space) => space.id));
+  if (
+    permitted.length === 0 ||
+    (pkg.source !== "system" &&
+      !placementGrantsRead(
+        pkg,
+        installations.map((row) => row.spaceId),
+        readable,
+      ) &&
+      !(installations.length === 0 && managesOrgCatalog(c, orgRole)))
+  ) {
+    throw notFound(`Package '${packageId}' not found`);
+  }
+}
+
+/**
+ * Write authority is the package's HOME (`packages.home_space_id`) and nothing
+ * else — not the space the caller happens to be in, not the set of spaces it is
+ * installed in: those consume the package and have no say over its draft,
+ * versions or identity. A NULL home is the organization catalogue — owners and
+ * admins in session, which is what {@link managesOrgCatalog} means.
+ *
+ * There is deliberately no permission check against the CURRENT space. The home
+ * lookup goes through `packageAccessSpaces` → `effectiveInSpace`, so it already
+ * carries the view-as persona and the credential ceiling, and it already pins an
+ * API key to its own space. A second check against the current space would turn
+ * the rule into "home AND wherever I am browsing from", which is what made a
+ * builder's own package unwritable from a space where they only read.
+ *
+ * Returns the loaded row so a caller that has to act on it does not read it again.
+ *
+ * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §6.9
+ */
 export async function assertPackageMutationAccess(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete",
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
-): Promise<void> {
-  const { pkg, accessible, installations } = await loadPackageAccess(c, packageId, resolvedSpaces);
+): Promise<PackageAccessRow> {
+  const orgId = c.get("orgId");
+  const [pkg, accessible] = await Promise.all([
+    loadPackageRow(packageId, orgId),
+    resolvedSpaces ?? packageAccessSpaces(c),
+  ]);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
   // never loads at all (404). A row whose org does not match is a SYSTEM one.
-  if (pkg.orgId !== c.get("orgId")) throw forbidden("Cannot modify a system package.");
+  if (pkg.orgId !== orgId) throw forbidden("Cannot modify a system package.");
   const permission = packagePermission(pkg.type, action);
-  await makePermissionGuard(permission)(c, async () => {});
-  const allowed = new Set(
-    accessible.filter((space) => space.permissions.has(permission)).map((space) => space.id),
+  if (holdsHomeAuthority(c, pkg, accessible, permission)) return pkg;
+  // Refused. Whether the caller may even KNOW this id exists is the read
+  // question, answered by the one predicate that answers it — an unreachable
+  // package stays a 404 rather than becoming an existence oracle. Only this
+  // path pays for the installations.
+  assertPackageIsReachable(
+    c,
+    packageId,
+    pkg,
+    await loadPackageInstallations(packageId, orgId),
+    accessible,
+    callerOrgRole(c, orgId),
   );
-  if (!managesOrgCatalog(c) && !installations.some((row) => allowed.has(row.spaceId))) {
-    throw notFound(`Package '${packageId}' not found`);
-  }
-  if (installations.some((row) => !allowed.has(row.spaceId))) {
-    throw forbidden(
-      "Modifying a shared package requires permission in every space where it is installed.",
-    );
-  }
+  reportPermissionDenial(c, permission);
+  throw forbidden(
+    pkg.homeSpaceId === null
+      ? `Modifying '${packageId}' requires organization owner or admin authority — it belongs to the organization catalog.`
+      : `Modifying '${packageId}' requires '${permission}' in its home space.`,
+  );
+}
+
+/** `<type>:<action>` in the home space, or org-catalog authority when it has none. */
+function holdsHomeAuthority(
+  c: Context<AppEnv>,
+  pkg: { homeSpaceId: string | null },
+  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
+  permission: Permission,
+): boolean {
+  if (pkg.homeSpaceId === null) return managesOrgCatalog(c);
+  const home = accessible.find((space) => space.id === pkg.homeSpaceId);
+  return home?.permissions.has(permission) ?? false;
 }
 
 /** Forking reads source bytes, including when the destination is another organization. */

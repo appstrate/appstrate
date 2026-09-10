@@ -8,6 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A package now has a home space, and it alone decides who may write it.**
+  `packages.home_space_id` names the space whose `<type>:write` authorizes
+  editing, publishing, restoring, renaming and deleting a package; the other
+  spaces it is installed in consume it and get no say. `NULL` means the
+  organization catalogue — owners and admins on a session. The home is asked, and
+  nothing else: the mutation routes no longer also require the permission in the
+  space the request comes from, so an author edits their own package while
+  browsing a space where they only read. The routes acting on the _installation_
+  — install, uninstall, configure, per-space settings — keep their current-space
+  guard, because that is what they are about. The home is set from the space a
+  package is created, imported or forked in, is exposed as `home_space_id` on
+  package reads and on `GET /api/library`, and is moved by the new
+  `PATCH /api/packages/{scope}/{name}`, which requires that permission in both
+  the old and the new home (an unreachable destination answers 404). It is a
+  read grant too, everywhere: a package is readable from the spaces it is
+  installed in **and** from its home, so a draft installed nowhere — or one
+  installed only where its author cannot go — stays visible to them, on the
+  detail, in the library and in the file explorer. Running a package is
+  unchanged: that still needs an installation in the space it runs in. This
+  replaces the rule requiring the permission in _every_ space where a package
+  was installed, which cost an author the edit of their own package the moment
+  someone installed it into a space the author cannot read. A space that
+  homes a package can no longer be deleted: `DELETE /api/spaces/{id}` answers
+  409 `space_homes_packages` and names them, so moving them stays the caller's
+  act — the package page's actions menu carries a **Move to a space…** dialog for
+  exactly that, listing the spaces where the caller may author this type.
+  Existing rows start with no home and are therefore admin-only until the
+  operator runs `scripts/migration/0013-packages-home-space-backfill.sql`,
+  which belongs between the migrations and bringing the new version up — stop,
+  migrate, run 0013, start — so nothing serves traffic while non-owner authors
+  and API keys are locked out.
+
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for
   outside collaborators. Every space now carries a **visibility** (`open`,

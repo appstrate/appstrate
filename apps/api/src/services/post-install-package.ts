@@ -51,6 +51,12 @@ export async function postInstallPackage(params: {
   content: string;
   files: Record<string, Uint8Array>;
   zipBuffer: Buffer;
+  /**
+   * Home space for a row this call has to CREATE (a skill the bundle brought
+   * along). An existing package keeps the home it already has — an install
+   * never moves a package.
+   */
+  homeSpaceId: string | null;
   /** Override version instead of auto-detecting from manifest or auto-bumping. */
   version?: string;
 }): Promise<void> {
@@ -69,7 +75,12 @@ export async function postInstallPackage(params: {
 
   if (packageType === "skill") {
     const cfg = CONFIG_BY_TYPE[packageType];
-    const item: CreateItemInput = { id: packageId, content, createdBy: userId };
+    const item: CreateItemInput = {
+      id: packageId,
+      content,
+      createdBy: userId,
+      homeSpaceId: params.homeSpaceId,
+    };
     await upsertItem(orgId, packageId, item, cfg, manifest);
     await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);
   }

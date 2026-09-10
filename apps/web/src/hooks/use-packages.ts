@@ -223,12 +223,39 @@ function useDeletePackage(type: PackageType) {
   });
 }
 
+/**
+ * Move a package to another home space — `PATCH /api/packages/{scope}/{name}`.
+ *
+ * The home is what authorizes every later edit (`packages.home_space_id`, RBAC
+ * spec §6.9), and it is also a read grant: the destination gains sight of the
+ * package and the old home may lose it. So this invalidates the family (detail
+ * + lists), the agent catalog and the library, not just the one detail row.
+ */
+function useMovePackageHome(type: PackageType) {
+  const qc = useQueryClient();
+  const cfg = PACKAGE_CONFIG[type];
+  return useMutation({
+    mutationFn: async ({ id, homeSpaceId }: { id: string; homeSpaceId: string }) => {
+      await client.PATCH("/api/packages/{scope}/{name}", {
+        params: { path: splitPackageRef(id) },
+        body: { home_space_id: homeSpaceId },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+    },
+  });
+}
+
 // Re-export factory hooks for direct use
 export {
   usePackageList,
   usePackageDetail,
   useUploadPackage,
   useDeletePackage,
+  useMovePackageHome,
   type PackageType,
   PACKAGE_CONFIG,
 };

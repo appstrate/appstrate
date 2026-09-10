@@ -44,6 +44,50 @@ export function useCanPreviewRole(): boolean {
 }
 
 /**
+ * Gate on the permissions of a package's HOME space, not the current one.
+ *
+ * Write authority over a package follows `packages.home_space_id` — the server
+ * checks exactly that (`assertPackageMutationAccess`), so a button gated on the
+ * space the reader happens to be in offers edits the API answers 403. A `null`
+ * home is the organization catalog: owners and admins only.
+ *
+ * `null` and `undefined` are DIFFERENT answers here. Every package read emits
+ * the field, so `null` is the organization catalog and `undefined` only means
+ * the detail has not landed; conflating them would grant an owner the catalog's
+ * authority over a package whose home is a space they cannot even see.
+ *
+ * Returns `false` while the detail or the space list is still loading, like `can`.
+ */
+export function useHomeSpacePermission(homeSpaceId: string | null | undefined) {
+  const { orgRole } = usePermissions();
+  const { data: spaces } = useSpaces();
+
+  const homePermissions = homeSpaceId
+    ? (spaces?.find((s) => s.id === homeSpaceId)?.permissions ?? null)
+    : null;
+  const granted = useMemo(() => new Set<string>(homePermissions ?? []), [homePermissions]);
+
+  return useCallback(
+    (permission: GateablePermission) => {
+      if (homeSpaceId === undefined) return false;
+      if (homeSpaceId === null) return orgRole === "owner" || orgRole === "admin";
+      return granted.has(permission);
+    },
+    [granted, homeSpaceId, orgRole],
+  );
+}
+
+/**
+ * Display name of a package's home space, or `null` when there is none to show
+ * — the organization catalog (`home_space_id: null`), or a space this caller
+ * cannot enter, which `GET /api/spaces` does not list for them.
+ */
+export function useHomeSpaceName(homeSpaceId: string | null | undefined): string | null {
+  const { data: spaces } = useSpaces();
+  return (homeSpaceId && spaces?.find((s) => s.id === homeSpaceId)?.name) || null;
+}
+
+/**
  * Permission gating for the UI.
  *
  * `can` answers over the caller's ORG-level effective set (`GET /api/orgs`)

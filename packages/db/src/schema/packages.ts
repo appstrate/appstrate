@@ -78,6 +78,21 @@ export const packages = pgTable(
   {
     id: text("id").primaryKey(),
     orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    // WHO MAY WRITE THIS PACKAGE — the one authority, read by
+    // `assertPackageMutationAccess` (`apps/api/src/lib/package-access.ts`).
+    // Holding `<type>:write` in THIS space is what authorizes editing,
+    // publishing, renaming and deleting the package; every other space it is
+    // installed in consumes it and never gains a say. NULL means the
+    // organization catalogue: owners and admins in session, nobody else
+    // (`managesOrgCatalog`). It is also a READ grant — a draft never installed
+    // anywhere is still readable at home.
+    //
+    // `ON DELETE RESTRICT`: dropping a space that homes packages would
+    // silently promote them to the org catalogue, widening who may write them.
+    // `deleteSpace` therefore refuses with 409 `space_homes_packages` and names
+    // them, so moving them stays the caller's act. Inline shadow rows are left
+    // homeless for the same reason: one run must not wedge its space.
+    homeSpaceId: text("home_space_id").references(() => spaces.id, { onDelete: "restrict" }),
     type: packageTypeEnum("type").notNull(),
     source: packageSourceEnum("source").notNull().default("local"),
     draftManifest: jsonb("draft_manifest"),
@@ -102,6 +117,10 @@ export const packages = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_packages_created_by").on(table.createdBy),
+    // Referencing-side index for the `spaces` RESTRICT action, and for the
+    // "what does this space home" sweep the write guard and the offboarding
+    // path both run.
+    index("idx_packages_home_space_id").on(table.homeSpaceId),
     // Partial index sized for the compaction sweep (`ephemeral = true AND
     // created_at < now() - interval '30 days'`). Keeps the hot set tiny.
     index("idx_packages_ephemeral_created")

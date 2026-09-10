@@ -77,6 +77,7 @@ import {
   packageJsonCreateSchema,
   packageJsonCreateWithContentSchema,
   packageJsonUpdateSchema,
+  packageHomeSpaceSchema,
   createVersionBodySchema,
 } from "../routes/packages.ts";
 
@@ -510,6 +511,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/packages/skills/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft skill package",
+  },
+
+  {
+    method: "PATCH",
+    path: "/api/packages/{scope}/{name}",
+    jsonSchema: toJsonSchema(packageHomeSpaceSchema),
+    description: "Move a package to another home space",
   },
 
   {

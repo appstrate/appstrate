@@ -529,6 +529,8 @@ export const schemas = {
     // shared-type marks them optional to match). `forked_from` is optional for
     // a second reason: a summary read (`agents:run` without `agents:read`)
     // withholds the authoring history along with the manifest and the prompt.
+    // `home_space_id` is NOT part of that withheld set: `null` is a meaning of
+    // its own (the organization catalog), so it is always emitted.
     required: [
       "id",
       "source",
@@ -539,6 +541,7 @@ export const schemas = {
       "running_runs",
       "last_run",
       "effective_timeout_seconds",
+      "home_space_id",
     ],
     properties: {
       id: { type: "string" },
@@ -681,6 +684,11 @@ export const schemas = {
         description: "Number of published versions (0 for built-in agents)",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      home_space_id: {
+        type: ["string", "null"],
+        description:
+          "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority.",
+      },
       has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
@@ -1269,6 +1277,7 @@ export const schemas = {
       "version",
       "auto_installed",
       "forked_from",
+      "home_space_id",
     ],
     properties: {
       id: { type: "string" },
@@ -1285,6 +1294,11 @@ export const schemas = {
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       auto_installed: { type: "boolean" },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      home_space_id: {
+        type: ["string", "null"],
+        description:
+          "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority.",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -1307,6 +1321,7 @@ export const schemas = {
       "version",
       "auto_installed",
       "forked_from",
+      "home_space_id",
       "agents",
     ],
     properties: {
@@ -1337,6 +1352,11 @@ export const schemas = {
         description: "Whether the active version has changes not yet archived as a version",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      home_space_id: {
+        type: ["string", "null"],
+        description:
+          "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority.",
+      },
       agents: {
         type: "array",
         items: {
@@ -2007,7 +2027,7 @@ export const schemas = {
       "is currently installed (empty array = not installed in any of the caller's spaces).",
     items: {
       type: "object",
-      required: ["id", "type", "source", "name", "description", "installed_in"],
+      required: ["id", "type", "source", "name", "description", "home_space_id", "installed_in"],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
         type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
@@ -2025,6 +2045,11 @@ export const schemas = {
           type: "string",
           description:
             "Description from the package draft manifest; empty string when not provided.",
+        },
+        home_space_id: {
+          type: ["string", "null"],
+          description:
+            "Space (`spc_…`) whose `<type>:write` authorizes writing this package; `null` means the organization catalog (owners and admins only).",
         },
         installed_in: {
           type: "array",

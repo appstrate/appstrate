@@ -2839,7 +2839,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
          */
         get: operations["getAgentPackage"];
         /**
@@ -3424,6 +3424,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/packages/{scope}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Move a package to another home space
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. This route touches nothing else: the draft is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.
+         */
+        patch: operations["movePackageHome"];
         trace?: never;
     };
     "/api/packages/{scope}/{name}/files": {
@@ -4210,7 +4230,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a space
-         * @description Delete a space and all associated end-users. The default space cannot be deleted.
+         * @description Delete a space and all associated end-users. The default space cannot be deleted, and neither can a space that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move them with `PATCH /api/packages/{scope}/{name}` first.
          */
         delete: operations["deleteSpace"];
         options?: never;
@@ -4888,6 +4908,8 @@ export interface components {
             version_count?: number;
             /** @description Source package ID if forked */
             forked_from?: string | null;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority. */
+            home_space_id: string | null;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
@@ -5319,6 +5341,8 @@ export interface components {
             name: string;
             /** @description Description from the package draft manifest; empty string when not provided. */
             description: string;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes writing this package; `null` means the organization catalog (owners and admins only). */
+            home_space_id: string | null;
             /** @description Space ids (`spc_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
         }[];
@@ -5533,6 +5557,8 @@ export interface components {
             auto_installed: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority. */
+            home_space_id: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -5564,6 +5590,8 @@ export interface components {
             has_unarchived_changes?: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority. */
+            home_space_id: string | null;
             agents: {
                 id: string;
                 display_name: string;
@@ -12444,6 +12472,7 @@ export interface operations {
                      *             "source": "local",
                      *             "name": "Inbox Triage",
                      *             "description": "Sorts incoming Gmail threads into priority buckets.",
+                     *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *             "installed_in": [
                      *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
                      *             ]
@@ -12458,6 +12487,7 @@ export interface operations {
                      *             "source": "system",
                      *             "name": "Gmail",
                      *             "description": "Google Mail OAuth integration.",
+                     *             "home_space_id": null,
                      *             "installed_in": [
                      *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
@@ -17260,6 +17290,7 @@ export interface operations {
                      *           "used_by_agents": 2,
                      *           "auto_installed": false,
                      *           "forked_from": null,
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
                      *         }
@@ -17689,6 +17720,49 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    movePackageHome: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Destination space id (`spc_…`), or `null` for the organization catalog. */
+                    home_space_id: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The package resource, with its new `home_space_id`. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDetail"] | components["schemas"]["OrgPackageItemDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listPackageFiles: {
@@ -20534,6 +20608,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The space is the home of one or more packages (`space_homes_packages`); their ids are listed in the problem's `packages` extension. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     updateSpace: {

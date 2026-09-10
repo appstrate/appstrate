@@ -16,7 +16,7 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
-import { usePermissions } from "../hooks/use-permissions";
+import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState } from "../components/page-states";
@@ -203,6 +203,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const uninstallMutation = useTogglePackageInstall();
   const currentSpaceId = useCurrentSpaceId();
   const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
+  // The package's own detail response is the authority on its home. NOT
+  // collapsed to `null`: the response always carries the field, so `null` means
+  // "the organization catalog" and `undefined` means "not loaded yet" — reading
+  // an unloaded detail as an org-catalog package hands the caller the wrong gate.
+  const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
+  const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
     type: "deletePackage" | "uninstallPackage";
@@ -297,6 +303,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     source: source ?? ("local" as const),
     type,
     version,
+    homeSpaceName,
   };
 
   // ── Render ──
@@ -382,6 +389,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
+                homeSpaceId={homeSpaceId}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}

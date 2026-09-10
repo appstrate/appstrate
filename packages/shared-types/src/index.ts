@@ -590,6 +590,13 @@ export interface AgentDetail {
   /** Authoring history: withheld from a summary read, with `version_count`. */
   forked_from?: string | null;
   /**
+   * The space whose `agents:write` governs this agent (`packages.home_space_id`);
+   * `null` is the organization catalog. Always emitted, INCLUDING on a summary
+   * read: `null` is a meaning of its own here, so an optional field would make
+   * "withheld" and "organization catalog" the same absence.
+   */
+  home_space_id: string | null;
+  /**
    * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
    * platform default when it declares none) clamped to this deployment's
    * `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with
@@ -614,6 +621,12 @@ export interface OrgPackageItem extends BasePackageListItem {
   updatedAt: string;
   used_by_agents: number;
   auto_installed: boolean;
+  /**
+   * The space whose `<type>:write` governs this package
+   * (`packages.home_space_id`); `null` is the organization catalog, writable by
+   * owners and admins only. Always emitted by the org-package mappers.
+   */
+  home_space_id: string | null;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is

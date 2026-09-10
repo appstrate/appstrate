@@ -11,6 +11,7 @@ import {
   packageAccessSpaces,
   packagePermission,
   managesOrgCatalog,
+  placementGrantsRead,
 } from "../lib/package-access.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -43,6 +44,7 @@ export function createLibraryRouter() {
         type: packages.type,
         installedAnywhere: sql<boolean>`EXISTS (SELECT 1 FROM ${spacePackages} sp INNER JOIN ${spaces} s ON s.id = sp.space_id WHERE sp.package_id = ${packages.id} AND s.org_id = ${orgId})`,
         source: packages.source,
+        homeSpaceId: packages.homeSpaceId,
         draftManifest: packages.draftManifest,
         spaceId: spacePackages.spaceId,
       })
@@ -65,6 +67,7 @@ export function createLibraryRouter() {
         id: string;
         type: string;
         source: string;
+        home_space_id: string | null;
         name: string;
         description: string;
         installed_in: string[];
@@ -74,10 +77,14 @@ export function createLibraryRouter() {
     for (const row of rows) {
       const readable = readableSpaceIds.get(row.type);
       if (!readable?.size) continue;
-      const readableInstallation = row.spaceId && readable.has(row.spaceId);
-      if (row.spaceId && !readableInstallation && row.source !== "system") continue;
-      if (!row.spaceId && row.source !== "system" && !(orgCatalogAdmin && !row.installedAnywhere))
-        continue;
+      const readableInstallation = !!row.spaceId && readable.has(row.spaceId);
+      // Installed where the caller reads, or homed there — the same rule the
+      // detail routes apply, from the one predicate that states it.
+      const placed = placementGrantsRead(row, row.spaceId ? [row.spaceId] : [], readable);
+      // A package with no home and no reachable installation is the org
+      // catalog, which owners and admins also list.
+      const orgCatalogEntry = !row.spaceId && orgCatalogAdmin && !row.installedAnywhere;
+      if (!placed && row.source !== "system" && !orgCatalogEntry) continue;
       let entry = pkgMap.get(row.id);
       if (!entry) {
         const m = asRecord(row.draftManifest);
@@ -85,6 +92,7 @@ export function createLibraryRouter() {
           id: row.id,
           type: row.type,
           source: row.source,
+          home_space_id: row.homeSpaceId,
           name: typeof m.display_name === "string" ? m.display_name : row.id,
           description: typeof m.description === "string" ? m.description : "",
           installed_in: [],

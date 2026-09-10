@@ -144,6 +144,13 @@ export interface CreateItemInput {
   description?: string;
   content: string;
   createdBy?: string;
+  /**
+   * The space whose `<type>:write` will govern this package
+   * (`packages.home_space_id`). Every caller that runs inside a space context
+   * passes it; `null` is the organization catalogue, writable by owners and
+   * admins only — the shape an org-level import with no space has.
+   */
+  homeSpaceId: string | null;
 }
 
 /**
@@ -177,6 +184,7 @@ export async function createOrgItem(
       .values({
         id: packageId,
         orgId,
+        homeSpaceId: item.homeSpaceId,
         type: cfg.type,
         source: "local",
         draftManifest: finalManifest,
@@ -286,9 +294,18 @@ export async function listOrgItems(
   // "system always shows" branch. Used by the agent editor's integration
   // picker so it only offers usable integrations (server-side filter — the
   // full catalogue can be large).
+  // The catalogue branch mirrors `placementGrantsRead` (`lib/package-access.ts`,
+  // RBAC spec §6.9): installed here OR homed here. Without the home half a
+  // package this space governs but has uninstalled disappears from its own
+  // type's index page while staying editable — write without read.
+  // `activeOnly` stays install-only: the home is not a usable instance.
   const installFilter = opts?.activeOnly
     ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
-    : or(eq(packages.source, "system"), isNotNull(spacePackages.packageId));
+    : or(
+        eq(packages.source, "system"),
+        isNotNull(spacePackages.packageId),
+        eq(packages.homeSpaceId, spaceId),
+      );
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
   // projected: the list mapper never reads it, and it is by far the largest
   // column on the row.
@@ -304,6 +321,7 @@ export async function listOrgItems(
       updatedAt: packages.updatedAt,
       autoInstalled: packages.autoInstalled,
       forkedFrom: packages.forkedFrom,
+      homeSpaceId: packages.homeSpaceId,
       lockVersion: packages.lockVersion,
     })
     .from(packages)
@@ -343,6 +361,7 @@ export async function listOrgItems(
       version: typeof m.version === "string" ? m.version : null,
       auto_installed: row.autoInstalled,
       forked_from: row.forkedFrom ?? null,
+      home_space_id: row.homeSpaceId,
     };
   });
 }
@@ -367,6 +386,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
   return {
     id: data.id,
     orgId: data.orgId,
+    home_space_id: data.homeSpaceId,
     name: getPackageDisplayName(data),
     description: m.description ?? null,
     content: data.draftContent,

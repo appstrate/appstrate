@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, asc, desc } from "drizzle-orm";
+import { and, eq, asc, desc } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
-import { spaces, files, uploads, runs, organizations } from "@appstrate/db/schema";
-import { invalidRequest, notFound } from "../lib/errors.ts";
+import { spaces, files, uploads, runs, organizations, packages } from "@appstrate/db/schema";
+import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -185,7 +185,10 @@ export async function updateSpace(
   return space;
 }
 
-/** Delete a space. Throws 400 if default, 404 if not found. */
+/**
+ * Delete a space. Throws 400 if default, 404 if not found, 409 if it is the
+ * home of any package (RBAC spec §6.9).
+ */
 export async function deleteSpace(orgId: string, spaceId: string) {
   await db.transaction(async (tx) => {
     // Use the same org-first lock order as file/upload writes, then lock the
@@ -209,6 +212,28 @@ export async function deleteSpace(orgId: string, spaceId: string) {
     if (!space) throw notFound("Space not found");
     if (space.isDefault) throw invalidRequest("Cannot delete default space");
 
+    // A homed package's write authority IS this space (`packages.home_space_id`,
+    // `ON DELETE RESTRICT`), so the row cannot follow the space out. Re-homing
+    // it here would silently widen or narrow who may edit it, and deleting it
+    // would destroy a catalog entry other spaces are running. Name the packages
+    // and let the caller move them: `PATCH /api/packages/{scope}/{name}`.
+    // Inline shadow rows never appear here on their own: they carry no home at
+    // all, so a run in this space cannot make it undeletable.
+    const homed = await tx
+      .select({ id: packages.id })
+      .from(packages)
+      .where(and(eq(packages.orgId, orgId), eq(packages.homeSpaceId, spaceId)))
+      .orderBy(asc(packages.id));
+    if (homed.length > 0) {
+      throw conflict(
+        "space_homes_packages",
+        `Cannot delete this space: it is the home of ${homed.length} package(s) — ${homed
+          .map((row) => row.id)
+          .join(", ")}. Move them to another space first.`,
+        { packages: homed.map((row) => row.id) },
+      );
+    }
+
     const docRows = await tx
       .select({ storageKey: files.storageKey, size: files.size })
       .from(files)
@@ -227,11 +252,11 @@ export async function deleteSpace(orgId: string, spaceId: string) {
     for (const r of runRows) {
       storageJobs.push(...runWorkspaceDeletionJobs(r.id, "space_deleted"));
     }
-    // No package artifacts to enumerate here: `packages` is ORG-scoped (it has
-    // no `space_id`), so this cascade drops only the `space_packages`
-    // join rows — the `agent-packages` / `library-packages` objects stay owned
-    // by the org and are purged by `deleteOrganization`. Verified against
-    // `packages/db/src/schema/packages.ts`.
+    // No package artifacts to enumerate here. A package this space HOMED made
+    // the delete a 409 above, so what the cascade still drops is only the
+    // `space_packages` join rows of packages homed elsewhere — the
+    // `agent-packages` / `library-packages` objects stay owned by the org and
+    // are purged by `deleteOrganization`.
     await enqueueStorageDeletion(tx, storageJobs);
 
     const bytes = docRows.reduce((sum, row) => sum + row.size, 0);

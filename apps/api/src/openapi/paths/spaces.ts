@@ -257,7 +257,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Delete a space",
       description:
-        "Delete a space and all associated end-users. The default space cannot be deleted.",
+        "Delete a space and all associated end-users. The default space cannot be deleted, and neither can a space that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move them with `PATCH /api/packages/{scope}/{name}` first.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -271,6 +271,15 @@ export const spacesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The space is the home of one or more packages (`space_homes_packages`); their ids are listed in the problem's `packages` extension.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

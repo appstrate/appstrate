@@ -10,6 +10,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { hasPackageAccess } from "./space-packages.ts";
+import { isPackageReadableInSpace } from "../lib/package-access.ts";
 
 interface DbPackageRow {
   id: string;
@@ -147,6 +148,10 @@ export async function getPackage(
  * System packages are reachable from every space; everything else needs an
  * installed `space_packages` row (`hasPackageAccess`).
  * Returns null if agent not found OR access denied (404 semantics — no info leak).
+ *
+ * This is the RUN-side gate: an agent runs in the space that installed it. A
+ * plain READ of the agent goes through {@link getPackageForRead}, which the
+ * home also opens.
  */
 export async function getPackageWithAccess(
   id: string,
@@ -157,6 +162,24 @@ export async function getPackageWithAccess(
   if (!agent) return null;
 
   if (!(await hasPackageAccess({ orgId, spaceId }, id))) return null;
+
+  return agent;
+}
+
+/**
+ * {@link getPackageWithAccess} for a READ rather than a run: the agent's HOME
+ * grants it too, so an author keeps sight of an agent installed only in spaces
+ * they cannot reach (RBAC spec §6.9). Same 404 semantics.
+ */
+export async function getPackageForRead(
+  id: string,
+  orgId: string,
+  spaceId: string,
+): Promise<LoadedPackage | null> {
+  const agent = await getPackage(id, orgId);
+  if (!agent) return null;
+
+  if (!(await isPackageReadableInSpace(spaceId, id))) return null;
 
   return agent;
 }

@@ -439,6 +439,9 @@ export async function importBundle(
         .values({
           id: packageId,
           orgId: scope.orgId,
+          // The importing space owns what it imports: it is the home whose
+          // `<type>:write` governs the package from here on.
+          homeSpaceId: scope.spaceId,
           type: parsedZip.type,
           source: "local",
           draftManifest: parsedZip.manifest,
@@ -482,6 +485,7 @@ export async function importBundle(
         files: parsedZip.files,
         zipBuffer: Buffer.from(getReconstructedPackage()),
         version,
+        homeSpaceId: scope.spaceId,
       });
     } catch (err) {
       // Post-install (version snapshot + storage upload) failed. If this

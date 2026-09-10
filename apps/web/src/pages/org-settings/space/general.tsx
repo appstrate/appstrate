@@ -18,7 +18,7 @@ import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { RoleCatalogState } from "../../../components/role-catalog-state";
 import { SpaceRoleSelect } from "../../../components/space-role-select";
 import { useSpaceRoleOptions, type SpaceRolePreset } from "../../../hooks/use-roles";
-import type { components } from "../../../api/client";
+import { ApiError, type components } from "../../../api/client";
 import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
@@ -276,7 +276,16 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
                 setConfirmOpen(false);
                 navigate("/org-settings/spaces");
               },
-              onError: (error) => toast.error(getErrorMessage(error)),
+              // A space that homes packages refuses (409 `space_homes_packages`,
+              // RBAC spec §6.9) and the detail names them — but not how to act
+              // on it, which is one move per package from its own page.
+              onError: (error) =>
+                toast.error(getErrorMessage(error), {
+                  description:
+                    error instanceof ApiError && error.code === "space_homes_packages"
+                      ? t("spaces.deleteHomesPackagesHint")
+                      : undefined,
+                }),
             },
           );
         }}

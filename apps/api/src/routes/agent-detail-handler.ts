@@ -5,7 +5,7 @@ import type { AgentManifest, AppEnv } from "../types/index.ts";
 import type { AgentDetail } from "@appstrate/shared-types";
 import {
   getPackage,
-  getPackageWithAccess,
+  getPackageForRead,
   resolveDeclaredSkills,
 } from "../services/package-catalog.ts";
 import {
@@ -126,7 +126,7 @@ export async function buildAgentDetailDto(
   const summaryOnly = agentReadIsSummary(c);
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
-    requireAccess ? getPackageWithAccess(itemId, orgId, spaceId) : getPackage(itemId, orgId),
+    requireAccess ? getPackageForRead(itemId, orgId, spaceId) : getPackage(itemId, orgId),
     getOrgItem(orgId, itemId, CONFIG_BY_TYPE.agent),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
@@ -208,6 +208,13 @@ export async function buildAgentDetailDto(
     // system agents, so making this field conditional too would leave a system
     // agent's cap undiscoverable from the API.
     effective_timeout_seconds: resolveRunTimeout(m.timeout).effectiveSeconds,
+    // Which space's `agents:write` governs this agent (`packages.home_space_id`).
+    // Emitted UNCONDITIONALLY, for the same reason as the timeout above: `null`
+    // already MEANS something here — the organization catalog, writable by
+    // owners and admins — so a withheld field and an org-catalog agent would
+    // arrive as the same absence, and a reader collapsing the two grants the
+    // catalog's authority over an agent it cannot even see the home of.
+    home_space_id: rawItem?.home_space_id ?? null,
     // The authoring history: who it was forked from, how many versions stand
     // behind it, whether the draft is ahead of them. A summary read omits it —
     // a launcher does not edit or publish.

@@ -89,6 +89,7 @@ export const libraryPaths = {
                       source: "local",
                       name: "Inbox Triage",
                       description: "Sorts incoming Gmail threads into priority buckets.",
+                      home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       installed_in: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
                     },
                   ],
@@ -101,6 +102,7 @@ export const libraryPaths = {
                       source: "system",
                       name: "Gmail",
                       description: "Google Mail OAuth integration.",
+                      home_space_id: null,
                       installed_in: [
                         "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                         "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",

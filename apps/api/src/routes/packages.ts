@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { makePermissionGuard } from "@appstrate/core/permissions";
+import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
@@ -13,7 +13,7 @@ import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
-import { installPackage, hasPackageAccess } from "../services/space-packages.ts";
+import { installPackage } from "../services/space-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -69,6 +69,9 @@ import {
   assertExistingPackageInstallAccess,
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
+  isPackageReadableInSpace,
+  managesOrgCatalog,
+  packageAccessSpaces,
   packagePermission,
   requireAgentRead,
 } from "../lib/package-access.ts";
@@ -288,6 +291,15 @@ export const packageJsonUpdateSchema = z
  * no override is chosen — so `version` is the only member and it is optional.
  */
 export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
+
+/**
+ * Body of `PATCH /api/packages/{scope}/{name}` — the package's home space,
+ * i.e. the space whose `<type>:write` governs it (`packages.home_space_id`).
+ * `null` hands it to the organization catalog, which only owners and admins
+ * may then write. `.strict()` so this route can never be mistaken for the
+ * draft editor: the draft is `PUT`, with its optimistic lock.
+ */
+export const packageHomeSpaceSchema = z.object({ home_space_id: z.string().nullable() }).strict();
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -708,7 +720,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const createdItem = await createOrgItem(
         orgId,
-        { id: packageId, content, createdBy: user.id },
+        // Created inside a space: that space is the package's home and its
+        // `<type>:write` is what will authorize every later edit.
+        { id: packageId, content, createdBy: user.id, homeSpaceId: c.get("spaceId") },
         rcfg.cfg,
         validatedManifest as Record<string, unknown>,
       ).catch((err: unknown) => {
@@ -822,6 +836,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           description: parsed.description,
           content: parsed.content,
           createdBy: user.id,
+          homeSpaceId: c.get("spaceId"),
         },
         rcfg.cfg,
         parsed.manifest,
@@ -967,8 +982,8 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     const spaceId = c.get("spaceId");
     const itemId = getItemId(c);
 
-    // Enforce space-level access: all spaces can only access installed packages
-    if (!(await hasPackageAccess({ orgId, spaceId }, itemId))) {
+    // Space-level visibility: installed here, homed here, or a system package.
+    if (!(await isPackageReadableInSpace(spaceId, itemId))) {
       throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
@@ -1521,19 +1536,19 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  *
  * Two gates that answer different questions, both required:
  *
- * - `hasPackageAccess` is VISIBILITY: "is this a system package, or installed
- *   in THIS space?" (it also excludes ephemeral shadows). It says
- *   nothing about what the caller is ALLOWED to do — a credential with
- *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
- *   had to undo across the rest of the package surface.
+ * - `isPackageReadableInSpace` is VISIBILITY: "is this a system package,
+ *   installed in THIS space, or homed here?" (it also excludes ephemeral
+ *   shadows). It says nothing about what the caller is ALLOWED to do — a
+ *   credential with `scopes: []` passes it. Believing otherwise is exactly the
+ *   mistake #1124 had to undo across the rest of the package surface.
  * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
  *   `<type>:read` scope. Both file-explorer routes are registered on the
  *   router ROOT, so the RBAC resource is not knowable from the path — only
  *   from the row — which is why the guard runs here and not as route-level
  *   middleware.
  *
- * The row read in between adds the org boundary (`hasPackageAccess` does not
- * filter `orgId`) and fetches the draft columns the overlay needs.
+ * The row read in between adds the org boundary (`isPackageReadableInSpace`
+ * does not filter `orgId`) and fetches the draft columns the overlay needs.
  *
  * Authorizing HERE rather than at each call site is what makes the ordering
  * safe. Both handlers call this before they touch a validator, so no
@@ -1551,7 +1566,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
   const orgId = c.get("orgId");
   const spaceId = c.get("spaceId");
 
-  if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
+  if (!(await isPackageReadableInSpace(spaceId, packageId))) {
     throw notFound("Package not found");
   }
 
@@ -1589,15 +1604,15 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * `<type>:read`, remove the member from the org, or uninstall the package from
  * the space, and the cached 200 keeps being handed out until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
- * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
- * `requirePackageReadPermission` run on every hit.
+ * round-trip re-enters `loadFileExplorerPackage`, so `isPackageReadableInSpace`
+ * and `requirePackageReadPermission` run on every hit.
  *
  * The revalidation this costs is nearly free: `resolvePackageFileValidator`
  * answers a version's 304 from one DB read, with no storage GET and no unzip.
  * That is the entire reason it is split out from `readPackageSnapshot`.
  *
  * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
- * `X-Space-Id` (via `hasPackageAccess`) while the URL does not mention
+ * `X-Space-Id` (via `isPackageReadableInSpace`) while the URL does not mention
  * either. Without it, switching spaces in the SPA re-issues an identical
  * URL and the browser answers from cache — showing space B an artifact
  * that is only installed in space A.
@@ -1681,11 +1696,14 @@ export function createPackagesRouter() {
     // Permission resource matches the route path (e.g. "skills", "agents", "integrations")
     const resource = path as import("../lib/permissions.ts").Resource;
     const readGuard = requirePermission(resource, "read");
+    // Creation only. Every route that mutates an EXISTING package is guarded by
+    // `requirePackageInOrg()` alone: authority is the package's home space, and
+    // a second guard against the current space would re-impose the conjunction
+    // the home rule replaced (RBAC spec §6.9).
     const writeGuard = requirePermission(resource, "write");
-    const deleteGuard = requirePermission(resource, "delete");
 
-    // `readGuard` on every GET: the install/system visibility check inside the
-    // handlers (`hasPackageAccess`) answers "is this package reachable from
+    // `readGuard` on every GET: the visibility check inside the handlers
+    // (`isPackageReadableInSpace`) answers "is this package reachable from
     // this space", never "may this caller read it". Without the guard a
     // credential scoped without `<type>:read` still gets the manifest and, on
     // the detail route, the full `content` (SKILL.md / prompt.md).
@@ -1706,19 +1724,16 @@ export function createPackagesRouter() {
     router.post(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
       requirePackageInOrg(),
-      writeGuard,
       makeCreateVersionHandler(rcfg),
     );
     router.post(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version/restore`,
       requirePackageInOrg(),
-      writeGuard,
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
       requirePackageInOrg("delete"),
-      deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
     router.get(
@@ -1735,16 +1750,10 @@ export function createPackagesRouter() {
       rcfg.cfg.type === "agent" ? requireAgentRead : readGuard,
       rcfg.getHandler ?? makeGetHandler(rcfg),
     );
-    router.put(
-      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
-      requirePackageInOrg(),
-      writeGuard,
-      makeUpdateHandler(rcfg),
-    );
+    router.put(`/${path}/${SCOPED_PACKAGE_ROUTE}`, requirePackageInOrg(), makeUpdateHandler(rcfg));
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg("delete"),
-      deleteGuard,
       makeDeleteHandler(rcfg),
     );
     // There is deliberately no unscoped `/:id` variant.
@@ -1766,6 +1775,77 @@ export function createPackagesRouter() {
     // its message.
   }
 
+  // --- Move a package to another home space ---
+  //
+  // Without it a package is a prisoner of the space it was born in: write
+  // authority follows `home_space_id` and nothing else could change it.
+  //
+  // No route-level permission guard: like every other mutation of an existing
+  // package, the authority is the home space, which `assertPackageMutationAccess`
+  // is the one reader of. It runs before the body is parsed so a caller who may
+  // not touch this package learns nothing about the body's shape.
+  router.patch(`/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+
+    const accessible = await packageAccessSpaces(c);
+    // Authority in the CURRENT home first — 404 for an id the caller cannot
+    // reach at all, 403 when they can see it but do not govern it. It hands
+    // back the row, so the type and the old home are not read twice.
+    const pkg = await assertPackageMutationAccess(c, packageId, "write", accessible);
+
+    const body = await readJsonBody(c, packageHomeSpaceSchema);
+    const target = body.home_space_id;
+
+    if (target === null) {
+      // Handing a package to the organization catalog widens who may write it
+      // to every owner and admin — their own decision to make, nobody else's.
+      if (!managesOrgCatalog(c)) {
+        reportPermissionDenial(c, packagePermission(pkg.type, "write"));
+        throw forbidden(
+          "Moving a package to the organization catalog requires owner or admin authority.",
+        );
+      }
+    } else {
+      const destination = accessible.find((space) => space.id === target);
+      // A space the caller cannot reach must not be confirmed to exist — and the
+      // 404 stays silent, since naming the permission would confirm it.
+      if (!destination) throw notFound(`Space '${target}' not found`);
+      if (!destination.permissions.has(packagePermission(pkg.type, "write"))) {
+        reportPermissionDenial(c, packagePermission(pkg.type, "write"));
+        throw forbidden(
+          `Moving '${packageId}' into that space requires '${packagePermission(pkg.type, "write")}' there.`,
+        );
+      }
+    }
+
+    if (target !== pkg.homeSpaceId) {
+      // `updatedAt` is deliberately NOT stamped: it is the DRAFT's timestamp,
+      // and `has_unarchived_changes` compares it against the latest version's
+      // (`computeHasUnpublishedChanges`). Moving the home changes no bytes, so
+      // touching it would report a fully-published package as dirty.
+      await db
+        .update(packages)
+        .set({ homeSpaceId: target })
+        .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+      await recordAuditFromContext(c, {
+        action: "package.home_space_changed",
+        resourceType: "package",
+        resourceId: packageId,
+        before: { home_space_id: pkg.homeSpaceId },
+        after: { home_space_id: target },
+      });
+    }
+
+    const rcfg = ROUTE_CONFIGS[pkg.type];
+    const detail = rcfg ? await loadPackageDetailDto(c, rcfg, packageId, orgId) : null;
+    if (!detail) {
+      logger.error("Moved package could not be re-read", { packageId, orgId });
+      throw internalError();
+    }
+    return c.json(detail);
+  });
+
   // --- Fork route ---
   router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requireAnyPackageWrite, async (c) => {
     const packageId = getItemId(c);
@@ -1781,7 +1861,16 @@ export function createPackagesRouter() {
     const source = await assertForkSourceAccess(c, packageId);
     await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
 
-    const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
+    const result = await forkPackage(
+      orgId,
+      orgSlug,
+      packageId,
+      // The fork is a NEW package in the space the caller forked from; the
+      // source's home says nothing about who may edit the copy.
+      c.get("spaceId"),
+      user.id,
+      customName,
+    );
 
     if ("code" in result) {
       switch (result.code) {
@@ -2049,7 +2138,7 @@ export function createPackagesRouter() {
       try {
         await createOrgItem(
           orgId,
-          { id: packageId, content, createdBy: user.id },
+          { id: packageId, content, createdBy: user.id, homeSpaceId: c.get("spaceId") },
           cfg,
           manifest as Record<string, unknown>,
         );
@@ -2071,6 +2160,7 @@ export function createPackagesRouter() {
         content,
         files,
         zipBuffer: artifact,
+        homeSpaceId: c.get("spaceId"),
       });
     } catch (err) {
       const message = getErrorMessage(err);
@@ -2370,11 +2460,11 @@ export function createPackagesRouter() {
     const spaceId = c.get("spaceId");
     const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package OR installed in THIS space",
-    // the same gate the rest of the package surface applies. Without it this
-    // route served the artifact bytes of packages that are merely owned by the
-    // org and installed nowhere the caller can reach.
-    if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
+    // Visibility first — "system package, installed in THIS space, or homed
+    // here", the same gate the rest of the package read surface applies.
+    // Without it this route served the artifact bytes of packages that are
+    // merely owned by the org and placed nowhere the caller can reach.
+    if (!(await isPackageReadableInSpace(spaceId, packageId))) {
       throw notFound("Package not found");
     }
 

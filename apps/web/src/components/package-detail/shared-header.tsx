@@ -24,6 +24,12 @@ interface SharedHeaderDetail {
   version?: string | null;
   /** Raw AFPS manifest `icon` (image URL or Iconify id); integrations only. */
   icon?: string;
+  /**
+   * Name of the space this package lives in — the one whose permissions decide
+   * who may edit it. Absent for the org catalog and for a home the reader
+   * cannot enter.
+   */
+  homeSpaceName?: string | null;
 }
 
 export function SharedHeader({
@@ -68,6 +74,14 @@ export function SharedHeader({
             {detail.source === "system" && (
               <span title={t("packages.sourceBuiltIn", { ns: "settings" })}>
                 <ShieldCheck className="text-muted-foreground h-4 w-4" />
+              </span>
+            )}
+            {detail.homeSpaceName && (
+              <span
+                className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
+                title={t("packages.homeSpaceHint", { ns: "settings" })}
+              >
+                {t("packages.homeSpace", { ns: "settings", space: detail.homeSpaceName })}
               </span>
             )}
             {detail.version && (

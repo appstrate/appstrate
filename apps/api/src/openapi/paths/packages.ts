@@ -695,6 +695,7 @@ export const packagesPaths = {
                     used_by_agents: 2,
                     auto_installed: false,
                     forked_from: null,
+                    home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
                   },
@@ -1210,7 +1211,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get agent detail",
       description:
-        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
+        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1544,6 +1545,62 @@ export const packagesPaths = {
             },
           },
         },
+      },
+    },
+  },
+  "/api/packages/{scope}/{name}": {
+    patch: {
+      operationId: "movePackageHome",
+      tags: ["Packages"],
+      summary: "Move a package to another home space",
+      description:
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. This route touches nothing else: the draft is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["home_space_id"],
+              properties: {
+                home_space_id: {
+                  type: ["string", "null"],
+                  description:
+                    "Destination space id (`spc_…`), or `null` for the organization catalog.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The package resource, with its new `home_space_id`.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                oneOf: [
+                  { $ref: "#/components/schemas/AgentDetail" },
+                  { $ref: "#/components/schemas/OrgPackageItemDetail" },
+                ],
+                description:
+                  "The moved package resource — same shape as its GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`). No follow-up GET needed.",
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
