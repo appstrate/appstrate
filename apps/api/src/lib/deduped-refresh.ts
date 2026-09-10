@@ -32,20 +32,31 @@
 
 import { withRedisLock } from "./distributed-lock.ts";
 
-/** Distributed-lock TTL in seconds — sized as `30s network timeout` + slack. */
+/**
+ * Distributed-lock lease in seconds — sized as `30s network timeout` + slack.
+ * A watchdog renews it while the exchange runs, so this is not a cap on the
+ * critical section: it is how long a CRASHED holder's lock lingers before a
+ * peer can reclaim it.
+ */
 const REFRESH_LOCK_TTL_SECONDS = 45;
 /**
- * How long to wait for the distributed lock before proceeding unlocked.
- * Derived from the TTL so the two cannot drift apart: a waiter gives up only
- * once the holder's lock has definitively expired (holder presumed dead),
- * never at the holder's worst-case exchange duration. Trade-off: a sidecar
- * caller queued behind a wedged holder waits up to ~50 s before proceeding,
- * plus the 30 s exchange timeout in `@appstrate/connect`. A forced caller that
- * arrives while a proactive flight is already exchanging pays that once, not
- * once per hop — it adopts that exchange's token rather than queueing a second
- * one behind it (see {@link dedupedRefresh}).
+ * Hard cap on how long the lock watchdog keeps renewing. Two full exchange
+ * timeouts past the lease: a holder still running then is not slow, it is
+ * wedged, and must stop renewing so the credential's refresh is not deadlocked
+ * for every other instance.
+ *
+ * `withRedisLock` derives the waiter's give-up point from this (the waiter
+ * polls until the holder's lease is guaranteed gone), so the two cannot drift
+ * apart. Trade-off: a caller queued behind a wedged holder waits up to
+ * ~2.5 min before proceeding unlocked, plus the 30 s exchange timeout in
+ * `@appstrate/connect`. Waiting is the cheaper failure — proceeding early
+ * double-spends the rotating `refresh_token` and flags a valid credential
+ * `needsReconnection`. A forced caller that arrives while a proactive flight
+ * is already exchanging pays that once, not once per hop — it adopts that
+ * exchange's token rather than queueing a second one behind it (see
+ * {@link dedupedRefresh}).
  */
-const REFRESH_LOCK_ACQUIRE_TIMEOUT_MS = REFRESH_LOCK_TTL_SECONDS * 1_000 + 5_000;
+const REFRESH_LOCK_MAX_HOLD_SECONDS = 90;
 
 interface DedupedRefreshOptions<T> {
   /** Redis lock key (e.g. `oauth-refresh:${id}` / `intg-refresh:${id}`). */
@@ -138,7 +149,7 @@ export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): 
       opts.lockKey,
       {
         ttlSeconds: REFRESH_LOCK_TTL_SECONDS,
-        acquireTimeoutMs: REFRESH_LOCK_ACQUIRE_TIMEOUT_MS,
+        maxHoldSeconds: REFRESH_LOCK_MAX_HOLD_SECONDS,
         label: opts.lockLabel,
       },
       async (): Promise<FlightOutcome<T>> => {
