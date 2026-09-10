@@ -137,6 +137,19 @@ export async function runSelfUpdate(opts: SelfUpdateOptions = {}): Promise<SelfU
     };
   }
 
+  if (result.status === "refused-downgrade") {
+    // Exit 0, not a failure code: `self-update` runs unattended (cron, CI
+    // images), and a box that is simply ahead of the newest release must not
+    // start failing those. The refusal is loud in the message instead, and
+    // names the flag that overrides it.
+    return {
+      exitCode: SELF_UPDATE_EXIT.OK,
+      message:
+        `Already on appstrate ${result.version}, which is NEWER than ${target}. ` +
+        `Refusing to downgrade — pass --force to install ${target} anyway.`,
+      detail: result,
+    };
+  }
   if (result.status === "already-up-to-date") {
     return {
       exitCode: SELF_UPDATE_EXIT.OK,

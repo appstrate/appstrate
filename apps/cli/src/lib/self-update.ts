@@ -44,13 +44,20 @@ const RELEASE_URL_BASE = "https://github.com/appstrate/appstrate/releases";
  * `release.yml` can steer an update.
  */
 const RELEASES_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases";
-const RELEASES_PAGE_SIZE = 30;
 /**
- * Pages scanned before giving up: 150 releases. Every platform cycle creates
- * one `v*` plus at most three npm Releases, so a `v*` sits inside the first
- * page in practice; the cap only bounds the API calls when it does not.
+ * 100 is the GitHub API maximum. Every page is walked before the highest
+ * version is picked (see `resolveTargetVersion`), so a larger page is strictly
+ * fewer requests: two calls cover the same 200 releases a 30-per-page walk
+ * would spend seven on.
  */
-const RELEASES_MAX_PAGES = 5;
+const RELEASES_PAGE_SIZE = 100;
+/**
+ * Pages scanned before giving up: 200 releases, ~50 platform cycles back (each
+ * creates one `v*` plus at most three npm Releases). The cap bounds the API
+ * calls — GitHub's unauthenticated limit is 60 req/h per IP, and every
+ * resolution now pays for the full walk rather than stopping early.
+ */
+const RELEASES_MAX_PAGES = 2;
 const PLATFORM_TAG = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 function releasesPageUrl(page: number): string {
@@ -375,18 +382,22 @@ export async function resolveTargetVersion(
     }
     return v;
   }
-  // Newest first, as the API orders them. Only a platform `v<semver>` release
-  // carries the CLI binaries; the npm workflows (`cli@`, `core@`,
-  // `afps-shared@`) publish their own Releases and are skipped by tag, the
-  // same way `releases/latest` skips drafts and prereleases. Within the newest
-  // page that holds any candidate, the HIGHEST version wins, not the newest by
-  // creation date: a hotfix for an older line published after a newer release
-  // must not become "latest".
+  // The API orders releases by creation date, newest first. Only a platform
+  // `v<semver>` release carries the CLI binaries; the npm workflows (`cli@`,
+  // `core@`, `afps-shared@`) publish their own Releases and are skipped by
+  // tag, the same way `releases/latest` skips drafts and prereleases.
+  //
+  // EVERY page is collected before the HIGHEST version wins, not the highest
+  // within the first page that holds a candidate: creation order and version
+  // order diverge whenever a hotfix is cut for an older line. `v1.1.0` ships,
+  // enough npm Releases accumulate to fill a page, then `v1.0.1` is published
+  // for the old line — it now sits alone on page 1 while `v1.1.0` sits on
+  // page 2. Stopping at the first page with a candidate hands back `v1.0.1`
+  // and downgrades every user, which is exactly what this walk prevents.
   const skipped: string[] = [];
+  const candidates: string[] = [];
   for (let page = 1; page <= RELEASES_MAX_PAGES; page++) {
     const releases = await fetchReleasesPage(deps, page);
-    if (releases.length === 0) break;
-    const candidates: string[] = [];
     for (const release of releases) {
       if (!release || typeof release !== "object") continue;
       const { tag_name, draft, prerelease } = release as {
@@ -399,10 +410,13 @@ export async function resolveTargetVersion(
       if (PLATFORM_TAG.test(tag_name)) candidates.push(tag_name);
       else skipped.push(tag_name);
     }
-    if (candidates.length > 0) {
-      candidates.sort(compareSemver);
-      return normalizeVersion(candidates[candidates.length - 1]!);
-    }
+    // GitHub fills every page but the last, so a short page is the end of the
+    // list: stop instead of spending a request on a page known to be empty.
+    if (releases.length < RELEASES_PAGE_SIZE) break;
+  }
+  if (candidates.length > 0) {
+    candidates.sort(compareSemver);
+    return normalizeVersion(candidates[candidates.length - 1]!);
   }
   throw new Error(
     `No platform v* release among the newest ${skipped.length} GitHub Releases` +
@@ -469,9 +483,13 @@ interface PerformCurlUpdateOptions {
 }
 
 export interface PerformCurlUpdateResult {
-  /** `"updated"` when a binary was written; `"already-up-to-date"` when no-op. */
-  status: "updated" | "already-up-to-date";
-  /** Final installed version. */
+  /**
+   * `"updated"` when a binary was written; `"already-up-to-date"` when the
+   * target equals the running version; `"refused-downgrade"` when the target
+   * is OLDER than it. Both no-op statuses leave the binary untouched.
+   */
+  status: "updated" | "already-up-to-date" | "refused-downgrade";
+  /** Final installed version — the running one for both no-op statuses. */
   version: string;
   /** Destination path that was atomic-replaced (only when status === "updated"). */
   destination?: string;
@@ -497,8 +515,15 @@ export async function performCurlUpdate(
     );
   }
 
-  if (!opts.force && compareSemver(current, target) === 0) {
-    return { status: "already-up-to-date", version: current };
+  // Never move backwards. The resolver picks the highest published `v*`, so a
+  // target below the running version means either a `--release` naming an older
+  // line or a release that vanished from the list — in both cases installing it
+  // strands the user on the older binary, and the next run would resolve the
+  // same target and keep them there. `--force` is the deliberate override.
+  if (!opts.force) {
+    const cmp = compareSemver(current, target);
+    if (cmp === 0) return { status: "already-up-to-date", version: current };
+    if (cmp > 0) return { status: "refused-downgrade", version: current };
   }
 
   // Require minisign on PATH. Same UX as bootstrap.sh — fail closed; a
