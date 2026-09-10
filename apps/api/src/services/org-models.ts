@@ -1067,13 +1067,22 @@ type ModelListingFetchResult =
  * The guarded `GET <baseUrl>/models` request, shared by {@link testModelConfig}
  * (reads the status) and `listServedModels` (parses the body): the SSRF
  * pre-flight, the pinned transport and the pre-response failure mapping exist once.
+ *
+ * `pageQuery` asks for a page other than the first, spending the cursor the
+ * previous page published. It is appended to the URL the shape builds rather
+ * than merged into it: the request is always derived from the base URL, so the
+ * cursor cannot accumulate across pages and the first page stays byte-identical
+ * to a request that carries none.
  */
-export async function fetchModelListing(config: {
-  apiShape: string;
-  baseUrl: string;
-  apiKey: string;
-  providerId?: string;
-}): Promise<ModelListingFetchResult> {
+export async function fetchModelListing(
+  config: {
+    apiShape: string;
+    baseUrl: string;
+    apiKey: string;
+    providerId?: string;
+  },
+  pageQuery?: { name: string; value: string },
+): Promise<ModelListingFetchResult> {
   // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
   // DNS-rebind host gate) before the fetch: a public hostname resolving to a
   // private/loopback/link-local address is refused, fail-closed, with the same
@@ -1088,7 +1097,10 @@ export async function fetchModelListing(config: {
     };
   }
 
-  const { url, headers } = buildModelTestRequest(config);
+  const { url: firstPageUrl, headers } = buildModelTestRequest(config);
+  const url = pageQuery
+    ? `${firstPageUrl}${firstPageUrl.includes("?") ? "&" : "?"}${pageQuery.name}=${encodeURIComponent(pageQuery.value)}`
+    : firstPageUrl;
 
   const start = performance.now();
   try {
