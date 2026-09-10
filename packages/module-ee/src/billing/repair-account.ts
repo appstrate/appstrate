@@ -36,6 +36,23 @@
  * reconstruction would be WRONG on an existing account (a Stripe renewal resets
  * `credits_used` to 0 while historical usage records remain), which is why this
  * refuses to touch an org that already has one.
+ *
+ * ALL OR NOTHING. The guard, the provision and the debt run in ONE transaction.
+ * Split across two commits, an interruption between them (Ctrl-C, a pool blip, a
+ * pod eviction) left the account provisioned and the debt unapplied — and the
+ * guard below then reported `already_provisioned` forever, writing the org's
+ * entire debt off silently while refusing to touch it again. The atomic form
+ * makes that state unreachable: a repair either lands whole or leaves no trace,
+ * so re-running it after any failure is always correct.
+ *
+ * WHY THE GUARD STAYS "DOES A ROW EXIST", rather than "does `credits_used`
+ * already cover the records". It cannot tell the two apart: a subscription
+ * cancellation downgrades the account to free with `credits_used = 0`,
+ * `period_end = NULL` and `stripe_subscription_id = NULL` while the historical
+ * usage records survive — byte for byte the signature of "provisioned, debt not
+ * applied". A guard keyed on the shortfall would re-charge that org for
+ * everything it ever spent. Existence is the only safe test, and with the
+ * transaction above it is also a sufficient one.
  */
 
 import { eq, sql } from "drizzle-orm";
@@ -50,44 +67,66 @@ export type RepairOutcome =
   | { status: "repaired"; creditQuota: number; creditsApplied: number };
 
 /**
+ * Optional test seam for {@link repairBillingAccount}. `onBeforeCommit` runs
+ * INSIDE the transaction, after the debt has been applied: throwing from it is
+ * how a test reproduces an interrupted repair and proves nothing is left behind.
+ */
+export interface RepairHooks {
+  onBeforeCommit?: () => Promise<void>;
+}
+
+/**
  * Re-provision a missing billing account and apply the usage recorded while it
- * was missing. Refuses (without writing anything) when the account already
- * exists — there is nothing to repair, and reconstructing `credits_used` from
- * usage records would clobber a legitimate renewal reset.
+ * was missing, in one transaction. Refuses (without writing anything) when the
+ * account already exists — there is nothing to repair, and reconstructing
+ * `credits_used` from usage records would clobber a legitimate renewal reset.
  */
 export async function repairBillingAccount(
   orgId: string,
   ownerEmail: string,
+  hooks?: RepairHooks,
 ): Promise<RepairOutcome> {
   const db = getEeDb();
 
-  const [existing] = await db
-    .select({ orgId: billingAccounts.orgId })
-    .from(billingAccounts)
-    .where(eq(billingAccounts.orgId, orgId));
-  if (existing) return { status: "already_provisioned" };
+  const outcome = await db.transaction(async (tx): Promise<RepairOutcome> => {
+    const [existing] = await tx
+      .select({ orgId: billingAccounts.orgId })
+      .from(billingAccounts)
+      .where(eq(billingAccounts.orgId, orgId));
+    if (existing) return { status: "already_provisioned" };
 
-  const { creditQuota } = await provisionBillingAccount(
-    orgId,
-    normalizeEmail(ownerEmail),
-    ownerEmail,
-  );
+    const { creditQuota } = await provisionBillingAccount(
+      tx,
+      orgId,
+      normalizeEmail(ownerEmail),
+      ownerEmail,
+    );
 
-  // Apply the debt the sweep recorded but could not debit. Computed in SQL from
-  // the org's usage records so no float round-trips through JS.
-  const [applied] = await db
-    .update(billingAccounts)
-    .set({
-      creditsUsed: sql`COALESCE((
-        SELECT SUM(${orgUsageRecords.costCredits}) FROM ${orgUsageRecords}
-        WHERE ${orgUsageRecords.orgId} = ${orgId}
-      ), 0)`,
-      updatedAt: new Date(),
-    })
-    .where(eq(billingAccounts.orgId, orgId))
-    .returning({ creditsUsed: billingAccounts.creditsUsed });
+    // Apply the debt the sweep recorded but could not debit. Computed in SQL from
+    // the org's usage records so no float round-trips through JS.
+    const [applied] = await tx
+      .update(billingAccounts)
+      .set({
+        creditsUsed: sql`COALESCE((
+          SELECT SUM(${orgUsageRecords.costCredits}) FROM ${orgUsageRecords}
+          WHERE ${orgUsageRecords.orgId} = ${orgId}
+        ), 0)`,
+        updatedAt: new Date(),
+      })
+      .where(eq(billingAccounts.orgId, orgId))
+      .returning({ creditsUsed: billingAccounts.creditsUsed });
 
-  const creditsApplied = applied?.creditsUsed ?? 0;
-  logger.info("billing account repaired", { orgId, creditQuota, creditsApplied });
-  return { status: "repaired", creditQuota, creditsApplied };
+    if (hooks?.onBeforeCommit) await hooks.onBeforeCommit();
+
+    return { status: "repaired", creditQuota, creditsApplied: applied?.creditsUsed ?? 0 };
+  });
+
+  if (outcome.status === "repaired") {
+    logger.info("billing account repaired", {
+      orgId,
+      creditQuota: outcome.creditQuota,
+      creditsApplied: outcome.creditsApplied,
+    });
+  }
+  return outcome;
 }
