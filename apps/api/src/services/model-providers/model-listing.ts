@@ -13,7 +13,9 @@
  * page would hand the operator a silently short list. Following stops at
  * {@link MAX_LISTING_PAGES} pages or {@link MAX_SERVED_MODELS} models, and a
  * result cut by either cap says so (`truncated`) instead of passing for a
- * complete listing.
+ * complete listing. Each page's body is read under a byte budget
+ * ({@link MAX_LISTING_BODY_BYTES}) — the endpoint is operator-supplied, so a
+ * body that streams past it is refused rather than buffered.
  */
 
 import { fetchModelListing } from "../org-models.ts";
@@ -24,6 +26,16 @@ const MAX_SERVED_MODELS = 1000;
 
 /** Upper bound on listing requests per call — a cursor that never ends must stop. */
 const MAX_LISTING_PAGES = 10;
+
+/**
+ * Upper bound on one page's response body. The endpoint is operator-supplied
+ * (`POST /discover` takes an arbitrary `base_url_override`), so it is
+ * untrusted: `res.json()` buffers whatever it streams, and the request timeout
+ * alone bounds the duration, not the bytes. A page carrying
+ * {@link MAX_SERVED_MODELS} entries with full metadata sits an order of
+ * magnitude under this.
+ */
+const MAX_LISTING_BODY_BYTES = 4 * 1024 * 1024;
 
 /** Input modalities a listing entry or a catalog entry can advertise, in canonical order. */
 export const INPUT_MODALITIES = ["text", "image"] as const;
@@ -253,15 +265,55 @@ async function fetchListingPage(
     };
   }
 
+  const parsed = await readBoundedJson(res);
+  if (!parsed.ok) {
+    return { ok: false, error: "BAD_RESPONSE", status: res.status, message: parsed.message };
+  }
+  return { ok: true, body: parsed.body, status: res.status };
+}
+
+/**
+ * Read a response body as JSON under {@link MAX_LISTING_BODY_BYTES}, cancelling
+ * the stream the moment it crosses. Refuses rather than truncates: half a JSON
+ * document parses to nothing, and a listing that large is not one the platform
+ * would serve anyway. The budget is spent on the stream, not on a declared
+ * `content-length` — an untrusted endpoint's header is not a bound.
+ */
+async function readBoundedJson(
+  res: Response,
+): Promise<{ ok: true; body: unknown } | { ok: false; message: string }> {
+  if (res.body === null) return { ok: false, message: "Model listing is not JSON" };
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   try {
-    return { ok: true, body: await res.json(), status: res.status };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_LISTING_BODY_BYTES) {
+        await reader.cancel();
+        return {
+          ok: false,
+          message: `Model listing exceeds ${MAX_LISTING_BODY_BYTES} bytes`,
+        };
+      }
+      chunks.push(value);
+    }
   } catch {
-    return {
-      ok: false,
-      error: "BAD_RESPONSE",
-      status: res.status,
-      message: "Model listing is not JSON",
-    };
+    return { ok: false, message: "Model listing request failed" };
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) };
+  } catch {
+    return { ok: false, message: "Model listing is not JSON" };
   }
 }
 
