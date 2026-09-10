@@ -935,6 +935,17 @@ export function createIntegrationsRouter() {
     if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
+    // From here on the claims name the integration this link was minted for, so
+    // every completion this handler emits must carry it (issue #1346). A
+    // completion that identifies NOTHING is for everyone by contract
+    // (`completionMatches` — the permissive tail exists for the two pages above,
+    // which resolved neither a package nor a state), and both carriers fan out,
+    // so a context-less error from a failing Gmail link drove an unrelated
+    // ClickUp card into an error naming Gmail. `packageId` is also the only
+    // identifier a hosted-connect surface holds — the OAuth `state` is minted
+    // later, past the redirect — so it is what makes these pages reach the card
+    // that opened them and nothing else.
+    const completionDetail = { packageId: claims.package_id };
     // Resolve the integration BEFORE consuming the jti — if the auth no longer
     // exists, the capability token stays unburned so the caller can retry once
     // the integration is back, rather than being forced to re-mint.
@@ -942,11 +953,17 @@ export function createIntegrationsRouter() {
     try {
       ({ auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
     } catch {
-      return c.html(popupHtmlError("This integration is no longer available.", {}), 410);
+      return c.html(
+        popupHtmlError("This integration is no longer available.", completionDetail),
+        410,
+      );
     }
     // Single-use: burn the jti only once we know the link is actionable.
     if (!(await consumeJti(claims.jti, claims.exp))) {
-      return c.html(popupHtmlError("This connect link has already been used.", {}), 410);
+      return c.html(
+        popupHtmlError("This connect link has already been used.", completionDetail),
+        410,
+      );
     }
 
     if (auth.type === "oauth2") {
@@ -964,7 +981,10 @@ export function createIntegrationsRouter() {
       const scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
       const strategy = resolveStrategy(auth);
       if (!strategy.begin) {
-        return c.html(popupHtmlError("This integration cannot be connected.", {}), 500);
+        return c.html(
+          popupHtmlError("This integration cannot be connected.", completionDetail),
+          500,
+        );
       }
       // `begin` throws for two different reasons, and the popup must tell them
       // apart (issue #1263). Without a guard at all the throw escapes to the
@@ -1016,7 +1036,7 @@ export function createIntegrationsRouter() {
           return c.html(
             popupHtmlError(
               "This integration is not ready to be connected. Ask an administrator to finish setting it up, then open this link again.",
-              {},
+              completionDetail,
             ),
             err.status as ContentfulStatusCode,
           );
@@ -1026,7 +1046,10 @@ export function createIntegrationsRouter() {
           packageId: claims.package_id,
           authKey: claims.auth_key,
         });
-        return c.html(popupHtmlError("Could not start the connection. Please try again.", {}), 502);
+        return c.html(
+          popupHtmlError("Could not start the connection. Please try again.", completionDetail),
+          502,
+        );
       }
       return c.redirect(result.redirectUrl);
     }
