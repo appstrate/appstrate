@@ -92,19 +92,36 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
 
 ## OAuth-provider 1.7.3 rollout (drizzle `0057`, script `0011`)
 
-1. **Pre-flight, before any drizzle migration.** `0057` fills a NULL
-   `token_endpoint_auth_method` with `client_secret_basic`, which 1.7.3 then
-   enforces strictly. Count the confidential clients that have no method stored
-   — each one authenticates by putting its secret in the POST body and will be
-   answered `invalid_client`:
+1. **Pre-flight, before the 1.7.3 image is deployed.** 1.7.3 reads a stored
+   NULL `token_endpoint_auth_method` as `client_secret_basic` and then refuses
+   every other method, so a client that authenticates by putting its secret in
+   the POST body is answered `invalid_client` the moment the new code serves —
+   before `0057` runs, not because of it, since migrations apply at boot under
+   that same image. `0057` is why the count cannot wait: its fold writes
+   `client_secret_basic` into exactly these rows, and a written value is
+   indistinguishable from a registered one, so afterwards nothing enumerates
+   them. Run this while the old image is still up and **keep the rows**, not
+   just the count:
 
    ```sql
-   SELECT count(*) FROM oauth_clients
-   WHERE token_endpoint_auth_method IS NULL AND "public" = false;
+   SELECT id, client_id, "public", created_at
+   FROM oauth_clients
+   WHERE token_endpoint_auth_method IS NULL
+   ORDER BY created_at;
    ```
 
-   Non-zero → decide per client before applying: store `client_secret_post` by
-   hand, or tell the owner to move to `client_secret_basic`.
+   No `public` predicate: the column is nullable and the runtime default is read
+   from the method alone, so a row with `public` NULL breaks exactly like a
+   `public = false` one. It is also the single case the fold skips
+   (`… AND "public" IS NOT NULL`), which is why a count written against the
+   fold's own predicate misses it. Save the result with the release's rehearsal
+   notes; `0057` drops `public`, so nothing reconstructs the list.
+
+   Any row → decide per client before that image ships: store
+   `client_secret_post` by hand, or tell the owner to move to
+   `client_secret_basic`. The fail direction is safe either way — a NULL
+   resolves to `client_secret_basic`, never to `none`, so no confidential client
+   is downgraded to a public one.
 
 2. Apply pending Drizzle migrations, including `0057_oauth_provider_1_7_3.sql`.
    Its section D drops `oauth_clients.public` and `type`; an older build still
@@ -116,6 +133,14 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
    `metadata` JSON key `selfService`. Until it runs, every self-registered
    client reads as operator-provisioned and `/oauth2/token` does not confine its
    tokens to one protected resource.
+
+   **The API refuses to boot in between, and that is the intended sequence.**
+   Migrations apply at boot and this script does not, so the deployment comes up
+   only far enough to apply `0057`, counts the rows still unfolded and exits
+   naming this file (`assertSelfServiceFoldApplied`, `apps/api/src/lib/boot.ts`);
+   under a supervisor it restarts into the same refusal. Run the script against
+   the database, then restart. A deployment that never accepted a self-registered
+   client counts zero and never sees it.
 
 4. Check the script's `to_fold_after` prints 0 and `self_service_after` grew by
    `to_fold_before`. A non-zero `unparseable_metadata` is a manual read of those
@@ -134,5 +159,5 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
 | 0008 | not applied | org role `viewer` → `guest` + an explicit `viewer` `space_members` row in every space that exists; pending invitations and legacy OAuth signup clients carry the same current-space snapshot — **run between drizzle `0056` and bringing the new version up**; viewers are locked out in between                                                                                                                                 | unmeasured — the script prints before/after counts and aborts if any survives. This deployment ran it on nothing: production held 2 viewer members (2 orgs, 1 space each) and 2 accepted viewer invitations on 2026-09-09, moved off `viewer` by hand so the whole rollout could ship as one release — see step 3 |
 | 0009 | not applied | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0056` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                                                                                                                                                       | unmeasured — prints the duplicate-pair count before/after, after must be 0                                                                                                                                                                                                                                        |
 | 0010 | not applied | the commercial module's billing tables out of the database it used to run on and into the platform database, under the `drizzle.ee_migrations` journal — **run with the platform stopped, before deploying the release that moves the module in-tree**; the source prefix is detected (`cloud_*` at level `0003` is production's), reads `EE_SOURCE_DATABASE_URL` + `DATABASE_URL`, `.ts`, dry-run by default, `--apply` to copy | unmeasured — prints the per-table source/target counts and exits non-zero on any mismatch; refuses a mixed prefix, an unknown `ee_`/`cloud_` table, a source-only column or a non-empty target (exit 1, nothing written), so a second `--apply` refuses rather than double-counting                               |
-| 0011 | not applied | `oauth_clients.self_service` set from the `metadata` JSON key `selfService`, which drizzle `0057` leaves behind when it adds the column — **run after the drizzle batch**; rows whose `metadata` is not valid JSON are skipped, not rewritten                                                                                                                                                                                    | unmeasured — prints the count it will fold before and after, after must be 0                                                                                                                                                                                                                                      |
+| 0011 | not applied | `oauth_clients.self_service` set from the `metadata` JSON key `selfService`, which drizzle `0057` leaves behind when it adds the column — **run after the drizzle batch**, which the API refuses to boot past until this has run; rows whose `metadata` is not valid JSON are skipped, not rewritten                                                                                                                             | unmeasured — prints the count it will fold before and after, after must be 0                                                                                                                                                                                                                                      |
 | 0012 | not applied | `org_invitations` reading `viewer` with a status other than `pending` — the history `0008` deliberately leaves alone — mapped to `guest`, so drizzle `0059` can recreate the type without the value; **run right after `0008`**                                                                                                                                                                                                  | unmeasured — prints the history and pending counts before and after, history after must be 0                                                                                                                                                                                                                      |
