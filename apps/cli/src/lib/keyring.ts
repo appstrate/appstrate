@@ -7,8 +7,9 @@
  * libsecret/DBus on Linux, Credential Manager on Windows). Fallback:
  * `$XDG_CONFIG_HOME/appstrate/credentials.json` with `0600` permissions
  * when no keyring daemon is available (CI runners, stripped containers
- * — confirmed during preflight PF-1 where `@napi-rs/keyring` threw
- * `Platform secure storage failure` on a bare Debian slim image).
+ * — confirmed during preflight PF-1 where `@napi-rs/keyring` threw a
+ * `PlatformFailure` on a bare Debian slim image). Which throws take
+ * that fallback and which are refused is {@link classifyKeyringError}.
  *
  * Tokens are scoped by profile: the keyring entry key is
  * `(appstrate, <profile>)` so profiles share the service name.
@@ -33,9 +34,9 @@ import { getErrorMessage } from "@appstrate/core/errors";
  * Opt-in escape hatch for environments where the keyring daemon is
  * present but refuses to serve (SSH-attached macOS without a logged-in
  * loginwindow, frozen gnome-keyring, stripped container with a stale
- * libsecret socket). Without this env var set, a `"broken"` keyring
- * error is fatal instead of silently writing plaintext tokens to the
- * file fallback. The rationale is symmetric with the Windows refusal:
+ * libsecret socket). Without this env var set, a `"store-locked"`
+ * keyring error is fatal instead of silently writing plaintext tokens
+ * to the file fallback. The rationale is symmetric with the Windows refusal:
  * if the user's machine is configured to protect secrets via the OS
  * keyring, a broken backend is a signal, not a reason to quietly
  * downgrade.
@@ -117,35 +118,57 @@ function fallbackPath(): string {
 }
 
 /**
- * Known substrings thrown by `@napi-rs/keyring` on hosts where no
- * keyring daemon is available. These are expected fallback triggers —
- * silently route to the file store. Anything else is surfaced as a
- * one-time stderr warning so a broken daemon (corrupt libsecret,
- * locked keychain) doesn't degrade into silent plaintext storage
- * without any signal to the operator.
- *
- * The wording comes from the napi-rs/keyring error constructors we
- * observed during preflight PF-1 (Debian slim without libsecret,
- * stripped CI image). If this list drifts out of sync with upstream
- * the only cost is an extra warning line — never a wrong outcome.
- *
- * Note: `"No matching entry"` is intentionally NOT in this list.
- * `classifyKeyringError` checks for it FIRST and returns
- * `"entry-missing"` before this array is consulted, so including it
- * here would be unreachable dead code. Entry-missing is a read-path
- * concept (the user simply hasn't logged in yet), distinct from the
- * "no keyring daemon at all" fallback signal this list represents.
+ * Display prefix of `keyring-core`'s `PlatformFailure` variant — the
+ * store machinery is not functional on this host at all: no DBus
+ * session bus, no libsecret, stripped container, bare CI runner.
+ * See {@link classifyKeyringError}.
  */
-const MISSING_BACKEND_MARKERS = ["Platform secure storage failure", "No storage"];
+export const PLATFORM_FAILURE_MARKER = "Platform failure: ";
+
+/**
+ * Display prefix of `keyring-core`'s `NoStorageAccess` variant — the
+ * store exists and answered, but refused us: locked Keychain on a
+ * headless SSH session, a gnome-keyring that will not unlock, a user
+ * who denied access. See {@link classifyKeyringError}.
+ */
+export const NO_STORAGE_ACCESS_MARKER = "Couldn't access platform storage: ";
 
 /** De-dupe stderr output across calls within the same process. */
 let _backendWarningEmitted = false;
 
-function classifyKeyringError(err: unknown): "missing-backend" | "entry-missing" | "broken" {
-  const msg = getErrorMessage(err);
-  if (msg.includes("No matching entry")) return "entry-missing";
-  if (MISSING_BACKEND_MARKERS.some((marker) => msg.includes(marker))) return "missing-backend";
-  return "broken";
+/**
+ * Sort a keyring throw into the only two outcomes that change what we do.
+ *
+ * `@napi-rs/keyring` 2.x surfaces `keyring-core` errors as plain JS
+ * `Error`s, so the variant survives only as its Display prefix — the
+ * prefix IS the discriminator, and the two we care about are pinned
+ * against the shipped native binary by
+ * `test/keyring-error-markers.test.ts`, which fails on the next bump
+ * that reworded them (the failure this classification had already
+ * silently suffered once, issue #1321).
+ *
+ *   • `store-unavailable` (`PlatformFailure`) — there is no keyring
+ *     protection on this host to downgrade FROM, so the 0600 file
+ *     store is the only option: fall back silently. This is the whole
+ *     reason the file store exists.
+ *   • `store-locked` (everything else, chiefly `NoStorageAccess`) —
+ *     the machine IS configured to protect secrets and merely won't
+ *     serve us right now. Writing plaintext here would be a real
+ *     downgrade, so the write path refuses unless the operator opts in.
+ *
+ * Unknown wording therefore lands on the conservative side: refuse and
+ * say why, never a silent plaintext write.
+ *
+ * There is no third "the entry simply isn't there" class: 2.x reports
+ * a missing credential as `getPassword() === null` and
+ * `deletePassword() === false`, never as a throw (contract stated in
+ * `@napi-rs/keyring`'s own `index.d.ts`). Every throw reaching us
+ * means the store did not serve the operation.
+ */
+function classifyKeyringError(err: unknown): "store-unavailable" | "store-locked" {
+  return getErrorMessage(err).includes(PLATFORM_FAILURE_MARKER)
+    ? "store-unavailable"
+    : "store-locked";
 }
 
 /**
@@ -158,14 +181,15 @@ function classifyKeyringError(err: unknown): "missing-backend" | "entry-missing"
  * to disk. DPAPI-based encryption would fix this but is out of scope
  * for v1 (tracked as a follow-up).
  *
- * `entry-missing` is a read-path concept ("user hasn't logged in yet")
- * and never triggers a fallback, so we don't refuse on that case.
+ * Every throw from `@napi-rs/keyring` 2.x means the store did not serve
+ * the operation (a missing entry is a `null`/`false` return, not a
+ * throw), so on Windows the refusal is unconditional — there is no
+ * error class that would legitimately reach the file store here.
  * Export kept under the `_`-prefix convention for unit testability —
  * the real `process.platform` can't be faked cleanly in bun:test.
  */
-export function _shouldRefuseWindowsFallback(platform: string, err: unknown): boolean {
-  if (platform !== "win32") return false;
-  return classifyKeyringError(err) !== "entry-missing";
+export function _shouldRefuseWindowsFallback(platform: string): boolean {
+  return platform === "win32";
 }
 
 function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): never {
@@ -192,7 +216,7 @@ function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): n
  * — a bearer token in `~/.config/appstrate/credentials.json` equals
  * full account takeover for anyone with read access to the file.
  */
-function refuseBrokenKeyring(op: "read" | "write" | "delete", err: unknown): never {
+function refuseBrokenKeyring(op: "read" | "write", err: unknown): never {
   const cause = getErrorMessage(err);
   throw new Error(
     `Cannot ${op} Appstrate credentials: the OS keyring is installed but not serving.\n` +
@@ -208,13 +232,13 @@ function refuseBrokenKeyring(op: "read" | "write" | "delete", err: unknown): nev
       `    • Linux: ensure gnome-keyring / kwallet is running and unlocked\n` +
       `      (check with \`secret-tool store …\`).\n` +
       `    • Explicitly accept plaintext storage with:\n` +
-      `        APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1 appstrate ${op === "delete" ? "logout" : "login"}\n` +
+      `        APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1 appstrate login\n` +
       `      Only do this if you understand the tokens will be written\n` +
       `      to ~/.config/appstrate/credentials.json (mode 0600).`,
   );
 }
 
-function warnBackendOnce(op: "read" | "write" | "delete", err: unknown): void {
+function warnBackendOnce(op: "read" | "write", err: unknown): void {
   if (_backendWarningEmitted) return;
   _backendWarningEmitted = true;
   const msg = getErrorMessage(err);
@@ -230,24 +254,13 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
     _keyringFactory(profile).setPassword(payload);
     return;
   } catch (err) {
-    if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("write", err);
-    // Three classes of error on write:
-    //   - `missing-backend`: no keyring daemon on this host (bare CI,
-    //     stripped container). Legitimate silent fallback to the 0600
-    //     JSON file — that's the whole point of the fallback.
-    //   - `broken`: keyring installed but not serving (locked Keychain,
-    //     frozen gnome-keyring). Refused by default. `APPSTRATE_ALLOW_
-    //     PLAINTEXT_TOKENS=1` opts in.
-    //   - `entry-missing`: napi-rs's "No matching entry" wording, which
-    //     is a read-path concept that shouldn't surface on a write.
-    //     Treat it symmetrically with `broken` — refuse by default,
-    //     because if the classification is wrong we'd rather fail loud
-    //     than silently drop plaintext tokens on disk. The same
-    //     `APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1` escape hatch covers the
-    //     corner case where a future napi-rs version legitimately uses
-    //     that wording on write.
-    const kind = classifyKeyringError(err);
-    if (kind === "broken" || kind === "entry-missing") {
+    if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("write", err);
+    // The write path is the only one that can DOWNGRADE storage: it is
+    // where a plaintext file would come into existence. `store-locked`
+    // means the host does protect secrets, so refuse unless the
+    // operator opted in; `store-unavailable` means there is nothing to
+    // downgrade from and the 0600 file is the documented fallback.
+    if (classifyKeyringError(err) === "store-locked") {
       if (!plaintextFallbackAllowed()) refuseBrokenKeyring("write", err);
       warnBackendOnce("write", err);
     }
@@ -315,15 +328,13 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
       return parsed;
     }
   } catch (err) {
-    if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("read", err);
-    // "No matching entry" on read is normal — the user simply hasn't
-    // stored credentials for this profile yet. Missing-backend is the
-    // expected fallback trigger. A broken daemon is refused on unix
-    // unless the user opts into plaintext explicitly, otherwise we'd
-    // silently read from a plaintext file the user never consented to
-    // populate.
-    const kind = classifyKeyringError(err);
-    if (kind === "broken") {
+    if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("read", err);
+    // A host with no working store (`store-unavailable`) is the
+    // expected fallback trigger — the credentials only ever lived in
+    // the file. A locked store is refused on unix unless the user opts
+    // into plaintext explicitly, otherwise we'd silently read from a
+    // plaintext file the user never consented to populate.
+    if (classifyKeyringError(err) === "store-locked") {
       if (!plaintextFallbackAllowed()) refuseBrokenKeyring("read", err);
       warnBackendOnce("read", err);
     }
@@ -351,25 +362,43 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
   return fromFile;
 }
 
+/**
+ * Remove a profile's tokens from BOTH stores.
+ *
+ * Deletion never refuses: refusing to delete is the one failure mode
+ * that GUARANTEES the outcome we are protecting against — a live
+ * plaintext refresh token left in `credentials.json` after the user
+ * ran `logout` and was told nothing (issue #1321). So the file store is
+ * always cleared first, and only then is a keyring failure reported,
+ * loudly, because a copy of the credential may survive there.
+ */
 export async function deleteTokens(profile: string): Promise<void> {
+  let keyringError: unknown;
   try {
     _keyringFactory(profile).deletePassword();
   } catch (err) {
-    if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("delete", err);
-    // A missing entry is not an error; the file fallback below still
-    // runs so a partial keyring/file divergence is cleaned up. A broken
-    // daemon is still refused on unix unless the user opts into
-    // plaintext — otherwise `logout` would silently only clear half of
-    // a split-brain storage situation.
-    if (classifyKeyringError(err) === "broken") {
-      if (!plaintextFallbackAllowed()) refuseBrokenKeyring("delete", err);
-      warnBackendOnce("delete", err);
-    }
+    keyringError = err;
   }
   // Windows has no file fallback to clean up — Credential Manager is
   // the single source of truth there.
-  if (process.platform === "win32") return;
-  await deleteFromFile(profile);
+  if (process.platform !== "win32") await deleteFromFile(profile);
+  if (keyringError === undefined) return;
+  if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("delete", keyringError);
+  // A host with no working store never held a keyring entry for this
+  // profile — the file store we just cleared was the only copy.
+  if (classifyKeyringError(keyringError) === "store-unavailable") return;
+  throw new Error(
+    `Signed out of profile "${profile}" locally, but the OS keyring entry could not be removed.\n` +
+      `  Cause: ${getErrorMessage(keyringError)}\n` +
+      `  The credentials file was cleared; a copy of the token may remain in\n` +
+      `  the keyring until the store is reachable again.\n\n` +
+      `  Fixes:\n` +
+      `    • Unlock the keyring (macOS: \`security unlock-keychain\`; Linux:\n` +
+      `      start / unlock gnome-keyring) and re-run \`appstrate logout\n` +
+      `      --profile ${profile}\`.\n` +
+      `    • Or delete the "${SERVICE_NAME}" entry for "${profile}" with your\n` +
+      `      platform's credential manager.`,
+  );
 }
 
 // ─── File fallback ───────────────────────────────────────────────────────────

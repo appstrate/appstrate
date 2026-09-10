@@ -29,7 +29,7 @@
  *     403 `not_a_space_member`.
  */
 
-import { apiFetch, apiList } from "./api.ts";
+import { ApiError, apiFetch, apiList } from "./api.ts";
 
 export interface Space {
   id: string;
@@ -48,7 +48,41 @@ export interface Space {
 }
 
 export async function listSpaces(profileName: string): Promise<Space[]> {
-  return apiList<Space>(profileName, "/api/spaces");
+  const rows = await apiList<unknown>(profileName, "/api/spaces");
+  return rows.map(asSpace);
+}
+
+/**
+ * Read one listed row as a `Space`, or refuse the listing.
+ *
+ * `access` / `permissions` arrived with granular space roles, so a server that
+ * predates them serves neither — and a blind cast would hand that row on as a
+ * space whose standing reads `undefined`. `skills sync` compares that against
+ * `"member"`, finds no space that supplies skills, and deletes every skill it
+ * had installed (issue #1320). An older server is a version mismatch to say out
+ * loud, never an emptied set of grants, so the standing is checked, not cast.
+ *
+ * `SpaceObject` requires both fields, so a 200 without them is a server that
+ * broke its own contract — the same grade of fault `apiList` reports.
+ */
+function asSpace(row: unknown): Space {
+  const space = row as Space | null;
+  if (
+    space !== null &&
+    typeof space === "object" &&
+    (space.access === "member" || space.access === "none") &&
+    Array.isArray(space.permissions) &&
+    space.permissions.every((permission) => typeof permission === "string")
+  ) {
+    return space;
+  }
+  throw new ApiError(
+    500,
+    "GET /api/spaces answered a space without the caller's own standing " +
+      "(`access`, `permissions`). This Appstrate instance is older than the CLI: " +
+      "update the instance, or use the CLI version it shipped with.",
+    row,
+  );
 }
 
 export async function createSpace(profileName: string, name: string): Promise<Space> {

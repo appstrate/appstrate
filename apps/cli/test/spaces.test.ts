@@ -125,6 +125,34 @@ describe("listSpaces", () => {
     // silently returning [] (which used to mask broken servers).
     await expect(listSpaces("default")).rejects.toThrow(/Malformed list response/);
   });
+
+  it("refuses a row that omits the caller's standing (server older than the CLI)", async () => {
+    await seedAuth();
+    const { access: _access, permissions: _permissions, ...legacy } = spaceRow();
+    installFetch(
+      async () =>
+        new Response(JSON.stringify({ object: "list", data: [legacy] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    // `access` / `permissions` arrived with granular space roles. Casting a
+    // pre-RBAC row to `Space` reads its silence as "a member of nothing", which
+    // is what makes `skills sync` delete every skill it installed (issue #1320).
+    await expect(listSpaces("default")).rejects.toThrow(/older than the CLI/);
+  });
+
+  it("refuses a row whose permissions are not strings", async () => {
+    await seedAuth();
+    installFetch(
+      async () =>
+        new Response(
+          JSON.stringify({ object: "list", data: [{ ...spaceRow(), permissions: [42] }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    await expect(listSpaces("default")).rejects.toThrow(/older than the CLI/);
+  });
 });
 
 describe("createSpace", () => {
