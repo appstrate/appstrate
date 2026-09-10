@@ -1041,13 +1041,16 @@ describe("draft tree writes", () => {
   });
 
   it("serializes two concurrent writers — pg_advisory_xact_lock holds on this tier", async () => {
-    // Without the lock the second writer reads the tree the first has not
-    // stored yet and drops its file. Both files surviving is the lock working;
-    // the call itself proves `pg_advisory_xact_lock` exists on this tier.
+    // What this asserts depends on the tier, and both halves are worth having.
+    // On tier 0 (PGlite, ONE connection) the two calls cannot overlap at all,
+    // so it proves only that `pg_advisory_xact_lock(hashtext(...))` parses and
+    // runs on this tier — the thing the plan required verifying before building
+    // on it. On CI's real PostgreSQL the two transactions do overlap, and the
+    // assertion bites: without the lock the second writer reads the tree the
+    // first has not stored yet and drops its file.
     const target = { id, type: "skill" as const, orgId: ctx.orgId };
     const add = (path: string, text: string) => ({
-      label: "Skill",
-      precondition: { etag: "*" },
+      precondition: { etag: "*" as const },
       mutate: (files: Record<string, Uint8Array>) => ({
         ...files,
         [path]: encoder.encode(text),
@@ -1079,7 +1082,6 @@ describe("draft tree writes", () => {
     const written = await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        label: "Skill",
         precondition: { etag },
         mutate: (files) => ({ ...files, "docs/note.md": encoder.encode("noted") }),
       },
@@ -1100,7 +1102,6 @@ describe("draft tree writes", () => {
     await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        label: "Skill",
         precondition: { etag },
         mutate: (files) => ({ ...files, "docs/late.md": encoder.encode("late") }),
       },

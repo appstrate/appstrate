@@ -32,8 +32,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deleted, and the result still has to pass the frontmatter gate every other
   write path runs. A `move` never overwrites: an occupied destination is
   refused rather than silently taking the target's place. A file may not shadow
-  a directory nor a directory a file, and archive-unsafe paths (`..`, an empty
-  segment, a backslash, `__MACOSX/`) are rejected rather than dropped. Ceilings:
+  a directory nor a directory a file, nor carry a name that another entry of the
+  tree collapses onto once it is written to a case-insensitive or
+  Unicode-normalizing filesystem (`skill.md` beside `SKILL.md`, an NFD `é`
+  beside its NFC twin) — that is one file on the Mac `skills sync` materializes
+  onto, and the loser is silently dropped. Archive-unsafe paths (`..`, `.`, an
+  empty segment, a backslash, a `C:/` prefix, `__MACOSX/`) are rejected rather
+  than dropped. Authorization is the package `PUT`'s, in full: a draft tree is
+  one object behind every installation of the package, so writing it requires
+  the type's `write` permission in **every** space where it is installed.
+  Ceilings:
   200 operations per request, 1 MiB per written file, and a resulting tree of at
   most 50 MB and 10 000 entries — a bigger binary still goes in by importing a
   ZIP. Enabled for **agents and skills only**; integrations and MCP servers
@@ -201,6 +209,17 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   green).
 
 ### Changed
+
+- **One archive-path rule, everywhere a package's files are written or read
+  back.** Importing a ZIP already dropped an entry named with a `..` segment, an
+  empty segment (`dir//file`, a leading or trailing `/`), a backslash, a `\0` or
+  the `__MACOSX/` prefix; it now also drops one carrying a `.` segment
+  (`./notes.md`) or a Windows drive prefix (`C:/notes.md`). Those two were
+  already refused by `appstrate skills sync` when it writes the file to disk, so
+  a package could hold a path the platform accepted and the CLI called
+  malformed — which failed the whole sync, not just that entry. The write route
+  refuses the same set outright (`400`), and the CLI reads the rule from the
+  platform instead of restating it.
 
 - **`runs:read` now means the runs you launched, and nothing else.** Your manual
   runs and the runs of your own schedules — not a colleague's, not an

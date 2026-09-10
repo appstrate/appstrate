@@ -15,8 +15,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
-import { packages } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import { auditEvents, packages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -252,6 +252,34 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       expect(decoder.decode(frozen["references/data.md"]!)).toBe("reference");
     });
 
+    it("records the paths the batch touched in the audit trail", async () => {
+      expect(
+        (
+          await patchFiles([
+            { op: "write", path: "docs/notes.md", text: "# Notes" },
+            { op: "move", from: "scripts/run.py", to: "scripts/main.py" },
+            { op: "delete", path: "assets/logo.bin" },
+          ])
+        ).status,
+      ).toBe(200);
+
+      const [audit] = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(
+          and(eq(auditEvents.action, "package.updated"), eq(auditEvents.resourceId, SKILL_ID)),
+        );
+      // WHICH entries moved, not just how many: after the write the tree they
+      // were in no longer exists anywhere to answer that.
+      expect(audit!.after).toMatchObject({
+        type: "skill",
+        fileOperations: 3,
+        filePaths: ["docs/notes.md", "scripts/run.py \u2192 scripts/main.py", "assets/logo.bin"],
+      });
+      // The bytes are the package itself and stay out of the trail.
+      expect(JSON.stringify(audit!.after)).not.toContain("# Notes");
+    });
+
     it("hands a file added by the batch to a draft run's bundle catalog", async () => {
       expect(
         (await patchFiles([{ op: "write", path: "scripts/helper.py", text: "print(2)" }])).status,
@@ -279,7 +307,15 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     }
 
     it("refuses every path shape the archive cannot carry", async () => {
-      for (const path of ["../escape.md", "dir\\file.md", "__MACOSX/x.md", "dir//x.md"]) {
+      for (const path of [
+        "../escape.md",
+        "dir\\file.md",
+        "__MACOSX/x.md",
+        "dir//x.md",
+        "./notes.md",
+        "docs/./notes.md",
+        "C:/notes.md",
+      ]) {
         const res = await patchFiles([{ op: "write", path, text: "x" }]);
         expect(`${path}: ${res.status}`).toBe(`${path}: 400`);
         expect(`${path}: ${(await problem(res)).code}`).toBe(`${path}: invalid_path`);
@@ -310,6 +346,16 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
 
     it("refuses a move onto a path that is already taken", async () => {
       const res = await patchFiles([{ op: "move", from: "scripts/run.py", to: "assets/logo.bin" }]);
+      expect(res.status).toBe(400);
+      expect((await problem(res)).code).toBe("path_conflict");
+      await expectNothingWritten();
+    });
+
+    it("refuses a name only a case-insensitive filesystem would merge with another", async () => {
+      // `skill.md` beside `SKILL.md` is two entries in a ZIP and ONE file once
+      // `skills sync` writes it to APFS — where `skill.md` lands last by sort
+      // order, so the runtime would load a body this route never gated.
+      const res = await patchFiles([{ op: "write", path: "skill.md", text: "not the real one" }]);
       expect(res.status).toBe(400);
       expect((await problem(res)).code).toBe("path_conflict");
       await expectNothingWritten();
@@ -451,6 +497,88 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       });
       expect(res.status).toBe(412);
       expect(Object.keys(await storedTree())).not.toContain("docs/a.md");
+    });
+  });
+
+  // ─── The other writers of the same tree ────────────────────────────────────
+
+  describe("a version restore", () => {
+    async function publish(version: string): Promise<Response> {
+      return app.request(`/api/packages/skills/${SKILL_ID}/versions`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ version }),
+      });
+    }
+
+    async function restore(version: string): Promise<Response> {
+      return app.request(`/api/packages/skills/${SKILL_ID}/versions/${version}/restore`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+    }
+
+    it("replaces row and stored tree together, and moves the row's token", async () => {
+      expect(
+        (await patchFiles([{ op: "write", path: "references/data.md", text: "reference" }])).status,
+      ).toBe(200);
+      expect((await publish("1.0.0")).status).toBe(201);
+
+      // Draft moves on after the version: one more file, and a rewritten body.
+      const rewritten = "---\nname: edit-skill\ndescription: An edited skill.\n---\n\nAfter.";
+      const patched = await patchFiles([
+        { op: "write", path: "scratch/tmp.md", text: "scratch" },
+        { op: "write", path: "SKILL.md", text: rewritten },
+      ]);
+      expect(patched.status).toBe(200);
+      const afterPatch = (await patched.json()) as { lock_version: number };
+
+      expect((await restore("1.0.0")).status).toBe(200);
+
+      // The version's entries ARE the draft tree now — the later file is gone,
+      // and `manifest.json` is not stored for a skill (the row owns it, the
+      // read overlay materializes it).
+      const stored = await storedTree();
+      expect(Object.keys(stored).sort()).toEqual([
+        "SKILL.md",
+        "assets/logo.bin",
+        "references/data.md",
+        "scripts/run.py",
+      ]);
+      expect(decoder.decode(stored["SKILL.md"]!)).toBe(SKILL_MD);
+
+      // Both stores moved, in step: the row's content entry matches the bytes,
+      // and the index the explorer serves is built from the same pair.
+      const row = await packageRow();
+      expect(row.draftContent).toBe(SKILL_MD);
+      expect(row.lockVersion).toBeGreaterThan(afterPatch.lock_version);
+      const { entries } = await listFiles();
+      expect(entries.map((e) => e.path)).toEqual([
+        "SKILL.md",
+        "assets/logo.bin",
+        "manifest.json",
+        "references/data.md",
+        "scripts/run.py",
+      ]);
+      expect(entries.find((e) => e.path === "SKILL.md")!.inline).toBe(SKILL_MD);
+    });
+
+    it("refuses a batch composed against the pre-restore tree, rather than losing it", async () => {
+      expect((await publish("1.0.0")).status).toBe(201);
+      // The draft has to move past the version, or restoring it is a no-op and
+      // the validator below would still be live — proving nothing.
+      expect((await patchFiles([{ op: "write", path: "scratch/tmp.md", text: "t" }])).status).toBe(
+        200,
+      );
+      const stale = (await listFiles()).etag;
+      expect((await restore("1.0.0")).status).toBe(200);
+      expect(Object.keys(await storedTree())).not.toContain("scratch/tmp.md");
+
+      const res = await patchFiles([{ op: "write", path: "docs/late.md", text: "late" }], {
+        etag: stale,
+      });
+      expect(res.status).toBe(412);
+      expect(Object.keys(await storedTree())).not.toContain("docs/late.md");
     });
   });
 

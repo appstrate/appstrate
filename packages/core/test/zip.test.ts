@@ -397,6 +397,16 @@ describe("isSafeArchivePath", () => {
       "dir\\file.txt",
       "..\\etc\\passwd",
       "__MACOSX/._safe.txt",
+      // A `.` segment names a file another entry already names, so only one of
+      // the two survives extraction — and the CLI materializer refuses it.
+      ".",
+      "./notes.md",
+      "a/./b.md",
+      "docs/.",
+      // A Windows drive prefix is absolute on the extraction target while every
+      // segment reads as relative. The backslash form is caught above.
+      "C:/Users/x.md",
+      "c:/x.md",
     ]) {
       expect({ path, safe: isSafeArchivePath(path) }).toEqual({ path, safe: false });
     }
@@ -407,7 +417,15 @@ describe("isSafeArchivePath", () => {
     // and the predicate has to agree entry for entry — one rule, two policies.
     const entries: Record<string, Uint8Array> = {};
     const encoder = new TextEncoder();
-    for (const path of ["safe.txt", "dir/deep.md", "../escape", "__MACOSX/._x", "dir//x"]) {
+    for (const path of [
+      "safe.txt",
+      "dir/deep.md",
+      "../escape",
+      "__MACOSX/._x",
+      "dir//x",
+      "./dotted.md",
+      "C:/drive.md",
+    ]) {
       entries[path] = encoder.encode("x");
     }
     const files = unzipArtifact(zipArtifact(entries));

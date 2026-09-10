@@ -33,7 +33,10 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FolderOpen } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import {
+  PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_MANIFEST_FILE,
+} from "@appstrate/core/package-files";
 import { formatBytes } from "@appstrate/core/format";
 import type { PackageType } from "@appstrate/core/validation";
 import {
@@ -52,7 +55,7 @@ import {
   setDraftText,
   type DraftTexts,
 } from "../../lib/package-file-drafts";
-import { MANIFEST_FILE, packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
+import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
 import { ConfirmModal } from "../confirm-modal";
 import { ContentEditor } from "../package-editor/content-editor";
 import { LoadingState, ErrorState, EmptyState } from "../page-states";
@@ -255,7 +258,8 @@ export function PackageFilesEditor({
   // `manifest.json` is authored on the JSON tab and refused by the write route,
   // so it is shown but never opened for typing. Everything else the preview
   // ceiling admits is text.
-  const editable = activeEntry.path !== MANIFEST_FILE && previewBlockReason(activeEntry) === null;
+  const editable =
+    activeEntry.path !== PACKAGE_MANIFEST_FILE && previewBlockReason(activeEntry) === null;
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">

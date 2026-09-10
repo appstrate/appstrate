@@ -27,7 +27,7 @@ import {
   listOrgItems,
   getOrgItem,
   createOrgItem,
-  updateOrgItem,
+  reinstallOrgItem,
   deleteOrgItem,
   PackageAlreadyExistsError,
 } from "../services/package-items/crud.ts";
@@ -541,16 +541,6 @@ async function createVersionSafe(params: {
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
-  /**
-   * How this type names ONE of its packages in an error message ("Skill
-   * '@acme/x' not found"). Stated per entry, not derived: `cfg.label` is a
-   * plural display string, and deriving the singular from it by dropping its
-   * last character made "the label ends in a droppable s" an unwritten
-   * invariant of every label — one a plural like "MCP Bundles" (or any label
-   * whose singular is not the plural minus a letter) breaks silently, in the
-   * error text, where nothing type-checks it.
-   */
-  labelSingular: string;
   /** URL path segment used for routing (e.g. "skills", "integrations"). */
   path: string;
   parseOpts: {
@@ -629,7 +619,6 @@ interface PackageRouteConfig {
 const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
-    labelSingular: "Skill",
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     storageFileName: "SKILL.md",
@@ -638,7 +627,6 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   },
   agent: {
     cfg: CONFIG_BY_TYPE.agent,
-    labelSingular: "Agent",
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "prompt.md",
@@ -660,7 +648,6 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   // sources that need no server bundle.
   integration: {
     cfg: CONFIG_BY_TYPE.integration,
-    labelSingular: "Integration",
     path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
@@ -673,7 +660,6 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   // Referenced by an integration's `source.kind: "local"`.
   "mcp-server": {
     cfg: CONFIG_BY_TYPE["mcp-server"],
-    labelSingular: "MCP Server",
     path: "mcp-servers",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
@@ -840,7 +826,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     if (isSystemPackage(parsed.id)) {
       throw forbidden(
-        `${rcfg.labelSingular} '${parsed.id}' is a system package and cannot be modified`,
+        `${rcfg.cfg.labelSingular} '${parsed.id}' is a system package and cannot be modified`,
       );
     }
 
@@ -963,7 +949,7 @@ export function getItemId(c: Context<AppEnv>): string {
 async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId: string) {
   const item = await getOrgItem(orgId, itemId, rcfg.cfg);
   if (!item) {
-    throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
+    throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
   }
   return item;
 }
@@ -1026,12 +1012,12 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
 
     // Enforce space-level access: all spaces can only access installed packages
     if (!(await hasPackageAccess({ orgId, spaceId }, itemId))) {
-      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
+      throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
     const dto = await buildPackageDetailDto(rcfg, itemId, orgId);
     if (!dto) {
-      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
+      throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
     return c.json(dto);
@@ -1045,7 +1031,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     if (isSystemPackage(itemId)) {
       throw forbidden(
-        `${rcfg.labelSingular} '${itemId}' is a system package and cannot be modified`,
+        `${rcfg.cfg.labelSingular} '${itemId}' is a system package and cannot be modified`,
       );
     }
 
@@ -1115,9 +1101,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // carried forward above is `packages.draft_content` — which for an
     // integration is its INTEGRATION.md. Echoing it would overwrite the
     // package's `manifest.json` with its documentation.
-    const manifestIsStoredFile =
-      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path !== rcfg.storageFileName;
-    const storageContent = manifestIsStoredFile ? manifestText : content;
+    const storageContent = rcfg.cfg.manifestIsStoredFile ? manifestText : content;
 
     // One read-modify-write for the row and the stored tree, under the package's
     // advisory lock — the same helper the file-tree writes take, so two writers
@@ -1132,11 +1116,9 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     await mutatePackageDraftFiles(
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
-        label: rcfg.labelSingular,
         precondition: { lockVersion: body.lock_version },
         manifest: validatedManifest,
         draftContent: resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
-        manifestIsStoredFile,
         mutate: (files) => ({
           ...files,
           [rcfg.storageFileName]: new TextEncoder().encode(storageContent),
@@ -1192,7 +1174,7 @@ async function assertNoRunningRuns(
   if (running > 0) {
     throw conflict(
       "agent_in_use",
-      `${running} run(s) still running for this ${rcfg.labelSingular.toLowerCase()}`,
+      `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}`,
     );
   }
 }
@@ -1204,7 +1186,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     if (isSystemPackage(itemId)) {
       throw forbidden(
-        `${rcfg.labelSingular} '${itemId}' is a system package and cannot be deleted`,
+        `${rcfg.cfg.labelSingular} '${itemId}' is a system package and cannot be deleted`,
       );
     }
 
@@ -1214,7 +1196,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
     if (!result.ok) {
       throw conflict(
         "in_use",
-        `${rcfg.labelSingular} '${itemId}' is used by ${result.dependents!.length} package(s)`,
+        `${rcfg.cfg.labelSingular} '${itemId}' is used by ${result.dependents!.length} package(s)`,
       );
     }
 
@@ -1315,7 +1297,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
@@ -1404,7 +1386,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
@@ -1417,7 +1399,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
     if (!existing.lock_version) {
-      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
+      throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
     // Extract `packages.draft_content` from the version ZIP.
@@ -1444,8 +1426,8 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       }
     }
 
-    // A restore WRITES authored content. Before `updateOrgItem`, so a
-    // violation writes nothing.
+    // A restore WRITES authored content. Before the write below, so a
+    // violation leaves both stores untouched.
     if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
     await assertPackageDependenciesAccessible(
@@ -1453,16 +1435,28 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       asRecord(detail.manifest),
       asRecord(existing.manifest),
     );
-    const updated = await updateOrgItem(
-      orgId,
-      itemId,
-      { manifest: detail.manifest, content },
-      existing.lock_version,
+    // Row and stored tree in ONE read-modify-write, under the package's advisory
+    // lock — the same helper the package `PUT` and the file-tree `PATCH` take.
+    // Restoring is a whole-tree replacement: the version's entries ARE the draft
+    // afterwards, so `mutate` ignores what it is handed. A version that stored
+    // no entries leaves the tree alone rather than emptying it — the row is
+    // still restored, which is what the version carries in that case.
+    //
+    // One write, not two, because the gap between two is a lost update with no
+    // symptom: a `PATCH` that takes the lock between a committed row and a
+    // later upload reads the bumped `lock_version`, writes its file into the
+    // pre-restore tree, answers `200` — and the upload replaces that tree
+    // wholesale. Inside the helper the restore holds the lock for both halves,
+    // so such a `PATCH` runs strictly before or strictly after it.
+    await mutatePackageDraftFiles(
+      { id: itemId, type: rcfg.cfg.type, orgId },
+      {
+        precondition: { lockVersion: existing.lock_version },
+        manifest: asRecord(detail.manifest),
+        draftContent: content,
+        mutate: (files) => detail.content ?? files,
+      },
     );
-
-    if (!updated) {
-      throw conflict("conflict", "Package was modified concurrently. Reload and try again.");
-    }
 
     // If restoring the latest version, align updatedAt so the draft
     // doesn't appear as having unpublished changes.
@@ -1476,11 +1470,6 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
         .update(packages)
         .set({ updatedAt: latestDate })
         .where(and(eq(packages.id, itemId), eq(packages.orgId, orgId)));
-    }
-
-    // Re-upload storage files from the version ZIP
-    if (detail.content) {
-      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, detail.content);
     }
 
     // After-update hook (e.g. agent junction table sync on restore)
@@ -1519,7 +1508,7 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
     // Verify org ownership before deletion
@@ -1680,59 +1669,44 @@ function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string>
  * - The read side gates on VISIBILITY (`hasPackageAccess`: a system package, or
  *   one installed in THIS space), because a reader reaches a package through a
  *   space.
- * - The write side gates on OWNERSHIP, exactly as the package `PUT` does
- *   (`loadOrgItemOr404`): an author edits their organization's package whether
- *   or not it happens to be installed where they are standing. Adding a space
- *   gate here would make the file tree editable from fewer places than the
- *   `PUT` that writes the same tree.
+ * - The write side gates on AUTHORITY OVER A SHARED DRAFT, exactly as the
+ *   package `PUT` does — the `requirePackageInOrg()` middleware, i.e.
+ *   {@link assertPackageMutationAccess}. A draft tree is one object behind every
+ *   installation of the package, so editing it requires `<type>:write` in EVERY
+ *   space where it is installed (403 otherwise), and reaching it at all requires
+ *   that permission in at least one of them, or org-catalog authority over a
+ *   package installed nowhere (404 otherwise). Gating on org ownership alone
+ *   would let a builder in space A rewrite a skill that only exists in the
+ *   private space B, through the file tree, while the `PUT` that writes the same
+ *   tree refuses them.
  *
- * Order is forced, not chosen. The row has to be read first — this route is
- * registered on the router ROOT, so the RBAC resource is knowable only from the
- * row's `type`, never from the path — which is why the `<type>:write` guard runs
- * here and not as route-level middleware. Everything that could tell an
- * unauthorized caller something (a system package's existence, whether the type
- * is editable) therefore sits AFTER that guard.
+ * That call settles the row lookup, the `<type>:write` permission and the
+ * system-package refusal together, in that order, and hands the row back — which
+ * is what makes the RBAC resource knowable at all on a route registered on the
+ * router ROOT, where the path names no type. Everything below it depends on the
+ * row's `type` and therefore runs after it.
  */
 async function loadDraftFilesWriteTarget(
   c: Context<AppEnv>,
-): Promise<{ id: string; type: PackageType; orgId: string; label: string }> {
-  const packageId = getItemId(c);
-  const orgId = c.get("orgId");
+): Promise<{ id: string; type: PackageType; orgId: string }> {
+  const pkg = await assertPackageMutationAccess(c, getItemId(c), "write");
 
-  const [pkg] = await db
-    .select({ id: packages.id, type: packages.type, orgId: packages.orgId })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
-    .limit(1);
-  if (!pkg) {
-    throw notFound(`Package '${packageId}' not found`);
-  }
-
-  await requirePackagePermission(c, pkg.type, "write");
-
-  // `requirePackagePermission` is built from this same map and fails closed, so
-  // a type that gets past it has a route config.
+  // Every package type is wired into `ROUTE_CONFIGS`; the map stays `Partial`
+  // only so its `?.` readers keep compiling.
   const rcfg = ROUTE_CONFIGS[pkg.type]!;
-
-  // A system package's tree is owned by the `system-packages/` sync, which
-  // rewrites it at boot: an edit here would be silently reverted. Same wording
-  // as the package `PUT`, which refuses them for the same reason.
-  if (pkg.orgId === null) {
-    throw forbidden(
-      `${rcfg.labelSingular} '${packageId}' is a system package and cannot be modified`,
-    );
-  }
 
   if (!CONFIG_BY_TYPE[pkg.type].draftFilesWritable) {
     throw new ApiError({
       status: 400,
       code: "package_type_not_editable",
       title: "Package Type Not Editable",
-      detail: `${rcfg.labelSingular} '${packageId}' has files that are authored by importing an archive, not edited through the file tree`,
+      detail: `${rcfg.cfg.labelSingular} '${pkg.id}' has files that are authored by importing an archive, not edited through the file tree`,
     });
   }
 
-  return { id: pkg.id, type: pkg.type, orgId: pkg.orgId, label: rcfg.labelSingular };
+  // `assertPackageMutationAccess` refuses a row whose org is not the caller's,
+  // so the org this write targets is the request's own.
+  return { id: pkg.id, type: pkg.type, orgId: c.get("orgId") };
 }
 
 /**
@@ -2252,11 +2226,14 @@ export function createPackagesRouter() {
         }
       }
 
-      // Update existing package manifest and content
-      await db
-        .update(packages)
-        .set({ draftManifest: manifest, draftContent: content, updatedAt: new Date() })
-        .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+      // Overwrite the existing package's draft manifest and content with the
+      // imported archive's. Through `reinstallOrgItem` rather than a bare
+      // `UPDATE`: it bumps `lock_version`, so an editor tab holding the token
+      // from before this import is told its save is stale (409) instead of
+      // writing over the freshly imported draft with the one it had on screen.
+      // Last-writer-wins on the token is the right optimism here — an import IS
+      // the later writer, by definition.
+      await reinstallOrgItem(orgId, packageId, { manifest, content });
     } else {
       // New package — insert
       const cfg = ROUTE_CONFIGS[packageType as PackageType]?.cfg;
@@ -2609,7 +2586,6 @@ export function createPackagesRouter() {
       written = await mutatePackageDraftFiles(
         { id: target.id, type: target.type, orgId: target.orgId },
         {
-          label: target.label,
           precondition: { etag: ifMatch },
           mutate: (files) => applyFileOperations(files, operations, { type: target.type }),
         },
@@ -2619,11 +2595,20 @@ export function createPackagesRouter() {
       throw err;
     }
 
+    // The paths, never the bytes. "Three files changed" is not an audit trail
+    // of a route whose whole purpose is deleting and renaming files: the
+    // question an operator asks afterwards is WHICH entry disappeared, and the
+    // tree the write replaced no longer exists anywhere to answer it. Contents
+    // stay out — they are the package itself, and its versions hold them.
     await recordAuditFromContext(c, {
       action: "package.updated",
       resourceType: "package",
       resourceId: target.id,
-      after: { type: target.type, file_operations: operations.length },
+      after: {
+        type: target.type,
+        fileOperations: operations.length,
+        filePaths: operations.map((op) => (op.op === "move" ? `${op.from} → ${op.to}` : op.path)),
+      },
     });
 
     // Exactly what a subsequent `GET .../files` reports — body, ETag and cache

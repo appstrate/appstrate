@@ -725,7 +725,21 @@ describe("applyFileOperations — the operations", () => {
 
 describe("applyFileOperations — the refusals", () => {
   it("invalid_path: every shape isSafeArchivePath refuses", () => {
-    for (const path of ["../escape.md", "/abs.md", "dir//x.md", "dir/", "", "a\\b.md", "n\0.md"]) {
+    for (const path of [
+      "../escape.md",
+      "/abs.md",
+      "dir//x.md",
+      "dir/",
+      "",
+      "a\\b.md",
+      "n\0.md",
+      // A `.` segment and a drive prefix: the CLI's `skills sync` materializer
+      // refuses both when it writes the file, so a `200` here would publish a
+      // skill whose sync aborts with "the artifact is malformed".
+      "./notes.md",
+      "a/./b.md",
+      "C:/x.md",
+    ]) {
       expectRefusal(
         () => apply({ "SKILL.md": SKILL }, [{ op: "write", path, bytes: encoder.encode("x") }]),
         "invalid_path",
@@ -882,6 +896,74 @@ describe("applyFileOperations — the refusals", () => {
     ]);
 
     expect(Object.keys(result).sort()).toEqual(["SKILL.md", "a", "a/b", "c.md"]);
+
+    // And the file that shadows is itself still SAVEABLE: overwriting a path the
+    // tree already holds adds no name, so it cannot introduce the conflict. The
+    // author of such a package could otherwise never save `a` again.
+    const overwritten = apply({ "SKILL.md": SKILL, a: "file", "a/b": "under" }, [
+      { op: "write", path: "a", bytes: encoder.encode("edited") },
+    ]);
+    expect(texts(overwritten).a).toBe("edited");
+  });
+
+  it("path_conflict: a name that is indistinct from another on the target filesystem", () => {
+    // `skills sync` materializes onto APFS/NTFS, where these pairs are one file:
+    // the later one by sort order wins, so the `SKILL.md` the platform gated is
+    // not the `SKILL.md` the runtime loads.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL }, [
+          { op: "write", path: "skill.md", bytes: encoder.encode("x") },
+        ]),
+      "path_conflict",
+      "skill.md",
+    );
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "Docs/a.md": "A" }, [
+          { op: "write", path: "docs/a.md", bytes: encoder.encode("x") },
+        ]),
+      "path_conflict",
+      "docs/a.md",
+    );
+    // NFD `é` (e + U+0301) beside its NFC twin — the same filename, written by
+    // two editors on two platforms.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "e\u0301tude.md": "A" }, [
+          { op: "write", path: "\u00e9tude.md", bytes: encoder.encode("x") },
+        ]),
+      "path_conflict",
+      "\u00e9tude.md",
+    );
+    // A move lands on the same rule, at the destination.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "Notes.md": "N", "a.md": "A" }, [
+          { op: "move", from: "a.md", to: "notes.md" },
+        ]),
+      "path_conflict",
+      "notes.md",
+    );
+
+    // Negative controls. Writing the SAME path twice in one batch is one name,
+    // not two; and a package whose stored ZIP already holds an indistinct pair
+    // stays editable, exactly as it does for directory shadowing.
+    expect(
+      texts(
+        apply({ "SKILL.md": SKILL }, [
+          { op: "write", path: "a.md", bytes: encoder.encode("1") },
+          { op: "write", path: "a.md", bytes: encoder.encode("2") },
+        ]),
+      )["a.md"],
+    ).toBe("2");
+    expect(
+      Object.keys(
+        apply({ "SKILL.md": SKILL, "A.md": "A", "a.md": "a" }, [
+          { op: "write", path: "c.md", bytes: encoder.encode("C") },
+        ]),
+      ).sort(),
+    ).toEqual(["A.md", "SKILL.md", "a.md", "c.md"]);
   });
 
   it("file_too_large: one written file above the inline ceiling", () => {

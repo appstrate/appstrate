@@ -103,24 +103,33 @@ export const ARCHIVE_MAX_FILES = 10_000;
 /**
  * Whether an archive entry name is one the platform is willing to carry.
  *
- * Rejects, in one pass: a `..` segment (traversal), and any EMPTY segment —
+ * Rejects, in one pass: a `..` segment (traversal) and a `.` segment (a path
+ * that names a file already named by another entry — `./a.md` and `a.md` are
+ * the same file, and only one of them survives extraction), any EMPTY segment —
  * which is what a leading `/` (absolute path), a trailing `/` (directory
- * entry), a `//` and the empty name itself all produce. Plus a `\0` or a `\`
+ * entry), a `//` and the empty name itself all produce — a `\0` or a `\`
  * anywhere (a backslash is a separator on the extraction target and would
- * smuggle a second path shape past the segment rules), and the `__MACOSX/`
- * metadata prefix Finder adds.
+ * smuggle a second path shape past the segment rules), a Windows drive prefix
+ * (`C:/…`, absolute on the extraction target while every segment looks
+ * relative), and the `__MACOSX/` metadata prefix Finder adds.
  *
- * ONE predicate, TWO policies. Import ({@link unzipArtifact}) DROPS an
- * offending entry: an author's archive is not rejected wholesale because
- * Finder slipped a resource fork into it. The draft write path REFUSES the
- * request: a caller naming the path is told its path is unusable rather than
- * being told the write succeeded and losing it silently.
+ * ONE predicate, THREE consumers, TWO policies. Import ({@link unzipArtifact})
+ * DROPS an offending entry: an author's archive is not rejected wholesale
+ * because Finder slipped a resource fork into it. The draft write path REFUSES
+ * the request: a caller naming the path is told its path is unusable rather
+ * than being told the write succeeded and losing it silently. The CLI's
+ * `skills sync` materializer refuses too, at the point where it creates the
+ * file on disk — and it is why the `.` segment and the drive prefix are here:
+ * a path this predicate admitted but the materializer refused failed a whole
+ * skill's sync with "the published artifact is malformed", for bytes the write
+ * route had answered `200` for.
  */
 export function isSafeArchivePath(path: string): boolean {
   if (path.includes("\0") || path.includes("\\")) return false;
   if (path.startsWith("__MACOSX/")) return false;
+  if (/^[a-zA-Z]:\//.test(path)) return false;
   for (const segment of path.split("/")) {
-    if (segment === "" || segment === "..") return false;
+    if (segment === "" || segment === "." || segment === "..") return false;
   }
   return true;
 }
@@ -163,8 +172,8 @@ export function unzipArtifact(
   }
 
   // Sanitize: drop every entry whose name {@link isSafeArchivePath} refuses —
-  // traversal, absolute paths, null bytes, backslashes, __MACOSX metadata and
-  // directory entries.
+  // traversal, `.` segments, absolute paths (leading `/` or a drive prefix),
+  // null bytes, backslashes, __MACOSX metadata and directory entries.
   const files: Record<string, Uint8Array> = {};
   for (const [key, value] of Object.entries(rawFiles)) {
     if (!isSafeArchivePath(key)) continue;

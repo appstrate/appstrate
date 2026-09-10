@@ -13,11 +13,11 @@
 import {
   PACKAGE_CONTENT_ENTRY,
   PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_MANIFEST_FILE,
 } from "@appstrate/core/package-files";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 import type { PackageType } from "@appstrate/core/validation";
 import type { components } from "../api/schema";
-import { MANIFEST_FILE } from "./package-files";
 
 /** One real file in the artifact, as returned by `GET .../files`. */
 export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
@@ -367,7 +367,7 @@ export function languageForPath(path: string): string {
  * file the editor opens on — while `manifest.json` is not.
  */
 export function isPinnedEntry(type: PackageType, path: string): boolean {
-  return path === MANIFEST_FILE || path === PACKAGE_CONTENT_ENTRY[type]?.path;
+  return path === PACKAGE_MANIFEST_FILE || path === PACKAGE_CONTENT_ENTRY[type]?.path;
 }
 
 /**
@@ -393,7 +393,7 @@ export function validateNewPath(
   path: string,
 ): NewPathRejection | null {
   if (!isSafeArchivePath(path)) return "invalid";
-  if (path === MANIFEST_FILE) return "reserved";
+  if (path === PACKAGE_MANIFEST_FILE) return "reserved";
 
   for (const entry of entries) {
     if (entry.path === path) return "exists";

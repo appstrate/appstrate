@@ -32,7 +32,8 @@
  * that no transaction spans — the `packages` row and the ZIP object — so every
  * writer has to serialize against the other writers, re-read, validate and
  * persist in the same order, or the two halves drift. There is one such
- * sequence and {@link mutatePackageDraftFiles} is it.
+ * sequence, {@link mutatePackageDraftFiles}, and every EDITING route takes it.
+ * Its header names the four writers that do not, and why each one is out.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -54,6 +55,7 @@ import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import {
   PACKAGE_CONTENT_ENTRY,
   PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_MANIFEST_FILE,
 } from "@appstrate/core/package-files";
 import {
   ARCHIVE_MAX_FILES,
@@ -262,8 +264,6 @@ export function fileEtag(snapshotId: string, path: string): string {
   return `"f-${snapshotId}-${pathDigest}"`;
 }
 
-const MANIFEST_FILE_NAME = "manifest.json";
-
 /**
  * Apply the DB-authoritative draft columns on top of the stored ZIP, in place.
  * Exported so the per-type overlay matrix can be asserted without a database
@@ -315,7 +315,7 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
   }
 
   if (pkg.draftManifest !== null && pkg.draftManifest !== undefined) {
-    files[MANIFEST_FILE_NAME] = encoder.encode(JSON.stringify(pkg.draftManifest, null, 2));
+    files[PACKAGE_MANIFEST_FILE] = encoder.encode(JSON.stringify(pkg.draftManifest, null, 2));
   }
 }
 
@@ -587,13 +587,30 @@ function assertOperandPath(path: string): void {
   if (!isSafeArchivePath(path)) {
     throw new PackageFileWriteError("invalid_path", path, `'${path}' is not a usable file path`);
   }
-  if (path === MANIFEST_FILE_NAME) {
+  if (path === PACKAGE_MANIFEST_FILE) {
     throw new PackageFileWriteError(
       "reserved_entry",
       path,
-      `'${MANIFEST_FILE_NAME}' is authored through the package manifest, not the file tree`,
+      `'${PACKAGE_MANIFEST_FILE}' is authored through the package manifest, not the file tree`,
     );
   }
+}
+
+/**
+ * The form under which two archive entries are the SAME file once the tree is
+ * written to a filesystem: Unicode-normalized (macOS and Linux disagree about
+ * whether `é` is one code point or two, and a `git`-checked-out tree carries
+ * whichever the author's editor emitted) and case-folded (APFS and NTFS are
+ * case-insensitive by default).
+ *
+ * A ZIP is a flat list of byte strings, so it can carry `SKILL.md` and
+ * `skill.md` at once; extracting it to `~/.claude/skills` on a Mac cannot. The
+ * later of the two wins by sort order, which means the file the platform gated
+ * (`assertArchiveContentConforms` reads `SKILL.md`) is not the file the runtime
+ * loads. Refusing the second name is the only way both ends see one file.
+ */
+function indistinctName(path: string): string {
+  return path.normalize("NFC").toLowerCase();
 }
 
 /**
@@ -601,11 +618,14 @@ function assertOperandPath(path: string): void {
  * a batch is atomic, so every intermediate tree is allowed to be invalid (a
  * move is a delete the caller has not finished yet).
  *
- * `touched` — the paths this batch created — scopes the file/directory
- * shadowing check to what the caller is responsible for. A stored ZIP is free
- * to contain both `a` and `a/b` (a ZIP is a flat list of names, not a
- * filesystem), and refusing every later edit of such a package would punish the
- * author for an archive they may not have built.
+ * `touched` — the paths this batch ADDS, i.e. the ones the result holds and the
+ * input did not — scopes the two collision checks to what the caller is
+ * responsible for. A stored ZIP is free to contain both `a` and `a/b` (a ZIP is
+ * a flat list of names, not a filesystem), or both `A.md` and `a.md`, and
+ * refusing every later edit of such a package would punish the author for an
+ * archive they may not have built. Overwriting a path the tree already holds
+ * introduces neither kind of collision, so it is not in `touched` — otherwise
+ * saving an existing file of such a package would be refused forever.
  */
 function assertTreeConforms(files: Record<string, Uint8Array>, touched: Iterable<string>): void {
   const paths = Object.keys(files);
@@ -629,13 +649,30 @@ function assertTreeConforms(files: Record<string, Uint8Array>, touched: Iterable
 
   // Every path that is used as a DIRECTORY by some entry of the result.
   const directories = new Set<string>();
+  // Result paths keyed by the form two of them collapse to on the filesystems
+  // this tree is materialized on.
+  const byIndistinctName = new Map<string, string[]>();
   for (const path of paths) {
     for (let cut = path.indexOf("/"); cut >= 0; cut = path.indexOf("/", cut + 1)) {
       directories.add(path.slice(0, cut));
     }
+    const key = indistinctName(path);
+    const same = byIndistinctName.get(key);
+    if (same) same.push(path);
+    else byIndistinctName.set(key, [path]);
   }
 
   for (const path of touched) {
+    const indistinct = byIndistinctName
+      .get(indistinctName(path))!
+      .filter((other) => other !== path);
+    if (indistinct.length > 0) {
+      throw new PackageFileWriteError(
+        "path_conflict",
+        path,
+        `'${path}' and '${indistinct[0]}' are the same file on a case-insensitive filesystem`,
+      );
+    }
     if (directories.has(path)) {
       throw new PackageFileWriteError(
         "path_conflict",
@@ -700,8 +737,11 @@ export function applyFileOperations(
             `'${op.path}' is ${op.bytes.byteLength} bytes; a file written through the editor holds at most ${PACKAGE_FILE_INLINE_MAX_BYTES}`,
           );
         }
+        // Only a path the INPUT tree did not hold is `touched`: overwriting an
+        // entry that is already there changes bytes, never the set of names, so
+        // it can introduce no collision with the names around it.
+        if (!Object.hasOwn(files, op.path)) touched.add(op.path);
         result[op.path] = op.bytes;
-        touched.add(op.path);
         break;
       }
       case "delete": {
@@ -739,8 +779,10 @@ export function applyFileOperations(
         const bytes = result[op.from]!;
         delete result[op.from];
         touched.delete(op.from);
+        // Same rule as `write`: a destination the input tree already held (this
+        // batch freed it with an earlier `delete`) is not a new name.
+        if (!Object.hasOwn(files, op.to)) touched.add(op.to);
         result[op.to] = bytes;
-        touched.add(op.to);
         break;
       }
     }
@@ -762,8 +804,6 @@ export function applyFileOperations(
 export type DraftFilesPrecondition = { etag: string } | { lockVersion: number };
 
 export interface MutateDraftFilesInput {
-  /** How this package type is named in a conflict message ("Skill", "Agent"). */
-  label: string;
   precondition: DraftFilesPrecondition;
   /** Transform the overlaid tree. Runs under the lock; must return a new map. */
   mutate: (files: Record<string, Uint8Array>) => Record<string, Uint8Array>;
@@ -777,48 +817,62 @@ export interface MutateDraftFilesInput {
    * {@link resolveDraftContent}.
    */
   draftContent?: string;
-  /**
-   * Whether `manifest.json` is a STORED file for this package type.
-   *
-   * For `agent` / `skill` it is not: the row owns the manifest, the read
-   * overlay materializes it (see {@link applyDraftOverlay}), publish rebuilds
-   * it from the row and the draft-run catalog synthesizes it — so storing a
-   * second copy in the ZIP only creates something that can go stale. It is
-   * dropped from the uploaded tree.
-   *
-   * For `integration` / `mcp-server` `manifest.json` IS the editor's storage
-   * sink (`storageFileName`, `routes/packages.ts`) and the bundle's portable
-   * manifest, so it is uploaded like any other file.
-   */
-  manifestIsStoredFile?: boolean;
 }
 
 /**
  * The one read-modify-write of a package's draft tree.
  *
- * Every writer goes through here, because the tree lives in two stores: the
+ * The EDITING writers go through here — the package `PUT`, the file-tree
+ * `PATCH` and a version restore — because the tree lives in two stores: the
  * `packages` row (`draft_manifest` / `draft_content`, which the read overlay
  * lets WIN) and the ZIP object. Under one transaction-scoped advisory lock on
  * the package id, concurrent writers of one package queue instead of clobbering
  * each other's read-modify-write.
  *
+ * Four writers do NOT, and the reason differs:
+ *
+ * - **create**, **import of a NEW id** and **fork** upload a package's first
+ *   tree directly. There is no row a concurrent writer could have read, so
+ *   there is nothing to serialize against.
+ * - the **`system-packages/` boot sync** writes packages whose `orgId` is
+ *   `null`; this helper scopes its row read by a real org and cannot address
+ *   them.
+ * - **`postInstallPackage`** — an import over a package that already exists —
+ *   is the one that genuinely could and does not, for two reasons stated at its
+ *   own header: the content gate below is deliberately not applied to a
+ *   bundle's non-root packages, and that path persists a raw manifest into the
+ *   version while the row takes a normalized one. Its row write and its upload
+ *   are therefore NOT serialized against the editor's, and an import landing
+ *   mid-save can drop a file the `PATCH` just stored.
+ *
  * ## Why the row is written before the object
  *
  * No transaction spans PostgreSQL and object storage, so one of the two lands
  * first and a crash between them leaves a skew. The order is chosen so that the
- * skew a failure produces is the one every reader already absorbs:
+ * skew a failure produces is the smallest one available, not a harmless one:
  *
  * - The storage upload runs INSIDE the transaction. When it fails — the likely
  *   failure of the two, being a network round-trip — the row update rolls back
  *   with it and the write simply did not happen.
  * - When the upload succeeds and the COMMIT then fails, the object is ahead of
- *   the row. The overlay makes the row's content entry win on every read, which
- *   is exactly the rule it enforces for the opposite skew, so a reader sees the
- *   old content entry and no invented file.
+ *   the row and the caller has a `500`. What the overlay hides is exactly the
+ *   two entries it owns: the type's content entry and `manifest.json` read back
+ *   at their pre-write values, so the author's `SKILL.md` edit did not land.
+ *   Every OTHER entry of the batch DID: an ancillary file it wrote is now
+ *   listed, one it deleted is gone, one it moved sits at its new path — while
+ *   `lock_version` did not move and nothing told the caller. A delete that
+ *   lands in that window is not recoverable through this route; the version the
+ *   file was published in is where those bytes still exist. Closing it means
+ *   storing each write as its own content-addressed object and swapping a
+ *   pointer, which is a storage layout this package does not have.
  *
  * The lock is therefore held across the storage round-trip. That is the cost of
  * writes to one package being serialized at all, and writes to one package are
- * what the editor produces.
+ * what the editor produces. It is NOT the lock the publish path takes
+ * (`pg_advisory_xact_lock(hashtext(id))`, `package-versions.ts`): that one
+ * guards the `package_versions` rows and dist-tags, and publish reads the draft
+ * tree it freezes before entering it, so the two key spaces are deliberately
+ * distinct rather than accidentally so.
  *
  * @returns the tree a subsequent `GET …/files` will report, and the row's new
  *   `lock_version`.
@@ -830,6 +884,7 @@ export async function mutatePackageDraftFiles(
   input: MutateDraftFilesInput,
 ): Promise<{ snapshot: PackageFileSnapshot; lockVersion: number }> {
   const lockKey = `package-files:${target.id}`;
+  const label = CONFIG_BY_TYPE[target.type].labelSingular;
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
@@ -843,7 +898,7 @@ export async function mutatePackageDraftFiles(
       .from(packages)
       .where(and(eq(packages.id, target.id), eq(packages.orgId, target.orgId)))
       .limit(1);
-    if (!row) throw notFound(`${input.label} '${target.id}' not found`);
+    if (!row) throw notFound(`${label} '${target.id}' not found`);
 
     const source: PackageFileSource = {
       id: target.id,
@@ -863,11 +918,11 @@ export async function mutatePackageDraftFiles(
       const presented = input.precondition.etag;
       if (presented !== "*" && presented !== indexEtag(before.snapshotId)) {
         throw preconditionFailed(
-          `${input.label} '${target.id}' changed since its files were read. Reload and try again.`,
+          `${label} '${target.id}' changed since its files were read. Reload and try again.`,
         );
       }
     } else if (input.precondition.lockVersion !== row.lockVersion) {
-      throw conflict("conflict", `${input.label} was modified concurrently. Reload and try again.`);
+      throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
 
     const mutated = input.mutate(before.files);
@@ -893,11 +948,11 @@ export async function mutatePackageDraftFiles(
     // this update, and the caller is told so rather than being told the write
     // landed.
     if (!updated) {
-      throw conflict("conflict", `${input.label} was modified concurrently. Reload and try again.`);
+      throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
 
     const stored = { ...mutated };
-    if (!input.manifestIsStoredFile) delete stored[MANIFEST_FILE_NAME];
+    if (!CONFIG_BY_TYPE[target.type].manifestIsStoredFile) delete stored[PACKAGE_MANIFEST_FILE];
     await uploadPackageFiles(
       CONFIG_BY_TYPE[target.type].storageFolder,
       target.orgId,

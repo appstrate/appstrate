@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
+import { PACKAGE_CONTENT_FILE, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../api/errors";
 
@@ -21,15 +21,6 @@ interface DisplayFile {
 }
 
 /**
- * The archive entry that carries a package's manifest.
- *
- * Exported because it is not only a display name: the draft file editor refuses
- * to write, rename or delete it (the write route answers `reserved_entry`), so
- * the tree and the path validator both have to recognize it.
- */
-export const MANIFEST_FILE = "manifest.json";
-
-/**
  * Primary file of a package type — the editor's content tab, and the entry the
  * file explorer opens on when the artifact carries it.
  *
@@ -45,7 +36,7 @@ export const MANIFEST_FILE = "manifest.json";
 export function primaryDisplayFile(type: PackageType): DisplayFile {
   const content = PACKAGE_CONTENT_FILE[type];
   return content === null
-    ? { name: MANIFEST_FILE, source: "manifest" }
+    ? { name: PACKAGE_MANIFEST_FILE, source: "manifest" }
     : { name: content, source: "content" };
 }
 

@@ -13,7 +13,28 @@ import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.t
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
 
-/** Insert or update a skill during post-install. */
+/**
+ * Insert or update a skill during post-install.
+ *
+ * This path deliberately does NOT go through `mutatePackageDraftFiles`, the
+ * read-modify-write every editor route takes, for two reasons that are both
+ * load-bearing:
+ *
+ * - That helper runs `assertArchiveContentConforms` on the tree it stores. AFPS
+ *   §3.3 gates a bundle's ROOT package only (`bundle-import.ts`), because a
+ *   published bundle is immutable and a pre-rule DEPENDENCY is a skill nobody
+ *   can fix — gating here would refuse bundles the platform is required to
+ *   accept.
+ * - `manifest` here is the RAW object parsed out of `files`, which the version
+ *   row must carry verbatim; the draft ROW takes the caller's normalized
+ *   manifest instead (retired `runtime_tools` ids dropped). One write cannot
+ *   persist both.
+ *
+ * The cost, stated because nothing else states it: this row write and the
+ * upload below are not serialized against the editor's writes. An import that
+ * lands while an author is saving can drop a file the `PATCH` just stored,
+ * without either side being told.
+ */
 async function upsertItem(
   orgId: string,
   packageId: string,

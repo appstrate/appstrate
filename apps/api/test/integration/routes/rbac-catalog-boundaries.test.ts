@@ -91,6 +91,45 @@ const library = async (h: Record<string, string>) => {
 const deleteSkill = (h: Record<string, string>) =>
   app.request(`/api/packages/skills/${ID}`, { method: "DELETE", headers: h });
 
+/**
+ * One draft-tree write. `If-Match: *` and a well-formed body so the answer can
+ * only be the authority gate: the route settles authorization before it looks
+ * at the validator (428) or the body (400).
+ */
+const patchFiles = (h: Record<string, string>) =>
+  app.request(`/api/packages/${ID}/files`, {
+    method: "PATCH",
+    headers: { ...h, "Content-Type": "application/json", "If-Match": "*" },
+    body: JSON.stringify({ operations: [{ op: "write", path: "notes.md", text: "x" }] }),
+  });
+
+/** Every route whose authority is the package's, with the init each one needs. */
+function routesUnderAuthority(): [
+  string,
+  string,
+  { headers?: Record<string, string>; body?: string }?,
+][] {
+  return [
+    ["GET", `/api/packages/skills/${ID}`],
+    ["GET", `/api/packages/skills/${ID}/versions`],
+    ["GET", `/api/packages/skills/${ID}/versions/info`],
+    ["GET", `/api/packages/skills/${ID}/versions/0.1.0`],
+    ["DELETE", `/api/packages/skills/${ID}`],
+    ["PUT", `/api/packages/skills/${ID}`],
+    ["POST", `/api/packages/skills/${ID}/versions`],
+    ["POST", `/api/packages/skills/${ID}/versions/0.1.0/restore`],
+    ["DELETE", `/api/packages/skills/${ID}/versions/0.1.0`],
+    [
+      "PATCH",
+      `/api/packages/${ID}/files`,
+      {
+        headers: { "Content-Type": "application/json", "If-Match": "*" },
+        body: JSON.stringify({ operations: [{ op: "write", path: "notes.md", text: "x" }] }),
+      },
+    ],
+  ];
+}
+
 /** A single-skill `.afps` archive as an upload form, `manifest.name` overridable. */
 function skillArchiveForm(id = ID, fields: Record<string, string> = {}) {
   const archive = zipArtifact({
@@ -204,18 +243,12 @@ describe("library visibility", () => {
 describe("shared package authority", () => {
   it("denies hidden package reads, versions, mutations and guessed installation without changing state", async () => {
     await installIn(privateId);
-    for (const [method, path] of [
-      ["GET", `/api/packages/skills/${ID}`],
-      ["GET", `/api/packages/skills/${ID}/versions`],
-      ["GET", `/api/packages/skills/${ID}/versions/info`],
-      ["GET", `/api/packages/skills/${ID}/versions/0.1.0`],
-      ["DELETE", `/api/packages/skills/${ID}`],
-      ["PUT", `/api/packages/skills/${ID}`],
-      ["POST", `/api/packages/skills/${ID}/versions`],
-      ["POST", `/api/packages/skills/${ID}/versions/0.1.0/restore`],
-      ["DELETE", `/api/packages/skills/${ID}/versions/0.1.0`],
-    ]) {
-      const response = await app.request(path!, { method, headers });
+    for (const [method, path, init] of routesUnderAuthority()) {
+      const response = await app.request(path, {
+        method,
+        ...init,
+        headers: { ...headers, ...init?.headers },
+      });
       expect(response.status, `${method} ${path}`).toBe(404);
     }
     const install = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
@@ -231,6 +264,24 @@ describe("shared package authority", () => {
     await installIn(ctx.defaultSpaceId);
     expect((await deleteSkill(headers)).status).toBe(204);
     await assertDbCount(packages, eq(packages.id, ID), 0);
+  });
+
+  it("requires write authority in every shared installation for the file tree too", async () => {
+    // The draft tree is ONE object behind every installation, so the route that
+    // rewrites it answers to the same rule as the `PUT` that writes the same
+    // tree: a viewer in the space the package is shared with cannot be written
+    // around from the space where the caller is a builder.
+    await installIn(ctx.defaultSpaceId);
+    await installIn(privateId);
+    await seedSpaceMember({ spaceId: privateId, userId: guestId, presetRole: "viewer" });
+    expect((await patchFiles(headers)).status).toBe(403);
+    await expectSecretUntouched();
+
+    await db
+      .update(spaceMembers)
+      .set({ presetRole: "builder" })
+      .where(eq(spaceMembers.spaceId, privateId));
+    expect((await patchFiles(headers)).status).toBe(200);
   });
 
   it("requires deletion authority in every shared installation, not only visibility", async () => {
