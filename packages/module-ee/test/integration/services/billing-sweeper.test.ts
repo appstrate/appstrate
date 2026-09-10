@@ -28,6 +28,8 @@ import {
 import {
   runBillingSweep,
   runBillingSweepTick,
+  startBillingSweeper,
+  stopBillingSweeper,
   _resetBillingSweeperForTests,
 } from "../../../src/billing/billing-sweeper.ts";
 import {
@@ -571,6 +573,30 @@ describe("billing sweep — cursor consumer", () => {
     // A subsequent healthy tick resets the counter.
     const ok = await runBillingSweepTick();
     expect(ok!.billed).toBe(1);
+  });
+
+  it("keeps a maintenance tick armed when metering is paused (INTERVAL=0)", async () => {
+    // The regression: the early return on INTERVAL=0 armed NO timer, and the tick
+    // is the only caller of `retryPendingCancellations()` — so a deleted org whose
+    // Stripe cancel failed kept being charged for as long as metering stayed paused.
+    _resetBillingSweeperForTests();
+    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "0";
+    _resetEeEnvForTests();
+
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      startBillingSweeper();
+      // The re-entry guard warns only when a timer is actually armed.
+      startBillingSweeper();
+      expect(
+        warnSpy.mock.calls.filter(([msg]) => msg === "billing sweeper already running"),
+      ).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+      stopBillingSweeper();
+      _resetBillingSweeperForTests();
+      _resetEeEnvForTests();
+    }
   });
 
   it("does not advance the watermark when the ledger read fails", async () => {
