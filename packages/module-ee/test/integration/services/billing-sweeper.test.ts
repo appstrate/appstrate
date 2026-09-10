@@ -17,6 +17,7 @@ import {
   seedBillingAccount,
   seedLlmUsage,
   seedBillingCursor,
+  seedUsageRecord,
   markLlmUsageBilled,
 } from "../../helpers/seed.ts";
 import {
@@ -234,6 +235,42 @@ describe("billing sweep — cursor consumer", () => {
     expect(record!.contextType).toBe("unattributed");
     expect(Number(record!.costUsd)).toBeCloseTo(0.0008, 6);
     expect(record!.costCredits).toBe(1);
+  });
+
+  it("keeps sweeping when a context's cumulative credits exceed the int4 ceiling", async () => {
+    // The durable `unattributed` bucket never resets, so its cumulative
+    // `cost_credits` grows for the lifetime of the deployment. Past 2 147 483 647
+    // credits (~$2.15M) an `integer` column — and the `round(...)::int` casts
+    // that wrote it — raised "integer out of range" INSIDE the sweep
+    // transaction, rolling back the whole pass: no row claimed, no watermark
+    // advanced, billing dead for EVERY tenant until someone found the row.
+    await seedBillingCursor(0);
+    const beyondInt4 = 3_000_000_000; // credits, i.e. $3M cumulative
+    await seedUsageRecord({
+      orgId,
+      contextType: "unattributed",
+      contextId: orgId,
+      costCredits: beyondInt4,
+      costUsd: beyondInt4 / 1000,
+    });
+    seedLlmUsage({ orgId, costUsd: 0.05, contextType: null, contextId: null });
+
+    const result = await runBillingSweep();
+
+    // The pass committed: the row was claimed and the watermark moved.
+    expect(result.billed).toBe(1);
+    expect(await cursorValue()).toBe(1);
+
+    // Only the DELTA is debited — the $3M already on the record is not re-billed.
+    expect(await creditsUsed()).toBe(50);
+
+    const db = getEeDb();
+    const [record] = await db
+      .select()
+      .from(orgUsageRecords)
+      .where(eq(orgUsageRecords.contextId, orgId));
+    expect(record!.costCredits).toBe(beyondInt4 + 50);
+    expect(Number(record!.costUsd)).toBeCloseTo(3_000_000.05, 6);
   });
 
   it("bills a chat-context row and keys the usage record by chat session", async () => {

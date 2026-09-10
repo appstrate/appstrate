@@ -16,6 +16,7 @@ import {
   billingCursor,
   billingManagers,
 } from "../../drizzle/schema.ts";
+import { CREDITS_PER_DOLLAR } from "../../src/credits.ts";
 import type { LlmUsageLedgerRow } from "@appstrate/core/module";
 import { mockLedger } from "./mock-platform.ts";
 
@@ -55,11 +56,18 @@ export async function seedBillingAccount(overrides: {
   return account!;
 }
 
+/**
+ * `costUsd` is the context's CUMULATIVE dollar total and must stay consistent
+ * with `costCredits` (`costCredits === round(costUsd * CREDITS_PER_DOLLAR)`) —
+ * the sweep derives its debit from the difference between the two. It defaults
+ * to the whole-dollar equivalent of `costCredits`, which satisfies that.
+ */
 export async function seedUsageRecord(overrides: {
   orgId: string;
   contextType?: string;
   contextId: string;
   costCredits: number;
+  costUsd?: number;
 }) {
   const db = getEeDb();
   const [record] = await db
@@ -69,6 +77,7 @@ export async function seedUsageRecord(overrides: {
       contextType: overrides.contextType ?? "run",
       contextId: overrides.contextId,
       costCredits: overrides.costCredits,
+      costUsd: (overrides.costUsd ?? overrides.costCredits / CREDITS_PER_DOLLAR).toFixed(12),
     })
     .returning();
   return record!;
