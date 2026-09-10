@@ -3561,7 +3561,7 @@ export interface paths {
         put?: never;
         /**
          * Batch lookup profiles
-         * @description Retrieve display names for a list of user IDs.
+         * @description Retrieve display names for a list of user IDs. Reads the organization directory, so it requires `members:read`.
          */
         post: operations["batchGetProfiles"];
         delete?: never;
@@ -18172,6 +18172,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listProxies: {
