@@ -584,7 +584,19 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         updatedAt: new Date(),
       };
       if (itemPeriodEnd) updates.periodEnd = itemPeriodEnd;
-      if (newPlan) updates.planId = newPlan.id;
+      if (newPlan) {
+        updates.planId = newPlan.id;
+        // The plan and its ceiling are ONE fact: `changeSubscriptionPlan` deliberately
+        // writes neither, and `create_prorations` bills on the next cycle, so no
+        // `invoice.paid` follows a plan switch to repair a stale quota.
+        //
+        // `creditsUsed` is deliberately left alone — consumption already billed is never
+        // erased by a plan move (same rule as invoice.paid outside `subscription_cycle`).
+        // An upgrade therefore frees exactly the added headroom, and a downgrade below
+        // current consumption leaves the account over its ceiling until the renewal
+        // invoice resets the counter.
+        updates.creditQuota = newPlan.creditQuota;
+      }
 
       // Org from metadata (ordering-independent), written only if the org is still ON this
       // subscription. Nothing here ATTACHES one, so an `updated` naming another is a tail.

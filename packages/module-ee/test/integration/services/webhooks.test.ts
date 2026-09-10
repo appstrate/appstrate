@@ -701,6 +701,102 @@ describe("handleWebhook", () => {
       expect(account!.subscriptionStatus).toBe("past_due");
       expect(account!.cancelAtPeriodEnd).toBe(true);
     });
+
+    it("raises the credit quota on an upgrade, freeing the added headroom", async () => {
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_update_002",
+        stripeSubscriptionId: "sub_update_002",
+        subscriptionStatus: "active",
+        creditsUsed: 20000,
+        creditQuota: 20000,
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_sub_updated_upgrade",
+        type: "customer.subscription.updated",
+        data: {
+          object: {
+            id: "sub_update_002",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { orgId, planId: "pro" },
+            items: {
+              data: [
+                {
+                  id: "si_upd_002",
+                  price: { id: "price_pro_test" },
+                  current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 3600,
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.planId).toBe("pro");
+      expect(account!.creditQuota).toBe(80000);
+      // Consumption already billed survives the move — the upgrade buys headroom,
+      // it does not erase the Starter spend.
+      expect(account!.creditsUsed).toBe(20000);
+    });
+
+    it("lowers the credit quota on a downgrade without erasing consumption", async () => {
+      await seedBillingAccount({
+        orgId,
+        planId: "pro",
+        stripeCustomerId: "cus_update_003",
+        stripeSubscriptionId: "sub_update_003",
+        subscriptionStatus: "active",
+        creditsUsed: 60000,
+        creditQuota: 80000,
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_sub_updated_downgrade",
+        type: "customer.subscription.updated",
+        data: {
+          object: {
+            id: "sub_update_003",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { orgId, planId: "starter" },
+            items: {
+              data: [
+                {
+                  id: "si_upd_003",
+                  price: { id: "price_starter_test" },
+                  current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 3600,
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.planId).toBe("starter");
+      expect(account!.creditQuota).toBe(20000);
+      // Over the new ceiling on purpose: the renewal invoice resets the counter,
+      // a plan move never grants credits back.
+      expect(account!.creditsUsed).toBe(60000);
+    });
   });
 
   describe("customer.subscription.deleted", () => {
