@@ -200,9 +200,9 @@ for (const width of WIDTHS) {
     assertTableSurface(await frameStyle(credentialsTable), modelsPath, width, "integrated");
     await assertPageActions(page, modelsPath, width, ["create-credential"]);
 
-    const detailPath = "/integrations/@appstrate/google-drive";
+    const detailPath = "/integrations/@appstrate/google-drive#connections";
     const connectionsTable = await open(page, detailPath, 'main table[role="table"]:visible');
-    assertTableSurface(await frameStyle(connectionsTable), detailPath, width, "card");
+    assertTableSurface(await frameStyle(connectionsTable), detailPath, width, "integrated");
     await page.getByTestId("tab-configuration").click();
     const clientsTable = page.locator('main table[role="table"]:visible').first();
     await clientsTable.waitFor({ state: "visible" });
@@ -210,7 +210,7 @@ for (const width of WIDTHS) {
       await frameStyle(clientsTable),
       `${detailPath}#configuration`,
       width,
-      "card",
+      "integrated",
     );
 
     const cataloguePath = "/integrations?catalogue=1";

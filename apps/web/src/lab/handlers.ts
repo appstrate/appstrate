@@ -37,7 +37,11 @@ type AgentUpdate = f.JsonRequest<"/api/packages/agents/{scope}/{name}", "put">;
 const changedEndUsers = new Map<string, LabEndUser>();
 const deletedEndUsers = new Set<string>();
 const dashboardSsoByOrg = new Map<string, boolean>();
+const organizationLogoByOrg = new Map<string, string | null>();
 const changedAgentBundles = new Map<string, LabAgentDetail>();
+const integrationDefaults = new Map<string, { connection_id: string; enforce: boolean }>();
+const defaultKey = (url: URL, headers: Headers) =>
+  `${headers.get("X-Org-Id")}:${headers.get("X-Application-Id")}:${url.pathname}`;
 
 export function resetEndUserLabState(): void {
   changedEndUsers.clear();
@@ -45,7 +49,9 @@ export function resetEndUserLabState(): void {
 }
 
 export function resetSettingsLabState(): void {
+  integrationDefaults.clear();
   dashboardSsoByOrg.clear();
+  organizationLogoByOrg.clear();
 }
 
 export function resetAgentEditorLabState(): void {
@@ -78,7 +84,7 @@ function genericPackageId(url: URL): string {
 
 function isPermanentPackageDetail(headers: Headers): boolean {
   const location = headers.get("X-Appstrate-Lab-Location") ?? "";
-  return /^\/(skills|mcp-servers)\/[^/]+\/[^/]+(?:\/|$)/.test(location);
+  return /^\/(skills|mcp-servers|integrations)\/[^/]+\/[^/]+(?:\/|$)/.test(location);
 }
 
 function isEndUserPatch(body: unknown): body is EndUserPatch {
@@ -118,6 +124,8 @@ function agentDetailFixture(packageId: string): LabAgentDetail {
   const detail: LabAgentDetail = {
     ...f.agentDetail,
     id: packageId,
+    icon: listed?.icon ?? f.agentDetail.icon,
+    color: listed?.color ?? f.agentDetail.color,
     display_name: displayName,
     description: listed?.description ?? f.agentDetail.description,
     source: listed?.source ?? f.agentDetail.source,
@@ -135,9 +143,11 @@ function agentDetailFixture(packageId: string): LabAgentDetail {
     manifest: {
       ...baseManifest,
       name: packageId,
+      icon: listed?.icon ?? f.agentDetail.icon,
       version: detailVersion,
       display_name: displayName,
       description: listed?.description ?? f.agentDetail.description,
+      _meta: listed?.color ? { "dev.appstrate/ui": { color: listed.color } } : baseManifest._meta,
       dependencies: {},
     },
     dependencies: { skills: [], mcp_servers: [], integrations: [] },
@@ -212,7 +222,12 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       status: 200,
       body: {
         ...f.orgs,
-        data: isPermanentPackageDetail(headers) ? f.orgs.data : list(f.orgs.data, s),
+        data: (isPermanentPackageDetail(headers) ? f.orgs.data : list(f.orgs.data, s)).map(
+          (org) => ({
+            ...org,
+            logo: organizationLogoByOrg.has(org.id) ? organizationLogoByOrg.get(org.id) : org.logo,
+          }),
+        ),
       },
     }),
   },
@@ -277,17 +292,35 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     // below; everything else on the screen is in this one body.
     method: "GET",
     pattern: /^\/api\/integrations\/[^/]+\/[^/]+$/,
-    handler: (_u, s) => ({
-      status: 200,
-      body: {
-        ...f.integrationDetail,
-        auths: f.integrationDetail.auths.map((a) =>
-          a.auth_key === f.INTEGRATION_AUTH_KEY
-            ? { ...a, connections: list(a.connections, s, f.heavyIntegrationConnections) }
-            : a,
-        ),
-      },
-    }),
+    handler: (url, scenario) => {
+      const technical = genericPackageId(url) === "@lab/auth-methods";
+      const detail = technical ? f.integrationAuthLabDetail : f.integrationDetail;
+      return {
+        status: 200,
+        body: {
+          ...detail,
+          manifest: technical
+            ? {
+                ...detail.manifest,
+                display_name: "Cas de test : authentification",
+                description:
+                  "Scénarios techniques de démonstration, pas une intégration de production.",
+              }
+            : detail.manifest,
+          auths: detail.auths.map((auth) => {
+            const connections =
+              auth.auth_key === f.INTEGRATION_AUTH_KEY
+                ? list(auth.connections, scenario, f.heavyIntegrationConnections)
+                : auth.connections;
+            return {
+              ...auth,
+              connections,
+              ready: connections.some((connection) => !connection.needs_reconnection),
+            };
+          }),
+        },
+      };
+    },
   },
   {
     method: "GET",
@@ -335,12 +368,74 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     // it as such — a 404 there would look like a broken endpoint instead.
     method: "GET",
     pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/default$/,
-    handler: () => ({ status: 204, body: null }),
+    handler: (url, _scenario, headers) => {
+      const value = integrationDefaults.get(defaultKey(url, headers));
+      return value ? { status: 200, body: value } : { status: 204, body: null };
+    },
+  },
+  {
+    method: "PUT",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/default$/,
+    handler: (url, scenario, headers, body) => {
+      if (
+        !body ||
+        typeof body !== "object" ||
+        !("connection_id" in body) ||
+        typeof body.connection_id !== "string" ||
+        !("enforce" in body) ||
+        typeof body.enforce !== "boolean"
+      )
+        return { status: 400, body: {} };
+      const value = { connection_id: body.connection_id, enforce: body.enforce };
+      if (scenario !== "error") integrationDefaults.set(defaultKey(url, headers), value);
+      return { status: 200, body: value };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/default$/,
+    handler: (url, scenario, headers) => {
+      if (scenario !== "error") integrationDefaults.delete(defaultKey(url, headers));
+      return { status: 200, body: { deleted: true } };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/integrations$/,
+    handler: (url, scenario) => {
+      const activeIds = new Set(
+        f.integrations.data
+          .filter((integration) => integration.active)
+          .map((integration) => integration.id),
+      );
+      const rows = f.integrationPackageList.data.filter(
+        (item) => url.searchParams.get("active") !== "true" || activeIds.has(item.id),
+      );
+      return { status: 200, body: { ...f.integrationPackageList, data: list(rows, scenario) } };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/integrations\/[^/]+\/[^/]+\/versions$/,
+    handler: (url) => ({ status: 200, body: f.integrationVersionHistory(typedPackageId(url)) }),
   },
   {
     method: "GET",
     pattern: /^\/api\/packages\/integrations\/[^/]+\/[^/]+$/,
-    handler: () => ({ status: 200, body: f.integrationPackage }),
+    handler: (url) => ({
+      status: 200,
+      body:
+        typedPackageId(url) === "@lab/auth-methods"
+          ? {
+              ...f.integrationPackage,
+              id: "@lab/auth-methods",
+              name: "auth-methods",
+              orgId: f.ORG_ID,
+              source: "local",
+              agents: [],
+            }
+          : f.integrationPackage,
+    }),
   },
   {
     method: "GET",
@@ -383,11 +478,39 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: () => ({ status: 200, body: f.oauthScopes }),
   },
   {
+    method: "PUT",
+    pattern: /^\/api\/orgs\/[^/]+$/,
+    handler: (url, scenario, _headers, body) => {
+      const orgId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+      const logo =
+        typeof body === "object" && body !== null && "logo" in body
+          ? typeof body.logo === "string" || body.logo === null
+            ? body.logo
+            : undefined
+          : undefined;
+      if (scenario !== "error" && logo !== undefined) organizationLogoByOrg.set(orgId, logo);
+      return {
+        status: 200,
+        body: {
+          ...f.orgDetail,
+          logo: organizationLogoByOrg.has(orgId)
+            ? organizationLogoByOrg.get(orgId)
+            : f.orgDetail.logo,
+        },
+      };
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/api\/orgs\/[^/]+$/,
-    handler: (_u, s) => ({
+    handler: (url, s) => ({
       status: 200,
-      body: s === "empty" ? { ...f.orgDetail, members: [], invitations: [] } : f.orgDetail,
+      body: {
+        ...(s === "empty" ? { ...f.orgDetail, members: [], invitations: [] } : f.orgDetail),
+        logo: organizationLogoByOrg.has(orgIdFromSettingsUrl(url))
+          ? organizationLogoByOrg.get(orgIdFromSettingsUrl(url))
+          : f.orgDetail.logo,
+      },
     }),
   },
   {
@@ -495,6 +618,16 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/packages\/(skills|mcp-servers)\/[^/]+\/[^/]+\/versions$/,
+    handler: (url, scenario) => {
+      const history = f.packageVersionsById[typedPackageId(url)];
+      return history
+        ? { status: 200, body: { versions: list(history.versions, scenario) } }
+        : { status: 404, body: {} };
+    },
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/packages\/skills\/[^/]+\/[^/]+\/versions\/info$/,
     handler: (url) => {
       const info = f.skillVersionInfoById[typedPackageId(url)];
@@ -504,10 +637,10 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/packages\/skills\/[^/]+\/[^/]+\/versions\/[^/]+$/,
-    handler: (url) =>
-      typedPackageId(url) === f.wikiBrainSkillDetail.id
-        ? { status: 200, body: f.wikiBrainLatestVersion }
-        : { status: 404, body: {} },
+    handler: (url) => {
+      const detail = f.publishedPackageVersion(typedPackageId(url), endUserId(url));
+      return detail ? { status: 200, body: detail } : { status: 404, body: {} };
+    },
   },
   {
     method: "GET",
@@ -536,16 +669,22 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/packages\/mcp-servers\/[^/]+\/[^/]+\/versions\/[^/]+$/,
-    handler: (url) =>
-      typedPackageId(url) === f.qboMcpServerDetail.id
-        ? { status: 200, body: f.qboMcpServerLatestVersion }
-        : { status: 404, body: {} },
+    handler: (url) => {
+      const detail = f.publishedPackageVersion(typedPackageId(url), endUserId(url));
+      return detail ? { status: 200, body: detail } : { status: 404, body: {} };
+    },
   },
   {
     method: "GET",
     pattern: /^\/api\/packages\/[^/]+\/[^/]+\/files$/,
     handler: (url) => {
-      const files = f.packageFileIndexes[genericPackageId(url)];
+      const packageId = genericPackageId(url);
+      const files =
+        packageId === f.INTEGRATION_ID
+          ? f.integrationFiles
+          : packageId === "@lab/auth-methods"
+            ? f.integrationAuthLabFiles
+            : f.packageFileIndexes[packageId];
       return files ? { status: 200, body: files } : { status: 404, body: {} };
     },
   },
@@ -879,6 +1018,43 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       status: 200,
       body: { ...f.cliSessions, data: list(f.cliSessions.data, s) },
     }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/schedules\/[^/]+$/,
+    handler: (url) => {
+      const schedule = f.scheduleDetails[endUserId(url)];
+      return schedule ? { status: 200, body: schedule } : { status: 404, body: {} };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/schedules\/[^/]+\/runs$/,
+    handler: (url, scenario) => {
+      const id = url.pathname.split("/")[3];
+      const statuses = (url.searchParams.get("status") ?? "").split(",").filter(Boolean);
+      const q = (url.searchParams.get("q") ?? "").trim().toLocaleLowerCase();
+      const rows = list(f.runs, scenario).filter(
+        (run) =>
+          run.scheduleId === id &&
+          (!statuses.length || statuses.includes(run.status)) &&
+          (!q ||
+            [run.agent_name, run.agent_scope, run.error].some((value) =>
+              value?.toLocaleLowerCase().includes(q),
+            ) ||
+            Number(q.replace(/^#/, "")) === run.runNumber),
+      );
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number(url.searchParams.get("limit") ?? 20);
+      const data = rows.slice(offset, offset + limit);
+      const body: f.Json200<"/api/schedules/{id}/runs", "get"> = {
+        object: "list",
+        data,
+        total: rows.length,
+        hasMore: offset + data.length < rows.length,
+      };
+      return { status: 200, body };
+    },
   },
   {
     method: "GET",

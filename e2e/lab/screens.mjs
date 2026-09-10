@@ -20,6 +20,16 @@ export const SCREENS = [
   { path: "/", name: "dashboard" },
   { path: "/runs", name: "runs" },
   { path: "/schedules", name: "schedules" },
+  { path: "/schedules/sch_01#details", name: "schedule-detail" },
+  { path: "/schedules/sch_01#runs", name: "schedule-detail-runs" },
+  {
+    path: "/agents/@tractr/compta-trimestrielle?agentBundle=skills#overview",
+    name: "agent-bundle-skills",
+  },
+  {
+    path: "/agents/@tractr/compta-trimestrielle?agentBundle=integrations#overview",
+    name: "agent-bundle-integrations",
+  },
   { path: "/agents", name: "agents" },
   { path: "/agents?create=agent", name: "agent-creation" },
   { path: "/skills", name: "skills" },
@@ -43,6 +53,24 @@ export const SCREENS = [
   { path: "/integrations?create=integration", name: "integration-creation" },
   { path: "/integrations?catalogue=1", name: "integration-catalogue" },
   { path: "/integrations/@appstrate/google-drive", name: "integration-detail" },
+  { path: "/integrations/@appstrate/google-drive#tools", name: "integration-detail-tools" },
+  {
+    path: "/integrations/@appstrate/google-drive#connections",
+    name: "integration-detail-connections",
+  },
+  { path: "/integrations/@lab/auth-methods#connections", name: "integration-auth-lab-connections" },
+  { path: "/integrations/@lab/auth-methods#configuration", name: "integration-auth-lab-settings" },
+  {
+    path: "/integrations/@appstrate/google-drive?integrationSettings=files#configuration",
+    name: "integration-detail-files",
+  },
+  { path: "/mcp-servers/@appstrate/gdrive-mcp", name: "mcp-server-drive-detail" },
+  {
+    path: "/integrations/@appstrate/google-drive?integrationSettings=access#configuration",
+    name: "integration-detail-access",
+  },
+  { path: "/skills/@tractr/compta-references#versions", name: "skill-detail-versions" },
+  { path: "/skills/@tractr/compta-references#usedBy", name: "skill-detail-usage" },
   {
     path: "/integrations/@appstrate/google-drive#configuration",
     name: "integration-detail-config",

@@ -11,6 +11,11 @@
  * shape the backend stopped returning.
  */
 import type { paths, components } from "../api/schema";
+import {
+  resolveIntegrationToolSurface,
+  type IntegrationManifest,
+  type IntegrationToolCatalogEntry,
+} from "@appstrate/core/integration";
 
 export type Json200<P extends keyof paths, M extends keyof paths[P]> = paths[P][M] extends {
   responses: { 200: { content: { "application/json": infer B } } };
@@ -158,8 +163,22 @@ export const orgs: Json200<"/api/orgs", "get"> = {
   object: "list",
   hasMore: false,
   data: [
-    { id: ORG_ID, name: "Tractr", slug: "tractr", role: "owner", createdAt: ago(60) },
-    { id: "org_lab_2", name: "Appstrate", slug: "appstrate", role: "admin", createdAt: ago(60) },
+    {
+      id: ORG_ID,
+      name: "Tractr",
+      slug: "tractr",
+      logo: "emoji:🚜",
+      role: "owner",
+      createdAt: ago(60),
+    },
+    {
+      id: "org_lab_2",
+      name: "Appstrate",
+      slug: "appstrate",
+      logo: "emoji:⚡️",
+      role: "admin",
+      createdAt: ago(60),
+    },
   ],
 };
 
@@ -572,6 +591,8 @@ export const agents: Json200<"/api/agents", "get"> = {
   data: [
     {
       id: "@tractr/compta-trimestrielle",
+      icon: "receipt",
+      color: "amber",
       display_name: "Compta trimestrielle",
       description:
         "Pipeline de comptabilité trimestrielle : renomme les relevés BNC, extrait les transactions, concilie les factures et génère le récapitulatif Excel.",
@@ -589,6 +610,8 @@ export const agents: Json200<"/api/agents", "get"> = {
     },
     {
       id: "@default/wiki-brain",
+      icon: "brain",
+      color: "violet",
       display_name: "Wiki-brain",
       description: "Mémoire proactive par personne : capte, range et rappelle ce qui compte.",
       author: "Appstrate",
@@ -602,12 +625,62 @@ export const agents: Json200<"/api/agents", "get"> = {
     },
     {
       id: "@tractr/analyse-recurrence-articles-tastet",
+      icon: "newspaper",
+      color: "rose",
       display_name: "Analyse de récurrence des articles Tastet",
       description: "Détecte le potentiel de récurrence éditoriale d'un corpus d'articles.",
       keywords: [],
       source: "local",
       scope: "@tractr",
       version: "0.1.0",
+      type: "agent",
+      running_runs: 0,
+      dependencies: {},
+    },
+    {
+      id: "@tractr/reponse-leads",
+      icon: "mail",
+      color: "emerald",
+      display_name: "Réponse aux leads",
+      description:
+        "Qualifie les demandes entrantes et prépare une réponse personnalisée avec le bon contexte commercial.",
+      author: "Tractr",
+      keywords: ["ventes", "email"],
+      source: "local",
+      scope: "@tractr",
+      version: "0.8.2",
+      type: "agent",
+      running_runs: 0,
+      dependencies: {},
+    },
+    {
+      id: "@tractr/radar-ia",
+      icon: "sparkles",
+      color: "blue",
+      display_name: "Radar IA",
+      description:
+        "Surveille les sources prioritaires et assemble une veille agentique directement exploitable.",
+      author: "Tractr",
+      keywords: ["veille", "recherche"],
+      source: "local",
+      scope: "@tractr",
+      version: "1.2.0",
+      type: "agent",
+      running_runs: 0,
+      dependencies: {},
+    },
+    {
+      id: "@tractr/debrief-appel",
+      icon: "workflow",
+      color: "cyan",
+      display_name: "Débrief d’appel",
+      description:
+        "Transforme un appel prospect en synthèse, prochaines étapes et actions commerciales prêtes à suivre.",
+      author: "Tractr",
+      keywords: ["réunion", "crm"],
+      source: "local",
+      scope: "@tractr",
+      version: "0.6.0",
       type: "agent",
       running_runs: 0,
       dependencies: {},
@@ -718,6 +791,12 @@ export const schedules: Json200<"/api/schedules", "get"> = {
     }),
   ],
 };
+
+/** Detail responses reuse the same schedules as the list, never a parallel dataset. */
+export const scheduleDetails: Record<
+  string,
+  Json200<"/api/schedules/{id}", "get">
+> = Object.fromEntries(schedules.data.map((schedule) => [schedule.id, schedule]));
 
 export const chatSessions: Json200<"/api/chat/sessions", "get"> = {
   object: "list",
@@ -1014,6 +1093,16 @@ export const wikiBrainSkillDetail: Json200<"/api/packages/skills/{scope}/{name}"
   updatedAt: skills.data[2]!.updatedAt,
 };
 
+const driveToolCatalog = [
+  { name: "drive_search", description: "Chercher des fichiers par nom, type ou contenu." },
+  { name: "drive_read_file", description: "Lire le contenu d'un fichier." },
+  { name: "drive_upload", description: "Déposer un fichier dans un dossier." },
+];
+const driveMcpTools = [
+  ...driveToolCatalog,
+  { name: "drive_delete", description: "Supprimer définitivement un fichier." },
+];
+
 export const gdriveMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{name}", "get"> = {
   id: "@appstrate/gdrive-mcp",
   orgId: null,
@@ -1024,7 +1113,13 @@ export const gdriveMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{
   created_by: null,
   auto_installed: true,
   version: "2.1.0",
-  manifest: {},
+  manifest: {
+    name: "@appstrate/gdrive-mcp",
+    version: "2.1.0",
+    type: "mcp-server",
+    server: { type: "node", entry_point: "src/server.ts" },
+    tools: driveMcpTools,
+  },
   manifest_name: "@appstrate/gdrive-mcp",
   version_count: 3,
   has_unarchived_changes: false,
@@ -1050,7 +1145,7 @@ export const qboMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{nam
     version: "1.0.0",
     type: "mcp-server",
     server: { type: "node", entry_point: "src/server.ts" },
-  } as never,
+  },
   manifest_name: "@tractr/qbo-mcp",
   version_count: 1,
   has_unarchived_changes: true,
@@ -1076,9 +1171,10 @@ function skillFileIndex(content: string): PackageFileIndex {
   };
 }
 
-function mcpServerFileIndex(): PackageFileIndex {
+function mcpServerFileIndex(manifest: unknown): PackageFileIndex {
+  const content = `${JSON.stringify(manifest, null, 2)}\n`;
   return {
-    entries: [{ path: "manifest.json", size: 3, media_kind: "text", inline: "{}\n" }],
+    entries: [{ path: "manifest.json", size: content.length, media_kind: "text", inline: content }],
   };
 }
 
@@ -1153,7 +1249,7 @@ export const triageSentimentSkillFiles: Json200<"/api/packages/{scope}/{name}/fi
 export const wikiBrainSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
   skillFileIndex(wikiBrainSkillDetail.content ?? "");
 export const gdriveMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
-  mcpServerFileIndex();
+  mcpServerFileIndex(gdriveMcpServerDetail.manifest);
 export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> = {
   entries: [
     {
@@ -1425,6 +1521,8 @@ export const heavyDocuments: LabDocument[] = Array.from({ length: 60 }, (_, i) =
  */
 export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> = {
   id: "@tractr/compta-trimestrielle",
+  icon: "receipt",
+  color: "amber",
   display_name: "Compta trimestrielle",
   description:
     "Pipeline de comptabilité trimestrielle : renomme les relevés BNC, extrait les transactions, concilie les factures et génère le récapitulatif Excel.",
@@ -1437,12 +1535,14 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
     "Prépare la comptabilité trimestrielle. Classe les transactions, rapproche les pièces et publie un récapitulatif vérifiable.",
   manifest: {
     name: "@tractr/compta-trimestrielle",
+    icon: "receipt",
     version: "1.4.0",
     type: "agent",
     display_name: "Compta trimestrielle",
     description: "Prépare et classe les transactions du trimestre.",
     author: "Tractr",
     schema_version: "0.6",
+    _meta: { "dev.appstrate/ui": { color: "amber" } },
     dependencies: {
       skills: { "@tractr/compta-references": "1.4.0" },
       mcp_servers: {
@@ -2277,6 +2377,56 @@ export const agentVersions: Json200<"/api/packages/agents/{scope}/{name}/version
   ],
 };
 
+/** Published package history for the detail pages and bundle version selectors. */
+export const packageVersionsById: Record<
+  string,
+  Json200<"/api/packages/skills/{scope}/{name}/versions", "get">
+> = Object.fromEntries(
+  [...skillDetails, ...mcpServerDetails].map((detail, index) => [
+    detail.id,
+    {
+      versions: [
+        {
+          id: 100 + index,
+          packageId: detail.id,
+          version:
+            (skillVersionInfoById[detail.id] ?? mcpServerVersionInfoById[detail.id])
+              ?.latest_published_version ??
+            detail.version ??
+            "1.0.0",
+          integrity: agentVersions.versions[0]!.integrity,
+          artifact_size: 1240,
+          yanked: false,
+          created_by: USER_ID,
+          createdAt: ago(3000),
+        },
+      ],
+    },
+  ]),
+);
+
+/** Resolve only versions actually advertised by the lab catalog. */
+export function publishedPackageVersion(
+  packageId: string,
+  requestedVersion: string,
+): components["schemas"]["PackageVersionDetail"] | undefined {
+  const published = packageVersionsById[packageId]?.versions.find(
+    (version) => version.version === requestedVersion || requestedVersion === "latest",
+  );
+  if (!published) return undefined;
+  if (packageId === wikiBrainSkillDetail.id) return wikiBrainLatestVersion;
+  if (packageId === qboMcpServerDetail.id) return qboMcpServerLatestVersion;
+  const detail = [...skillDetails, ...mcpServerDetails].find((item) => item.id === packageId);
+  if (!detail) return undefined;
+  return {
+    ...published,
+    manifest: detail.manifest ?? {},
+    content: detail.content,
+    yanked_reason: null,
+    dist_tags: ["latest"],
+  };
+}
+
 /** The version the selector resolves `latest` to. */
 export const agentLatestVersion: components["schemas"]["PackageVersionDetail"] = {
   id: 6,
@@ -2458,6 +2608,7 @@ export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
   id: ORG_ID,
   name: "Tractr",
   slug: "tractr",
+  logo: "emoji:🚜",
   createdAt: ago(200_000),
   storage: { used_bytes: 2_411_724_800, limit_bytes: null, effective_limit_bytes: null },
   members: [
@@ -2706,20 +2857,20 @@ const driveConnections: Connection[] = [
   },
 ];
 
-/**
- * The integration detail.
- *
- * THREE auths on purpose, because the states are per-auth and one happy auth
- * shows none of them: `drive` (oauth2) carries the accounts and the clients;
- * `mcp` is a remote-MCP auth whose client is auto-provisioned, which is the
- * only way to reach the clients table's EMPTY state and the hint that explains
- * it; `service_account` is a `custom` auth with nothing connected, which shows
- * the connections table's empty state and the Configuration tab's "this auth
- * has no OAuth client" line. None of the three was visible while the screen had
- * no fixture at all.
- */
-export const integrationDetail: IntegrationDetail = {
+const driveAuthDeclaration = {
+  type: "oauth2" as const,
+  authorized_uris: [
+    "https://www.googleapis.com/drive/v3",
+    "https://www.googleapis.com/upload/drive/v3",
+    "https://oauth2.googleapis.com/token",
+    "https://www.googleapis.com/oauth2/v3/userinfo",
+  ],
+};
+
+/** Dedicated technical fixture, never the default Google Drive experience. */
+export const integrationAuthLabDetail: IntegrationDetail = {
   manifest: {
+    tools_policy: Object.fromEntries(driveToolCatalog.map((tool) => [tool.name, {}])),
     display_name: "Google Drive",
     description:
       "Lire, écrire et organiser les fichiers d'un Drive : documents, tableurs, dossiers partagés.",
@@ -2730,15 +2881,7 @@ export const integrationDetail: IntegrationDetail = {
     // this map and skips any auth missing from it, so without these two the
     // whole tab renders as the access-rules row alone.
     auths: {
-      drive: {
-        type: "oauth2",
-        authorized_uris: [
-          "https://www.googleapis.com/drive/v3",
-          "https://www.googleapis.com/upload/drive/v3",
-          "https://oauth2.googleapis.com/token",
-          "https://www.googleapis.com/oauth2/v3/userinfo",
-        ],
-      },
+      drive: driveAuthDeclaration,
       mcp: { type: "oauth2", authorized_uris: ["https://mcp.googleapis.com"] },
       service_account: { type: "custom", authorized_uris: ["https://www.googleapis.com"] },
     },
@@ -2788,16 +2931,65 @@ export const integrationDetail: IntegrationDetail = {
       client_auto_provisioned: false,
     },
   ],
-  tool_catalog: [
-    { name: "drive_search", description: "Chercher des fichiers par nom, type ou contenu." },
-    { name: "drive_read_file", description: "Lire le contenu d'un fichier." },
-    { name: "drive_upload", description: "Déposer un fichier dans un dossier." },
-  ],
+  tool_catalog: driveToolCatalog,
   allow_undeclared_tools: false,
   active: true,
   block_user_connections: false,
   platform_redirect_uri: "https://app.appstrate.com/api/integrations/oauth/callback",
 };
+
+/** Realistic default: one Google OAuth connection method, one MCP source. */
+export const integrationDetail: IntegrationDetail = {
+  ...integrationAuthLabDetail,
+  manifest: {
+    ...integrationAuthLabDetail.manifest,
+    source: { kind: "local", server: { name: "@appstrate/gdrive-mcp", version: "2.1.0" } },
+    hidden_tools: ["drive_delete"],
+    tools_policy: {
+      drive_upload: { required_scopes: { drive: ["https://www.googleapis.com/auth/drive.file"] } },
+    },
+    auths: {
+      drive: {
+        ...driveAuthDeclaration,
+        default_scopes: integrationAuthLabDetail.auths[0]!.scopes,
+      },
+    },
+  },
+  auths: [integrationAuthLabDetail.auths[0]!],
+};
+
+// Use the production resolver so the demo manifest, inventory and picker agree.
+function mutableTool<T extends IntegrationToolCatalogEntry>(tool: T) {
+  return {
+    ...tool,
+    ...(tool.policy
+      ? {
+          policy: {
+            required_scopes: Object.fromEntries(
+              Object.entries(tool.policy.required_scopes ?? {}).map(([auth, scopes]) => [
+                auth,
+                [...scopes],
+              ]),
+            ),
+          },
+        }
+      : {}),
+  };
+}
+for (const [detail, mcpServerTools] of [
+  [integrationDetail, driveMcpTools],
+  [integrationAuthLabDetail, undefined],
+] as const) {
+  const surface = resolveIntegrationToolSurface({
+    integration: detail.manifest as IntegrationManifest,
+    mcpServerTools,
+  });
+  detail.tool_catalog = surface.catalog.map(mutableTool);
+  detail.tool_catalog_inspection = {
+    ...surface.inspection,
+    entries: surface.inspection.entries.map(mutableTool),
+  };
+}
 
 /** The same auth with a dozen accounts — what a shared workspace reaches. */
 export const heavyIntegrationConnections: Connection[] = Array.from({ length: 12 }, (_, i) => {
@@ -2863,6 +3055,7 @@ export const integrationPackage: components["schemas"]["OrgPackageItemDetail"] =
   name: "google-drive",
   description: "Lire, écrire et organiser les fichiers d'un Drive.",
   content: "# Google Drive\n\nIntégration système.\n",
+  manifest: integrationDetail.manifest,
   source: "system",
   created_by: null,
   auto_installed: true,
@@ -2872,6 +3065,67 @@ export const integrationPackage: components["schemas"]["OrgPackageItemDetail"] =
   createdAt: ago(200_000),
   updatedAt: ago(4_000),
 };
+
+/** The file view uses the same declaration as the rendered integration. */
+export const integrationFiles: PackageFileIndex = {
+  entries: [
+    ...mcpServerFileIndex(integrationDetail.manifest).entries,
+    {
+      path: "INTEGRATION.md",
+      size: integrationPackage.content!.length,
+      media_kind: "text",
+      inline: integrationPackage.content!,
+    },
+  ],
+};
+export const integrationAuthLabFiles = mcpServerFileIndex(integrationAuthLabDetail.manifest);
+
+/** Catalog response used by the bundle dependency selector. */
+export const integrationPackageList: Json200<"/api/packages/integrations", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: integrations.data.map((integration) => ({
+    id: integration.id,
+    orgId: integration.orgId,
+    name:
+      typeof integration.manifest?.display_name === "string"
+        ? integration.manifest.display_name
+        : integration.id,
+    description:
+      typeof integration.manifest?.description === "string" ? integration.manifest.description : "",
+    source: integration.source ?? "local",
+    version:
+      typeof integration.manifest?.version === "string" ? integration.manifest.version : "1.0.0",
+    created_by: integration.source === "system" ? null : USER_ID,
+    used_by_agents: 1,
+    auto_installed: false,
+    forked_from: null,
+    createdAt: ago(200000),
+    updatedAt: ago(4000),
+  })),
+};
+
+export function integrationVersionHistory(
+  packageId: string,
+): Json200<"/api/packages/integrations/{scope}/{name}/versions", "get"> {
+  const item = integrationPackageList.data.find((entry) => entry.id === packageId);
+  return {
+    versions: item
+      ? [
+          {
+            id: 200 + integrationPackageList.data.indexOf(item),
+            packageId: item.id,
+            version: item.version ?? "1.0.0",
+            integrity: agentVersions.versions[0]!.integrity,
+            artifact_size: 1240,
+            yanked: false,
+            created_by: USER_ID,
+            createdAt: ago(3000),
+          },
+        ]
+      : [],
+  };
+}
 
 /** The agents that consume the integration — the pin section's left column. */
 export const integrationConsumingAgents: Json200<

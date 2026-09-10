@@ -2746,7 +2746,7 @@ export interface paths {
         get: operations["getOrganization"];
         /**
          * Update organization
-         * @description Update organization name and/or slug. Owner only.
+         * @description Update organization name, slug, and/or logo. Owner or admin required.
          */
         put: operations["updateOrganization"];
         post?: never;
@@ -4687,6 +4687,10 @@ export interface components {
         };
         AgentDetail: {
             id: string;
+            /** @description AFPS manifest icon used for the Agent identity tile. */
+            icon?: string;
+            /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
+            color?: string;
             display_name?: string;
             description?: string;
             /** @enum {string} */
@@ -4800,6 +4804,10 @@ export interface components {
         };
         AgentListItem: {
             id: string;
+            /** @description AFPS manifest icon used for the Agent identity tile. */
+            icon?: string;
+            /** @description Presentation token from `_meta["dev.appstrate/ui"].color`. */
+            color?: string;
             display_name?: string;
             description?: string;
             schema_version?: string;
@@ -5391,6 +5399,8 @@ export interface components {
             id?: string;
             name?: string;
             slug?: string;
+            /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial. */
+            logo?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
@@ -5507,7 +5517,9 @@ export interface components {
             /** @description Manifest version (semver) */
             version: string | null;
             /** @description Full manifest object */
-            manifest?: Record<string, never>;
+            manifest?: {
+                [key: string]: unknown;
+            };
             /** @description Manifest name (@scope/name) — may differ from package ID */
             manifest_name?: string | null;
             /** @description Number of published versions */
@@ -5551,6 +5563,8 @@ export interface components {
             id: string;
             name: string;
             slug: string;
+            /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial. */
+            logo: string | null;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "viewer";
             /**
@@ -11298,6 +11312,26 @@ export interface operations {
                                 };
                             };
                         }[];
+                        /** @description Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory. */
+                        tool_catalog_inspection?: {
+                            /** @enum {string} */
+                            basis: "mcp_package" | "manifest" | "platform";
+                            entries: {
+                                name: string;
+                                description?: string;
+                                policy?: {
+                                    required_scopes?: {
+                                        [key: string]: string[];
+                                    };
+                                };
+                                /** @enum {string} */
+                                origin: "mcp_package" | "manifest" | "appstrate";
+                                /** @enum {string} */
+                                exposure: "available" | "hidden" | "not_in_catalog";
+                                /** @enum {string} */
+                                hidden_reason?: "manifest" | "connection" | "dependency";
+                            }[];
+                        };
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -11408,6 +11442,26 @@ export interface operations {
                                 };
                             };
                         }[];
+                        /** @description Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory. */
+                        tool_catalog_inspection?: {
+                            /** @enum {string} */
+                            basis: "mcp_package" | "manifest" | "platform";
+                            entries: {
+                                name: string;
+                                description?: string;
+                                policy?: {
+                                    required_scopes?: {
+                                        [key: string]: string[];
+                                    };
+                                };
+                                /** @enum {string} */
+                                origin: "mcp_package" | "manifest" | "appstrate";
+                                /** @enum {string} */
+                                exposure: "available" | "hidden" | "not_in_catalog";
+                                /** @enum {string} */
+                                hidden_reason?: "manifest" | "connection" | "dependency";
+                            }[];
+                        };
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -12483,6 +12537,26 @@ export interface operations {
                                 };
                             };
                         }[];
+                        /** @description Explanatory inventory, never an agent allowlist. Package/manifest data only, not a live upstream MCP inventory. */
+                        tool_catalog_inspection?: {
+                            /** @enum {string} */
+                            basis: "mcp_package" | "manifest" | "platform";
+                            entries: {
+                                name: string;
+                                description?: string;
+                                policy?: {
+                                    required_scopes?: {
+                                        [key: string]: string[];
+                                    };
+                                };
+                                /** @enum {string} */
+                                origin: "mcp_package" | "manifest" | "appstrate";
+                                /** @enum {string} */
+                                exposure: "available" | "hidden" | "not_in_catalog";
+                                /** @enum {string} */
+                                hidden_reason?: "manifest" | "connection" | "dependency";
+                            }[];
+                        };
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -15054,6 +15128,7 @@ export interface operations {
                         id: string;
                         name: string;
                         slug: string;
+                        logo: string | null;
                         /** @enum {string} */
                         role: "owner";
                         /** Format: date-time */
@@ -15131,6 +15206,8 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
+                    /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null restores the initial fallback. */
+                    logo?: string | null;
                 };
             };
         };
@@ -20371,6 +20448,10 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description Comma-separated lifecycle statuses. */
+                status?: string;
+                /** @description Search agent name, scope, error or run number. */
+                q?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
