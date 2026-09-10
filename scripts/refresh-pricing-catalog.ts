@@ -363,6 +363,155 @@ function formatCoverageSummary(rows: readonly CoverageRow[]): string {
 }
 
 /**
+ * One ALREADY-VENDORED model whose rates move — or vanish — in this refresh.
+ *
+ * Catalog-backed `org_models` rows store `cost = NULL` on purpose
+ * (`seedOrgModelsForCredential`) and resolve the rate live on every call
+ * (`resolveCatalogDefaults` → `computeCostUsd` → `llm_usage.cost_usd` → the EE
+ * credit debit), so merging a refresh changes what EXISTING customers pay from
+ * the next release on, with no per-org pin and no notification. That is the
+ * intended design — the catalog is meant to track upstream — but it makes the
+ * price half of the diff a money decision, not a data bump, and the raw JSON
+ * diff buries it among metadata churn (`contextWindow`, `capabilities`,
+ * `generation`). {@link formatPriceChangeSummary} is what puts it in front of
+ * the reviewer.
+ *
+ * Newly ADDED ids are deliberately excluded: no row can be tracking a price
+ * that did not exist last week, so they change nobody's bill.
+ */
+interface PriceChange {
+  provider: string;
+  model: string;
+  /** Rates in the vendored file this refresh replaces. */
+  before: CompactEntry["cost"];
+  /** Rates after it — `null` when upstream DROPPED the model entirely. */
+  after: CompactEntry["cost"] | null;
+}
+
+/**
+ * The rate changes `upstream` makes to models `local` already carries. Reads the
+ * same two snapshots the diff and the coverage row read, before `--apply`
+ * overwrites the file. Pure — unit-tested.
+ */
+function priceChanges(
+  provider: string,
+  local: Record<string, CompactEntry>,
+  upstream: Record<string, CompactEntry>,
+): PriceChange[] {
+  const changes: PriceChange[] = [];
+  for (const model of Object.keys(local).sort()) {
+    const before = local[model]!.cost;
+    const next = upstream[model];
+    if (!next) changes.push({ provider, model, before, after: null });
+    else if (JSON.stringify(before) !== JSON.stringify(next.cost))
+      changes.push({ provider, model, before, after: next.cost });
+  }
+  return changes;
+}
+
+/** The four per-million rate buckets of {@link CompactEntry.cost}, in table order. */
+const RATE_BUCKETS = ["input", "output", "cacheRead", "cacheWrite"] as const;
+
+/**
+ * One bucket's move, as a table cell: `5 → 7.5 (+50%)`, `— → 0.1`, `0.1 → —`,
+ * or `·` when the rate is unchanged (including absent on both sides).
+ *
+ * A rate going to `—` is called out with ⚠️ because it does not mean "free": the
+ * bucket's tokens are then priced at exactly zero while still being consumed.
+ * Pure — unit-tested.
+ */
+function formatRateDelta(before: number | undefined, after: number | undefined): string {
+  if (before === after) return "·";
+  if (before === undefined) return `— → ${after}`;
+  if (after === undefined) return `${before} → — ⚠️`;
+  // A percentage off a zero base is undefined, not infinite — state the move only.
+  if (before === 0) return `${before} → ${after}`;
+  return `${before} → ${after} (${after > before ? "+" : ""}${Math.round(((after - before) / before) * 100)}%)`;
+}
+
+/** Rows listed per table before the rest is elided — see {@link formatPriceChangeSummary}. */
+const MAX_LISTED_PRICE_CHANGES = 60;
+
+function priceChangeTable(
+  rows: readonly PriceChange[],
+  cell: (r: PriceChange) => string[],
+): string[] {
+  const lines = [
+    "| Provider | Model | input | output | cacheRead | cacheWrite |",
+    "| --- | --- | ---: | ---: | ---: | ---: |",
+  ];
+  for (const r of rows.slice(0, MAX_LISTED_PRICE_CHANGES)) {
+    lines.push(`| \`${r.provider}\` | \`${r.model}\` | ${cell(r).join(" | ")} |`);
+  }
+  if (rows.length > MAX_LISTED_PRICE_CHANGES) {
+    lines.push("", `_…and ${rows.length - MAX_LISTED_PRICE_CHANGES} more — read the file diff._`);
+  }
+  return lines;
+}
+
+/**
+ * Markdown for the weekly PR body: every model an org can already be billed on
+ * whose price this refresh changes or removes. Pure — unit-tested.
+ */
+function formatPriceChangeSummary(changes: readonly PriceChange[]): string {
+  const dropped = changes.filter((c) => c.after === null);
+  const repriced = changes.filter((c) => c.after !== null);
+
+  const lines = [
+    "### Price impact on models already vendored",
+    "",
+    "Catalog-backed `org_models` rows store `cost = NULL` and resolve the rate LIVE on",
+    "every call, down to the credit debit — so each row below changes what an existing",
+    "customer pays as soon as this merges and ships. Newly added models are omitted:",
+    "nothing can be tracking a price that did not exist last week.",
+    "",
+  ];
+
+  if (changes.length === 0) {
+    lines.push(
+      "No vendored model was re-priced or dropped by this refresh — every pricing change",
+      "here is a model nobody is billed on yet.",
+      "",
+    );
+    return lines.join("\n");
+  }
+
+  lines.push(
+    "**Check every row against the vendor's own price page before merging.** The platform",
+    "cannot list which orgs are affected from CI (no database here); the operator query is",
+    "`SELECT DISTINCT org_id FROM org_models WHERE cost IS NULL AND model_id = …`.",
+    "",
+  );
+
+  if (dropped.length > 0) {
+    lines.push(
+      `#### Dropped by upstream — ${dropped.length} model(s), now billed at ZERO`,
+      "",
+      "A model that leaves the catalog resolves to NO rate: `cost_usd` is 0 and",
+      "`pricing_status` becomes `unpriced`, so an org still pointing at it is served for",
+      "free — the EE sweeper claims the row, charges nothing and logs a revenue fault.",
+      "Rates shown are the ones being deleted.",
+      "",
+      ...priceChangeTable(dropped, (r) => RATE_BUCKETS.map((b) => `${r.before?.[b] ?? "—"}`)),
+      "",
+    );
+  }
+
+  if (repriced.length > 0) {
+    lines.push(
+      `#### Re-priced — ${repriced.length} model(s)`,
+      "",
+      ...priceChangeTable(repriced, (r) =>
+        RATE_BUCKETS.map((b) => formatRateDelta(r.before?.[b], r.after?.[b])),
+      ),
+      "",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
  * Strip the routing namespace prefix LiteLLM uses for some entries
  * (`mistral/codestral-latest`, `azure/gpt-4o`, …). Our pricing lookup
  * keys on the canonical model id only.
@@ -692,12 +841,14 @@ async function main(): Promise<void> {
   const summaries: Summary[] = [];
   const snapshots: Record<string, Record<string, CompactEntry>> = {};
   const coverageRows: CoverageRow[] = [];
+  const priceChangeRows: PriceChange[] = [];
 
   for (const [litellmProvider, ourName] of Object.entries(LITELLM_TO_OURS)) {
     const upstreamSnapshot = buildProviderSnapshot(upstream, litellmProvider);
     snapshots[ourName] = upstreamSnapshot;
     const local = readLocal(ourName);
     coverageRows.push(coverageRow(ourName, local, upstreamSnapshot));
+    priceChangeRows.push(...priceChanges(ourName, local, upstreamSnapshot));
     const diff = diffSnapshots(local, upstreamSnapshot);
     const summary: Summary = {
       provider: ourName,
@@ -806,9 +957,12 @@ async function main(): Promise<void> {
     }
   }
 
-  // Cache-rate coverage — always computed (it is a state report, not a diff),
-  // printed for the local operator and, in CI, written to the path the caller
-  // names.
+  // Review summary — two sections, both always computed, printed for the local
+  // operator and, in CI, written to the path the caller names:
+  //
+  //   1. price impact (a DIFF: what this refresh does to models orgs can
+  //      already be billed on — the money half, so it goes first);
+  //   2. cache-rate coverage (a STATE report on the resulting catalog).
   //
   // File over "parse it back out of stdout": this script's stdout already
   // interleaves per-provider diff lines, `→ wrote …` lines and warnings, so
@@ -818,13 +972,13 @@ async function main(): Promise<void> {
   // (the workflow uses `$RUNNER_TEMP`): `create-pull-request` commits every
   // change it finds, so a summary file in the repo would land in the very PR
   // it describes.
-  const coverageMarkdown = formatCoverageSummary(coverageRows);
-  console.log(`\n${coverageMarkdown}`);
-  const coveragePath = (globalThis as { process?: { env?: Record<string, string | undefined> } })
-    .process?.env?.PRICING_COVERAGE_SUMMARY_PATH;
-  if (coveragePath) {
-    writeFileSync(coveragePath, coverageMarkdown, "utf8");
-    console.log(`→ wrote coverage summary to ${coveragePath}`);
+  const reviewMarkdown = `${formatPriceChangeSummary(priceChangeRows)}\n${formatCoverageSummary(coverageRows)}`;
+  console.log(`\n${reviewMarkdown}`);
+  const reviewPath = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.PRICING_REVIEW_SUMMARY_PATH;
+  if (reviewPath) {
+    writeFileSync(reviewPath, reviewMarkdown, "utf8");
+    console.log(`→ wrote review summary to ${reviewPath}`);
   }
 
   const drift = summaries.some((s) => !s.unchanged);
@@ -852,6 +1006,9 @@ export {
   coverageRow,
   projectGenerationCapabilities,
   formatCoverageSummary,
+  formatPriceChangeSummary,
+  formatRateDelta,
+  priceChanges,
   projectEntry,
 };
-export type { CoverageRow };
+export type { CoverageRow, PriceChange };

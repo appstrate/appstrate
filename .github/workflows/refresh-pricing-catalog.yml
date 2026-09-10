@@ -153,10 +153,11 @@ jobs:
       - name: Refresh catalog (apply)
         env:
           LITELLM_CATALOG_PATH: ${{ runner.temp }}/litellm-source/litellm-catalog.json
-          # Per-provider cache-rate coverage + delta, for the PR body assembled
-          # below. Written to the runner temp dir, NEVER the worktree — see the
+          # Reviewable summary for the PR body assembled below: the price impact
+          # on models already vendored, then per-provider cache-rate coverage +
+          # delta. Written to the runner temp dir, NEVER the worktree — see the
           # body-path rationale in the drift step.
-          PRICING_COVERAGE_SUMMARY_PATH: ${{ runner.temp }}/pricing-coverage.md
+          PRICING_REVIEW_SUMMARY_PATH: ${{ runner.temp }}/pricing-review.md
         run: |
           cp \
             "${RUNNER_TEMP}/litellm-source/litellm-catalog.lock.json" \
@@ -227,24 +228,28 @@ jobs:
 
           if [ "$pricing" = true ]; then
           cat <<'EOF'
-          - Spot-check 1-2 model price changes against
-            https://openai.com/api/pricing / https://www.anthropic.com/pricing.
-          - Confirm no models we rely on were removed (search `model:`
-            in `apps/api/src/services/llm-proxy/` if unsure).
+          - **Check EVERY row of "Price impact on models already vendored" below**
+            against the vendor's own price page
+            (https://openai.com/api/pricing / https://www.anthropic.com/pricing / …).
+            That section is the complete list of models an org can already be
+            billed on whose rate this PR changes or deletes — catalog-backed
+            `org_models` rows resolve their price live, so merging re-prices
+            existing customers, and a dropped model bills at zero. It is not a
+            spot-check: if a row looks wrong, this PR must not merge as-is.
           - Read the cache-rate coverage table below. `cacheRead` coverage is
             inherited from LiteLLM, so it drifts on its own, and a model with no
             `cacheRead` prices its cached input tokens at zero.
           EOF
 
-          # Inlined verbatim so the coverage change is reviewed rather than merged
-          # blind. Written by the refresh step to $RUNNER_TEMP (outside the
-          # worktree, same reason as the body itself).
-          coverage="${RUNNER_TEMP}/pricing-coverage.md"
-          if [ -f "$coverage" ]; then
+          # Inlined verbatim so the price impact and the coverage change are
+          # reviewed rather than merged blind. Written by the refresh step to
+          # $RUNNER_TEMP (outside the worktree, same reason as the body itself).
+          review="${RUNNER_TEMP}/pricing-review.md"
+          if [ -f "$review" ]; then
             printf '\n'
-            cat "$coverage"
+            cat "$review"
           else
-            printf '\n_Coverage summary missing — the refresh step did not write %s._\n' "$coverage"
+            printf '\n_Review summary missing — the refresh step did not write %s._\n' "$review"
           fi
           fi
 
