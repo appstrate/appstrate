@@ -20,6 +20,16 @@ import type {
   ModelFormSubmitOutcome,
 } from "./model-form-payload.ts";
 import { toCreateModelBody } from "./model-form-payload.ts";
+import { ApiError } from "../api/errors.ts";
+
+/**
+ * `POST /api/models` refuses a (credential, model) pair the organization
+ * already holds — one row per binding, or `llm_usage` splits that model's spend
+ * across the copies. Reported apart from a real failure: nothing to retry.
+ */
+function isDuplicate(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "model_already_added";
+}
 
 export type ModelFormCreateBody = ModelFormModelEntry & { credentialId: string };
 type ModelFormUpdateBody = Omit<ModelFormData, "newCredential">;
@@ -68,18 +78,22 @@ async function submitBatch(
   onSuccess: () => void,
 ): Promise<ModelFormSubmitOutcome> {
   const credentialId = await bindCredential(writes, data);
-  if (!credentialId) return { failedModelIds: data.models.map((m) => m.modelId) };
+  if (!credentialId) {
+    return { failedModelIds: data.models.map((m) => m.modelId), duplicateModelIds: [] };
+  }
 
   const failedModelIds: string[] = [];
+  const duplicateModelIds: string[] = [];
   for (const entry of data.models) {
     try {
       await writes.createModel({ ...entry, credentialId });
-    } catch {
+    } catch (err) {
       failedModelIds.push(entry.modelId);
+      if (isDuplicate(err)) duplicateModelIds.push(entry.modelId);
     }
   }
   if (failedModelIds.length === 0) onSuccess();
-  return { failedModelIds, credentialId };
+  return { failedModelIds, duplicateModelIds, credentialId };
 }
 
 /** A refusal (of the key or the model) is reported the way a batch reports its own. */
@@ -90,7 +104,7 @@ async function submitOne(
   onSuccess: () => void,
 ): Promise<ModelFormSubmitOutcome> {
   const credentialId = await bindCredential(writes, data);
-  if (!credentialId) return { failedModelIds: [data.modelId] };
+  if (!credentialId) return { failedModelIds: [data.modelId], duplicateModelIds: [] };
 
   try {
     if (editModelId) {
@@ -99,11 +113,15 @@ async function submitOne(
     } else {
       await writes.createModel(toCreateModelBody(data, credentialId));
     }
-  } catch {
-    return { failedModelIds: [data.modelId], credentialId };
+  } catch (err) {
+    return {
+      failedModelIds: [data.modelId],
+      duplicateModelIds: isDuplicate(err) ? [data.modelId] : [],
+      credentialId,
+    };
   }
   onSuccess();
-  return { failedModelIds: [] };
+  return { failedModelIds: [], duplicateModelIds: [] };
 }
 
 /** One submission handler over `writes` — a batch when the payload carries `models`. */

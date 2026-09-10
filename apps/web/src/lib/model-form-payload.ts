@@ -93,6 +93,12 @@ export type ModelFormSubmission = ModelFormData | ModelFormMultiData;
 /** The ids a batch could not create, and the credential it created for a retry to bind to. */
 export interface ModelFormSubmitOutcome {
   failedModelIds: string[];
+  /**
+   * The subset of `failedModelIds` the server refused as `model_already_added`
+   * — this organization already has a row for that (credential, model) pair.
+   * Named apart because it is not a failure to retry: the model is there.
+   */
+  duplicateModelIds: string[];
   credentialId?: string;
 }
 

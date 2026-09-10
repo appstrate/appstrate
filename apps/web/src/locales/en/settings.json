@@ -657,6 +657,8 @@
   "models.form.addModels_one": "Add {{count}} model",
   "models.form.addModels_other": "Add {{count}} models",
   "models.form.addFailed": "Could not add: {{ids}}",
+  "models.form.alreadyAdded": "This model is already added for this credential.",
+  "models.form.addSkippedDuplicate": "Already added, skipped: {{ids}}",
   "models.form.selectionRequired": "Select at least one model.",
   "models.form.providerUnavailable": "This model's provider is no longer available.",
   "models.form.saveFailed": "Could not save the model. Check the values and try again.",

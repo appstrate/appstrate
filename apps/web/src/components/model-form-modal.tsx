@@ -210,6 +210,9 @@ function ModelForm({
   const [picked, setPicked] = useState<ModelPickRow[]>([]);
   /** Ids a batch could not create — re-offered instead of silently dropped. */
   const [failedModelIds, setFailedModelIds] = useState<string[]>([]);
+  // Refused as already-added rather than failed — a separate line, because the
+  // model IS there and re-submitting will not change that.
+  const [duplicateModelIds, setDuplicateModelIds] = useState<string[]>([]);
   /**
    * The credential a refused submission already minted from the typed key. It
    * outlives the model step: a retry binds to it instead of minting a second
@@ -361,9 +364,15 @@ function ModelForm({
       const outcome = await onSubmit(batch.data);
       if (outcome.failedModelIds.length === 0) return;
       if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
-      setFailedModelIds(outcome.failedModelIds);
-      // Only what failed stays checked — the rest are rows in the table now.
-      setPicked(picked.filter((r) => outcome.failedModelIds.includes(r.id)));
+      // An already-added model is not a retry candidate — it is a row in the
+      // table like the ones that succeeded, just not one this submission made.
+      const retryable = outcome.failedModelIds.filter(
+        (id) => !outcome.duplicateModelIds.includes(id),
+      );
+      setFailedModelIds(retryable);
+      setDuplicateModelIds(outcome.duplicateModelIds);
+      // Only what can be retried stays checked — the rest are rows in the table now.
+      setPicked(picked.filter((r) => retryable.includes(r.id)));
       return;
     }
     const result = buildModelFormPayload({
@@ -383,7 +392,13 @@ function ModelForm({
     const outcome = await onSubmit(result.data);
     if (outcome.failedModelIds.length > 0) {
       if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
-      setError("modelId", { message: t("models.form.saveFailed") });
+      setError("modelId", {
+        message: t(
+          outcome.duplicateModelIds.length > 0
+            ? "models.form.alreadyAdded"
+            : "models.form.saveFailed",
+        ),
+      });
     }
   });
 
@@ -499,6 +514,11 @@ function ModelForm({
           {failedModelIds.length > 0 && (
             <div className="text-destructive text-sm">
               {t("models.form.addFailed", { ids: failedModelIds.join(", ") })}
+            </div>
+          )}
+          {duplicateModelIds.length > 0 && (
+            <div className="text-destructive text-sm">
+              {t("models.form.addSkippedDuplicate", { ids: duplicateModelIds.join(", ") })}
             </div>
           )}
           {source !== "discover" && offersManual && manualToggle("manual")}

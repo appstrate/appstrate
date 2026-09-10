@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { ApiError } from "../../api/errors.ts";
 import type { ModelFormData, ModelFormMultiData } from "../model-form-payload.ts";
 import {
   submitModelForm,
@@ -20,8 +21,14 @@ import {
 
 const NEW_CREDENTIAL = { apiKey: "sk-abc", providerId: "openai" };
 
+const DUPLICATE = new ApiError(
+  "model_already_added",
+  "Model 'gpt-6' is already added for this credential",
+  409,
+);
+
 /** Records every write; `refuse` names the step that throws. */
-function harness(refuse?: "credential" | "model") {
+function harness(refuse?: "credential" | "model" | "duplicate") {
   const created: ModelFormCreateBody[] = [];
   const updated: { id: string; credentialId: string }[] = [];
   const credentials: { providerId: string; apiKey: string }[] = [];
@@ -34,10 +41,12 @@ function harness(refuse?: "credential" | "model") {
       return { id: `cred_${credentials.length}` };
     },
     createModel: async (body) => {
+      if (refuse === "duplicate") throw DUPLICATE;
       if (refuse === "model") throw new Error("model refused");
       created.push(body);
     },
     updateModel: async (id, body) => {
+      if (refuse === "duplicate") throw DUPLICATE;
       if (refuse === "model") throw new Error("model refused");
       updated.push({ id, credentialId: body.credentialId });
     },
@@ -106,7 +115,7 @@ describe("submitModelForm — single model", () => {
       onSuccess: h.onSuccess,
     })(oneWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: ["gpt-6"] });
+    expect(outcome).toEqual({ failedModelIds: ["gpt-6"], duplicateModelIds: [] });
     expect(h.created).toEqual([]);
   });
 
@@ -118,7 +127,7 @@ describe("submitModelForm — single model", () => {
       onSuccess: h.onSuccess,
     })(oneWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: [] });
+    expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [] });
     expect(h.created).toEqual([{ modelId: "gpt-6", credentialId: "cred_1" }]);
     expect(h.successes).toBe(1);
   });
@@ -141,7 +150,27 @@ describe("submitModelForm — single model", () => {
       onSuccess: h.onSuccess,
     })(oneWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: ["gpt-6"], credentialId: "cred_1" });
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6"],
+      duplicateModelIds: [],
+      credentialId: "cred_1",
+    });
+  });
+
+  it("reports a 409 model_already_added apart from a failure to retry", async () => {
+    const h = harness("duplicate");
+    const outcome = await submitModelForm({
+      writes: h.writes,
+      editModelId: null,
+      onSuccess: h.onSuccess,
+    })(oneWithTypedKey);
+
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6"],
+      duplicateModelIds: ["gpt-6"],
+      credentialId: "cred_1",
+    });
+    expect(h.successes).toBe(0);
   });
 });
 
@@ -154,7 +183,11 @@ describe("submitModelForm — batch", () => {
       onSuccess: h.onSuccess,
     })(batchWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: ["gpt-6", "gpt-6-mini"], credentialId: "cred_1" });
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6", "gpt-6-mini"],
+      duplicateModelIds: [],
+      credentialId: "cred_1",
+    });
     expect(h.credentials).toHaveLength(1);
     expect(h.successes).toBe(0);
   });
@@ -167,7 +200,10 @@ describe("submitModelForm — batch", () => {
       onSuccess: h.onSuccess,
     })(batchWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: ["gpt-6", "gpt-6-mini"] });
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6", "gpt-6-mini"],
+      duplicateModelIds: [],
+    });
     expect(h.created).toEqual([]);
   });
 
@@ -179,8 +215,24 @@ describe("submitModelForm — batch", () => {
       onSuccess: h.onSuccess,
     })(batchWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: [], credentialId: "cred_1" });
+    expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [], credentialId: "cred_1" });
     expect(h.created.map((m) => m.credentialId)).toEqual(["cred_1", "cred_1"]);
     expect(h.successes).toBe(1);
+  });
+
+  it("lists every entry the server refused as already added", async () => {
+    const h = harness("duplicate");
+    const outcome = await submitModelForm({
+      writes: h.writes,
+      editModelId: null,
+      onSuccess: h.onSuccess,
+    })(batchWithTypedKey);
+
+    expect(outcome).toEqual({
+      failedModelIds: ["gpt-6", "gpt-6-mini"],
+      duplicateModelIds: ["gpt-6", "gpt-6-mini"],
+      credentialId: "cred_1",
+    });
+    expect(h.created).toEqual([]);
   });
 });
