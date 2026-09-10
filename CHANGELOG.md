@@ -48,17 +48,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Organization setting `restrict_package_copy`** (default `false`). Reading a
   package implies being able to copy it, as in Notion, Drive and Figma. An
   organization may close that: at `true`, `POST …/fork` and
-  `GET …/{version}/download` require `<type>:share` in the SOURCE package's home
-  space (owners and admins when it has none) and answer
-  `403 package_copy_restricted` otherwise. Without it, personal spaces open
-  "fork it into mine, then share it on" to every reader — `share` would protect
-  the link and not the content. **Skills and system packages are exempt** in
-  both settings: the CLI's skills sync downloads skills into a local checkout by
-  design and a skill's audience is already the space it is installed in, while a
-  system package is shipped readable in every space of every organization and so
-  has no owning space for the setting to protect. Agent runs are unaffected; a run's bundle is assembled server-side and never travels as a
-  copy. Toggled from the organization's general settings page under
-  `org:settings`.
+  `GET …/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` require
+  `<type>:share` in the SOURCE package's home space (owners and admins when it
+  has none) and answer `403 package_copy_restricted` otherwise. Without it,
+  personal spaces open "fork it into mine, then share it on" to every reader —
+  `share` would protect the link and not the content. **Skills and system
+  packages are exempt** on all three: the CLI's skills sync downloads skills
+  into a local checkout by design and a skill's audience is already the space it
+  is installed in, while a system package is shipped readable in every space of
+  every organization and so has no owning space for the setting to protect.
+  `/bundle` is the widest of the three and the one to know about: **a
+  SERVER-side agent run is unaffected** — it assembles the same bundle and hands
+  it to nobody — but `appstrate run @scope/agent --local` downloads one, so
+  under a restricted organization it answers `403 package_copy_restricted`. That
+  is the flag's meaning rather than a side effect: a copy of the agent leaves
+  the platform to perform a local run. Reading a package's files in the file
+  explorer stays open in both settings — a screen is not a copy. Toggled from
+  the organization's general settings page under `org:settings`.
 
 - **Every member of an organization now has a personal space — "Mon espace".**
   It is created at the moment they join (organization creation, invitation
@@ -108,11 +114,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   "Mon espace" above the team spaces, a personal space's settings hide the
   Members tab and lock the visibility and default-role controls, and the
   organization's Spaces page lists orphaned ones with **Convertir en espace
-  d'équipe** / **Supprimer maintenant**. Migration `0062` is shape-only and
+  d'équipe** / **Supprimer maintenant**. `POST /api/end-users` joins
+  `POST /api/api-keys` and the OIDC client registration in refusing a personal
+  space (409 `personal_space_takes_no_end_users`): it holds no identity that
+  outlives the one member it belongs to. Migration `0062` is shape-only and
   needs no backfill to be correct; provisioning the spaces of members who
   already exist is `scripts/migration/0014-personal-spaces-backfill.sql`, run
-  AFTER the deploy is validated and only once the cloud plan limits have been
-  checked — nothing is degraded while it has not run.
+  AFTER the deploy is validated — nothing is degraded while it has not run, and
+  nothing counts spaces for a quota today, so the count it prints matters only
+  to an operator with a per-space ceiling of their own. **This one is a one-way
+  deploy**, and from the FIRST BOOT of the new build rather than from `0014`:
+  personal spaces exist from the first request served, and an older build's
+  resolver reads one as an ordinary `private` space — handing every organization
+  owner and admin `admin` inside it, the one thing the feature refuses. Roll
+  forward, or restore the coordinated backup; the runbook
+  (`scripts/migration/README.md` → "Personal spaces & sharing rollout") states
+  the per-file rollback truth.
 
 - **`DELETE /api/spaces/{id}` now refuses a space with runs in progress** —
   409 `space_has_active_runs` while any run in it is `pending` or `running`, for
@@ -147,11 +164,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   409 `space_homes_packages` and names them, so moving them stays the caller's
   act — the package page's actions menu carries a **Move to a space…** dialog for
   exactly that, listing the spaces where the caller may author this type.
-  Existing rows start with no home and are therefore admin-only until the
-  operator runs `scripts/migration/0013-packages-home-space-backfill.sql`,
-  which belongs between the migrations and bringing the new version up — stop,
-  migrate, run 0013, start — so nothing serves traffic while non-owner authors
-  and API keys are locked out.
+  Migration **0061** adds the column and is shape-only: every existing row
+  starts with no home and is therefore admin-only until the operator runs
+  `scripts/migration/0013-packages-home-space-backfill.sql`, which belongs
+  between the migrations and bringing the new version up — stop, migrate,
+  run 0013, start — so nothing serves traffic while non-owner authors and API
+  keys are locked out. Rolling 0061 back is safe before 0013 and needs an
+  `UPDATE packages SET home_space_id = NULL` first afterwards, because the
+  column's `ON DELETE RESTRICT` then refuses to delete a space that homes a
+  package and an older build has no route that clears a home. The combined
+  runbook for 0061-0063 and both scripts is `scripts/migration/README.md` →
+  "Personal spaces & sharing rollout".
 
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for

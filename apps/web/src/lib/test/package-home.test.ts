@@ -1,24 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The ONE SPA rule that still reads a package's home space: which spaces the
- * "move" dialog may offer (RBAC spec §6.9).
- *
- * The write verdict is deliberately NOT tested here, because the SPA no longer
- * computes it: `home_writable` arrives on the package's own read, from
- * `homeWireForCaller` server-side, and the API integration suites are what pin
- * it. The hook this file used to exercise (`useHomeSpacePermission`) was that
- * second implementation and is gone.
+ * `writableDestinations` — which spaces the package "move" dialog may offer
+ * (RBAC spec §6.9). The WRITE verdict is not computed in the SPA at all:
+ * `home_writable` arrives on the package's own read, from `homeWireForCaller`
+ * server-side, and the API integration suites pin it.
  */
 
 import { describe, expect, it } from "bun:test";
-import { installFakeStorage } from "../../../test/fake-storage.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { writableDestinations } = await import("../../../lib/package-home.ts");
+const { writableDestinations } = await import("../package-home.ts");
 
 type Space = { id: string; name: string; permissions: string[] };
 

@@ -60,6 +60,7 @@ import {
   PERSONAL_SPACE_GRACE_DAYS,
 } from "../../../src/services/spaces.ts";
 import { sweepOrphanedPersonalSpaces } from "../../../src/services/personal-space-sweeper.ts";
+import { applySpacePermissions } from "../../../src/middleware/space-context.ts";
 
 const app = getTestApp();
 
@@ -558,6 +559,62 @@ describe("personal spaces — the write rules", () => {
     await seedSpaceMember({ spaceId: team.id, userId: member.user.id, presetRole: "admin" });
     const minted = await create(team.id);
     expect(minted.status, await minted.clone().text()).toBe(201);
+  });
+
+  it("refuses an end-user with 409, and creates one in a team space", async () => {
+    const create = (spaceId: string) =>
+      app.request("/api/end-users", {
+        method: "POST",
+        headers: {
+          Cookie: member.cookie,
+          "X-Org-Id": member.orgId,
+          "X-Space-Id": spaceId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ externalId: `ext-${spaceId.slice(-6)}` }),
+      });
+
+    // Same reason as the API key and the OAuth client: an end-user is an
+    // external identity somebody else signs in as, pointed at a space that
+    // exists for exactly one member and goes away with them.
+    await expectProblem(await create(personalId), 409, {
+      code: "personal_space_takes_no_end_users",
+    });
+
+    // The positive control: the same caller, a team space they administer.
+    const team = await seedSpace({ orgId: owner.orgId, name: "EndUsers" });
+    await seedSpaceMember({ spaceId: team.id, userId: member.user.id, presetRole: "admin" });
+    const created = await create(team.id);
+    expect(created.status, await created.clone().text()).toBe(201);
+  });
+
+  it("refuses a principal with no org role — the resolver is not the only gate", async () => {
+    // An OIDC end-user token carries no org role, so it never reaches
+    // `resolveSpaceRole`: `applySpacePermissions` returned early for it and the
+    // token kept its strategy's fixed allowlist inside a personal space. The
+    // refusal now sits on THIS side of that early return.
+    //
+    // Called directly rather than over HTTP: minting an end-user realm token
+    // pinned to a personal space needs the oidc module's own harness (and the
+    // route that would create such an end-user is the 409 above), so the seam
+    // itself is what is asserted.
+    const space = await getDbRow(spaces, eq(spaces.id, personalId));
+    const values: Record<string, unknown> = { orgId: owner.orgId, user: member.user };
+    const stub = {
+      get: (key: string) => values[key],
+      set: (key: string, value: unknown) => {
+        values[key] = value;
+      },
+    } as unknown as Parameters<typeof applySpacePermissions>[0];
+
+    await expect(applySpacePermissions(stub, space)).rejects.toThrow();
+    expect(values.permissions).toBeUndefined();
+
+    // The positive control, same stub: a TEAM space still returns silently for
+    // an orgRole-less principal, whose permissions its strategy owns.
+    const team = await seedSpace({ orgId: owner.orgId, name: "Realm" });
+    await applySpacePermissions(stub, await getDbRow(spaces, eq(spaces.id, team.id)));
+    expect(values.permissions).toBeUndefined();
   });
 
   it("refuses a space_members write with 409", async () => {

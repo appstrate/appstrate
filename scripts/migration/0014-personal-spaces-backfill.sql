@@ -12,16 +12,20 @@
 -- feet.
 --
 -- ⚠ PRE-FLIGHT — CLOUD PLAN LIMITS. This inserts ONE `spaces` row per
--- `organization_members` row. Count them first, on the replica:
+-- `org_members` row. Count them first, on the replica:
 --
 --   SELECT count(*) AS members, count(DISTINCT org_id) AS orgs
---   FROM organization_members;
+--   FROM org_members;
 --
--- and confirm against the plan limits before running anything. Personal spaces
--- are deliberately excluded from the commercial module's space accounting
--- (`owner_user_id IS NULL`), but a self-hosted operator with a per-space
--- ceiling of their own has to know the number in advance. If in doubt, do not
--- run this script at all: the lazy repair covers correctness on its own.
+-- and know the number before running anything. The commercial module counts
+-- spaces for NOTHING today — there is no space quota to breach and no billing
+-- consequence (RBAC spec §3.6) — so the count matters to exactly one reader: a
+-- self-hosted operator who has imposed a per-space ceiling of their own,
+-- whether in their own tooling or in whatever the row count feeds. If a space
+-- limit is ever added to the commercial module, §3.6 says it counts
+-- `WHERE owner_user_id IS NULL`, which excludes every row this script writes.
+-- If in doubt, do not run this script at all: the lazy repair covers
+-- correctness on its own.
 --
 -- Idempotent: the insert is guarded by `NOT EXISTS` on `(org_id,
 -- owner_user_id)`, which is the partial unique index
@@ -53,7 +57,7 @@ SELECT
       WHERE s.org_id = m.org_id AND s.owner_user_id = m.user_id
     )
   ) AS missing_personal_space_before
-FROM organization_members m;
+FROM org_members m;
 
 -- ═══ WRITE — one private, non-default space per membership ═══
 -- `visibility = 'private'` and `is_default = false` are the two CHECKs
@@ -73,7 +77,7 @@ SELECT
   'operator',
   m.user_id,
   m.user_id
-FROM organization_members m
+FROM org_members m
 WHERE NOT EXISTS (
   SELECT 1 FROM spaces s
   WHERE s.org_id = m.org_id AND s.owner_user_id = m.user_id
@@ -87,7 +91,7 @@ SELECT
       WHERE s.org_id = m.org_id AND s.owner_user_id = m.user_id
     )
   ) AS missing_personal_space_after
-FROM organization_members m;
+FROM org_members m;
 
 -- ═══ VERIFY (after) — every personal space satisfies its three contracts ═══
 SELECT

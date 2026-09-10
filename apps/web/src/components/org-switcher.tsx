@@ -27,6 +27,7 @@ import {
 } from "@appstrate/ui/components/sidebar";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 import { cn } from "@appstrate/ui/cn";
+import { spaceLabel } from "../lib/space-label";
 
 function OrgAvatar({ name, className }: { name: string; className?: string }) {
   return (
@@ -53,11 +54,9 @@ export function OrgSwitcher() {
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
-  // "Mon espace" is pinned above the team spaces, and its LABEL is the SPA's:
-  // the server stores a plain name and answers `personal: true`, so the switcher
-  // renders the caller's own translation rather than someone's stored French.
-  const spaceLabel = (space: { personal: boolean; name: string }) =>
-    space.personal ? t("spaces.personal.title", { ns: "settings" }) : space.name;
+  // "Mon espace" is pinned above the team spaces; `spaceLabel` is what makes it
+  // read as the caller's own translation rather than someone's stored French.
+  const label = (space: { personal: boolean; name: string }) => spaceLabel(space, t);
   const personalSpaces = (spaces ?? []).filter((s) => s.personal);
   const teamSpaces = (spaces ?? []).filter((s) => !s.personal);
 
@@ -92,7 +91,7 @@ export function OrgSwitcher() {
       >
         <span className="flex min-w-0 flex-col">
           <span className="flex items-center gap-1.5 truncate">
-            {spaceLabel(space)}
+            {label(space)}
             {space.isDefault && (
               <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
             )}
@@ -129,7 +128,7 @@ export function OrgSwitcher() {
                 <span className="truncate font-semibold">{currentOrg.name}</span>
                 {currentSpace && (
                   <span className="text-muted-foreground truncate text-xs">
-                    {spaceLabel(currentSpace)}
+                    {label(currentSpace)}
                   </span>
                 )}
               </div>
@@ -173,7 +172,7 @@ export function OrgSwitcher() {
                   className="flex items-center gap-2"
                 >
                   <span className="flex-1 truncate">
-                    {currentSpace ? spaceLabel(currentSpace) : null}
+                    {currentSpace ? label(currentSpace) : null}
                   </span>
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="min-w-48 rounded-lg">

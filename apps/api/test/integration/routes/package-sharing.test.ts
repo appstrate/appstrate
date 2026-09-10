@@ -38,6 +38,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -60,6 +61,7 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
+import { acceptSharedPackage } from "../../../src/services/space-packages.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 
 const app = getTestApp();
@@ -314,6 +316,27 @@ describe("authority — `<type>:share` in the home space", () => {
       body: JSON.stringify({ name: "sharer", scopes: ["agents:share"] }),
     });
     await expectProblem(minted, 400, { code: "invalid_request" });
+  });
+
+  it("refuses a malformed `space_id` with 400, not the 404 an unreachable space gets", async () => {
+    // A retired `app_` spelling resolves to no space. Without the shape check
+    // the route reports it as "space not found", which reads as a permission
+    // problem and sends the caller looking in the wrong place.
+    await expectRejectedField(
+      await shareWithSpace(author.headers(homeId), AGENT, "app_legacy"),
+      "target.space_id",
+    );
+    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+  });
+
+  it("refuses a malformed `spc_` revoke target with 400, not a 404", async () => {
+    // The `spc_` prefix discriminates the segment, and the FULL shape is then
+    // asserted: a malformed one sent down the user-id branch would answer
+    // "not a member of this organization", a wrong reason for a bad id.
+    await expectProblem(await revokeShare(author.headers(homeId), AGENT, "spc_nope"), 400, {
+      code: "invalid_request",
+      param: "target",
+    });
   });
 
   it("refuses a body with an unknown key or an unknown target kind", async () => {
@@ -574,10 +597,29 @@ describe("offered is not activated", () => {
   });
 
   it("lets a GUEST accept — the `operator` preset holds no install grant", async () => {
+    // The acceptance criterion of the whole lot, as the plan words it: "an
+    // external invited as a guest sees EXACTLY ONE agent after the share, and
+    // nothing else in the library". So the assertion is on the library's shape
+    // and not only on the pin — a guest who could see a second package would
+    // pass a `pinOf` check just as well.
     expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+
+    const before = await library(guest.headers());
+    expect(before.shared.map((entry) => entry.id)).toEqual([AGENT]);
+    // Offered is not installed: every type group is empty, the system-package
+    // groups included (the fixture seeds none).
+    for (const [type, group] of Object.entries(before.packages)) {
+      expect(group, `library.packages.${type} before the accept`).toEqual([]);
+    }
+
     const accepted = await acceptShare(guest.headers(), AGENT);
     expect(accepted.status, await accepted.clone().text()).toBe(200);
     expect(await pinOf(guest.personalSpaceId, AGENT)).not.toBeNull();
+
+    const after = await library(guest.headers());
+    expect(after.shared).toEqual([]);
+    expect(after.packages.agent?.map((entry) => entry.id)).toEqual([AGENT]);
+    expect(Object.values(after.packages).flat()).toHaveLength(1);
   });
 
   it("checks the offer INSIDE the transaction that installs — a revoked share cannot be accepted", async () => {
@@ -782,6 +824,18 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
   const download = (who: Principal, packageId: string, spaceId?: string) =>
     app.request(`/api/packages/${packageId}/0.1.0/download`, { headers: who.headers(spaceId) });
 
+  /**
+   * The THIRD copy door, and the widest: the whole agent plus every
+   * dependency's files. `source=draft` needs no stored artifact, so a refusal
+   * here is the copy gate and never a missing archive.
+   */
+  const bundle = (who: Principal, packageId = AGENT, spaceId = homeId) =>
+    app.request(`/api/agents/${packageId}/bundle?source=draft`, { headers: who.headers(spaceId) });
+
+  /** An on-screen read of the package's files — deliberately NOT a copy door. */
+  const fileList = (who: Principal, packageId = AGENT, spaceId = homeId) =>
+    app.request(`/api/packages/${packageId}/files`, { headers: who.headers(spaceId) });
+
   /** A published system package with its archive in storage — what a fork copies. */
   async function seedSystem(id: string, type: "agent" | "skill"): Promise<void> {
     const manifest = {
@@ -867,6 +921,36 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     });
   });
 
+  it("off: `/bundle` hands the agent to any reader of the space it is installed in", async () => {
+    const res = await bundle(viewer);
+    expect(res.status, await res.clone().text()).toBe(200);
+  });
+
+  it("on: `/bundle` needs `agents:share` in the home — a viewer is refused", async () => {
+    await setRestrictCopy(true);
+    // The widest copy door of the three, and the one that used to be gated on
+    // read + installed alone: without it a restricted organization's `download`
+    // refusal was one `appstrate run --local` away from being pointless.
+    await expectProblem(await bundle(viewer), 403, { code: "package_copy_restricted" });
+    // The home's builder holds it, so the archive is served.
+    const allowed = await bundle(author);
+    expect(allowed.status, await allowed.clone().text()).toBe(200);
+    // Off again, and the viewer gets what the builder got.
+    await setRestrictCopy(false);
+    expect((await bundle(viewer)).status).toBe(200);
+  });
+
+  it("on: reading the package's FILES stays open — a screen is not a copy", async () => {
+    await setRestrictCopy(true);
+    // The negative control of the whole key: it narrows the routes that hand
+    // over a package, not the ones that show it. A viewer who may read the
+    // agent still reads its file tree.
+    const listed = await fileList(viewer);
+    expect(listed.status, await listed.clone().text()).toBe(200);
+    // …while the same caller, same space, same toggle, cannot take it away.
+    await expectProblem(await bundle(viewer), 403, { code: "package_copy_restricted" });
+  });
+
   it("on: a run is unaffected — a bundle is assembled server-side, never copied", async () => {
     await setRestrictCopy(true);
     await publish(AGENT, "0.1.0");
@@ -879,6 +963,103 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     });
     expect(launched.status, await launched.clone().text()).toBe(201);
     await waitForRunPipelineSettled();
+  });
+});
+
+/**
+ * The lock, driven by hand (`services/space-packages.ts` → `sharedWith`).
+ *
+ * The in-process test above asserts the sequential property: after a committed
+ * revoke, the accept finds no offer. It cannot see the RACE, and the race is
+ * what the lock is for — a revoke whose DELETE has landed but not committed
+ * used to be invisible to the accept's plain SELECT under READ COMMITTED, so
+ * the accept sailed past it and committed an installation the share no longer
+ * backed. That state is unreachable through any route afterwards: nothing
+ * uninstalls it, and the recipient runs the package with their own credentials.
+ *
+ * Reproducing it needs TWO transactions held open at once, i.e. two
+ * connections, i.e. a real PostgreSQL — PGlite is a single-process embedded
+ * engine, so under `TEST_TIER=0` there is no interleaving to observe and this
+ * block skips with that as its reason (`test/helpers/tier.ts`).
+ */
+describeRequiresPostgres("a revoke racing an accept (needs a real PostgreSQL)", () => {
+  beforeEach(async () => {
+    await publish(AGENT, "0.1.0");
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    // NOT accepted: the fixture must leave `space_packages` empty for this
+    // pair, so the revoke's second DELETE takes no row lock of its own and the
+    // accept's INSERT has nothing to conflict on. Otherwise the accept would
+    // block on the unique index rather than on the share row, and the test
+    // would pass with or without the lock under test.
+    await assertDbMissing(
+      spacePackages,
+      and(
+        eq(spacePackages.packageId, AGENT),
+        eq(spacePackages.spaceId, recipient.personalSpaceId),
+      )!,
+    );
+  });
+
+  it("makes the accept wait, then refuse — never an installation with no offer", async () => {
+    let commitRevoke!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      commitRevoke = resolve;
+    });
+
+    // T1 — the revoke's two deletes, then HELD OPEN. This is
+    // `revokePackageShare`'s body, inlined so the transaction can be paused
+    // mid-flight; the service commits it in one go and gives no seam.
+    const revoking = db.transaction(async (tx) => {
+      await tx
+        .delete(packageShares)
+        .where(
+          and(
+            eq(packageShares.packageId, AGENT),
+            eq(packageShares.spaceId, recipient.personalSpaceId),
+          ),
+        );
+      await tx
+        .delete(spacePackages)
+        .where(
+          and(
+            eq(spacePackages.packageId, AGENT),
+            eq(spacePackages.spaceId, recipient.personalSpaceId),
+          ),
+        );
+      await gate;
+    });
+    await Bun.sleep(150);
+
+    // T2 — the accept. `SELECT … FOR UPDATE` on the share row blocks on T1's
+    // uncommitted delete; without the lock this read sees the row (T1 has not
+    // committed) and the accept commits an installation.
+    const accepting = acceptSharedPackage(
+      { orgId: ctx.orgId, spaceId: recipient.personalSpaceId },
+      AGENT,
+    );
+    let settled = false;
+    void accepting.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await Bun.sleep(300);
+    // Still waiting on the lock — the observable half of the fix.
+    expect(settled, "the accept must block until the revoke commits").toBe(false);
+
+    commitRevoke();
+    await revoking;
+
+    // The lock released onto a deleted row: READ COMMITTED re-evaluates and the
+    // offer is gone, so the accept refuses.
+    await expect(accepting).rejects.toThrow();
+    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    await assertDbMissing(
+      spacePackages,
+      and(
+        eq(spacePackages.packageId, AGENT),
+        eq(spacePackages.spaceId, recipient.personalSpaceId),
+      )!,
+    );
   });
 });
 

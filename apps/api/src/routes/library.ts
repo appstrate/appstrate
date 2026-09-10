@@ -192,7 +192,12 @@ export function createLibraryRouter() {
           // `POST …/shares/accept` installs into the caller's own personal
           // space and nowhere else, so only such an offer has that affordance.
           personal: offer.spaceId === ownPersonalSpaceId,
-          shared_by: offer.shared_by,
+          // The service's row is camelCase; the wire is snake_case, and this is
+          // the boundary (`docs/CASING_CONVENTIONS.md`).
+          shared_by: offer.sharedBy && {
+            user_id: offer.sharedBy.userId,
+            name: offer.sharedBy.name,
+          },
         },
       ];
     });

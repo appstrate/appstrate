@@ -42,12 +42,21 @@ export interface PackageShareView {
   created_at: string;
 }
 
-/** The sharer, as every share projection names them. `null` once the account is gone. */
+/** The sharer, as an INTERNAL row names them. `null` once the account is gone. */
+function sharerOf(row: {
+  sharedBy: string | null;
+  sharerName: string | null;
+}): SharedPackageRow["sharedBy"] {
+  return row.sharedBy && row.sharerName ? { userId: row.sharedBy, name: row.sharerName } : null;
+}
+
+/** …and as the WIRE names them, where the pair is snake_case. */
 function sharerView(row: {
   sharedBy: string | null;
   sharerName: string | null;
 }): PackageShareView["shared_by"] {
-  return row.sharedBy && row.sharerName ? { user_id: row.sharedBy, name: row.sharerName } : null;
+  const sharedBy = sharerOf(row);
+  return sharedBy && { user_id: sharedBy.userId, name: sharedBy.name };
 }
 
 /**
@@ -160,11 +169,16 @@ export async function listPackageShares(
   }));
 }
 
-/** One row of the library's `shared` section. */
+/**
+ * One row of the library's `shared` section — INTERNAL, hence camelCase
+ * throughout (`docs/CASING_CONVENTIONS.md`). The snake_case projection is
+ * `routes/library.ts`'s, where the row reaches the wire; mixing the two
+ * spellings in one type made the boundary invisible.
+ */
 export interface SharedPackageRow {
   packageId: string;
   spaceId: string;
-  shared_by: { user_id: string; name: string } | null;
+  sharedBy: { userId: string; name: string } | null;
 }
 
 /**
@@ -196,6 +210,6 @@ export async function listSharedNotInstalled(
   return rows.map((row) => ({
     packageId: row.packageId,
     spaceId: row.spaceId,
-    shared_by: sharerView(row),
+    sharedBy: sharerOf(row),
   }));
 }

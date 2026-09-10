@@ -16,6 +16,7 @@ import { packages, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -370,6 +371,14 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
     const headers = { Cookie: reader.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": alphaId };
 
     await expectProblem(await move(headers, betaId), 403);
+    expect(await homeOf()).toBe(alphaId);
+  });
+
+  it("refuses a malformed destination id with 400, not the 404 an unreachable one gets", async () => {
+    // A retired `app_` spelling resolves to no space. Read as an unreachable
+    // destination it answers "Space not found", which sends the caller looking
+    // for a permission problem; the body's shape check names the real fault.
+    await expectRejectedField(await move(owner(), "app_legacy"), "home_space_id");
     expect(await homeOf()).toBe(alphaId);
   });
 

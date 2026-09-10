@@ -16,7 +16,7 @@ import {
   updateEndUser,
   deleteEndUser,
 } from "../services/end-users.ts";
-import { invalidRequest } from "../lib/errors.ts";
+import { conflict, invalidRequest } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
@@ -68,6 +68,18 @@ export function createEndUsersRouter() {
     requirePermission("end-users", "write"),
     async (c) => {
       const scope = getSpaceScope(c);
+      // A personal space takes no end-users, for the same reason it takes no
+      // API key and no OAuth client (RBAC spec §3.6): an end-user is an
+      // external identity somebody else signs in as, and it would sign in to a
+      // space that exists for exactly one member and goes away with them. A 409
+      // rather than a 404: the caller is necessarily that space's owner —
+      // nobody else reaches it at all — so naming the reason discloses nothing.
+      if (c.get("space")?.ownerUserId) {
+        throw conflict(
+          "personal_space_takes_no_end_users",
+          "A personal space takes no end-users: it belongs to one member and is removed when they leave. Create the end-user in a team space.",
+        );
+      }
       const data = await readJsonBody(c, createEndUserSchema);
 
       const created = await createEndUser(scope, {

@@ -31,6 +31,8 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedInstalledPackage, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { packageShares } from "@appstrate/db/schema";
+import { listOrgItems } from "../../../src/services/package-items/crud.ts";
+import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
 
 type AccessibleSpaces = Awaited<ReturnType<typeof packageAccessSpaces>>;
 
@@ -257,6 +259,79 @@ describe("placementGrantsRead", () => {
   it("refuses when neither the home nor any placement is readable", () => {
     expect(placementGrantsRead({ homeSpaceId: "spc_z" }, ["spc_y"], readable)).toBe(false);
     expect(placementGrantsRead({ homeSpaceId: null }, [], readable)).toBe(false);
+  });
+});
+
+describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirror", () => {
+  /**
+   * The read rule has two implementations by necessity: `placementGrantsRead`
+   * in TypeScript, for the readers that already hold the rows, and the
+   * `installFilter` disjunction inside `listOrgItems` (`package-items/crud.ts`),
+   * because the per-type index page cannot load the organization's catalogue to
+   * filter it in memory. Nothing makes them agree except this test, and a
+   * FOURTH disjunct added to one and not the other drifts silently: a package
+   * would be readable on its detail and absent from the page a reader would go
+   * looking for it on, or the reverse.
+   *
+   * Each fixture below places the package one way and asserts BOTH readers on
+   * it, from the same rows.
+   */
+  const placements = {
+    "installed only": { install: true, share: false, home: false },
+    "shared only": { install: false, share: true, home: false },
+    "homed only": { install: false, share: false, home: true },
+    "placed nowhere": { install: false, share: false, home: false },
+  } as const;
+
+  for (const [label, placement] of Object.entries(placements)) {
+    it(`agrees on a package ${label}`, async () => {
+      // `otherId` is the space under test. The fixture homes the package in
+      // `homeId`, so "homed only" moves it here and the other three take it
+      // away from every space this caller looks at.
+      await db
+        .update(packages)
+        .set({ homeSpaceId: placement.home ? otherId : null })
+        .where(eq(packages.id, SKILL));
+      if (placement.install) await seedInstalledPackage(otherId, SKILL);
+      if (placement.share) {
+        await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
+      }
+
+      const expected = placement.install || placement.share || placement.home;
+
+      // The TS reader, from the same three facts the SQL sees.
+      const placedIn = [
+        ...(placement.install ? [otherId] : []),
+        ...(placement.share ? [otherId] : []),
+      ];
+      expect(
+        placementGrantsRead(
+          { homeSpaceId: placement.home ? otherId : null },
+          placedIn,
+          new Set([otherId]),
+        ),
+        `placementGrantsRead on a package ${label}`,
+      ).toBe(expected);
+
+      // …and the SQL reader, over the rows themselves.
+      const listed = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId);
+      expect(
+        listed.map((item) => item.id).includes(SKILL),
+        `listOrgItems on a package ${label}`,
+      ).toBe(expected);
+    });
+  }
+
+  it("keeps `activeOnly` install-only — neither a home nor an offer is an instance", async () => {
+    // The one place the two rules deliberately DIVERGE, so it is pinned rather
+    // than left to be discovered: the integration picker asks for usable
+    // instances, and a package merely homed or offered here is not one.
+    await db.update(packages).set({ homeSpaceId: otherId }).where(eq(packages.id, SKILL));
+    await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
+    const active = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId, {
+      activeOnly: true,
+    });
+    expect(active.map((item) => item.id)).not.toContain(SKILL);
   });
 });
 

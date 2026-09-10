@@ -357,7 +357,7 @@ export const spacesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The space is a team space (`space_not_personal`), or it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404.",
+            "Runs are in progress in the space (`space_has_active_runs`) — the sweep deletes the space, whose cascade drops `runs`, so it refuses for the same reason `DELETE` does and before it has emptied anything —, the space is a team space (`space_not_personal`), or it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

@@ -93,7 +93,7 @@ import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-import { isSpaceId } from "../lib/ids.ts";
+import { assertSpaceId, isSpaceId } from "../lib/ids.ts";
 import {
   resolvePackageFileValidator,
   readPackageSnapshot,
@@ -307,8 +307,22 @@ export const createVersionBodySchema = z.object({ version: z.string().min(1).opt
  * `null` hands it to the organization catalog, which only owners and admins
  * may then write. `.strict()` so this route can never be mistaken for the
  * draft editor: the draft is `PUT`, with its optimistic lock.
+ *
+ * The id is SHAPE-CHECKED, like every other space id arriving in a body
+ * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
+ * space, and without the refinement this route reports that as "space not
+ * found" — the silence `SPACE_ID_RE` exists to end.
  */
-export const packageHomeSpaceSchema = z.object({ home_space_id: z.string().nullable() }).strict();
+export const packageHomeSpaceSchema = z
+  .object({
+    home_space_id: z
+      .string()
+      .refine(isSpaceId, {
+        message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+      })
+      .nullable(),
+  })
+  .strict();
 
 /**
  * Body of `POST /api/packages/{scope}/{name}/shares` — WHO the package is
@@ -317,14 +331,24 @@ export const packageHomeSpaceSchema = z.object({ home_space_id: z.string().nulla
  * Two kinds, and a person is not a space: a `user` target is resolved
  * server-side to that member's personal space, so the sharer never handles
  * (nor learns) the id of a space §3.6 says does not exist for them. A `space`
- * target must be one the sharer can already reach. `.strict()` on both arms —
- * a typo'd key is a 400, not a share to the wrong subject.
+ * target must be one the sharer can already reach, and is SHAPE-CHECKED like
+ * every other space id in a body (`lib/space-role-assignment.ts`) so a
+ * malformed one is a 400 rather than the 404 an unreachable space answers.
+ * `.strict()` on both arms — a typo'd key is a 400, not a share to the wrong
+ * subject.
  */
 export const shareTargetSchema = z
   .object({
     target: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("user"), user_id: z.string().min(1) }).strict(),
-      z.object({ kind: z.literal("space"), space_id: z.string().min(1) }).strict(),
+      z
+        .object({
+          kind: z.literal("space"),
+          space_id: z.string().refine(isSpaceId, {
+            message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+          }),
+        })
+        .strict(),
     ]),
   })
   .strict();
@@ -2109,7 +2133,12 @@ export function createPackagesRouter() {
       action: "package.share_accepted",
       resourceType: "package",
       resourceId: packageId,
-      after: { spaceId: space.id, versionId },
+      // The PERSON who accepted, never the personal space it landed in — the
+      // same rule `package.shared` follows (plan decision 5b): that id is
+      // withheld everywhere on the wire, so writing it into the trail would
+      // publish through the audit log what §3.6 withholds. `versionId` is what
+      // the act actually settled: which version this recipient now runs.
+      after: { recipientUserId: userId, versionId },
     });
     return c.json({ object: "space_package", package_id: packageId, version_id: versionId });
   });
@@ -2126,7 +2155,14 @@ export function createPackagesRouter() {
 
     let spaceId: string;
     let recipientUserId: string | null = null;
-    if (isSpaceId(target)) {
+    // The `spc_` prefix DISCRIMINATES; the full shape is then asserted. Testing
+    // the whole shape as the discriminator instead sends a malformed space id
+    // down the user-id branch, where it reports "not a member of this
+    // organization" — a wrong reason for a malformed id, and the 400 this
+    // asserts is the right one. A user id never starts with `spc_`
+    // (Better Auth mints unprefixed ids), so the prefix is unambiguous.
+    if (target.startsWith("spc_")) {
+      assertSpaceId(target, "target");
       spaceId = target;
     } else {
       const membership = await getOrgMember(orgId, target);

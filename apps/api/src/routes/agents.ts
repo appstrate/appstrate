@@ -52,9 +52,11 @@ import {
 import {
   agentReadIsSummary,
   assertCatalogPackageAccess,
+  assertPackageCopyAllowed,
   packageAccessSpaces,
   requireAgentRead,
 } from "../lib/package-access.ts";
+import { callerOrgRole } from "../lib/view-as.ts";
 import {
   writeBundleToBuffer,
   parsePackageIdentity,
@@ -712,6 +714,22 @@ export function createAgentsRouter() {
             `Install it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
         });
       }
+      // A bundle is the agent AND every transitive dependency's stored files in
+      // one archive the caller walks away with — a COPY leaving the platform,
+      // which is exactly what `org_settings.restrict_package_copy` governs
+      // (plan decision 12, RBAC spec §6.10). Read + installed is not enough for
+      // it: without this gate, a restricted organization's `download` refusal
+      // was one `--local` run away from being pointless. Gated on the ROOT
+      // agent only — the dependencies keep their own read-scope gate below —
+      // and skills and system packages stay exempt inside the helper, by type,
+      // as everywhere else. The consequence is deliberate: `appstrate run
+      // @scope/agent --local` answers 403 `package_copy_restricted` under a
+      // restricted organization. A SERVER-side run is unaffected; it assembles
+      // the same bundle without handing it to anyone.
+      const orgRole = callerOrgRole(c, orgId);
+      const accessible = await packageAccessSpaces(c, orgId, orgRole);
+      const root = await assertCatalogPackageAccess(c, packageId, accessible);
+      await assertPackageCopyAllowed(c, root, { orgId, orgRole, accessible });
       const scope = getSpaceScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same

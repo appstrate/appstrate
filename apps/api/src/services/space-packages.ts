@@ -120,13 +120,26 @@ async function personalSpaceOwner(tx: Tx, spaceId: string): Promise<string | nul
   return row?.ownerUserId ?? null;
 }
 
-/** Is the package OFFERED to this space (`package_shares`)? */
+/**
+ * Is the package OFFERED to this space (`package_shares`)?
+ *
+ * `FOR UPDATE`, and that is the whole point of reading it here rather than in a
+ * route. `revokePackageShare` deletes the offer and the installation it backs
+ * in one transaction; an install that read the offer WITHOUT the lock could
+ * commit its `space_packages` row after that DELETE had already scanned the
+ * table, leaving an installation nothing authorizes. The lock serializes the
+ * two: whichever starts second waits, and then sees the other's result — an
+ * install that got there first blocks the revoke until its row exists to be
+ * deleted, and a revoke that got there first leaves this read finding nothing
+ * (READ COMMITTED re-evaluates after the lock releases) so the install refuses.
+ */
 async function sharedWith(tx: Tx, packageId: string, spaceId: string): Promise<boolean> {
   const [row] = await tx
     .select({ packageId: packageShares.packageId })
     .from(packageShares)
     .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, spaceId)))
-    .limit(1);
+    .limit(1)
+    .for("update");
   return !!row;
 }
 
@@ -142,14 +155,19 @@ async function latestVersionIdIn(tx: Tx, packageId: string): Promise<number | nu
 
 /**
  * The two rules an install into a PERSONAL space obeys (RBAC spec §6.10), and
- * the version to pin. A team space is unchanged: `null` pin, no precondition
- * beyond the caller's install grant.
+ * the version to pin. THE one implementation: both doors into a personal space
+ * — {@link installPackage} and {@link acceptSharedPackage} — call it, so the
+ * precondition, the pin and the "nothing published" refusal cannot say two
+ * different things depending on which route the caller used. A team space is
+ * unchanged: `null` pin, no precondition beyond the caller's install grant.
  *
  * 1. The package must be OFFERED there (`package_shares`) or HOMED there. A
  *    404, never a 403: the space id is private, so a named refusal would be an
  *    oracle. That the caller is the space's owner is already settled upstream —
  *    `resolveSpaceRole` answers `null` for anybody else and the space is
- *    `private`, so no other principal ever reaches this route.
+ *    `private`, so no other principal ever reaches this route. The offer is
+ *    read under a ROW LOCK, in the transaction that acts on it — see
+ *    {@link sharedWith}.
  * 2. An accepted share is PINNED to `latest` (plan decision 6). Without it the
  *    author publishes a v3 the recipient executes, with the recipient's
  *    credentials, having never seen it. A share with nothing published yet is
@@ -161,6 +179,9 @@ async function latestVersionIdIn(tx: Tx, packageId: string): Promise<number | nu
  * not seen — is not a risk they run against themselves. Pinning it would also
  * strand it, since a draft-only package has no version to pin and the update
  * path for a personal space is re-accepting a share it does not have.
+ *
+ * @returns the version to pin, or `null` when the rule pins nothing — a TEAM
+ *   space, or a package HOMED here.
  */
 async function resolvePersonalSpaceInstall(
   tx: Tx,
@@ -236,21 +257,24 @@ export async function installPackage(scope: SpaceScope, packageId: string) {
  * Accept a share into the recipient's OWN personal space — install it, pinned
  * to `latest`, on the space owner's behalf (RBAC spec §3.6, §6.10).
  *
- * Two things separate it from {@link installPackage}. It runs WITHOUT the
- * type's install grant: the space's owner consented by calling it, and a
- * `guest` holds only the `operator` preset in their own space, which carries
- * none of `agents:configure` / `integrations:install` / `<type>:write`. And it
- * is IDEMPOTENT in the useful direction — an already-installed package is
- * RE-PINNED to `latest`, which is how the owner takes a new version after the
- * author publishes one. Calling it twice is not an error; it is the update
- * button.
+ * The RULE is not restated here: {@link resolvePersonalSpaceInstall} is the one
+ * implementation of it, and this route adds only the UPSERT. What separates the
+ * two doors is what surrounds that rule. This one runs WITHOUT the type's
+ * install grant: the space's owner consented by calling it, and a `guest` holds
+ * only the `operator` preset in their own space, which carries none of
+ * `agents:configure` / `integrations:install` / `<type>:write`. And it is
+ * IDEMPOTENT in the useful direction — an already-installed package is RE-PINNED
+ * to `latest`, which is how the owner takes a new version after the author
+ * publishes one. Calling it twice is not an error; it is the update button.
  *
- * The OFFER is checked here rather than by the caller, so that the check and
- * the insert it authorizes commit or fail together.
+ * The rule runs INSIDE the transaction that inserts, so the offer it reads
+ * cannot be revoked between the check and the write it authorizes.
  *
  * @returns the pinned version id.
- * @throws 404 when the package does not exist or is not offered to this space —
- *   one message for both, since the caller may not know which.
+ * @throws 404 when the package does not exist, or the rule pins nothing here —
+ *   no offer, a package already homed here (installed through the ordinary
+ *   route, not accepted), or a space with no owner to consent. One message for
+ *   all of them, since the caller may not know which applies.
  */
 export async function acceptSharedPackage(
   scope: SpaceScope,
@@ -261,7 +285,7 @@ export async function acceptSharedPackage(
 
   return db.transaction(async (tx) => {
     const [pkg] = await tx
-      .select({ id: packages.id })
+      .select({ id: packages.id, homeSpaceId: packages.homeSpaceId })
       .from(packages)
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
       .limit(1);
@@ -269,24 +293,9 @@ export async function acceptSharedPackage(
       throw notFound(`Package '${packageId}' not found`);
     }
 
-    // The offer IS the authorization, so it is read here — in the transaction
-    // that inserts the installation — and not by the route. A check outside it
-    // is a check against a state that may already be gone: a revoke deletes the
-    // share and the installation together (`revokePackageShare`), and an accept
-    // that read the offer before that transaction committed would put the
-    // installation back with nothing backing it. A package that was never
-    // offered here is a 404, not a 403: the caller may have no other way to see
-    // it, and the space id is private.
-    if (!(await sharedWith(tx, packageId, scope.spaceId))) {
-      throw notFound(`Package '${packageId}' not found`);
-    }
-
-    const versionId = await latestVersionIdIn(tx, packageId);
+    const versionId = await resolvePersonalSpaceInstall(tx, scope, pkg);
     if (versionId === null) {
-      throw conflict(
-        "package_has_no_version",
-        `Package '${packageId}' has no published version to install — ask its author to publish one.`,
-      );
+      throw notFound(`Package '${packageId}' not found`);
     }
 
     await tx

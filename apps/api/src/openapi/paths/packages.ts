@@ -63,6 +63,19 @@ function versionRestoreResponseSchema(detailRef: string) {
   };
 }
 
+/**
+ * The authority sentence EVERY mutation of an EXISTING package carries — five
+ * verbs (draft update, delete, version create, version restore, version delete)
+ * times four types, twenty descriptions off ONE definition. Same reason
+ * `PACKAGE_HOME_PROPERTIES` (`../schemas.ts`) is one object rather than four
+ * copies: the rule is single (`packages.home_space_id`, RBAC spec §6.9) and
+ * hand-copied prose drifts the moment it changes. It answered nothing at all
+ * before — a reader could not tell from these descriptions that the space in
+ * `X-Space-Id` is not what authorizes them.
+ */
+const PACKAGE_MUTATION_AUTHORITY =
+  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -848,7 +861,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden.",
+        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -908,7 +922,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore a skill version into the draft",
       description:
-        "Restore a previously published version into the skill draft. Does not create a new version.",
+        "Restore a previously published version into the skill draft. Does not create a new version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -991,7 +1006,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a skill version",
       description:
-        "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version.",
+        "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1042,7 +1058,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update a skill",
       description:
-        "Update a skill in the organization packages. Built-in skills cannot be modified.",
+        "Update a skill in the organization packages. Built-in skills cannot be modified." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1095,7 +1112,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a skill",
       description:
-        "Delete a skill from the organization packages. Built-in skills cannot be deleted.",
+        "Delete a skill from the organization packages. Built-in skills cannot be deleted." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1247,7 +1265,9 @@ export const packagesPaths = {
       operationId: "updateAgent",
       tags: ["Packages"],
       summary: "Update a user agent",
-      description: "Update manifest and content of a user agent with optimistic locking.",
+      description:
+        "Update manifest and content of a user agent with optimistic locking." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1300,7 +1320,8 @@ export const packagesPaths = {
       operationId: "deleteAgent",
       tags: ["Packages"],
       summary: "Delete a user agent",
-      description: "Delete a user agent. Built-in agents cannot be deleted.",
+      description:
+        "Delete a user agent. Built-in agents cannot be deleted." + PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1401,7 +1422,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create an agent version from draft",
       description:
-        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs.",
+        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1456,7 +1478,9 @@ export const packagesPaths = {
       operationId: "restoreAgentVersion",
       tags: ["Packages"],
       summary: "Restore an agent version into the draft",
-      description: "Restore a published version into the draft. Requires no runs in progress.",
+      description:
+        "Restore a published version into the draft. Requires no runs in progress." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1522,7 +1546,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an agent version",
       description:
-        "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress.",
+        "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2033,7 +2058,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden.",
+        "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2089,7 +2115,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore an integration package version into the draft",
       description:
-        "Restore a previously published version into the integration package draft. Does not create a new version.",
+        "Restore a previously published version into the integration package draft. Does not create a new version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2167,7 +2194,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an integration package version",
       description:
-        "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version.",
+        "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2218,7 +2246,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update an integration package",
       description:
-        "Update an integration package in the organization packages. Built-in integration packages cannot be modified.",
+        "Update an integration package in the organization packages. Built-in integration packages cannot be modified." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2267,7 +2296,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an integration package",
       description:
-        "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted.",
+        "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2460,7 +2490,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden.",
+        "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2516,7 +2547,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore an MCP-server package version into the draft",
       description:
-        "Restore a previously published version into the MCP-server package draft. Does not create a new version.",
+        "Restore a previously published version into the MCP-server package draft. Does not create a new version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2594,7 +2626,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an MCP-server package version",
       description:
-        "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version.",
+        "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2645,7 +2678,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update an MCP-server package",
       description:
-        "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified.",
+        "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2694,7 +2728,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an MCP-server package",
       description:
-        "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted.",
+        "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

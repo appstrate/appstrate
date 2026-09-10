@@ -56,7 +56,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the four `/shares` routes enforce. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
@@ -64,7 +64,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   restrict_package_copy: {
     type: "boolean",
     description:
-      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork` and `GET /api/packages/{scope}/{name}/{version}/download` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt in both settings: the CLI's skills sync downloads them into a local checkout by design. Agent RUNS are unaffected; a run's bundle is assembled server-side and never travels as a copy.",
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
   },
   api_version: {
     type: "string",

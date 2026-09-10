@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import { AppWindow, Settings } from "lucide-react";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -16,6 +15,7 @@ import { useSpaceSwitcher } from "../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { SpaceCreateModal } from "../../components/space-create-modal";
 import { formatDateField } from "../../lib/format-date";
+import { spaceLabel } from "../../lib/space-label";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 type SpaceObject = components["schemas"]["SpaceObject"];
@@ -108,15 +108,6 @@ export function OrgSettingsSpacesPage() {
 }
 
 /**
- * The stored name of a personal space is a datum (`"Mon espace"`); the label is
- * the reader's own translation, keyed off `personal` — the wire deliberately
- * never says whose space it is.
- */
-function spaceLabel(space: { personal: boolean; name: string }, t: TFunction): string {
-  return space.personal ? t("spaces.personal.title") : space.name;
-}
-
-/**
  * Orphaned personal spaces — their owner has left the organization, the 30-day
  * window is running, and an owner or admin has exactly two acts available
  * (RBAC spec §3.6). Neither is reversible, so both go through a confirmation.
@@ -169,7 +160,7 @@ function OrphanedPersonalSpaces({ spaces }: { spaces: SpaceObject[] }) {
           >
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
               <div className="flex-1">
-                <h3 className="text-[0.95rem] font-semibold">{t("spaces.personal.title")}</h3>
+                <h3 className="text-[0.95rem] font-semibold">{spaceLabel(space, t)}</h3>
                 <span className="text-muted-foreground text-sm">
                   {t("spaces.personal.orphanedSince", {
                     date: formatDateField(space.orphaned_at ?? null, "date"),

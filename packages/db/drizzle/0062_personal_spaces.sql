@@ -30,9 +30,30 @@
 -- has been validated — it creates one space per membership, which is a cloud
 -- plan-limit question first (see the script header).
 --
--- ROLLBACK: safe until 0014 runs. A previous build never reads either column.
--- Once 0014 has run it is one-way: personal spaces exist, and an older build
--- would list them as ordinary `private` spaces its admins can enter.
+-- ROLLBACK: ONE-WAY from the first boot of the new build, and 0014 has nothing
+-- to do with when that starts. `provisionMember` creates a personal space at
+-- every membership door and `GET /api/spaces` repairs the caller's own, so
+-- personal spaces exist from the first request the new build serves — the
+-- script only decides HOW MANY exist, not whether any do.
+--
+-- What an older build does with them is the reason it is one-way. Its
+-- `resolveSpaceRole` does not read `owner_user_id`, so it treats such a space
+-- as an ordinary `private` one and grants every organization owner and admin
+-- `admin` in it — the one thing §3.6 refuses. And its `PATCH /api/spaces/{id}`
+-- can set `visibility` on one, which the CHECK `spaces_personal_is_private`
+-- then refuses at the database: a 500, not a validation error.
+--
+-- Rolling forward is the supported direction, and there is no route that undoes
+-- this: a LIVE personal space is convertible by nobody (`convert-to-team` is
+-- 409 `personal_space_not_orphaned` on one), by design. A rollback therefore
+-- means an operator turning every one of them into an ordinary team space by
+-- hand — `UPDATE spaces SET owner_user_id = NULL, orphaned_at = NULL WHERE
+-- owner_user_id IS NOT NULL`, which the three CHECKs accept — and accepting
+-- that whatever a member kept private in theirs becomes readable by the
+-- organization's admins. Restore the coordinated backup instead where one
+-- exists.
+--
+-- See `scripts/migration/README.md` → "Personal spaces & sharing rollout".
 
 ALTER TABLE "spaces" ADD COLUMN "owner_user_id" text;--> statement-breakpoint
 ALTER TABLE "spaces" ADD COLUMN "orphaned_at" timestamp with time zone;--> statement-breakpoint

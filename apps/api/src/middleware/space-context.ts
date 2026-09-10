@@ -72,11 +72,24 @@ export async function applySpacePermissions(
   c: Context<AppEnv>,
   space: SpaceContextRow,
 ): Promise<void> {
-  if (!c.get("orgRole")) return;
+  if (!c.get("orgRole")) {
+    // An orgRole-less principal — an OIDC end-user token — never reaches
+    // `resolveSpaceRole`, so the personal-space refusal cannot be left to the
+    // resolver for it: without this, such a token pinned to a personal space
+    // would keep its strategy's fixed allowlist and walk straight in. A 404,
+    // like every other refusal on a personal space (RBAC spec §3.6): an
+    // end-user belongs to a space, never to a person, so there is no reading
+    // under which it owns one.
+    if (space.ownerUserId !== null) {
+      throw notFound(`Space '${space.id}' not found in this organization`);
+    }
+    return;
+  }
 
-  // Under a preview both halves are the persona's. The caller id stays real:
-  // a personal space answers to its owner's session alone (RBAC spec §3.6),
-  // and `visibility = 'private'` means the refusal below is a 404.
+  // Under a preview both halves are the persona's, and so is the caller id:
+  // `callerPersonalOwnerId` answers `null` under a preview — a persona owns no
+  // personal space — so a previewed request reaches none (RBAC spec §3.6), and
+  // `visibility = 'private'` means the refusal below is a 404.
   const ref = resolveSpaceRole(
     callerOrgRole(c, space.orgId),
     space,

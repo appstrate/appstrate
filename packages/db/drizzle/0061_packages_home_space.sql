@@ -24,8 +24,16 @@
 -- then bring the new version up. Serving traffic in between locks every
 -- non-owner author, and every API key, out of its own packages.
 --
--- ROLLBACK: safe. A previous build never reads or writes the column, and the
--- FK accepts the NULLs it leaves behind.
+-- ROLLBACK: safe BEFORE 0013 only. A previous build never reads or writes the
+-- column, and the FK accepts the NULLs this file leaves behind. Once 0013 has
+-- run, the column names spaces: the old build ignores it, so a rollback is
+-- still serviceable, but `DELETE FROM spaces` is not — the `ON DELETE RESTRICT`
+-- fires on a space that homes a package and the older build has no route that
+-- clears a home. Undo 0013 first (`UPDATE packages SET home_space_id = NULL`)
+-- and do it BEFORE any space deletion, not after the first 23503.
+--
+-- See `scripts/migration/README.md` → "Personal spaces & sharing rollout" for
+-- the order this file, 0062, 0063, 0013 and 0014 go in.
 
 ALTER TABLE "packages" ADD COLUMN "home_space_id" text;--> statement-breakpoint
 ALTER TABLE "packages" ADD CONSTRAINT "packages_home_space_id_spaces_id_fk" FOREIGN KEY ("home_space_id") REFERENCES "public"."spaces"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint

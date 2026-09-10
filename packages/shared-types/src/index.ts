@@ -608,9 +608,11 @@ export interface AgentDetail {
   home_writable: boolean;
   /**
    * Whether THIS caller holds `agents:share` in the home space — the predicate
-   * the four `/shares` routes enforce, from the same server-side computation.
-   * Sharing is a third verb on the home, not a synonym for writing: a custom
-   * role may hold one without the other. Always emitted.
+   * the THREE `/shares` routes that change the audience enforce (offer, list,
+   * revoke), from the same server-side computation. `accept` is not one of
+   * them: it is the recipient's own act on their own space and asks for no
+   * `share`. Sharing is a third verb on the home, not a synonym for writing: a
+   * custom role may hold one without the other. Always emitted.
    */
   home_shareable: boolean;
   /**
@@ -653,8 +655,9 @@ export interface OrgPackageItem extends BasePackageListItem {
   home_writable: boolean;
   /**
    * Whether THIS caller holds the type's `share` in the home space — the
-   * predicate the four `/shares` routes enforce, from the same computation.
-   * Always emitted.
+   * predicate the THREE `/shares` routes that change the audience enforce
+   * (offer, list, revoke), from the same computation; `accept` asks for no
+   * `share`. Always emitted.
    */
   home_shareable: boolean;
 }

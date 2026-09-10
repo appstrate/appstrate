@@ -121,20 +121,200 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
    `to_fold_before`. A non-zero `unparseable_metadata` is a manual read of those
    rows, not a failure.
 
+## Personal spaces & sharing rollout (drizzle `0061` + `0062` + `0063`, scripts `0013` + `0014`)
+
+ONE release, and the three migrations apply as a single boot batch. Two scripts,
+and they sit on opposite sides of the window: `0013` runs **inside** it and is
+not optional, `0014` runs **after** the release is validated and is optional
+forever. Nothing here needs a new environment variable.
+
+Read the header of each file too — it is the authority on what that file touches.
+
+### 1. Rehearse
+
+Restore a production dump into a throwaway `postgres:16-alpine` and run every
+step below against it. Record the counts; production volume is UNMEASURED for
+both scripts until this is done.
+
+### 2. Pre-flight — which packages `0013` has to guess about
+
+`0061` adds `packages.home_space_id` NULL on every row, and NULL means "the
+organization catalogue: owners and admins on a session". Between the migration
+and `0013` every non-owner author and **every API key** is locked out of its own
+packages, which is why step 5 stops traffic. `0013` then picks a home per
+package: one installation → that space, several → the OLDEST `installed_at`,
+none → left NULL.
+
+Only the "several" case is a guess. Count them on the replica (`ssh appstrate`).
+The column does not exist yet there, so these run WITHOUT `0013`'s
+`home_space_id IS NULL` clause — before the migration every row qualifies:
+
+```sql
+SELECT
+  count(*)                               AS org_packages,
+  count(*) FILTER (WHERE i.installs = 1) AS exactly_one_install,
+  count(*) FILTER (WHERE i.installs > 1) AS several_installs,
+  count(*) FILTER (WHERE i.installs = 0) AS installed_nowhere
+FROM packages p
+JOIN LATERAL (
+  SELECT count(*) AS installs
+  FROM space_packages sp
+  JOIN spaces s ON s.id = sp.space_id
+  WHERE sp.package_id = p.id AND s.org_id = p.org_id
+) i ON true
+WHERE p.org_id IS NOT NULL AND p.ephemeral = false;
+```
+
+`several_installs` non-zero → list them and review each with its author, because
+"the first space to install it" is a good guess and not a fact:
+
+```sql
+SELECT
+  p.id     AS package_id,
+  p.org_id,
+  count(*) AS installations,
+  (array_agg(sp.space_id ORDER BY sp.installed_at, sp.space_id))[1] AS chosen_space_id,
+  min(sp.installed_at)                                              AS chosen_installed_at
+FROM packages p
+JOIN space_packages sp ON sp.package_id = p.id
+JOIN spaces s ON s.id = sp.space_id AND s.org_id = p.org_id
+WHERE p.org_id IS NOT NULL AND p.ephemeral = false
+GROUP BY p.id, p.org_id
+HAVING count(*) > 1
+ORDER BY p.id;
+```
+
+`0013` prints this same list before its `UPDATE`: review it and `ROLLBACK`
+instead of `COMMIT` if a row looks wrong. Whatever it picks stays correctable
+afterwards with `PATCH /api/packages/{scope}/{name} {"home_space_id": …}`.
+
+### 3. Pre-flight — what the two `RESTRICT`s make undeletable
+
+`0061` and `0062` each add an `ON DELETE RESTRICT` edge, and both are deliberate
+refusals rather than cascades. Know what they will refuse:
+
+- **`packages.home_space_id → spaces.id`.** After `0013`, a space that homes a
+  package cannot be deleted: the API answers `409 space_homes_packages` and
+  names the packages, and a hand-written `DELETE FROM spaces` raises `23503`.
+  Move them first (`PATCH /api/packages/{scope}/{name}`). Any automation of
+  yours that deletes spaces has to move homes first from now on. What will
+  become undeletable, run AFTER `0013`:
+
+  ```sql
+  SELECT home_space_id AS space_id, count(*) AS homed_packages
+  FROM packages
+  WHERE home_space_id IS NOT NULL
+  GROUP BY home_space_id
+  ORDER BY homed_packages DESC;
+  ```
+
+- **`spaces.owner_user_id → user.id`.** A user who owns a personal space cannot
+  be deleted. This codebase has no user hard-delete path (`grep -rn deleteUser`
+  finds none), so nothing regresses; an operator's ad-hoc `DELETE FROM "user"`
+  raises `23503` until that member's personal space is swept
+  (`POST /api/spaces/{id}/sweep-now`, orphaned spaces only).
+
+`0063` adds no such edge — `package_shares` cascades on both halves.
+
+### 4. Pre-flight — how many spaces `0014` would create
+
+Only if you intend to run `0014` (step 8). It inserts ONE `spaces` row per
+membership:
+
+```sql
+SELECT count(*) AS members, count(DISTINCT org_id) AS orgs FROM org_members;
+```
+
+The commercial module counts spaces for nothing today, so there is no quota to
+breach; the number matters to a self-hosted operator who has imposed a per-space
+ceiling of their own. Skipping `0014` entirely is a supported choice.
+
+### 5. Stop the platform, migrate, run `0013`, start
+
+The `0008` shape, for the reason in step 2 — nothing serves traffic while the
+column exists unbackfilled:
+
+```sh
+# stop the platform
+# apply pending Drizzle migrations ONLY: 0061 + 0062 + 0063, one boot batch
+docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
+  -f - < scripts/migration/0013-packages-home-space-backfill.sql
+# then bring the new version up
+```
+
+`0013` prints `no_home_before` split four ways, the ambiguous list, and
+`no_home_after` — which must equal `no_home_and_installed_nowhere`, i.e. the
+only packages left without a home are the ones installed nowhere.
+
+### 6. Validate lot 0 — the home rule
+
+- A builder who holds `<type>:write` in a package's home edits it while browsing
+  a space where they only read.
+- No caller sees "requires permission in every space where it is installed"
+  (`grep` for it; the message is gone).
+- `DELETE /api/spaces/{id}` on a space that homes a package answers
+  `409 space_homes_packages` and lists their ids.
+- An API key can write a package again — the one whose home is its own space.
+
+### 7. Validate lot 1 — personal spaces
+
+- `GET /api/spaces` for a member lists `personal: true` for exactly one space,
+  and the org switcher pins it above the team spaces.
+- An organization admin gets **404** on that space's detail, its members list,
+  `PATCH`, `DELETE` and `convert-to-team` — not a 403, not a 409.
+- `POST /api/api-keys` in a personal space answers
+  `409 personal_space_takes_no_keys`; `POST /api/end-users` answers
+  `409 personal_space_takes_no_end_users`.
+- Removing a member stamps `spaces.orphaned_at` and the organization's Spaces
+  page lists the orphan with **Convert** / **Sweep now**.
+
+### 8. Run `0014` — later, and only if you want to
+
+After step 7 passes. Nothing is degraded while it has not run: every membership
+door creates the space, and `GET /api/spaces` repairs the caller's own. What it
+buys is the members who will not log in soon — their space exists before someone
+shares a package to them. Idempotent; a second run inserts zero rows and
+`missing_personal_space_after` must print 0.
+
+### Rollback — what is actually reversible
+
+Per file, and they do not agree:
+
+| File   | Before its script                            | After its script                                                                                                                                                                                                                                                        |
+| ------ | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0061` | Safe. An older build never reads the column. | Serviceable — the old build still ignores the column — but `DELETE FROM spaces` now raises `23503` on a space that homes a package, and the old build has no route that clears a home. Run `UPDATE packages SET home_space_id = NULL` FIRST, before any space deletion. |
+| `0062` | **Already one-way.**                         | Same. `0014` changes only HOW MANY personal spaces exist, never whether any do.                                                                                                                                                                                         |
+| `0063` | Safe.                                        | Safe — no script. An older build never reads `package_shares`; the rows left behind are inert.                                                                                                                                                                          |
+
+`0062` is one-way from the **first boot of the new build**, not from `0014`:
+`provisionMember` creates a personal space at every membership door and
+`GET /api/spaces` repairs the caller's own, so they exist from the first request
+served. An older build's `resolveSpaceRole` does not read `owner_user_id` — it
+reads such a space as an ordinary `private` one and hands every organization
+owner and admin `admin` in it, which is the one thing §3.6 refuses — and its
+`PATCH /api/spaces/{id}` can set `visibility`, which the CHECK
+`spaces_personal_is_private` then refuses at the database as a 500. There is no
+route that undoes it either: a LIVE personal space is convertible by nobody, by
+design. A rollback therefore means an operator turning every one of them into a
+team space by hand (`UPDATE spaces SET owner_user_id = NULL, orphaned_at = NULL
+WHERE owner_user_id IS NOT NULL`) and accepting that what members kept private
+becomes readable by the organization's admins. Restore the coordinated backup
+instead where one exists, and prefer rolling forward.
+
 ## Log
 
-| #    | date        | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | rows                                                                                                                                                                                                                                                                                                              |
-| ---- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0001 | 2026-08-26  | `files.id` `doc_` → `file_` and every reference                                                                                                                                                                                                                                                                                                                                                                                                                                              | 521 / 25 / 64 / 59                                                                                                                                                                                                                                                                                                |
-| 0002 | 2026-08-26  | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4                                                                                                                                                                                                                                                                                                                                                                                                            | 59                                                                                                                                                                                                                                                                                                                |
-| 0003 | 2026-08-28  | `app_` → `spc_` space ids (+18 FK columns), `applications:*` scopes, `end_user:` realms, `level` vocabulary                                                                                                                                                                                                                                                                                                                                                                                  | 10750 id rows (33 `spaces` + 10717 across the 18 columns) / 32 scopes / 1+1 realms / 16 reasons / 1 `level`; 17 FKs dropped + restored                                                                                                                                                                            |
-| 0004 | not applied | oauth `resources` columns (0006) on a watermark-drifted DB — not rehearsed                                                                                                                                                                                                                                                                                                                                                                                                                   | unmeasured                                                                                                                                                                                                                                                                                                        |
-| 0005 | 2026-08-28  | AFPS `delivery.http.prefix`: bare auth scheme → separator-carrying (`"Bearer"` → `"Bearer "`), both manifest stores — **one deploy with the `integrationManifestSchema` (1d) gate**; run it FIRST, both spellings render alike under the old code                                                                                                                                                                                                                                            | 126 `package_versions` / 77 `packages.draft_manifest`                                                                                                                                                                                                                                                             |
-| 0007 | not applied | skills: quote the `description:` lines `yaml` cannot parse, so their drafts are savable again under the SKILL.md frontmatter gate — **run after deploying the gate**; `.ts`, dry-run by default, `--apply` to write                                                                                                                                                                                                                                                                          | 17 of 66 skills fixable, 3 need a manual edit (2 `name`, 1 over-long description) — counted on production, NOT rehearsed                                                                                                                                                                                          |
-| 0008 | not applied | org role `viewer` → `guest` + an explicit `viewer` `space_members` row in every space that exists; pending invitations and legacy OAuth signup clients carry the same current-space snapshot — **run between drizzle `0056` and bringing the new version up**; viewers are locked out in between                                                                                                                                                                                             | unmeasured — the script prints before/after counts and aborts if any survives. This deployment ran it on nothing: production held 2 viewer members (2 orgs, 1 space each) and 2 accepted viewer invitations on 2026-09-09, moved off `viewer` by hand so the whole rollout could ship as one release — see step 3 |
-| 0009 | not applied | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0056` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                                                                                                                                                                                                                   | unmeasured — prints the duplicate-pair count before/after, after must be 0                                                                                                                                                                                                                                        |
-| 0010 | not applied | the commercial module's billing tables out of the database it used to run on and into the platform database, under the `drizzle.ee_migrations` journal — **run with the platform stopped, before deploying the release that moves the module in-tree**; the source prefix is detected (`cloud_*` at level `0003` is production's), reads `EE_SOURCE_DATABASE_URL` + `DATABASE_URL`, `.ts`, dry-run by default, `--apply` to copy                                                             | unmeasured — prints the per-table source/target counts and exits non-zero on any mismatch; refuses a mixed prefix, an unknown `ee_`/`cloud_` table, a source-only column or a non-empty target (exit 1, nothing written), so a second `--apply` refuses rather than double-counting                               |
-| 0011 | not applied | `oauth_clients.self_service` set from the `metadata` JSON key `selfService`, which drizzle `0057` leaves behind when it adds the column — **run after the drizzle batch**; rows whose `metadata` is not valid JSON are skipped, not rewritten                                                                                                                                                                                                                                                | unmeasured — prints the count it will fold before and after, after must be 0                                                                                                                                                                                                                                      |
-| 0012 | not applied | `org_invitations` reading `viewer` with a status other than `pending` — the history `0008` deliberately leaves alone — mapped to `guest`, so drizzle `0059` can recreate the type without the value; **run right after `0008`**                                                                                                                                                                                                                                                              | unmeasured — prints the history and pending counts before and after, history after must be 0                                                                                                                                                                                                                      |
-| 0013 | not applied | every organization package given a `home_space_id` — its ONE write-authority space (drizzle `0061` adds the column NULL everywhere, i.e. admin-only): exactly one installation → that space, several → the oldest `installed_at` **printed for review before `COMMIT`**, none → left NULL; **run between the drizzle batch and bringing the new version up**, the `0008` shape; serving traffic in between costs every non-owner author and every API key write access to their own packages | unmeasured — prints the NULL-home count before and after (after = the packages installed nowhere) and the ambiguous list in between                                                                                                                                                                               |
-| 0014 | not applied | one personal space per existing `organization_members` row (`spaces.owner_user_id`, drizzle `0062`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the cloud plan limits first** — it inserts one row per membership                | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0                                                                                                                                                                                                   |
+| #    | date        | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | rows                                                                                                                                                                                                                                                                                                              |
+| ---- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0001 | 2026-08-26  | `files.id` `doc_` → `file_` and every reference                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 521 / 25 / 64 / 59                                                                                                                                                                                                                                                                                                |
+| 0002 | 2026-08-26  | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4                                                                                                                                                                                                                                                                                                                                                                                                                           | 59                                                                                                                                                                                                                                                                                                                |
+| 0003 | 2026-08-28  | `app_` → `spc_` space ids (+18 FK columns), `applications:*` scopes, `end_user:` realms, `level` vocabulary                                                                                                                                                                                                                                                                                                                                                                                                 | 10750 id rows (33 `spaces` + 10717 across the 18 columns) / 32 scopes / 1+1 realms / 16 reasons / 1 `level`; 17 FKs dropped + restored                                                                                                                                                                            |
+| 0004 | not applied | oauth `resources` columns (0006) on a watermark-drifted DB — not rehearsed                                                                                                                                                                                                                                                                                                                                                                                                                                  | unmeasured                                                                                                                                                                                                                                                                                                        |
+| 0005 | 2026-08-28  | AFPS `delivery.http.prefix`: bare auth scheme → separator-carrying (`"Bearer"` → `"Bearer "`), both manifest stores — **one deploy with the `integrationManifestSchema` (1d) gate**; run it FIRST, both spellings render alike under the old code                                                                                                                                                                                                                                                           | 126 `package_versions` / 77 `packages.draft_manifest`                                                                                                                                                                                                                                                             |
+| 0007 | not applied | skills: quote the `description:` lines `yaml` cannot parse, so their drafts are savable again under the SKILL.md frontmatter gate — **run after deploying the gate**; `.ts`, dry-run by default, `--apply` to write                                                                                                                                                                                                                                                                                         | 17 of 66 skills fixable, 3 need a manual edit (2 `name`, 1 over-long description) — counted on production, NOT rehearsed                                                                                                                                                                                          |
+| 0008 | not applied | org role `viewer` → `guest` + an explicit `viewer` `space_members` row in every space that exists; pending invitations and legacy OAuth signup clients carry the same current-space snapshot — **run between drizzle `0056` and bringing the new version up**; viewers are locked out in between                                                                                                                                                                                                            | unmeasured — the script prints before/after counts and aborts if any survives. This deployment ran it on nothing: production held 2 viewer members (2 orgs, 1 space each) and 2 accepted viewer invitations on 2026-09-09, moved off `viewer` by hand so the whole rollout could ship as one release — see step 3 |
+| 0009 | not applied | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0056` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                                                                                                                                                                                                                                  | unmeasured — prints the duplicate-pair count before/after, after must be 0                                                                                                                                                                                                                                        |
+| 0010 | not applied | the commercial module's billing tables out of the database it used to run on and into the platform database, under the `drizzle.ee_migrations` journal — **run with the platform stopped, before deploying the release that moves the module in-tree**; the source prefix is detected (`cloud_*` at level `0003` is production's), reads `EE_SOURCE_DATABASE_URL` + `DATABASE_URL`, `.ts`, dry-run by default, `--apply` to copy                                                                            | unmeasured — prints the per-table source/target counts and exits non-zero on any mismatch; refuses a mixed prefix, an unknown `ee_`/`cloud_` table, a source-only column or a non-empty target (exit 1, nothing written), so a second `--apply` refuses rather than double-counting                               |
+| 0011 | not applied | `oauth_clients.self_service` set from the `metadata` JSON key `selfService`, which drizzle `0057` leaves behind when it adds the column — **run after the drizzle batch**; rows whose `metadata` is not valid JSON are skipped, not rewritten                                                                                                                                                                                                                                                               | unmeasured — prints the count it will fold before and after, after must be 0                                                                                                                                                                                                                                      |
+| 0012 | not applied | `org_invitations` reading `viewer` with a status other than `pending` — the history `0008` deliberately leaves alone — mapped to `guest`, so drizzle `0059` can recreate the type without the value; **run right after `0008`**                                                                                                                                                                                                                                                                             | unmeasured — prints the history and pending counts before and after, history after must be 0                                                                                                                                                                                                                      |
+| 0013 | not applied | every organization package given a `home_space_id` — its ONE write-authority space (drizzle `0061` adds the column NULL everywhere, i.e. admin-only): exactly one installation → that space, several → the oldest `installed_at` **printed for review before `COMMIT`**, none → left NULL; **run between the drizzle batch and bringing the new version up**, the `0008` shape; serving traffic in between costs every non-owner author and every API key write access to their own packages                | unmeasured — prints the NULL-home count before and after (after = the packages installed nowhere) and the ambiguous list in between                                                                                                                                                                               |
+| 0014 | not applied | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0062`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0                                                                                                                                                                                                   |
