@@ -71,7 +71,8 @@ export const modelsPaths = {
       operationId: "createModel",
       tags: ["Models"],
       summary: "Create a custom model",
-      description: "Create a new custom LLM model for the organization.",
+      description:
+        "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -141,6 +142,15 @@ export const modelsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description:
+            "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -504,6 +514,15 @@ export const modelsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {

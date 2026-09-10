@@ -430,10 +430,17 @@
       "breakpoints": true
     },
     {
-      "idx": 62,
+      "idx": 61,
       "version": "7",
       "when": 1788888549265,
-      "tag": "0062_oauth_fk_indexes",
+      "tag": "0061_oauth_fk_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788888609265,
+      "tag": "0062_org_models_unique_binding",
       "breakpoints": true
     }
   ]

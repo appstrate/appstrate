@@ -1,6 +1,6 @@
 {
-  "id": "3f0c1a92-7d54-4b18-9c6e-5a2f8b41d0e7",
-  "prevId": "659f0564-d9e7-4451-97eb-28379d3f2a0b",
+  "id": "659f0564-d9e7-4451-97eb-28379d3f2a0b",
+  "prevId": "171b0b5e-6ec2-42e3-8779-6fd6b8108588",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1160,34 +1160,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "uq_org_models_unaliased_binding": {
-          "name": "uq_org_models_unaliased_binding",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "credential_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "model_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"org_models\".\"aliased\" = false",
           "concurrently": false,
           "method": "btree",
           "with": {}

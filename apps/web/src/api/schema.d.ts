@@ -2055,7 +2055,7 @@ export interface paths {
         put?: never;
         /**
          * Enumerate the models an endpoint serves
-         * @description Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.
+         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
          */
         post: operations["discoverModelProviderCredentialModels"];
         delete?: never;
@@ -2247,7 +2247,7 @@ export interface paths {
         put?: never;
         /**
          * Create a custom model
-         * @description Create a new custom LLM model for the organization.
+         * @description Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding.
          */
         post: operations["createModel"];
         delete?: never;
@@ -13423,7 +13423,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id. */
+            /** @description Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id. `truncated` marks a list that is short of what the endpoint serves. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13452,6 +13452,8 @@ export interface operations {
                              */
                             source: "endpoint" | "catalog" | null;
                         }[];
+                        /** @description `true` when the endpoint had more models to declare and a safety cap stopped the read (more than 1000 models, more than 10 listing pages, or a listing that declares a next page without publishing a cursor to follow). The ids returned are then a prefix of what the endpoint serves, not the whole of it. Always `false` for a non-`ok` outcome. */
+                        truncated: boolean;
                         /** @description Human-readable detail for a non-`ok` outcome (e.g. "URL targets a blocked network"); null on `ok`. */
                         message: string | null;
                     };
@@ -14068,6 +14070,15 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description `model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     setDefaultModel: {
@@ -14377,6 +14388,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     deleteModel: {

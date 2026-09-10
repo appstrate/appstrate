@@ -94,11 +94,19 @@ interface DiscoverTarget {
   apiKey: string;
 }
 
-/** Enumeration never spends a subscription token (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). */
-function assertApiKeyProvider(cfg: ModelProviderDefinition, param: string): void {
-  if (cfg.authMode !== "api_key") {
+/**
+ * Enumeration never spends a subscription token
+ * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). The declaration that keeps
+ * a credential off the listing path is `modelDiscovery: { mode: "static" }` —
+ * the same predicate `discoverAvailableModels` branches on — not the auth mode:
+ * the registry requires every oauth2 provider to declare it at boot
+ * (`assertSubscriptionNeverEnumerated`), and an api-key provider that declares
+ * it is asking for the same treatment.
+ */
+function assertEnumerableProvider(cfg: ModelProviderDefinition, param: string): void {
+  if (cfg.modelDiscovery?.mode === "static") {
     throw invalidRequest(
-      `Provider ${cfg.providerId} authenticates with OAuth; its models are not enumerated`,
+      `Provider ${cfg.providerId} declares a static model list; its endpoint is not enumerated`,
       param,
     );
   }
@@ -128,7 +136,7 @@ async function resolveDiscoverTarget(
     if (!creds) throw notFound("Model provider credential not found");
     const cfg = getModelProvider(creds.providerId);
     if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credential_id");
-    assertApiKeyProvider(cfg, "credential_id");
+    assertEnumerableProvider(cfg, "credential_id");
     return {
       providerId: creds.providerId,
       apiShape: creds.apiShape,
@@ -149,7 +157,7 @@ async function resolveDiscoverTarget(
 
   const cfg = getModelProvider(body.provider_id);
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.provider_id}`, "provider_id");
-  assertApiKeyProvider(cfg, "provider_id");
+  assertEnumerableProvider(cfg, "provider_id");
   if (body.base_url_override !== undefined && !cfg.baseUrlOverridable) {
     throw invalidRequest(
       `Provider ${cfg.providerId} does not accept a base URL override`,
@@ -350,7 +358,11 @@ export function createModelProviderCredentialsRouter() {
 
   // POST /api/model-provider-credentials/discover — what an endpoint serves,
   // described from its listing and the catalog, BEFORE a credential exists.
-  // Persists nothing, never echoes the key; gated like `refresh-models`.
+  // Writes no model state and never echoes the key — the probe itself is
+  // audited, since it spends a key on an operator-supplied URL. Gated like
+  // `refresh-models`. The listing is followed across its pages, and `truncated`
+  // says when a cap cut the read short rather than letting a partial list pass
+  // for a whole one.
   router.post(
     "/discover",
     rateLimit(6),
@@ -360,15 +372,32 @@ export function createModelProviderCredentialsRouter() {
       const body = await readJsonBody(c, discoverSchema);
       const target = await resolveDiscoverTarget(orgId, body);
       const listing = await listServedModels(target);
+      // The probe spends a key on an operator-supplied URL, so it leaves the
+      // same trail the create/update/delete routes do — the endpoint reached
+      // and what came back, never the key.
+      await recordAuditFromContext(c, {
+        action: "model_provider_credential.discovered",
+        resourceType: "model_provider_credential",
+        resourceId: body.credential_id ?? null,
+        after: {
+          providerId: target.providerId,
+          baseUrl: target.baseUrl,
+          outcome: listing.ok ? "ok" : listing.error.toLowerCase(),
+          modelCount: listing.ok ? listing.models.length : 0,
+          truncated: listing.ok && listing.truncated,
+        },
+      });
       if (!listing.ok) {
         return c.json({
           outcome: listing.error.toLowerCase(),
           models: [],
+          truncated: false,
           message: listing.message,
         });
       }
       return c.json({
         outcome: "ok",
+        truncated: listing.truncated,
         models: listing.models.map(({ id, hints }) => {
           const described = describeServedModel(target.providerId, id, hints);
           return {

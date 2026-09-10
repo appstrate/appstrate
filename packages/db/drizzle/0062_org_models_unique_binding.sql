@@ -1,0 +1,32 @@
+-- One `org_models` row per (organization, credential, model) — un-aliased rows.
+--
+-- WHY. `llm_usage.model` stores the `org_models.id` the caller asked for, not
+-- the upstream model string. Two rows for the same binding therefore split
+-- that model's spend across the copies and under-report each one — and because
+-- the credential FK is ON DELETE RESTRICT, detaching the credential means
+-- finding every copy. `POST /api/models` deduped only the LABEL
+-- (`deriveModelLabel`), from a read in a different transaction than the
+-- insert, so the multi-add path's N sequential POSTs raced it and produced
+-- "GPT-5" alongside "GPT-5 (2)" pointing at the same model.
+--
+-- PARTIAL, and the predicate is the design. An ALIAS is a public identity the
+-- organization minted deliberately: its own label, its own reporting line, its
+-- backing hidden from every user-facing surface. Several aliases over one
+-- backing model — or an alias beside the direct row — is the alias pattern
+-- working, not a duplicate, and their spend is MEANT to report apart. Only the
+-- un-aliased rows, the ones the picker shows under their catalog name, are held
+-- to one per binding.
+--
+-- SHAPE ONLY. No row is written (`docs/NO_TRANSITIONAL_CODE.md` §2). This
+-- index NARROWS, so a database that already holds a duplicate cannot take it:
+-- the CREATE raises 23505 and rolls the whole pending batch back. That refusal
+-- is the intended behaviour — the repair is a choice about which copy survives
+-- and where the other's references and ledger rows are repointed, which is
+-- `scripts/migration/0013-org-models-dedupe-bindings.sql`, run BEFORE this
+-- batch when the pre-flight in that README counts any. Most installations
+-- count zero and never run it.
+--
+-- ROLLBACK: `DROP INDEX "uq_org_models_unaliased_binding";`. A previous
+-- build is happy without it — it simply stops refusing duplicates again.
+
+CREATE UNIQUE INDEX "uq_org_models_unaliased_binding" ON "org_models" USING btree ("org_id","credential_id","model_id") WHERE "org_models"."aliased" = false;

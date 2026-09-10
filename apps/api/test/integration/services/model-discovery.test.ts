@@ -139,6 +139,7 @@ function forbiddenListing(): { deps: ModelDiscoveryDeps; calls: () => number } {
 const served = (...modelIds: string[]): ListServedModelsResult => ({
   ok: true,
   models: modelIds.map((id) => ({ id, hints: {} })),
+  truncated: false,
 });
 const AUTH_FAILED: ListServedModelsResult = {
   ok: false,

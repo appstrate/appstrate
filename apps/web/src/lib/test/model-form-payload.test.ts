@@ -487,7 +487,7 @@ const DESCRIBED: Partial<ModelPickRow> = {
   cost: { input: 1.25, output: 10 },
 };
 
-describe("buildModelsBatchPayload — what a row ships, per origin", () => {
+describe("buildModelsBatchPayload — what a row ships, per describer", () => {
   it.each([
     [
       "catalog: the id only, so the catalog keeps answering",
@@ -495,10 +495,9 @@ describe("buildModelsBatchPayload — what a row ships, per origin", () => {
       { modelId: "m" },
     ],
     [
-      "discover: what the listing described, never the cost",
+      "discover: what the endpoint published, never its label nor the cost",
       row({ id: "m", origin: "discover", ...DESCRIBED, source: "endpoint" }),
       {
-        label: "Described",
         modelId: "m",
         input: ["text", "image"],
         contextWindow: 32768,
@@ -507,13 +506,18 @@ describe("buildModelsBatchPayload — what a row ships, per origin", () => {
       },
     ],
     [
+      "discover: the id only when a catalog entry, not the endpoint, described it",
+      row({ id: "m", origin: "discover", ...DESCRIBED, source: "catalog" }),
+      { modelId: "m" },
+    ],
+    [
       "discover: nothing but the id for a model nobody described",
       row({ id: "m", origin: "discover" }),
       { modelId: "m" },
     ],
     [
       "discover: a reported false is kept, an empty modality list is dropped",
-      row({ id: "m", origin: "discover", input: [], reasoning: false }),
+      row({ id: "m", origin: "discover", source: "endpoint", input: [], reasoning: false }),
       { modelId: "m", reasoning: false },
     ],
     [

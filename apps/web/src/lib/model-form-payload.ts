@@ -93,6 +93,12 @@ export type ModelFormSubmission = ModelFormData | ModelFormMultiData;
 /** The ids a batch could not create, and the credential it created for a retry to bind to. */
 export interface ModelFormSubmitOutcome {
   failedModelIds: string[];
+  /**
+   * The subset of `failedModelIds` the server refused as `model_already_added`
+   * — this organization already has a row for that (credential, model) pair.
+   * Named apart because it is not a failure to retry: the model is there.
+   */
+  duplicateModelIds: string[];
   credentialId?: string;
 }
 
@@ -224,24 +230,44 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
   };
 }
 
-/**
- * How much of a picked row ships depends on its listing. `catalog`: the id
- * only, the vendored catalog answers for the rest. `discover`: what the
- * listing reported, as explicit overrides; nothing is defaulted. `search`:
- * everything, cost included — the search IS the billing rate.
- */
-function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
-  if (row.origin === "catalog") return { modelId: row.id };
+/** The values a row carries, as explicit overrides. An empty modality list is dropped: the server refuses it. */
+function describedCapabilities(row: ModelPickRow): ModelCapabilityOverrides {
   return {
-    ...(row.label ? { label: row.label } : {}),
-    modelId: row.id,
-    // The server refuses an empty modality list.
     ...(row.input?.length ? { input: row.input } : {}),
     ...(row.contextWindow !== null ? { contextWindow: row.contextWindow } : {}),
     ...(row.maxTokens !== null ? { maxTokens: row.maxTokens } : {}),
     ...(row.reasoning !== null ? { reasoning: row.reasoning } : {}),
-    ...(row.origin === "search" && row.cost ? { cost: row.cost } : {}),
   };
+}
+
+/**
+ * How much of a picked row ships depends on WHO described it, not just on
+ * which listing it came from. `search`: everything, cost included — the search
+ * IS the billing rate. `catalog`: the id only, the vendored catalog answers
+ * for the rest. `discover`: the endpoint's own words only.
+ *
+ * A discovered row the endpoint said nothing about was described by a catalog
+ * entry carrying the same id — the platform scans every vendor's catalog, so
+ * that entry may well belong to a different vendor, and it describes THAT
+ * vendor's hosted deployment, not the operator's. Pinning it would write a
+ * window a self-hosted server may serve at a fraction of, permanently: the
+ * read path only ever re-resolves a provider's OWN catalog, so no refresh can
+ * correct a value picked up from a foreign one. An unknown limit is inert, a
+ * wrong one truncates or breaks every run. The label is catalog-only by
+ * construction (no listing publishes one), so it goes the same way — the
+ * server derives one from the id.
+ */
+function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
+  if (row.origin === "search") {
+    return {
+      ...(row.label ? { label: row.label } : {}),
+      modelId: row.id,
+      ...describedCapabilities(row),
+      ...(row.cost ? { cost: row.cost } : {}),
+    };
+  }
+  if (row.source !== "endpoint") return { modelId: row.id };
+  return { modelId: row.id, ...describedCapabilities(row) };
 }
 
 export function buildModelsBatchPayload(input: {

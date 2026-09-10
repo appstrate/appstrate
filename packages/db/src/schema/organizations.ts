@@ -494,6 +494,26 @@ export const orgModels = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_org_models_created_by").on(table.createdBy),
+    // One row per binding (migration 0062). `llm_usage.model` stores THIS
+    // row's id, so two rows for the same (org, credential, model) split that
+    // model's spend across the copies and under-report each — the picker shows
+    // "GPT-5" and "GPT-5 (2)", and detaching the credential (ON DELETE
+    // RESTRICT) means finding every copy. Only the LABEL was deduped before
+    // (`deriveModelLabel`), and that read sits in a different transaction from
+    // the insert, so the N sequential POSTs of the multi-add path race it.
+    // The database is the only place the invariant holds under concurrency;
+    // `createOrgModel` turns the violation into a 409 naming the row that won.
+    //
+    // PARTIAL, and the predicate is the design: an ALIAS is a public identity
+    // the org minted deliberately (`aliased` above — its own label, its own
+    // reporting line, its backing hidden), so several of them over one backing
+    // model, or an alias alongside the direct row, is the alias pattern working
+    // as intended, not a duplicate. Only the un-aliased rows — the ones the
+    // picker shows by their catalog name and that spend reporting is expected
+    // to fold together — are held to one per binding.
+    uniqueIndex("uq_org_models_unaliased_binding")
+      .on(table.orgId, table.credentialId, table.modelId)
+      .where(sql`${table.aliased} = false`),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );
