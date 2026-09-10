@@ -2,8 +2,8 @@
 
 /**
  * Where the model form's pick list comes from, and the one row shape all three
- * sources produce. `origin` travels on the row so the batch payload knows how
- * much of it to put on the wire.
+ * sources produce. `origin` and `source` both travel on the row: together they
+ * tell the batch payload how much of it to put on the wire.
  */
 
 import type { ModelCost } from "@appstrate/core/module";
@@ -42,7 +42,7 @@ export interface ModelPickRow {
   maxTokens: number | null;
   input: string[] | null;
   reasoning: boolean | null;
-  /** Who described the row — rendered as a badge. */
+  /** Who described the row — rendered as a badge, and what the batch may pin. */
   source: "endpoint" | "catalog" | null;
   cost: ModelCost | null;
   /** The listing it came from: what the batch is allowed to send. */
