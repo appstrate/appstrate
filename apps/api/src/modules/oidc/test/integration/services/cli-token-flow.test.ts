@@ -779,7 +779,7 @@ describe("POST /api/auth/cli/revoke", () => {
     // `cli.refresh_token.revoke.client_mismatch` warn event), so
     // operators can still spot a compromised token showing up from an
     // unexpected client id.
-    const { prefixedId } = await import("../../../../../lib/ids.ts");
+    const { prefixedId } = await import("@appstrate/db/ids");
     const { oauthClient } = await import("@appstrate/db/schema");
     const attackerClientId = "attacker-cli";
     await db.insert(oauthClient).values({

@@ -11,7 +11,12 @@ import {
 } from "../lib/space-lookup.ts";
 import { isInternalDispatch } from "../lib/internal-dispatch.ts";
 import { setSpaceContextApplier } from "@appstrate/core/permissions";
-import { callerOrgRole, callerSpaceMember, effectiveInSpace } from "../lib/view-as.ts";
+import {
+  callerOrgRole,
+  callerPersonalOwnerId,
+  callerSpaceMember,
+  effectiveInSpace,
+} from "../lib/view-as.ts";
 import { resolveSpaceRole } from "../lib/space-role.ts";
 
 /**
@@ -69,11 +74,14 @@ export async function applySpacePermissions(
 ): Promise<void> {
   if (!c.get("orgRole")) return;
 
-  // Under a preview both halves are the persona's.
+  // Under a preview both halves are the persona's. The caller id stays real:
+  // a personal space answers to its owner's session alone (RBAC spec §3.6),
+  // and `visibility = 'private'` means the refusal below is a 404.
   const ref = resolveSpaceRole(
     callerOrgRole(c, space.orgId),
     space,
     await callerSpaceMember(c, space.orgId, space.id),
+    callerPersonalOwnerId(c, space.orgId),
   );
   if (!ref) {
     if (space.visibility === "private") {

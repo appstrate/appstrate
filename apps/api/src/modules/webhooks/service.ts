@@ -33,7 +33,7 @@ import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
-import { prefixedId } from "../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -24,8 +24,9 @@ import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts"
 function inDefaultSpace(role: Parameters<typeof orgPermissions>[0]): ReadonlySet<string> {
   const ref = resolveSpaceRole(
     role,
-    { id: "spc_test", visibility: "open", defaultRole: "operator" },
+    { id: "spc_test", visibility: "open", defaultRole: "operator", ownerUserId: null },
     null,
+    "usr_test",
   );
   return effectivePermissions({
     orgPermissions: orgPermissions(role),
@@ -116,8 +117,9 @@ describe("effective permissions in an open space", () => {
   it("guest added to the space holds exactly the preset it was given", () => {
     const ref = resolveSpaceRole(
       "guest",
-      { id: "spc_test", visibility: "closed", defaultRole: "operator" },
+      { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "viewer" } },
+      "usr_test",
     );
     const perms = effectivePermissions({
       orgPermissions: orgPermissions("guest"),
@@ -250,8 +252,9 @@ describe("the `runner` preset", () => {
     // in a closed space keeps the org reads and gains nothing else.
     const ref = resolveSpaceRole(
       "member",
-      { id: "spc_test", visibility: "closed", defaultRole: "operator" },
+      { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "runner" } },
+      "usr_test",
     );
     const effective = effectivePermissions({
       orgPermissions: orgPermissions("member"),

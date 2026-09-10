@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, spacePackages, spaces } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
@@ -14,7 +14,12 @@ import { getOrgMember } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import { callerPermissions, type Permission } from "./permissions.ts";
-import { callerOrgRole, callerSpaceMemberships, effectiveInSpace } from "./view-as.ts";
+import {
+  callerOrgRole,
+  callerPersonalOwnerId,
+  callerSpaceMemberships,
+  effectiveInSpace,
+} from "./view-as.ts";
 import { resolveSpaceRole } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { forbidden, notFound, invalidRequest } from "./errors.ts";
@@ -38,11 +43,30 @@ export const PACKAGE_WRITE_PERMISSIONS = Object.values(PACKAGE_RESOURCES).map(
 );
 
 /**
+ * Which permissions let a caller SEE a package of this type — the one statement
+ * of that rule (RBAC spec §3.4).
+ *
+ * For an agent it is a disjunction: `agents:run` opens the list, the detail and
+ * the resolved model the launch form reads, in a summary projection. So a
+ * `runner` reaches an agent, and every predicate that asks "may this caller
+ * know this package exists" — {@link requireAgentRead} as a route guard,
+ * {@link assertPackageIsReachable} as the 403-vs-404 decision — has to ask the
+ * same question. When they disagreed, a `runner` attempting a write got a 404
+ * on an agent it was, at that same moment, allowed to read.
+ *
+ * Every other type has one read permission and this collapses to it.
+ */
+function packageReadPermissions(type: PackageType): readonly Permission[] {
+  const read = packagePermission(type, "read");
+  return type === "agent" ? [read, "agents:run"] : [read];
+}
+
+/**
  * The read guard of the three agent routes `agents:run` also opens: the list,
  * the detail, and the resolved model the launch form reads (RBAC spec §3.4).
  * Every other agent surface keeps its `agents:read` / `agents:write` guard.
  */
-export const requireAgentRead = requireAnyPermission(["agents:read", "agents:run"]);
+export const requireAgentRead = requireAnyPermission(packageReadPermissions("agent"));
 
 /**
  * `agents:run` without `agents:read` — the caller sees what the launch form
@@ -91,6 +115,7 @@ export async function packageAccessSpaces(
   orgId = c.get("orgId"),
   orgRole = callerOrgRole(c, orgId),
 ) {
+  const callerId = callerPersonalOwnerId(c, orgId);
   const [rows, memberships] = await Promise.all([
     db
       .select({
@@ -99,6 +124,7 @@ export async function packageAccessSpaces(
         isDefault: spaces.isDefault,
         visibility: spaces.visibility,
         defaultRole: spaces.defaultRole,
+        ownerUserId: spaces.ownerUserId,
       })
       .from(spaces)
       .where(
@@ -107,6 +133,13 @@ export async function packageAccessSpaces(
           c.get("authMethod") === "api_key" || c.get("endUser")
             ? eq(spaces.id, c.get("spaceId"))
             : undefined,
+          // Someone else's personal space is never even LOADED. `resolveSpaceRole`
+          // would drop it anyway, but with one personal space per member this
+          // query would otherwise grow with the organization's headcount on
+          // every catalog read (RBAC spec §3.6).
+          callerId === null
+            ? isNull(spaces.ownerUserId)
+            : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
         ),
       ),
     c.get("endUser") && !c.get("orgRole")
@@ -117,7 +150,7 @@ export async function packageAccessSpaces(
     if (c.get("endUser") && !c.get("orgRole")) {
       return space.id === c.get("spaceId") ? [{ ...space, permissions: callerPermissions(c) }] : [];
     }
-    const ref = resolveSpaceRole(orgRole, space, memberships.get(space.id) ?? null);
+    const ref = resolveSpaceRole(orgRole, space, memberships.get(space.id) ?? null, callerId);
     if (!ref) return [];
     return [
       {
@@ -128,6 +161,16 @@ export async function packageAccessSpaces(
   });
 }
 
+/**
+ * Org-catalogue authority: a session-borne owner or admin, never an API key.
+ *
+ * It answers for `home_space_id IS NULL` and for nothing else. A package homed
+ * in a space — a PERSONAL space included — is governed by that space's
+ * `<type>:write`, so this must never be consulted as a fallback for one: it
+ * would hand an admin the drafts in a member's personal space, which is the one
+ * thing §3.6 refuses. Both readers (`holdsHomeAuthority`,
+ * `assertPackageIsReachable`) therefore test the NULL home first.
+ */
 export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerOrgRole(c)) {
   return c.get("authMethod") !== "api_key" && (orgRole === "owner" || orgRole === "admin");
 }
@@ -250,8 +293,9 @@ function assertPackageIsReachable(
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
   orgRole: OrgRole,
 ): void {
+  const opens = packageReadPermissions(pkg.type);
   const permitted = accessible.filter((space) =>
-    space.permissions.has(packagePermission(pkg.type, "read")),
+    opens.some((permission) => space.permissions.has(permission)),
   );
   const readable = new Set(permitted.map((space) => space.id));
   if (
@@ -262,7 +306,11 @@ function assertPackageIsReachable(
         installations.map((row) => row.spaceId),
         readable,
       ) &&
-      !(installations.length === 0 && managesOrgCatalog(c, orgRole)))
+      // The org-catalogue exception is for a package with NO home. One homed in
+      // a space is reachable through that space or not at all — otherwise an
+      // admin would read a draft that lives, uninstalled, in a member's
+      // personal space (§3.6).
+      !(pkg.homeSpaceId === null && installations.length === 0 && managesOrgCatalog(c, orgRole)))
   ) {
     throw notFound(`Package '${packageId}' not found`);
   }
@@ -298,8 +346,13 @@ export async function assertPackageMutationAccess(
     resolvedSpaces ?? packageAccessSpaces(c),
   ]);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
-  // never loads at all (404). A row whose org does not match is a SYSTEM one.
-  if (pkg.orgId !== orgId) throw forbidden("Cannot modify a system package.");
+  // never loads at all (404). A row whose org does not match is a SYSTEM one —
+  // the `source` column says the same thing, and {@link isSystemPackageRow} is
+  // where both spellings live, because `homeWireForCaller` has to answer the
+  // same way with only one of the two columns to hand.
+  if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) {
+    throw forbidden("Cannot modify a system package.");
+  }
   const permission = packagePermission(pkg.type, action);
   if (holdsHomeAuthority(c, pkg, accessible, permission)) return pkg;
   // Refused. Whether the caller may even KNOW this id exists is the read
@@ -320,6 +373,56 @@ export async function assertPackageMutationAccess(
       ? `Modifying '${packageId}' requires organization owner or admin authority — it belongs to the organization catalog.`
       : `Modifying '${packageId}' requires '${permission}' in its home space.`,
   );
+}
+
+/**
+ * The two `home_*` fields EVERY package read emits — one contract, computed
+ * once, for `AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail` and the
+ * library listing.
+ *
+ * `home_space_id` is the home's id **only when the caller reaches that space**,
+ * and `null` otherwise. The raw column cannot go on the wire: a package homed in
+ * a member's PERSONAL space is legitimately readable by everyone it is
+ * installed for, and emitting its home would hand each of them the id of a
+ * space §3.6 says does not exist for them. `null` therefore means "not a space
+ * you can see" — the organization catalogue and a withheld home both — and
+ * nothing downstream needs to tell those apart: what a reader actually wants to
+ * know is whether they may WRITE, which is the second field.
+ *
+ * `home_writable` is that answer, and it is `assertPackageMutationAccess`'s
+ * WHOLE rule, not just its home half: a SYSTEM package is refused there before
+ * the home is ever consulted, so it answers `false` here too however much
+ * authority the caller holds. It used to answer `true` to owners and admins on
+ * a system package the write route refuses, which is a button that 403s.
+ *
+ * It is computed for the type's `write`; the SPA gates delete and move on it
+ * too, and the server still checks `<type>:delete` in its own right (they
+ * diverge only under a custom role that grants one without the other, where the
+ * API refuses and the UI over-offered).
+ */
+export function homeWireForCaller(
+  c: Context<AppEnv>,
+  pkg: { type: PackageType; source: string; homeSpaceId: string | null },
+  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): { home_space_id: string | null; home_writable: boolean } {
+  const reached =
+    pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId);
+  return {
+    home_space_id: reached ? pkg.homeSpaceId : null,
+    home_writable:
+      !isSystemPackageRow(pkg) &&
+      holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "write")),
+  };
+}
+
+/**
+ * A package no principal in any organization may mutate: a SYSTEM one, synced
+ * from `system-packages/` and owned by the platform. Both readers of the write
+ * rule test it — the mutation route throws its own 403, the wire projection
+ * answers `home_writable: false` — so it is stated once.
+ */
+function isSystemPackageRow(pkg: { source: string }): boolean {
+  return pkg.source === "system";
 }
 
 /** `<type>:<action>` in the home space, or org-catalog authority when it has none. */

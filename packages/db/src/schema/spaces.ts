@@ -39,6 +39,24 @@ export const spaces = pgTable(
     visibility: text("visibility", { enum: SPACE_VISIBILITIES }).notNull().default("open"),
     /** Preset the implicit members of an `open` space hold. */
     defaultRole: text("default_role", { enum: SPACE_ROLE_PRESETS }).notNull().default("operator"),
+    /**
+     * The one member this space belongs to — "Mon espace" — or NULL for a team
+     * space (RBAC spec §3.6). A personal space is reached by its owner and by
+     * NOBODY else: `resolveSpaceRole` answers on this column before it looks at
+     * the org role, so an owner or admin of the organization gets nothing here.
+     *
+     * `ON DELETE RESTRICT`, not cascade: a user who owns a space leaves through
+     * the offboarding sweeper (`orphanedAt` below), which empties the space and
+     * deletes it. A cascade would drop somebody's private drafts as a side
+     * effect of an account deletion nothing had reviewed.
+     */
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "restrict" }),
+    /**
+     * When the owner stopped being a member of the organization. `removeMember`
+     * stamps it; the `personal-space-sweeper` worker empties and deletes the
+     * space 30 days later; re-joining clears it. NULL on every team space.
+     */
+    orphanedAt: timestamp("orphaned_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -47,6 +65,12 @@ export const spaces = pgTable(
     uniqueIndex("idx_spaces_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
+    // One personal space per member per org — and the conflict target
+    // `ensurePersonalSpace` upserts on, which is what makes provisioning a
+    // single statement rather than a select-then-insert race.
+    uniqueIndex("uq_spaces_org_owner")
+      .on(table.orgId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
     check("spaces_visibility_valid", sql`visibility IN ('open', 'closed', 'private')`),
     check(
       "spaces_default_role_valid",
@@ -55,6 +79,12 @@ export const spaces = pgTable(
     // The default space is where a new org member lands, so it can never stop
     // being reachable by one.
     check("spaces_default_is_open", sql`NOT is_default OR visibility = 'open'`),
+    // "Personal" has to mean one thing: nobody else reaches it, and it is never
+    // the space a new member lands in. Both halves are refused by the API with
+    // a 409 naming the rule; these are the backstop.
+    check("spaces_personal_is_private", sql`owner_user_id IS NULL OR visibility = 'private'`),
+    check("spaces_personal_not_default", sql`owner_user_id IS NULL OR NOT is_default`),
+    check("spaces_orphaned_is_personal", sql`orphaned_at IS NULL OR owner_user_id IS NOT NULL`),
   ],
 );
 

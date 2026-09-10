@@ -28,7 +28,7 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
 import { PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
-import { usePermissions, useHomeSpacePermission } from "../../hooks/use-permissions";
+import { usePermissions } from "../../hooks/use-permissions";
 import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
 
 interface PackageActionsDropdownProps {
@@ -38,11 +38,19 @@ interface PackageActionsDropdownProps {
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
   /**
-   * The package's home space (`home_space_id`). Editing, publishing and
-   * deleting are gated on ITS permissions — the server is
-   * (`assertPackageMutationAccess`). `null` is the org catalog: owners/admins.
+   * The package's home space (`home_space_id`), for the move dialog's
+   * "everything but the current home" list. `null` when the caller does not
+   * reach that space — the server withholds the id (RBAC spec §6.9).
    */
   homeSpaceId?: string | null;
+  /**
+   * `home_writable` off the package's own read: whether this caller holds the
+   * type's `write` in its home space. Editing, publishing, moving and deleting
+   * are gated on it, because it IS the predicate the server enforces
+   * (`assertPackageMutationAccess`) — the SPA derives no write authority of its
+   * own. `undefined` while the detail is loading, which reads as "no".
+   */
+  homeWritable?: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
   /** Agent-only: export the full transitive bundle (.afps-bundle). */
@@ -91,6 +99,7 @@ export function PackageActionsDropdown({
   isBuiltIn,
   isHistoricalVersion,
   homeSpaceId,
+  homeWritable,
   downloadVersion,
   onDownload,
   onDownloadBundle,
@@ -118,20 +127,22 @@ export function PackageActionsDropdown({
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
   const { can } = usePermissions();
-  const canInHome = useHomeSpacePermission(homeSpaceId);
   const [moveHomeOpen, setMoveHomeOpen] = useState(false);
 
   const isAgent = type === "agent";
   // Each package family is its own permission resource, so every gate below
   // asks for the string the matching route checks.
   const resource = PACKAGE_PERMISSIONS[type].resource;
-  const canWrite = canInHome(`${resource}:write`);
+  // The server's own verdict, not a re-derivation of it.
+  const canWrite = homeWritable === true;
   // The exports carry the manifest and every authored file, so the two download
   // routes ask for `<type>:read` — the permission a summary-only caller (an
   // `agents:run` runner) does not hold. Without this the items 403 on click.
   const canRead = can(`${resource}:read`);
   const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
-  const canDelete = canInHome(`${resource}:delete`);
+  // Same verdict: `<type>:delete` and `<type>:write` travel together in every
+  // preset, and the server checks delete in its own right anyway.
+  const canDelete = canWrite;
   // Deactivating / uninstalling an integration is the same route pair as
   // `integrations:uninstall`; the props say whether the action EXISTS here.
   const showDeactivate = !!canDeactivate && can("integrations:uninstall") && !!onDeactivate;

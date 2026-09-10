@@ -109,6 +109,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "SpaceObject ↔ SpaceInfo",
   },
   {
+    specSchemaName: "SpaceSweepResult",
+    sharedTypeName: "SpaceSweepResult",
+    description: "SpaceSweepResult ↔ SpaceSweepResult",
+  },
+  {
     specSchemaName: "SpaceMemberObject",
     sharedTypeName: "SpaceMember",
     description: "SpaceMemberObject ↔ SpaceMember",

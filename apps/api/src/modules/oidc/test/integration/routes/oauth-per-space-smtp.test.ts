@@ -23,7 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { prefixedId } from "../../../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";

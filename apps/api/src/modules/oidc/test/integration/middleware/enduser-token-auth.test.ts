@@ -29,7 +29,7 @@ import { endUsers, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
-import { prefixedId } from "../../../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 let privateKey: jose.CryptoKey;
 let kid: string;

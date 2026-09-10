@@ -1476,8 +1476,10 @@ export function IntegrationDetailPage() {
   const deletePkg = useDeletePackage("integration");
   const downloadPackage = usePackageDownload(scope, name);
   const { can } = usePermissions();
-  // The package's own detail response is the authority on its home.
+  // The package's own detail response is the authority on its home — both the
+  // id (withheld unless this caller reaches that space) and the write verdict.
   const homeSpaceId = pkg?.home_space_id;
+  const homeWritable = pkg?.home_writable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const canConfigure = can("integrations:configure");
   const canActivate = can("integrations:install");
@@ -1547,6 +1549,7 @@ export function IntegrationDetailPage() {
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
               homeSpaceId={homeSpaceId}
+              homeWritable={homeWritable}
               downloadVersion={version}
               onDownload={downloadPackage}
               onFork={() => setForkOpen(true)}

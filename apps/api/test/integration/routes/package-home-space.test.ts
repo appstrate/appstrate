@@ -71,13 +71,19 @@ const owner = () => ({
   "X-Space-Id": alphaId,
 });
 
-/** A builder session pinned to one space. */
-async function builderIn(spaceId: string): Promise<Record<string, string>> {
+/** A session pinned to one space, holding one preset there and nothing elsewhere. */
+async function memberIn(
+  spaceId: string,
+  presetRole: "builder" | "viewer",
+): Promise<Record<string, string>> {
   const user = await createTestUser();
   await addOrgMember(ctx.orgId, user.id, "guest");
-  await seedSpaceMember({ spaceId, userId: user.id, presetRole: "builder" });
+  await seedSpaceMember({ spaceId, userId: user.id, presetRole });
   return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": spaceId };
 }
+
+/** A builder session pinned to one space. */
+const builderIn = (spaceId: string) => memberIn(spaceId, "builder");
 
 /** A draft save — the plainest write the home has to authorize. */
 async function editSkill(headers: Record<string, string>) {
@@ -450,18 +456,107 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
   });
 });
 
-describe("home_space_id on the wire", () => {
-  it("is carried by the package detail and by the library", async () => {
-    const detail = await app.request(`/api/packages/skills/${ID}`, { headers: owner() });
-    expect(((await detail.json()) as { home_space_id: string }).home_space_id).toBe(alphaId);
+/**
+ * ONE wire contract for the home, on every shape that carries it (RBAC spec
+ * §6.9): `home_space_id` is the id only when the caller REACHES that space, and
+ * `home_writable` is the write verdict, computed by the same predicate the
+ * write routes enforce. The SPA derives neither.
+ */
+describe("the home on the wire", () => {
+  type HomeWire = { home_space_id: string | null; home_writable: boolean };
 
-    const library = await app.request("/api/library", {
-      headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
-    });
-    const body = (await library.json()) as {
-      packages: { skill: { id: string; home_space_id: string | null }[] };
+  /** The pair, off the package detail. */
+  async function homeWire(headers: Record<string, string>): Promise<HomeWire> {
+    const res = await app.request(`/api/packages/skills/${ID}`, { headers });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as HomeWire;
+    return { home_space_id: body.home_space_id, home_writable: body.home_writable };
+  }
+
+  /** The same pair, off the library listing — the second of the four shapes. */
+  async function libraryHomeWire(headers: Record<string, string>): Promise<HomeWire> {
+    const res = await app.request("/api/library", { headers });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as {
+      packages: { skill: (HomeWire & { id: string })[] };
     };
-    expect(body.packages.skill.find((p) => p.id === ID)?.home_space_id).toBe(alphaId);
+    const entry = body.packages.skill.find((p) => p.id === ID);
+    expect(entry).toBeDefined();
+    return { home_space_id: entry!.home_space_id, home_writable: entry!.home_writable };
+  }
+
+  it("gives the home's id and `true` to a builder of the home space", async () => {
+    expect(await homeWire(alpha)).toEqual({ home_space_id: alphaId, home_writable: true });
+    expect(await libraryHomeWire(alpha)).toEqual({
+      home_space_id: alphaId,
+      home_writable: true,
+    });
+  });
+
+  it("gives the id and `false` to a viewer of the home space", async () => {
+    const viewer = await memberIn(alphaId, "viewer");
+    expect(await homeWire(viewer)).toEqual({ home_space_id: alphaId, home_writable: false });
+    expect(await libraryHomeWire(viewer)).toEqual({
+      home_space_id: alphaId,
+      home_writable: false,
+    });
+  });
+
+  it("withholds the id from a reader whose only reach is another installation", async () => {
+    // Beta's builder READS the package — it is installed there — and never
+    // reaches Alpha. Emitting Alpha's id would hand them a space that does not
+    // exist for them, which is the whole reason the field is projected.
+    expect(await homeWire(beta)).toEqual({ home_space_id: null, home_writable: false });
+    expect(await libraryHomeWire(beta)).toEqual({ home_space_id: null, home_writable: false });
+  });
+
+  it("gives the owner the id and `true`, and answers `null`/`true` for the org catalogue", async () => {
+    expect(await homeWire(owner())).toEqual({ home_space_id: alphaId, home_writable: true });
+    // A NULL home is the organization catalogue: the same `null` on the wire,
+    // but writable — which is exactly why `home_writable` exists rather than a
+    // client-side reading of the id.
+    await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, ID));
+    expect(await homeWire(owner())).toEqual({ home_space_id: null, home_writable: true });
+    expect(await homeWire(beta)).toEqual({ home_space_id: null, home_writable: false });
+  });
+
+  it("answers `false` on a SYSTEM package, which is the write route's verdict", async () => {
+    // `home_writable` is the mutation route's WHOLE rule, not only its home
+    // half: a system package is refused there before the home is consulted, so
+    // an owner reading one must not be told they may write it. It answered
+    // `true` through the NULL-home branch (`managesOrgCatalog`), i.e. a button
+    // that 403s.
+    const SYS = "@system/wire-skill";
+    await seedPackage({
+      id: SYS,
+      orgId: null,
+      type: "skill",
+      source: "system",
+      draftManifest: { name: SYS, version: "1.0.0", type: "skill", description: "d" },
+      draftContent: "---\nname: wire-skill\ndescription: d\n---\n\nBody",
+    });
+    const res = await app.request(`/api/packages/skills/${SYS}`, { headers: owner() });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await res.json()).toMatchObject({ home_space_id: null, home_writable: false });
+
+    // The refusal it now agrees with.
+    const row = await getDbRow(packages, eq(packages.id, SYS));
+    const write = await app.request(`/api/packages/skills/${SYS}`, {
+      method: "PUT",
+      headers: { ...owner(), "Content-Type": "application/json" },
+      body: JSON.stringify({ content: `${CONTENT} edited`, lock_version: row.lockVersion }),
+    });
+    expect(write.status, await write.clone().text()).toBe(403);
+  });
+
+  it("carries both on the per-type list", async () => {
+    const res = await app.request("/api/packages/skills", { headers: alpha });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as { data: (HomeWire & { id: string })[] };
+    expect(body.data.find((p) => p.id === ID)).toMatchObject({
+      home_space_id: alphaId,
+      home_writable: true,
+    });
   });
 });
 

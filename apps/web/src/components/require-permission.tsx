@@ -31,8 +31,13 @@ export function RequirePermission({
   return <NoAccessState />;
 }
 
-/** The "you do not have access to this" panel, shared by every gated route. */
-function NoAccessState() {
+/**
+ * The "you do not have access to this" panel, shared by every gated route —
+ * and by the package editor, which is NOT gated on the current space (write
+ * authority is the package's home) and so renders it from `home_writable` once
+ * the detail has loaded.
+ */
+export function NoAccessState() {
   const { t } = useTranslation("common");
   return <EmptyState message={t("access.denied")} hint={t("access.deniedHint")} icon={Lock} />;
 }

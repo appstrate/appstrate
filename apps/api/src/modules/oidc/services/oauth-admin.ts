@@ -36,7 +36,7 @@ import { db } from "@appstrate/db/client";
 import { createCache } from "@appstrate/core/cache";
 import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
-import { prefixedId } from "../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../../../lib/logger.ts";
 import { getAppstrateScopeSet } from "../auth/scopes.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";

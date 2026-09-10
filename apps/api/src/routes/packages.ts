@@ -69,6 +69,7 @@ import {
   assertExistingPackageInstallAccess,
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
+  homeWireForCaller,
   isPackageReadableInSpace,
   managesOrgCatalog,
   packageAccessSpaces,
@@ -664,7 +665,22 @@ function makeListHandler(rcfg: PackageRouteConfig) {
       visible = items.filter((i) => activations.get(i.id)?.active);
     }
     const enriched = await enrichWithCreatorNames(visible);
-    return c.json(listResponse(enriched));
+    // `home_space_id` / `home_writable` are computed HERE, not in
+    // `listOrgItems`: both depend on the caller's reach (RBAC spec §6.9), which
+    // a service has no access to. One `packageAccessSpaces` read for the page.
+    const accessible = await packageAccessSpaces(c);
+    return c.json(
+      listResponse(
+        enriched.map(({ homeSpaceId, ...item }) => ({
+          ...item,
+          ...homeWireForCaller(
+            c,
+            { type: rcfg.cfg.type, source: item.source, homeSpaceId },
+            accessible,
+          ),
+        })),
+      ),
+    );
   };
 }
 
@@ -935,20 +951,24 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
  * the package is not found in the org.
  */
 async function buildPackageDetailDto(
+  c: Context<AppEnv>,
   rcfg: PackageRouteConfig,
   itemId: string,
   orgId: string,
 ): Promise<Record<string, unknown> | null> {
-  const [item, versionCount, latestVersionDate] = await Promise.all([
+  const [item, versionCount, latestVersionDate, accessible] = await Promise.all([
     getOrgItem(orgId, itemId, rcfg.cfg),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
+    packageAccessSpaces(c),
   ]);
 
   if (!item) return null;
 
+  const { homeSpaceId, ...rest } = item;
   return {
-    ...item,
+    ...rest,
+    ...homeWireForCaller(c, { type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
     version_count: versionCount,
     has_unarchived_changes: computeHasUnpublishedChanges(
       item.source,
@@ -973,7 +993,7 @@ function loadPackageDetailDto(
 ): Promise<Record<string, unknown> | null> {
   return rcfg.detailDto
     ? rcfg.detailDto(c, itemId, orgId)
-    : buildPackageDetailDto(rcfg, itemId, orgId);
+    : buildPackageDetailDto(c, rcfg, itemId, orgId);
 }
 
 function makeGetHandler(rcfg: PackageRouteConfig) {
@@ -987,7 +1007,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
-    const dto = await buildPackageDetailDto(rcfg, itemId, orgId);
+    const dto = await buildPackageDetailDto(c, rcfg, itemId, orgId);
     if (!dto) {
       throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }

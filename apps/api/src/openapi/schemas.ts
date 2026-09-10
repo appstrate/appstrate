@@ -3,7 +3,7 @@
 import { orgRoleEnum } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
-import { SPACE_ID_RE } from "../lib/ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -35,6 +35,26 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
  * does not keep. Sharing the PROPERTIES instead is what keeps the two halves
  * from drifting on the descriptions.
  */
+/**
+ * The `home_space_id` / `home_writable` pair, on every shape that carries a
+ * package's home (`AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail`,
+ * `LibraryPackageList`). ONE definition: the server computes both in one place
+ * (`homeWireForCaller`), and four hand-copied descriptions drifted the moment
+ * the contract changed.
+ */
+const PACKAGE_HOME_PROPERTIES = {
+  home_space_id: {
+    type: ["string", "null"],
+    description:
+      "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority.",
+  },
+  home_writable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld.",
+  },
+} as const;
+
 export const ORG_SETTINGS_PROPERTIES = {
   api_version: {
     type: "string",
@@ -529,8 +549,9 @@ export const schemas = {
     // shared-type marks them optional to match). `forked_from` is optional for
     // a second reason: a summary read (`agents:run` without `agents:read`)
     // withholds the authoring history along with the manifest and the prompt.
-    // `home_space_id` is NOT part of that withheld set: `null` is a meaning of
-    // its own (the organization catalog), so it is always emitted.
+    // `home_space_id`/`home_writable` are NOT part of that withheld set: a
+    // summary read still has to know it may not edit, and an absent
+    // `home_writable` would read as "not answered yet" rather than "no".
     required: [
       "id",
       "source",
@@ -542,6 +563,7 @@ export const schemas = {
       "last_run",
       "effective_timeout_seconds",
       "home_space_id",
+      "home_writable",
     ],
     properties: {
       id: { type: "string" },
@@ -684,11 +706,7 @@ export const schemas = {
         description: "Number of published versions (0 for built-in agents)",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
-      home_space_id: {
-        type: ["string", "null"],
-        description:
-          "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority.",
-      },
+      ...PACKAGE_HOME_PROPERTIES,
       has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
@@ -1278,6 +1296,7 @@ export const schemas = {
       "auto_installed",
       "forked_from",
       "home_space_id",
+      "home_writable",
     ],
     properties: {
       id: { type: "string" },
@@ -1294,11 +1313,7 @@ export const schemas = {
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       auto_installed: { type: "boolean" },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
-      home_space_id: {
-        type: ["string", "null"],
-        description:
-          "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority.",
-      },
+      ...PACKAGE_HOME_PROPERTIES,
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -1322,6 +1337,7 @@ export const schemas = {
       "auto_installed",
       "forked_from",
       "home_space_id",
+      "home_writable",
       "agents",
     ],
     properties: {
@@ -1352,11 +1368,7 @@ export const schemas = {
         description: "Whether the active version has changes not yet archived as a version",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
-      home_space_id: {
-        type: ["string", "null"],
-        description:
-          "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority.",
-      },
+      ...PACKAGE_HOME_PROPERTIES,
       agents: {
         type: "array",
         items: {
@@ -1741,6 +1753,23 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
+  SpaceSweepResult: {
+    type: "object",
+    required: ["object", "space_id", "rehomed_packages", "deleted_packages"],
+    properties: {
+      object: { type: "string", enum: ["space_sweep"] },
+      space_id: { type: "string", description: "The personal space that was swept and deleted" },
+      rehomed_packages: {
+        type: "integer",
+        description:
+          "Packages this space homed that another space has installed: handed to the organization catalogue (`home_space_id = null`) rather than deleted",
+      },
+      deleted_packages: {
+        type: "integer",
+        description: "Packages this space homed that no other space had installed: deleted",
+      },
+    },
+  },
   SpaceObject: {
     type: "object",
     required: [
@@ -1752,6 +1781,7 @@ export const schemas = {
       "settings",
       "visibility",
       "default_role",
+      "personal",
       "access",
       "role",
       "permissions",
@@ -1785,6 +1815,17 @@ export const schemas = {
         type: "string",
         enum: [...SPACE_ROLE_PRESETS],
         description: "Preset the implicit members of an `open` space hold",
+      },
+      personal: {
+        type: "boolean",
+        description:
+          "Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire.",
+      },
+      orphaned_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When the owner of this personal space stopped being a member of the organization; null while they are one. Present only for organization owners and admins, the only callers an orphaned personal space is listed to — they may convert it to a team space or sweep it immediately. Absent on every other projection.",
       },
       access: {
         type: "string",
@@ -2027,7 +2068,16 @@ export const schemas = {
       "is currently installed (empty array = not installed in any of the caller's spaces).",
     items: {
       type: "object",
-      required: ["id", "type", "source", "name", "description", "home_space_id", "installed_in"],
+      required: [
+        "id",
+        "type",
+        "source",
+        "name",
+        "description",
+        "home_space_id",
+        "home_writable",
+        "installed_in",
+      ],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
         type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
@@ -2046,11 +2096,7 @@ export const schemas = {
           description:
             "Description from the package draft manifest; empty string when not provided.",
         },
-        home_space_id: {
-          type: ["string", "null"],
-          description:
-            "Space (`spc_…`) whose `<type>:write` authorizes writing this package; `null` means the organization catalog (owners and admins only).",
-        },
+        ...PACKAGE_HOME_PROPERTIES,
         installed_in: {
           type: "array",
           description:

@@ -15,7 +15,7 @@ import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permis
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import { getAppConfig } from "../lib/app-config.ts";
 import { ApiError, conflict, invalidRequest, notFound } from "../lib/errors.ts";
-import { prefixedId } from "../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { knownSpaceLevelPermissions, presetPermissions } from "../lib/permissions.ts";
 
 /** One entry of `GET /api/roles`; `id` is null for a preset (it has no row). */

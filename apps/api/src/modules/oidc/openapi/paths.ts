@@ -177,7 +177,7 @@ export const oidcPaths = {
       tags: ["OAuth Clients"],
       summary: "Register an OAuth client",
       description:
-        "Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `space` (space-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once.",
+        "Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `space` (space-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once. A `referencedSpaceId` naming a PERSONAL space is refused: a personal space belongs to one member and is removed when they leave, so a client pinned to it would outlive the space its end-users signed in to.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
@@ -201,6 +201,15 @@ export const oidcPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description:
+            "`referencedSpaceId` names a personal space (`personal_space_takes_no_oauth_clients`).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -209,7 +218,7 @@ export const oidcPaths = {
       tags: ["OAuth Clients"],
       summary: "List OAuth clients",
       description:
-        "List every OAuth client visible to the current organization — both org-level clients pinned to the org and space-level clients pinned to any space the org owns.",
+        "List every OAuth client visible to the current organization — both org-level clients pinned to the org and space-level clients pinned to any TEAM space the org owns. Personal spaces are excluded: none can hold a client, and enumerating them would name a member's private space to the other administrators.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {

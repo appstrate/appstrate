@@ -20,7 +20,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { db } from "@appstrate/db/client";
 import { endUsers } from "@appstrate/db/schema";
-import { prefixedId } from "../../../src/lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
 
 // Test context is seeded once per test so the stub strategy can resolve to

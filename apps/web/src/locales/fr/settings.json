@@ -1076,5 +1076,19 @@
   "viewAs.spaceRolePlaceholder": "Choisir un rôle",
   "viewAs.rolesEmpty": "Aucun rôle prévisualisable dans cet espace.",
   "viewAs.submit": "Prévisualiser",
-  "viewAs.trigger": "Prévisualiser un rôle"
+  "viewAs.trigger": "Prévisualiser un rôle",
+  "spaces.personal.title": "Mon espace",
+  "spaces.personal.badge": "Personnel",
+  "spaces.personal.switcherGroup": "Personnel",
+  "spaces.personal.teamGroup": "Espaces d'équipe",
+  "spaces.personal.settingsLocked": "Un espace personnel est toujours privé et n'a que vous pour membre : seul son nom est modifiable.",
+  "spaces.personal.orphanedTitle": "Espaces personnels orphelins",
+  "spaces.personal.orphanedHint": "Leur propriétaire a quitté l'organisation. Ils sont supprimés automatiquement 30 jours après son départ.",
+  "spaces.personal.orphanedSince": "Orphelin depuis le {{date}}",
+  "spaces.personal.convert": "Convertir en espace d'équipe",
+  "spaces.personal.convertConfirm": "Convertir cet espace personnel en espace d'équipe ? Son ancien propriétaire a quitté l'organisation et n'y regagne rien : l'espace restera privé et son contenu deviendra lisible et modifiable par les propriétaires et administrateurs de l'organisation.",
+  "spaces.personal.converted": "Espace converti en espace d'équipe.",
+  "spaces.personal.sweep": "Supprimer maintenant",
+  "spaces.personal.sweepConfirm": "Supprimer définitivement cet espace et tout ce qu'il contient ? Les packages qu'il héberge et qui sont installés ailleurs passent au catalogue de l'organisation ; les autres sont supprimés.",
+  "spaces.personal.swept": "Espace supprimé ({{rehomed}} package(s) rendu(s) au catalogue, {{deleted}} supprimé(s))."
 }

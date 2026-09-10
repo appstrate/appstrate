@@ -494,7 +494,7 @@ export interface paths {
         put?: never;
         /**
          * Create an API key
-         * @description Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.
+         * @description Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later. The key is bound to the space named by `X-Space-Id`, which must be a TEAM space: a personal space takes no keys (409 `personal_space_takes_no_keys`), because a key carries no user and so could never resolve one.
          */
         post: operations["createApiKey"];
         delete?: never;
@@ -2509,13 +2509,13 @@ export interface paths {
         };
         /**
          * List OAuth clients
-         * @description List every OAuth client visible to the current organization — both org-level clients pinned to the org and space-level clients pinned to any space the org owns.
+         * @description List every OAuth client visible to the current organization — both org-level clients pinned to the org and space-level clients pinned to any TEAM space the org owns. Personal spaces are excluded: none can hold a client, and enumerating them would name a member's private space to the other administrators.
          */
         get: operations["listOAuthClients"];
         put?: never;
         /**
          * Register an OAuth client
-         * @description Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `space` (space-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once.
+         * @description Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `space` (space-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once. A `referencedSpaceId` naming a PERSONAL space is refused: a personal space belongs to one member and is removed when they leave, so a client pinned to it would outlive the space its end-users signed in to.
          */
         post: operations["createOAuthClient"];
         delete?: never;
@@ -2839,7 +2839,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
          */
         get: operations["getAgentPackage"];
         /**
@@ -4230,16 +4230,36 @@ export interface paths {
         post?: never;
         /**
          * Delete a space
-         * @description Delete a space and all associated end-users. The default space cannot be deleted, and neither can a space that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move them with `PATCH /api/packages/{scope}/{name}` first.
+         * @description Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PATCH /api/packages/{scope}/{name}` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and an API key is never its owner (a key carries its creator's authority, not their privacy), so it gets the 404 too.
          */
         delete: operations["deleteSpace"];
         options?: never;
         head?: never;
         /**
          * Update a space
-         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.
+         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.
          */
         patch: operations["updateSpace"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/convert-to-team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert a personal space to a team space
+         * @description Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); API keys are refused.
+         */
+        post: operations["convertSpaceToTeam"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/spaces/{id}/members": {
@@ -4375,6 +4395,26 @@ export interface paths {
         post?: never;
         /** Delete per-space social auth provider configuration */
         delete: operations["deleteSpaceSocialProvider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/sweep-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sweep an orphaned personal space now
+         * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space has it installed) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).
+         */
+        post: operations["sweepPersonalSpace"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4908,8 +4948,10 @@ export interface components {
             version_count?: number;
             /** @description Source package ID if forked */
             forked_from?: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
             home_space_id: string | null;
+            /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
+            home_writable: boolean;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
@@ -5341,8 +5383,10 @@ export interface components {
             name: string;
             /** @description Description from the package draft manifest; empty string when not provided. */
             description: string;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes writing this package; `null` means the organization catalog (owners and admins only). */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
             home_space_id: string | null;
+            /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
+            home_writable: boolean;
             /** @description Space ids (`spc_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
         }[];
@@ -5557,8 +5601,10 @@ export interface components {
             auto_installed: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
             home_space_id: string | null;
+            /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
+            home_writable: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -5590,8 +5636,10 @@ export interface components {
             has_unarchived_changes?: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
             home_space_id: string | null;
+            /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
+            home_writable: boolean;
             agents: {
                 id: string;
                 display_name: string;
@@ -6067,6 +6115,13 @@ export interface components {
              * @enum {string}
              */
             default_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            /** @description Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire. */
+            personal: boolean;
+            /**
+             * Format: date-time
+             * @description When the owner of this personal space stopped being a member of the organization; null while they are one. Present only for organization owners and admins, the only callers an orphaned personal space is listed to — they may convert it to a team space or sweep it immediately. Absent on every other projection.
+             */
+            orphaned_at?: string | null;
             /**
              * @description Whether the caller may enter this space
              * @enum {string}
@@ -6112,6 +6167,16 @@ export interface components {
             package_source: "system" | "local";
             /** @description Raw draft manifest JSONB for the installed package. */
             draft_manifest: Record<string, never> | null;
+        };
+        SpaceSweepResult: {
+            /** @enum {string} */
+            object: "space_sweep";
+            /** @description The personal space that was swept and deleted */
+            space_id: string;
+            /** @description Packages this space homed that another space has installed: handed to the organization catalogue (`home_space_id = null`) rather than deleted */
+            rehomed_packages: number;
+            /** @description Packages this space homed that no other space had installed: deleted */
+            deleted_packages: number;
         };
         TestResult: {
             ok: boolean;
@@ -8033,6 +8098,15 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description The current space is a personal space (`personal_space_takes_no_keys`). API keys are team-space only. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -12473,6 +12547,7 @@ export interface operations {
                      *             "name": "Inbox Triage",
                      *             "description": "Sorts incoming Gmail threads into priority buckets.",
                      *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *             "home_writable": true,
                      *             "installed_in": [
                      *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
                      *             ]
@@ -12488,6 +12563,7 @@ export interface operations {
                      *             "name": "Gmail",
                      *             "description": "Google Mail OAuth integration.",
                      *             "home_space_id": null,
+                     *             "home_writable": false,
                      *             "installed_in": [
                      *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
@@ -14786,6 +14862,15 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
+            /** @description `referencedSpaceId` names a personal space (`personal_space_takes_no_oauth_clients`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17291,6 +17376,7 @@ export interface operations {
                      *           "auto_installed": false,
                      *           "forked_from": null,
                      *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "home_writable": true,
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
                      *         }
@@ -20405,6 +20491,7 @@ export interface operations {
                      *           },
                      *           "visibility": "open",
                      *           "default_role": "operator",
+                     *           "personal": false,
                      *           "access": "member",
                      *           "role": {
                      *             "kind": "preset",
@@ -20432,6 +20519,7 @@ export interface operations {
                      *           },
                      *           "visibility": "closed",
                      *           "default_role": "operator",
+                     *           "personal": false,
                      *           "access": "none",
                      *           "role": null,
                      *           "permissions": [
@@ -20508,6 +20596,7 @@ export interface operations {
                      *       },
                      *       "visibility": "open",
                      *       "default_role": "operator",
+                     *       "personal": false,
                      *       "access": "member",
                      *       "role": {
                      *         "kind": "preset",
@@ -20608,7 +20697,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The space is the home of one or more packages (`space_homes_packages`); their ids are listed in the problem's `packages` extension. */
+            /** @description Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -20670,6 +20759,54 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The space is a personal space and the body changes more than its name (`personal_space_immutable`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    convertSpaceToTeam: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The space, now a team space */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceObject"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The space is already a team space (`space_not_personal`), or it is the CALLER'S OWN personal space and its owner — them — is still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404, not 409. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listSpaceMembers: {
@@ -21206,6 +21343,45 @@ export interface operations {
                 content?: never;
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    sweepPersonalSpace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The space was swept */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceSweepResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The space is a team space (`space_not_personal`), or it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listInstalledPackages: {

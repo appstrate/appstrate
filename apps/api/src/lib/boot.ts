@@ -44,6 +44,7 @@ import { listOrphanRunIds } from "../services/state/runs.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
+import { initPersonalSpaceSweeperWorker } from "../services/personal-space-sweeper.ts";
 import { initOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
 import { initPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { initLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
@@ -374,6 +375,11 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
     }),
     initInlineCompactionWorker().catch((err) => {
       logger.warn("Could not initialize inline compaction worker", {
+        error: getErrorMessage(err),
+      });
+    }),
+    initPersonalSpaceSweeperWorker().catch((err) => {
+      logger.warn("Could not initialize personal-space sweeper", {
         error: getErrorMessage(err),
       });
     }),

@@ -160,6 +160,55 @@ type ModulePermissionContribution = {
 
 A second, new module surface — `principalPermissions` — is the generic mechanism a module uses to grant **org-level** strings to a specific user rather than to a role. `module-ee` uses it for billing managers (§10). Signature and caching in §4.2.
 
+### 3.6 Personal spaces
+
+`spaces.owner_user_id` names the ONE member a space belongs to — "Mon espace", one per member per organization, `visibility = 'private'`, never the default space. It is a **structural property of the row**, not a role and not a feature flag: three DB CHECKs hold it (`spaces_personal_is_private`, `spaces_personal_not_default`, `spaces_orphaned_is_personal`) and a partial unique index (`uq_spaces_org_owner`) holds the one-per-member rule.
+
+**Resolver.** `resolveSpaceRole` reads that column FIRST, before the org role:
+
+```ts
+if (space.ownerUserId !== null) {
+  if (space.ownerUserId !== callerId) return null;
+  return { preset: orgRole === "guest" ? "operator" : "admin" };
+}
+```
+
+So an organization owner or admin resolves to `null` in somebody else's personal space, and because the space is `private` every caller renders that `null` as **404**: it does not exist for them.
+
+The owner's own preset is `admin` — **except a `guest`, who holds `operator`**. A guest is an external identity with no implicit reach into any space (§3.2), invited to USE one thing; `admin` in their own space would let them author and launch arbitrary agents on the organization's LLM budget, which is precisely what their org role withholds. `operator` is receive-and-run: read, launch, manage their own connections, no `<type>:write`. Forward constraint for package sharing: **accepting a share into one's own personal space must not require the type's install grant** (`spacePackagePermission(type, "install")` — `agents:configure` for an agent, `integrations:install` for an integration, `<type>:write` for the rest) — the accept endpoint installs on the space owner's behalf, and an `operator` holds none of those.
+
+`callerId` is the fourth argument, passed explicitly by all eight call sites — it is the user whose personal spaces are reachable. It is `null` for an **API key** (pinned to one space, carrying its creator's authority and not their privacy), for an **end-user**, and under a **role preview** (a persona has no personal space, and `X-View-As` naming one is a 400 `invalid_view_as`). It is NON-null for a session AND for the `deferOrgResolution` strategies — the CLI device-flow token and the MCP instance token — which are the human's own credential by another transport, the same reading `viewAsTransportGuard` takes. `lib/view-as.ts` → `callerPersonalOwnerId` is the single answer to "who is that".
+
+`packageAccessSpaces` narrows in SQL as well (`owner_user_id IS NULL OR owner_user_id = $caller`): with one personal space per member, loading the organization's spaces to filter them in TS would grow every catalog read with the headcount.
+
+**Admin non-access, and the two acts that remain.** Owners and admins neither read nor write a personal space. Combined with §6.9 (write authority is the home space) they never need to: a package shared out of a personal space is edited by its author, wherever it is installed. `managesOrgCatalog` answers for `home_space_id IS NULL` and for nothing else, so it is never a fallback authority over a package homed in someone's personal space. What is left applies to an **orphaned** space only — one whose owner has left the organization — and both acts are audited:
+
+| Route                                  | Permission                            | Effect                                                                                                                                                                                                                                   |
+| -------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/spaces/:id/convert-to-team` | org `spaces:write`, API keys refused  | `owner_user_id = NULL`, `orphaned_at = NULL`, `visibility` stays `private`. No `space_members` row is written: only an orphaned space converts, so its former owner is not a member and has no standing. Audit `space.converted_to_team` |
+| `POST /api/spaces/:id/sweep-now`       | org `spaces:delete`, API keys refused | Runs the offboarding routine on ONE orphaned space now. Audit `space.swept`                                                                                                                                                              |
+
+**404 before 409 on all three acts.** `DELETE /api/spaces/:id`, `convert-to-team` and `sweep-now` share ONE decision (`assertSpaceAdminAct`, `services/spaces.ts`), because a named 409 on a LIVE personal space that is not the caller's would confirm that the id IS somebody's personal space — the one fact every other route withholds from them. The rule, in order:
+
+- a **team space**: `delete` proceeds; the two personal-space acts are 409 `space_not_personal`.
+- a personal space the caller **owns**: 409, named — `personal_space_not_deletable` for the delete, `personal_space_not_orphaned` for the other two. They can see the space, so the reason discloses nothing.
+- a personal space that is **orphaned**, to an owner or admin: the act runs. Such a space is already listed to them, so there is nothing left to withhold. `delete` is still 409 `personal_space_not_deletable`: `sweep-now` is the route that empties it first.
+- anything else — a live personal space that is not the caller's: **404**. "The caller's" is `callerPersonalOwnerId`, so an **API key** and a **role preview** are never the owner: a key holds its creator's authority, not their privacy, and a named 409 from it would be the one route confirming that an id is their personal space.
+
+A LIVE personal space is therefore never convertible. Taking over an active member's private workspace is not an administrative act; the transfer exists to keep what a DEPARTING member built.
+
+**API keys are team-space only.** `POST /api/api-keys` answers **409 `personal_space_takes_no_keys`** when the current space is a personal one. A key carries no user, so `callerPersonalOwnerId` is `null` for it and the resolver would answer `null` here: a key minted in a personal space would 404 on every request it ever made. A 409 rather than a 404 because the caller is necessarily that space's owner — nobody else reaches it.
+
+**Write rules.** `owner_user_id` is not a body field anywhere (`POST /api/spaces` is `.strict()`). `PATCH /api/spaces/:id` accepts `name` only — `visibility` or `default_role` on a personal space is **409 `personal_space_immutable`**. `DELETE /api/spaces/:id` is **409 `personal_space_not_deletable`**: the space goes away through offboarding, not by an administrative act. `space_members` writes targeting one are **409 `personal_space_has_no_members`** — a personal space has exactly one member, its owner, and no row for them; collaboration goes through a team space. Deferred grants (an invitation's `space_assignments`, an OAuth signup policy's `signup_space_assignments`) are refused at write with a 400 and excluded again at apply.
+
+**Provisioning.** One seam, `provisionMember(tx, orgId, userId, role)`, behind all four membership doors — org creation, invitation accept, OIDC auto-provision, first-boot bootstrap — writing the membership row and the personal space in the SAME transaction. Org creation and bootstrap go through `provisionOrg` (`@appstrate/db/provision-org`, which also brings the DEFAULT space into the org transaction); `ensurePersonalSpace` is one upsert on `uq_spaces_org_owner`, so two concurrent provisions cannot both insert. `GET /api/spaces` repairs the caller's own lazily — for any principal `callerPersonalOwnerId` answers for, i.e. a session or a `deferOrgResolution` token (CLI, MCP instance), never an API key or an end-user — which is what makes the backfill script optional for anyone who logs in. `ensurePersonalSpace` reads before it writes (the `createDefaultSpace` shape) so that repair is not a WRITE on every dashboard poll; the upsert remains the path that provisions, and the one that is race-safe.
+
+**Offboarding.** `removeMember` stamps `spaces.orphaned_at` inside its transaction instead of deleting anything. For 30 days (`PERSONAL_SPACE_GRACE_DAYS`) the space is listed to owners and admins with `access: "none"` and an `orphaned_at` on the wire — the ONE exception to `isSpaceVisibleTo` — so it can be converted; a re-invite inside the window clears the stamp and hands the space back untouched. After that the hourly `personal-space-sweeper` worker, or `sweep-now`, empties and deletes it: a package it homes goes to the organization catalogue (`home_space_id = NULL`) when another space has it installed, and is deleted when it lived only there; then the existing `deleteSpace` path runs, which is why it takes a `"sweeper"` actor. During the window a package homed in the orphaned space and installed elsewhere is **writable by nobody**: its home still exists, so `managesOrgCatalog` does not answer for it (that is `home_space_id IS NULL` and nothing else), and no live principal reaches the home. This is accepted and intended — the alternative is handing a departed author's drafts to the org catalogue the moment they leave. `convert-to-team` ends it early; the sweeper ends it at 30 days by re-homing the package to `NULL`.
+
+`spaces.owner_user_id` is `ON DELETE RESTRICT`, and this **deviates from the plan**, which said the account-deletion path would call the sweeper first: there is no user hard-delete path in this codebase (`grep -rn deleteUser` finds none), so there was nothing to wire. What `RESTRICT` buys instead is that any future path — or an operator's ad-hoc `DELETE FROM "user"` — fails loudly with `23503` until it sweeps the personal spaces first, rather than cascading somebody's private drafts away unreviewed.
+
+**Not gated.** Personal spaces are OSS and structural (no feature flag, which would put two paths in the resolver). The commercial module counts spaces for nothing today; if a space limit is ever added there, it counts `WHERE owner_user_id IS NULL` — otherwise the feature is a tax on every member.
+
 ---
 
 ## 4. Enforcement
@@ -169,7 +218,14 @@ A second, new module surface — `principalPermissions` — is the generic mecha
 ```ts
 type SpaceRoleRef = { preset: SpaceRolePreset } | { custom: SpaceRoleRow };
 
-function resolveSpaceRole(orgRole, space, memberRow): SpaceRoleRef | null {
+function resolveSpaceRole(orgRole, space, memberRow, callerId): SpaceRoleRef | null {
+  // A personal space belongs to one member and to nobody else — §3.6, ahead of
+  // the org role. `callerId` is null for an API key, an end-user or a preview.
+  if (space.ownerUserId !== null) {
+    if (space.ownerUserId !== callerId) return null;
+    // A guest holds `operator` in their own space, never `admin` — see §3.6.
+    return { preset: orgRole === "guest" ? "operator" : "admin" };
+  }
   if (orgRole === "owner" || orgRole === "admin") return { preset: "admin" };
   if (memberRow) return memberRow.ref;                    // explicit wins over implicit
   if (orgRole === "member" && space.visibility === "open") return { preset: space.defaultRole };
@@ -235,6 +291,15 @@ ALTER TABLE spaces
   ADD COLUMN default_role text NOT NULL DEFAULT 'operator'
     CHECK (default_role IN ('admin', 'builder', 'operator', 'runner', 'viewer')),
   ADD CONSTRAINT spaces_default_is_open CHECK (NOT is_default OR visibility = 'open');
+
+-- personal spaces (§3.6)
+ALTER TABLE spaces
+  ADD COLUMN owner_user_id text REFERENCES "user"(id) ON DELETE RESTRICT,
+  ADD COLUMN orphaned_at   timestamptz,
+  ADD CONSTRAINT spaces_personal_is_private   CHECK (owner_user_id IS NULL OR visibility = 'private'),
+  ADD CONSTRAINT spaces_personal_not_default  CHECK (owner_user_id IS NULL OR NOT is_default),
+  ADD CONSTRAINT spaces_orphaned_is_personal  CHECK (orphaned_at IS NULL OR owner_user_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_spaces_org_owner ON spaces(org_id, owner_user_id) WHERE owner_user_id IS NOT NULL;
 
 -- custom role definitions (org-scoped)
 CREATE TABLE space_roles (
@@ -324,7 +389,9 @@ Without the flag the three write routes answer 403 `feature_unavailable`. Object
 | owner / admin | all spaces                                                                                                      |
 | member        | `open` (implicit) + `closed` (listed, `access: "none"`, cannot enter) + `private` **only** with an explicit row |
 | guest         | explicit rows only                                                                                              |
-| API key       | its own space only (unchanged)                                                                                  |
+| API key       | its own space only (unchanged), and never a personal space                                                      |
+
+A caller's OWN personal space is in every listing (`GET /api/spaces` provisions it if missing), nobody else's is — except an ORPHANED one, listed to owners and admins with `access: "none"` so they can convert or sweep it (§3.6). Each item carries `personal: boolean`; `orphaned_at` is added on the owner/admin projection only. The owner of a personal space is deliberately not named on the wire.
 
 Each item gains `visibility`, `default_role`, `access: "member" | "none"`, `role` (`{ kind, key, name }` or `null`) and `permissions: string[]` — the caller's effective set in that space, already ceiling-applied. The SPA reads nothing else to decide what to render (§8).
 
@@ -410,7 +477,16 @@ The home is set at creation, from the space the creation ran in: the package rou
 
 The home is also a READ grant, everywhere and not only in the catalog check: a package is readable from the spaces it is installed in **and** from its home, so a draft installed nowhere stays visible to its author, and so does one installed only in spaces the author cannot reach. `placementGrantsRead` (`apps/api/src/lib/package-access.ts`) is the single statement of that rule; its readers are the catalog check, the per-space visibility gate of the package read routes (`isPackageReadableInSpace`), `GET /api/library` and the per-type index listing (`listOrgItems`, whose SQL mirrors the predicate — the `activeOnly` narrowing the integration picker uses stays install-only, since the home is not a usable instance). RUNNING a package is untouched: that still requires an installation in the space it runs in (`hasPackageAccess`), so a package readable at home is not thereby executable there.
 
+**On the wire**, a package read never carries the raw column. Every shape that names a home — `AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList` — carries a PAIR, computed in one place (`homeWireForCaller`, `apps/api/src/lib/package-access.ts`):
+
+- `home_space_id: string | null` — the home's id **only when the caller reaches that space** (its `packageAccessSpaces` set), `null` otherwise. The raw column cannot be published: a package homed in a member's personal space is legitimately readable by everyone it is installed for, and its id would hand each of them a space §3.6 says does not exist for them. `null` therefore means "not a space you can see" — the organization catalogue and a withheld home alike — and nothing downstream needs to tell those apart.
+- `home_writable: boolean` — whether THIS caller holds the type's `write` in the home, from `holdsHomeAuthority`, the same predicate `assertPackageMutationAccess` enforces. Always emitted, a summary read (`agents:run` without `agents:read`) included: an absent boolean would read as "not answered yet" rather than "no".
+
+The SPA derives no write authority of its own; it gates edit, publish, move and delete on `home_writable`. (Delete and write travel together in every preset; a custom role granting one without the other over-offers a button the API then refuses, which is accepted.) The only client-side use of `home_space_id` is naming the home and excluding it from the move dialog's destination list.
+
 **Moving it** is `PATCH /api/packages/{scope}/{name}` with `{ "home_space_id": … }`. The caller must hold the type's `write` in the current home (or be an owner/admin when it is `NULL`) **and** in the destination, which must be a space they can reach — an unreachable destination answers 404, never confirming it exists. Setting it to `NULL` hands the package to the organization catalogue and is therefore owner/admin only.
+
+A space with runs in progress cannot be deleted either: `DELETE /api/spaces/{id}` answers **409 `space_has_active_runs`** while any run in it is `pending` or `running`, for every actor, the offboarding sweeper included (it logs the refusal and retries next pass). The delete cascade-drops `runs`/`run_logs`, so performing it under a live container rips the rows out from under it — the same rule organization deletion has, from the same predicate (`countInProgressRuns`, `services/state/runs.ts`).
 
 A space that homes a package cannot be deleted: `DELETE /api/spaces/{id}` answers **409 `space_homes_packages`** and names them. Re-homing them silently would move write authority without anyone asking, and deleting them would destroy catalogue entries other spaces are running — so moving them is the caller's act. Inline-run shadow rows carry no home for exactly this reason: a run must not make its space undeletable.
 

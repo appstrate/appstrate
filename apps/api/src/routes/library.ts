@@ -8,6 +8,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import {
+  homeWireForCaller,
   packageAccessSpaces,
   packagePermission,
   managesOrgCatalog,
@@ -68,6 +69,7 @@ export function createLibraryRouter() {
         type: string;
         source: string;
         home_space_id: string | null;
+        home_writable: boolean;
         name: string;
         description: string;
         installed_in: string[];
@@ -81,9 +83,12 @@ export function createLibraryRouter() {
       // Installed where the caller reads, or homed there — the same rule the
       // detail routes apply, from the one predicate that states it.
       const placed = placementGrantsRead(row, row.spaceId ? [row.spaceId] : [], readable);
-      // A package with no home and no reachable installation is the org
-      // catalog, which owners and admins also list.
-      const orgCatalogEntry = !row.spaceId && orgCatalogAdmin && !row.installedAnywhere;
+      // A package with NO HOME and no reachable installation is the org
+      // catalog, which owners and admins also list. The NULL home is what
+      // makes it theirs: one homed in a space — a personal space above all —
+      // is listed through that space or not at all (spec §3.6).
+      const orgCatalogEntry =
+        row.homeSpaceId === null && !row.spaceId && orgCatalogAdmin && !row.installedAnywhere;
       if (!placed && row.source !== "system" && !orgCatalogEntry) continue;
       let entry = pkgMap.get(row.id);
       if (!entry) {
@@ -92,7 +97,10 @@ export function createLibraryRouter() {
           id: row.id,
           type: row.type,
           source: row.source,
-          home_space_id: row.homeSpaceId,
+          // ONE contract for the pair, computed server-side (RBAC spec §6.9):
+          // the home's id only when this caller reaches that space, and the
+          // write verdict itself.
+          ...homeWireForCaller(c, row, accessible),
           name: typeof m.display_name === "string" ? m.display_name : row.id,
           description: typeof m.description === "string" ? m.description : "",
           installed_in: [],

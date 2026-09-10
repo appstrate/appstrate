@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { prefixedId } from "../../../src/lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 const app = getTestApp();
 

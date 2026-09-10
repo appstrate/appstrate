@@ -12,7 +12,7 @@ import {
   getInviterName,
   getOrgName,
 } from "../services/invitations.ts";
-import { addMember, getOrgById } from "../services/organizations.ts";
+import { getOrgById, provisionMember } from "../services/organizations.ts";
 import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
@@ -127,14 +127,15 @@ router.post("/:token/accept", async (c) => {
   // the two writes can never half-apply (user joined but invite still pending,
   // or vice versa). The claim is conditional on `status = 'pending'`, so two
   // concurrent accepts can't both succeed — the loser sees 0 rows claimed and
-  // is reported as already-accepted. `addMember` is idempotent (it swallows the
-  // unique violation), so an existing membership keeps the claim valid.
+  // is reported as already-accepted. `provisionMember` is idempotent (it
+  // swallows the unique violation and its personal-space upsert is a no-op on
+  // an existing one), so an existing membership keeps the claim valid.
   const claimed = await db.transaction(async (tx) => {
     const current = await markInvitationAccepted(invitation.id, tx);
     if (!current) return null;
     // The claim locks and returns the current grant, including edits committed
     // since the initial token lookup. Never apply that earlier snapshot.
-    await addMember(current.orgId, session.user.id, current.role as AssignableOrgRole, tx);
+    await provisionMember(tx, current.orgId, session.user.id, current.role as AssignableOrgRole);
     const assignments = await applySpaceAssignments(tx, {
       orgId: current.orgId,
       userId: session.user.id,

@@ -1076,5 +1076,19 @@
   "viewAs.spaceRolePlaceholder": "Choose a role",
   "viewAs.rolesEmpty": "No previewable role in this space.",
   "viewAs.submit": "Preview",
-  "viewAs.trigger": "Preview a role"
+  "viewAs.trigger": "Preview a role",
+  "spaces.personal.title": "My space",
+  "spaces.personal.badge": "Personal",
+  "spaces.personal.switcherGroup": "Personal",
+  "spaces.personal.teamGroup": "Team spaces",
+  "spaces.personal.settingsLocked": "A personal space is always private and has you as its only member: only its name can be changed.",
+  "spaces.personal.orphanedTitle": "Orphaned personal spaces",
+  "spaces.personal.orphanedHint": "Their owner has left the organization. They are deleted automatically 30 days after the departure.",
+  "spaces.personal.orphanedSince": "Orphaned since {{date}}",
+  "spaces.personal.convert": "Convert to a team space",
+  "spaces.personal.convertConfirm": "Convert this personal space into a team space? Its former owner has left the organization and gains nothing: the space stays private, and its contents become readable and writable by the organization's owners and administrators.",
+  "spaces.personal.converted": "Space converted to a team space.",
+  "spaces.personal.sweep": "Delete now",
+  "spaces.personal.sweepConfirm": "Permanently delete this space and everything in it? Packages it homes that are installed elsewhere move to the organization catalogue; the others are deleted.",
+  "spaces.personal.swept": "Space deleted ({{rehomed}} package(s) handed to the catalogue, {{deleted}} deleted)."
 }

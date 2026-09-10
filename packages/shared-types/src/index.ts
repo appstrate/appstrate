@@ -590,12 +590,22 @@ export interface AgentDetail {
   /** Authoring history: withheld from a summary read, with `version_count`. */
   forked_from?: string | null;
   /**
-   * The space whose `agents:write` governs this agent (`packages.home_space_id`);
-   * `null` is the organization catalog. Always emitted, INCLUDING on a summary
-   * read: `null` is a meaning of its own here, so an optional field would make
-   * "withheld" and "organization catalog" the same absence.
+   * The space whose `agents:write` governs this agent
+   * (`packages.home_space_id`) — emitted ONLY when the caller reaches that
+   * space. `null` means "not a space you can see": the organization catalog, or
+   * a home whose id is withheld (a colleague's personal space, readable through
+   * an installation but never nameable). Read {@link home_writable}, never this
+   * field, to decide whether a write may be offered.
    */
   home_space_id: string | null;
+  /**
+   * Whether THIS caller holds `agents:write` in the home space — the exact
+   * predicate the write routes enforce. Computed server-side
+   * (`homeWireForCaller`); the SPA derives no write authority of its own.
+   * Always emitted, INCLUDING on a summary read: an absent boolean would read
+   * as "not answered yet" rather than "no".
+   */
+  home_writable: boolean;
   /**
    * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
    * platform default when it declares none) clamped to this deployment's
@@ -623,10 +633,17 @@ export interface OrgPackageItem extends BasePackageListItem {
   auto_installed: boolean;
   /**
    * The space whose `<type>:write` governs this package
-   * (`packages.home_space_id`); `null` is the organization catalog, writable by
-   * owners and admins only. Always emitted by the org-package mappers.
+   * (`packages.home_space_id`) — emitted ONLY when the caller reaches that
+   * space; `null` means the organization catalog or a withheld home. Always
+   * emitted by the org-package mappers.
    */
   home_space_id: string | null;
+  /**
+   * Whether THIS caller holds the type's `write` in the home space — the exact
+   * predicate the write routes enforce, computed server-side
+   * (`homeWireForCaller`). Always emitted.
+   */
+  home_writable: boolean;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
@@ -969,6 +986,19 @@ export interface SpaceInfo {
   visibility: "open" | "closed" | "private";
   /** Preset the implicit members of an `open` space hold. */
   default_role: "admin" | "builder" | "operator" | "viewer";
+  /**
+   * Whether this is one member's personal space (RBAC spec §3.6). Reached by
+   * its owner alone — organization owners and admins included — takes no other
+   * members, always `private`, and only its name is editable. The owner is
+   * deliberately NOT named on the wire.
+   */
+  personal: boolean;
+  /**
+   * When the owner of a personal space stopped being a member. Present only on
+   * the owner/admin projection, the only one an orphaned personal space is
+   * listed to.
+   */
+  orphaned_at?: string | null;
   /** Whether the caller may enter — a `closed` space is listed as `"none"`. */
   access: "member" | "none";
   /** The caller's role here, or `null` when they have none. */
@@ -978,6 +1008,16 @@ export interface SpaceInfo {
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** What `POST /api/spaces/:id/sweep-now` did to an orphaned personal space. */
+export interface SpaceSweepResult {
+  object: "space_sweep";
+  space_id: string;
+  /** Homed packages another space had installed: handed to the org catalogue. */
+  rehomed_packages: number;
+  /** Homed packages nothing else had installed: deleted. */
+  deleted_packages: number;
 }
 
 /** One row of `GET /api/spaces/:id/members` — who reaches the space, and how. */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
@@ -42,12 +42,23 @@ export async function assertSpaceAssignmentsValid(
 
   const spaceIds = [...new Set(assignments.map((a) => a.space_id))];
   const liveSpaces = await tx
-    .select({ id: spaces.id })
+    .select({ id: spaces.id, ownerUserId: spaces.ownerUserId })
     .from(spaces)
     .where(and(eq(spaces.orgId, orgId), inArray(spaces.id, spaceIds)));
   const found = new Set(liveSpaces.map((row) => row.id));
   const missingSpace = spaceIds.find((id) => !found.has(id));
   if (missingSpace) throw notFound(`Space '${missingSpace}' not found in this organization`);
+  // A personal space belongs to one member and takes no others (RBAC spec
+  // §3.6), so it is never assignable — an invitation or an SSO signup policy
+  // naming one is a configuration error, refused where it is written rather
+  // than silently dropped when the member arrives.
+  const personal = liveSpaces.find((row) => row.ownerUserId !== null);
+  if (personal) {
+    throw invalidRequest(
+      `Space '${personal.id}' is a personal space and cannot be assigned to anyone`,
+      param,
+    );
+  }
 
   const roleIds = [
     ...new Set(assignments.map((a) => a.custom_role_id).filter((id): id is string => Boolean(id))),
@@ -105,6 +116,16 @@ export async function applySpaceAssignments(
         and(
           eq(spaces.orgId, orgId),
           inArray(spaces.id, [...new Set(assignments.map((a) => a.space_id))]),
+          // Backstop on the WRITE side of "a personal space is never
+          // assignable" (RBAC spec §3.6). `assertSpaceAssignmentsValid`
+          // already refuses one when the invitation or the signup policy is
+          // saved, and `owner_user_id` is only ever set at creation, so a
+          // stored policy cannot come to name a personal space on its own —
+          // but this is the statement that would grant the access, so it is
+          // where the rule has to hold. Excluded rather than special-cased, so
+          // such a target takes the existing "no longer exists" path: skipped
+          // for an invitation, refused for an SSO signup.
+          isNull(spaces.ownerUserId),
         ),
       ),
     namedRoles.length === 0

@@ -54,7 +54,7 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
-import { prefixedId } from "../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";

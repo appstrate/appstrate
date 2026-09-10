@@ -11,7 +11,7 @@
  * running alone have zero dependency on module schemas.
  */
 import { db } from "./db.ts";
-import { prefixedId, SPACE_ID_RE } from "../../src/lib/ids.ts";
+import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   packages,
   spacePackages,

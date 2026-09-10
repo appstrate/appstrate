@@ -73,7 +73,7 @@ import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { cliRefreshToken, deviceCode, oauthClient } from "@appstrate/db/schema";
-import { prefixedId } from "../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";

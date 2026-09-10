@@ -34,7 +34,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
-import { SPACE_ID_RE } from "../../../src/lib/ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 
 const SCRIPT = new URL(
   "../../../../../scripts/migration/0003-application-ids-to-space-ids.sql",

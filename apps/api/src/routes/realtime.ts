@@ -16,6 +16,7 @@ import { effectivePermissions } from "../lib/permissions.ts";
 import { loadSpaceMember, resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
 import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
 import {
+  callerPersonalOwnerId,
   effectiveInSpace,
   orgHalfFor,
   personaFor,
@@ -121,8 +122,14 @@ async function resolveSpaceGrants(
   realRole: OrgRole,
   space: SpaceContextRow,
   memberRow: SpaceMemberRow | null,
+  callerId: string | null,
 ): Promise<ReadonlySet<string> | null> {
-  const ref = resolveSpaceRole(personaFor(c, orgId)?.orgRole ?? realRole, space, memberRow);
+  const ref = resolveSpaceRole(
+    personaFor(c, orgId)?.orgRole ?? realRole,
+    space,
+    memberRow,
+    callerId,
+  );
   if (!ref) return null;
   return effectiveInSpace(
     c,
@@ -192,6 +199,11 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       keyInfo.creatorRole,
       keySpace,
       await loadSpaceMember(keySpace.id, keyInfo.userId),
+      // A key never reaches a personal space, not even its creator's: it is
+      // pinned to one space and carries their authority, not their privacy
+      // (RBAC spec §3.6). Passed as `null` rather than left to a context key
+      // this pipeline-exempt route does not set.
+      null,
     );
     if (!grants) {
       throw forbidden("The key's creator is not a member of the key's space");
@@ -262,6 +274,11 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     persona
       ? personaSpaceMember(persona, space.id)
       : await loadSpaceMember(space.id, session.user.id),
+    // The personal-space identity, not simply the session user: under a role
+    // preview it is `null`, so the previewer's OWN personal space stops being
+    // streamable through a persona that has none (RBAC spec §3.6). The context
+    // keys it reads — `user`, `authMethod`, `viewAs` — are all set above.
+    callerPersonalOwnerId(c, orgId),
   );
   if (!grants) {
     // Same 403 / 404 split as `applySpacePermissions`, not a 401 for an authenticated session.

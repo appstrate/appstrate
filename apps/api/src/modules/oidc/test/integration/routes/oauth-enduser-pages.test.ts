@@ -25,7 +25,7 @@ import {
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
-import { prefixedId } from "../../../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { buildSignedLoginNoticeValue } from "../../../services/login-notice-cookie.ts";
 
 const app = getTestApp({ modules: [oidcModule] });

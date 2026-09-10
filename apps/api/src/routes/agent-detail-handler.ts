@@ -27,7 +27,11 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { agentReadIsSummary } from "../lib/package-access.ts";
+import {
+  agentReadIsSummary,
+  homeWireForCaller,
+  packageAccessSpaces,
+} from "../lib/package-access.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 
 /**
@@ -125,11 +129,12 @@ export async function buildAgentDetailDto(
   // content: a launcher connects them, so they stay.
   const summaryOnly = agentReadIsSummary(c);
 
-  const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
+  const [agent, rawItem, versionCount, latestVersionDate, accessible] = await Promise.all([
     requireAccess ? getPackageForRead(itemId, orgId, spaceId) : getPackage(itemId, orgId),
     getOrgItem(orgId, itemId, CONFIG_BY_TYPE.agent),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
+    packageAccessSpaces(c),
   ]);
 
   if (!agent) {
@@ -208,13 +213,16 @@ export async function buildAgentDetailDto(
     // system agents, so making this field conditional too would leave a system
     // agent's cap undiscoverable from the API.
     effective_timeout_seconds: resolveRunTimeout(m.timeout).effectiveSeconds,
-    // Which space's `agents:write` governs this agent (`packages.home_space_id`).
-    // Emitted UNCONDITIONALLY, for the same reason as the timeout above: `null`
-    // already MEANS something here — the organization catalog, writable by
-    // owners and admins — so a withheld field and an org-catalog agent would
-    // arrive as the same absence, and a reader collapsing the two grants the
-    // catalog's authority over an agent it cannot even see the home of.
-    home_space_id: rawItem?.home_space_id ?? null,
+    // Which space's `agents:write` governs this agent, and whether THIS caller
+    // holds it (`homeWireForCaller`, RBAC spec §6.9). Both emitted
+    // UNCONDITIONALLY, for the same reason as the timeout above: a summary read
+    // still needs to know it may not edit, and an absent `home_writable` would
+    // read as "not answered yet" rather than "no".
+    ...homeWireForCaller(
+      c,
+      { type: "agent", source: agent.source, homeSpaceId: rawItem?.homeSpaceId ?? null },
+      accessible,
+    ),
     // The authoring history: who it was forked from, how many versions stand
     // behind it, whether the draft is ahead of them. A summary read omits it —
     // a launcher does not edit or publish.

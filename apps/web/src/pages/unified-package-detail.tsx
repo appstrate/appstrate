@@ -203,11 +203,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const uninstallMutation = useTogglePackageInstall();
   const currentSpaceId = useCurrentSpaceId();
   const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
-  // The package's own detail response is the authority on its home. NOT
-  // collapsed to `null`: the response always carries the field, so `null` means
-  // "the organization catalog" and `undefined` means "not loaded yet" — reading
-  // an unloaded detail as an org-catalog package hands the caller the wrong gate.
+  // The package's own detail response is the authority on both halves of the
+  // home contract: the id (only when this caller reaches that space) and the
+  // write verdict. `undefined` means "not loaded yet", which every gate reads
+  // as "no".
   const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
+  const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
@@ -390,6 +391,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
                 homeSpaceId={homeSpaceId}
+                homeWritable={homeWritable}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}

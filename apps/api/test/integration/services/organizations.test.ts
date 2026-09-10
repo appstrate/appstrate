@@ -12,7 +12,7 @@ import {
   getOrgMembers,
   isSlugAvailable,
   getOrgById,
-  addMember,
+  provisionMember,
   removeMember,
   updateMemberRole,
   getOrgSettings,
@@ -301,7 +301,7 @@ describe("organizations service", () => {
       const org = await createOrganization("Join Org", "join-org", userId);
       const newUser = await createTestUser({ email: "joiner@test.com" });
 
-      await addMember(org.id, newUser.id, "member");
+      await provisionMember(db, org.id, newUser.id, "member");
 
       const orgs = await getUserOrganizations(newUser.id);
       expect(orgs).toHaveLength(1);
@@ -316,7 +316,7 @@ describe("organizations service", () => {
     it("lists all members of an organization", async () => {
       const org = await createOrganization("Members Org", "members-org", userId);
       const member = await createTestUser({ email: "member@test.com" });
-      await addMember(org.id, member.id, "member");
+      await provisionMember(db, org.id, member.id, "member");
 
       const members = await getOrgMembers(org.id);
 
@@ -371,14 +371,14 @@ describe("organizations service", () => {
     });
   });
 
-  // ── addMember / removeMember / updateMemberRole ───────────
+  // ── provisionMember / removeMember / updateMemberRole ────
 
   describe("member management", () => {
-    it("addMember is idempotent for duplicate membership", async () => {
+    it("provisionMember is idempotent for duplicate membership", async () => {
       const org = await createOrganization("Dup Org", "dup-org", userId);
 
       // Should not throw — duplicate is silently ignored
-      await addMember(org.id, userId, "member");
+      await provisionMember(db, org.id, userId, "member");
 
       const members = await getOrgMembers(org.id);
       expect(members.filter((m) => m.userId === userId)).toHaveLength(1);
@@ -387,7 +387,7 @@ describe("organizations service", () => {
     it("removeMember removes a member from the org", async () => {
       const org = await createOrganization("Rm Org", "rm-org", userId);
       const member = await createTestUser({ email: "removable@test.com" });
-      await addMember(org.id, member.id, "member");
+      await provisionMember(db, org.id, member.id, "member");
 
       await removeMember(org.id, member.id);
 
@@ -415,7 +415,7 @@ describe("organizations service", () => {
     it("removeMember disables the member's enabled schedules in that org (CRIT-13)", async () => {
       const { org, defaultSpaceId } = await createTestOrg(userId, { slug: "sched-revoke" });
       const member = await createTestUser({ email: "sched-owner@test.com" });
-      await addMember(org.id, member.id, "member");
+      await provisionMember(db, org.id, member.id, "member");
 
       const pkg = await seedPackage({ orgId: org.id, id: "@sched-revoke/agent" });
       const memberSchedule = await seedSchedule({
@@ -461,7 +461,7 @@ describe("organizations service", () => {
       const { org: org1, defaultSpaceId: space1 } = await createTestOrg(userId, {
         slug: "rev-org1",
       });
-      await addMember(org1.id, member.id, "member");
+      await provisionMember(db, org1.id, member.id, "member");
       const { org: org2, defaultSpaceId: space2 } = await createTestOrg(member.id, {
         slug: "rev-org2",
       });
@@ -505,7 +505,7 @@ describe("organizations service", () => {
     it("updateMemberRole changes the role", async () => {
       const org = await createOrganization("Role Org", "role2-org", userId);
       const member = await createTestUser({ email: "promote@test.com" });
-      await addMember(org.id, member.id, "member");
+      await provisionMember(db, org.id, member.id, "member");
 
       await updateMemberRole(org.id, member.id, "admin");
 

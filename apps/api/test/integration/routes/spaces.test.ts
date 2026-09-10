@@ -11,10 +11,11 @@ import {
   seedPackage,
   seedInstalledPackage,
   seedOrgModel,
+  seedRun,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { assertDbHas, assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
-import { spaces, spacePackages, auditEvents, packages } from "@appstrate/db/schema";
+import { spaces, spacePackages, auditEvents, packages, runs } from "@appstrate/db/schema";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
@@ -222,6 +223,53 @@ describe("Spaces API", () => {
         await seedInstalledPackage(doomed, shadowId);
 
         expect((await getDbRow(packages, eq(packages.id, shadowId))).homeSpaceId).toBeNull();
+        expect((await del()).status).toBe(204);
+        await assertDbMissing(spaces, eq(spaces.id, doomed));
+      });
+    });
+
+    // The delete cascade-drops `runs`/`run_logs`, so performing it while a run
+    // is executing rips the rows out from under a live container — the same
+    // rule organization deletion has, from the same predicate
+    // (`countInProgressRuns`).
+    describe("a space with runs in progress", () => {
+      let doomed: string;
+
+      const del = () =>
+        app.request(`/api/spaces/${doomed}`, { method: "DELETE", headers: authHeaders(ctx) });
+
+      beforeEach(async () => {
+        doomed = (await seedSpace({ orgId: ctx.orgId, name: "Busy" })).id;
+        await seedPackage({
+          id: "@testorg/busy",
+          orgId: ctx.orgId,
+          type: "agent",
+          homeSpaceId: ctx.defaultSpaceId,
+        });
+      });
+
+      for (const status of ["pending", "running"] as const) {
+        it(`refuses with 409 while a run is ${status}`, async () => {
+          await seedRun({
+            orgId: ctx.orgId,
+            spaceId: doomed,
+            packageId: "@testorg/busy",
+            status,
+          });
+          await expectProblem(await del(), 409, { code: "space_has_active_runs" });
+          await assertDbHas(spaces, eq(spaces.id, doomed));
+        });
+      }
+
+      it("succeeds once the run has settled", async () => {
+        const run = await seedRun({
+          orgId: ctx.orgId,
+          spaceId: doomed,
+          packageId: "@testorg/busy",
+          status: "running",
+        });
+        await expectProblem(await del(), 409, { code: "space_has_active_runs" });
+        await db.update(runs).set({ status: "success" }).where(eq(runs.id, run.id));
         expect((await del()).status).toBe(204);
         await assertDbMissing(spaces, eq(spaces.id, doomed));
       });

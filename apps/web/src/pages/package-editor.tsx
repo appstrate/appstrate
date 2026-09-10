@@ -27,6 +27,7 @@ import { SourceSection } from "../components/integration-editor/source-section";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
+import { NoAccessState } from "../components/require-permission";
 import { EditorShell } from "../components/editor-shell";
 
 import type { AgentEditorState } from "../components/agent-editor/types";
@@ -605,6 +606,16 @@ export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-se
 
   if (isEdit && !detail) {
     return <Navigate to="/agents" replace />;
+  }
+
+  // Write authority is the package's HOME space, not the space this request
+  // carries (RBAC spec §6.9), so the route mounts unconditionally and the
+  // verdict is read off the loaded detail. A route-level `<type>:write` gate
+  // sent a builder who legitimately edits their own package — shown "Edit" from
+  // the same `home_writable` — to a no-access page whenever they were browsing
+  // from a space where they only read.
+  if (isEdit && detail && !detail.home_writable) {
+    return <NoAccessState />;
   }
 
   // Only system packages are read-only. Org-owned packages are editable regardless of their

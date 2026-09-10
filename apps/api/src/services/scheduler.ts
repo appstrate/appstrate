@@ -214,7 +214,12 @@ async function isScheduleActorValid(
       .limit(1);
     if (!space) return false;
     const membership = await loadSpaceMember(spaceId, actor.id);
-    return spacePermissions(resolveSpaceRole(row.role, space, membership)).has("agents:run");
+    // The frozen actor IS the caller here: a schedule in a personal space runs
+    // as its owner, and stops the moment they are no longer the owner
+    // (RBAC spec §3.6).
+    return spacePermissions(resolveSpaceRole(row.role, space, membership, actor.id)).has(
+      "agents:run",
+    );
   }
   const [row] = await db
     .select({ id: endUsers.id })

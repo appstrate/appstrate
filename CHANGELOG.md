@@ -8,6 +8,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Every member of an organization now has a personal space — "Mon espace".**
+  It is created at the moment they join (organization creation, invitation
+  accept, SSO auto-provision and first-boot bootstrap all go through one
+  `provisionMember` seam, in the same transaction as the membership row, so a
+  member without one cannot exist), and `GET /api/spaces` repairs a missing one
+  for the caller. It is `private`, holds exactly one member, and is reached by
+  its **owner alone** — an organization owner or admin gets a 404 on it, on
+  every route: the detail, the members list, the package detail of a draft homed
+  there, `PATCH`, `DELETE`, the SSE stream, and a schedule pointed at it. That
+  is the whole point: agents, runs, files and chat sessions started there are
+  private, and a draft nobody has shared is nobody else's business. The owner's
+  own session reaches it, and so does the same person through a CLI device-flow
+  or MCP instance token — their own credential by another transport. An **API
+  key** and an **end-user** never do: a key is pinned to a space and carries its
+  creator's authority, not their privacy, so a key minted into a personal space
+  would 404 on every request it made and `POST /api/api-keys` refuses it with a
+  409 `personal_space_takes_no_keys` (API keys are team-space only). A role
+  preview (`X-View-As`) can neither list nor target one (400). A **guest** who
+  owns a personal space holds preset `operator` there rather than `admin`:
+  receive and run what is shared with them, not author agents on the
+  organization's LLM budget. Only the name is editable: `visibility` or
+  `default_role` on it is a 409 `personal_space_immutable`, `DELETE` is a 409
+  `personal_space_not_deletable`, and a `space_members` write is a 409
+  `personal_space_has_no_members`. Two administrative acts remain — both
+  audited, both refused to API keys, and both applying to an **orphaned** space
+  only:
+  `POST /api/spaces/{id}/convert-to-team` turns one whose owner has LEFT into an
+  ordinary team space (it stays `private`), the one way an administrator ever
+  reaches inside one, and `POST /api/spaces/{id}/sweep-now` deletes it
+  immediately. A live personal space is never convertible, and all three acts —
+  those two plus `DELETE` — answer **404 rather than 409** on a live personal
+  space that is not the caller's own, an API key included (a key carries its
+  creator's authority, not their privacy): a named refusal would confirm that
+  the id is somebody's private workspace. Leaving the organization does not delete
+  anything: `spaces` gains `orphaned_at`, stamped by the member removal (whose
+  audit event now names the spaces it put on the clock), and for 30 days the
+  space is listed to owners and admins (`personal: true`, `orphaned_at` set,
+  `access: "none"`) so it can be converted, while a re-invite inside the window
+  hands it back untouched. During that window a package homed there but
+  installed elsewhere is writable by nobody, which is the intended state —
+  converting the space ends it early. After 30 days the new hourly
+  `personal-space-sweeper` worker empties it — a package it homes moves to the
+  organization catalogue when another space has it installed, and is deleted
+  when it lived only there — and deletes the space with its runs, files and
+  sessions. `GET /api/spaces` items carry `personal`, the switcher pins
+  "Mon espace" above the team spaces, a personal space's settings hide the
+  Members tab and lock the visibility and default-role controls, and the
+  organization's Spaces page lists orphaned ones with **Convertir en espace
+  d'équipe** / **Supprimer maintenant**. Migration `0062` is shape-only and
+  needs no backfill to be correct; provisioning the spaces of members who
+  already exist is `scripts/migration/0014-personal-spaces-backfill.sql`, run
+  AFTER the deploy is validated and only once the cloud plan limits have been
+  checked — nothing is degraded while it has not run.
+
+- **`DELETE /api/spaces/{id}` now refuses a space with runs in progress** —
+  409 `space_has_active_runs` while any run in it is `pending` or `running`, for
+  every actor including the offboarding sweeper (which logs and retries on the
+  next pass). The delete cascade-drops `runs`/`run_logs`, so performing it under
+  a live container tore the rows out from under it. Same rule as organization
+  deletion, and now literally the same predicate.
+
 - **A package now has a home space, and it alone decides who may write it.**
   `packages.home_space_id` names the space whose `<type>:write` authorizes
   editing, publishing, restoring, renaming and deleting a package; the other
@@ -201,6 +262,18 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   green).
 
 ### Changed
+
+- **A package read no longer publishes its home space's id to callers who
+  cannot see that space.** `home_space_id` on `AgentDetail`, `OrgPackageItem`,
+  `OrgPackageItemDetail` and `GET /api/library` is now the home's id **only when
+  the caller reaches that space**, and `null` otherwise — so a package homed in a
+  member's personal space and installed in a team space no longer hands
+  everyone in that team the id of a private workspace. Each of those four shapes
+  gains **`home_writable: boolean`**, the server's own verdict on whether this
+  caller may write the package (the exact predicate the write routes enforce).
+  Read `home_writable`, never the id, to decide whether to offer an edit: the
+  dashboard now does exactly that, and its client-side derivation of write
+  authority is gone.
 
 - **`runs:read` now means the runs you launched, and nothing else.** Your manual
   runs and the runs of your own schedules — not a colleague's, not an

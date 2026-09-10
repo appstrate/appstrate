@@ -47,6 +47,7 @@ function space(id: string, permissions: string[]) {
     isDefault: false,
     visibility: "closed" as const,
     defaultRole: "viewer" as const,
+    ownerUserId: null,
     permissions: new Set(permissions as Permission[]),
   };
 }

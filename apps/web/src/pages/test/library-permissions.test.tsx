@@ -24,6 +24,7 @@ function space(id: string, permissions: string[]): Space {
     settings: {},
     visibility: "open",
     default_role: "viewer",
+    personal: false,
     access: "member",
     role: null,
     permissions,
@@ -41,6 +42,7 @@ function packageRow(type: Package["type"], installed_in: string[], source = "loc
     type,
     source,
     home_space_id: null,
+    home_writable: false,
     installed_in,
   };
 }

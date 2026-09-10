@@ -10698,7 +10698,7 @@
         "operationId": "createApiKey",
         "tags": ["API Keys"],
         "summary": "Create an API key",
-        "description": "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.",
+        "description": "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later. The key is bound to the space named by `X-Space-Id`, which must be a TEAM space: a personal space takes no keys (409 `personal_space_takes_no_keys`), because a key carries no user and so could never resolve one.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10793,6 +10793,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "The current space is a personal space (`personal_space_takes_no_keys`). API keys are team-space only.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -14884,6 +14894,7 @@
                       "auto_installed": false,
                       "forked_from": null,
                       "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "home_writable": true,
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     }
@@ -15663,7 +15674,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
+        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17860,6 +17871,7 @@
                   },
                   "visibility": "open",
                   "default_role": "operator",
+                  "personal": false,
                   "access": "member",
                   "role": {
                     "kind": "preset",
@@ -17945,6 +17957,7 @@
                       },
                       "visibility": "open",
                       "default_role": "operator",
+                      "personal": false,
                       "access": "member",
                       "role": {
                         "kind": "preset",
@@ -17967,6 +17980,7 @@
                       },
                       "visibility": "closed",
                       "default_role": "operator",
+                      "personal": false,
                       "access": "none",
                       "role": null,
                       "permissions": ["org:read", "spaces:read"],
@@ -18054,7 +18068,7 @@
         "operationId": "updateSpace",
         "tags": ["Spaces"],
         "summary": "Update a space",
-        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.",
+        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18140,6 +18154,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is a personal space and the body changes more than its name (`personal_space_immutable`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -18147,7 +18171,7 @@
         "operationId": "deleteSpace",
         "tags": ["Spaces"],
         "summary": "Delete a space",
-        "description": "Delete a space and all associated end-users. The default space cannot be deleted, and neither can a space that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move them with `PATCH /api/packages/{scope}/{name}` first.",
+        "description": "Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PATCH /api/packages/{scope}/{name}` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and an API key is never its owner (a key carries its creator's authority, not their privacy), so it gets the 404 too.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18183,7 +18207,127 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The space is the home of one or more packages (`space_homes_packages`); their ids are listed in the problem's `packages` extension.",
+            "description": "Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/convert-to-team": {
+      "post": {
+        "operationId": "convertSpaceToTeam",
+        "tags": ["Spaces"],
+        "summary": "Convert a personal space to a team space",
+        "description": "Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); API keys are refused.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The space, now a team space",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is already a team space (`space_not_personal`), or it is the CALLER'S OWN personal space and its owner — them — is still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404, not 409.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/sweep-now": {
+      "post": {
+        "operationId": "sweepPersonalSpace",
+        "tags": ["Spaces"],
+        "summary": "Sweep an orphaned personal space now",
+        "description": "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space has it installed) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The space was swept",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceSweepResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is a team space (`space_not_personal`), or it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -22667,6 +22811,7 @@
                         "name": "Inbox Triage",
                         "description": "Sorts incoming Gmail threads into priority buckets.",
                         "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                        "home_writable": true,
                         "installed_in": ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"]
                       }
                     ],
@@ -22680,6 +22825,7 @@
                         "name": "Gmail",
                         "description": "Google Mail OAuth integration.",
                         "home_space_id": null,
+                        "home_writable": false,
                         "installed_in": [
                           "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                           "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
@@ -23558,7 +23704,8 @@
           "running_runs",
           "last_run",
           "effective_timeout_seconds",
-          "home_space_id"
+          "home_space_id",
+          "home_writable"
         ],
         "properties": {
           "id": {
@@ -23751,7 +23898,11 @@
           },
           "home_space_id": {
             "type": ["string", "null"],
-            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority."
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
           },
           "has_unarchived_changes": {
             "type": "boolean",
@@ -24500,7 +24651,8 @@
           "version",
           "auto_installed",
           "forked_from",
-          "home_space_id"
+          "home_space_id",
+          "home_writable"
         ],
         "properties": {
           "id": {
@@ -24542,7 +24694,11 @@
           },
           "home_space_id": {
             "type": ["string", "null"],
-            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority."
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
           },
           "createdAt": {
             "type": "string",
@@ -24569,6 +24725,7 @@
           "auto_installed",
           "forked_from",
           "home_space_id",
+          "home_writable",
           "agents"
         ],
         "properties": {
@@ -24629,7 +24786,11 @@
           },
           "home_space_id": {
             "type": ["string", "null"],
-            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package. `null` means the organization catalog, writable by organization owners and admins only. Other spaces the package is installed in consume it and never gain write authority."
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
           },
           "agents": {
             "type": "array",
@@ -25212,6 +25373,28 @@
           }
         }
       },
+      "SpaceSweepResult": {
+        "type": "object",
+        "required": ["object", "space_id", "rehomed_packages", "deleted_packages"],
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["space_sweep"]
+          },
+          "space_id": {
+            "type": "string",
+            "description": "The personal space that was swept and deleted"
+          },
+          "rehomed_packages": {
+            "type": "integer",
+            "description": "Packages this space homed that another space has installed: handed to the organization catalogue (`home_space_id = null`) rather than deleted"
+          },
+          "deleted_packages": {
+            "type": "integer",
+            "description": "Packages this space homed that no other space had installed: deleted"
+          }
+        }
+      },
       "SpaceObject": {
         "type": "object",
         "required": [
@@ -25223,6 +25406,7 @@
           "settings",
           "visibility",
           "default_role",
+          "personal",
           "access",
           "role",
           "permissions",
@@ -25274,6 +25458,15 @@
             "type": "string",
             "enum": ["admin", "builder", "operator", "runner", "viewer"],
             "description": "Preset the implicit members of an `open` space hold"
+          },
+          "personal": {
+            "type": "boolean",
+            "description": "Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire."
+          },
+          "orphaned_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the owner of this personal space stopped being a member of the organization; null while they are one. Present only for organization owners and admins, the only callers an orphaned personal space is listed to — they may convert it to a team space or sweep it immediately. Absent on every other projection."
           },
           "access": {
             "type": "string",
@@ -25608,6 +25801,7 @@
             "name",
             "description",
             "home_space_id",
+            "home_writable",
             "installed_in"
           ],
           "properties": {
@@ -25633,7 +25827,11 @@
             },
             "home_space_id": {
               "type": ["string", "null"],
-              "description": "Space (`spc_…`) whose `<type>:write` authorizes writing this package; `null` means the organization catalog (owners and admins only)."
+              "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+            },
+            "home_writable": {
+              "type": "boolean",
+              "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
             },
             "installed_in": {
               "type": "array",

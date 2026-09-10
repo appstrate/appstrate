@@ -20,13 +20,15 @@ import {
 import { and, eq, inArray, notInArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
-import { orgRunConcurrencyLockKey } from "./state/runs.ts";
+import { countInProgressRuns, orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
 import { deleteSpaceMembershipsInOrg } from "./space-members.ts";
+import { orphanPersonalSpaces } from "./spaces.ts";
+import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
 import type { RevokedSpaceAssignment } from "./space-members.ts";
 
 /** Accepts either the base client or an open transaction handle. */
@@ -76,31 +78,19 @@ export async function createOrganization(
   slug: string,
   userId: string,
 ): Promise<OrgResult> {
-  // Org + owner-membership are one unit: a partial write (org row created but
-  // membership insert failing) would leave an orphan org nobody can access.
-  // Wrap both statements in a transaction so they commit or roll back together.
-  const org = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(organizations)
-      .values({
-        name,
-        slug,
-        createdBy: userId,
-        orgSettings: { api_version: CURRENT_API_VERSION },
-      })
-      .returning();
-
-    if (!created) throw new Error("Failed to create organization");
-
-    // Add creator as owner.
-    await tx.insert(organizationMembers).values({
-      orgId: created.id,
-      userId,
-      role: "owner",
-    });
-
-    return created;
-  });
+  // Org row, owner membership, default space and the owner's personal space are
+  // ONE unit — `provisionOrg` (`@appstrate/db/provision-org`), shared with the
+  // bootstrap path so neither can provision half an organization. The default
+  // space used to be created after this commit, outside the transaction, with a
+  // swallowed `.catch`.
+  const { org } = await db.transaction(async (tx) =>
+    provisionOrg(tx, {
+      name,
+      slug,
+      ownerUserId: userId,
+      orgSettings: { api_version: CURRENT_API_VERSION },
+    }),
+  );
 
   // The initial `orgSettings` write above is a settings writer like any other:
   // a pin read for this id that raced the insert (and cached "no pin" for a
@@ -337,22 +327,53 @@ export async function getOrgMemberWithProfile(orgId: string, userId: string) {
   };
 }
 
-export async function addMember(
+/**
+ * Make `userId` a member of `orgId` — the membership row AND their personal
+ * space, in the caller's transaction.
+ *
+ * THE membership door. Every path that creates one goes through it (org
+ * creation via `provisionOrg`, invitation accept, OIDC auto-provision,
+ * bootstrap), because a member without their personal space has nowhere
+ * private to work and nothing to receive a share into (RBAC spec §3.6). There
+ * is deliberately no bare-insert variant to reach for.
+ *
+ * ON CONFLICT DO NOTHING makes the membership half idempotent AND
+ * transaction-safe. A plain INSERT that hits the (org_id, user_id) PK would
+ * raise — and inside an enclosing transaction a raised statement ABORTS the
+ * whole transaction, so a caught-and-swallowed error would still poison the
+ * surrounding tx. The conflict clause turns "already a member" into a clean
+ * no-op (the existing row, and its role, are left untouched — no silent
+ * downgrade), and the space half is idempotent for its own reasons, so
+ * re-provisioning an existing member is safe.
+ */
+export async function provisionMember(
+  tx: DbOrTx,
   orgId: string,
   userId: string,
   role: OrgRole = "member",
-  tx: DbOrTx = db,
-): Promise<void> {
-  // ON CONFLICT DO NOTHING makes this idempotent AND transaction-safe. A plain
-  // INSERT that hits the (org_id, user_id) PK would raise — and inside an
-  // enclosing transaction a raised statement ABORTS the whole transaction, so
-  // a caught-and-swallowed error would still poison the surrounding tx. The
-  // conflict clause turns "already a member" into a clean no-op (the existing
-  // row, and its role, are left untouched — no silent downgrade).
-  await tx.insert(organizationMembers).values({ orgId, userId, role }).onConflictDoNothing();
+): Promise<{ created: boolean }> {
+  const inserted = await tx
+    .insert(organizationMembers)
+    .values({ orgId, userId, role })
+    .onConflictDoNothing()
+    .returning({ orgId: organizationMembers.orgId });
+  await ensurePersonalSpace(tx, orgId, userId);
+  // `created: false` is how a caller tells the LOSER of a concurrent-provision
+  // race from a winner — the OIDC auto-join needs it, and re-reading the row
+  // could not answer it.
+  return { created: inserted.length > 0 };
 }
 
-export async function removeMember(orgId: string, userId: string): Promise<void> {
+/**
+ * @returns the ids of the personal spaces this removal put on the offboarding
+ *   clock, so the route can record them on `org.member_removed`. Without them
+ *   the audit trail says a member left and nothing about the space that now has
+ *   30 days to live — which is exactly the row an owner has to act on.
+ */
+export async function removeMember(
+  orgId: string,
+  userId: string,
+): Promise<{ orphanedSpaceIds: string[] }> {
   // One transaction: the member row, the member's notifications, the member's
   // explicit space roles AND the member's schedules in this org are handled
   // atomically. The member's runs
@@ -364,7 +385,7 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
   // removed member's user row survives (multi-org) — without the disable here
   // their schedules would keep firing under the revoked identity (CRIT-13).
   // A throw inside rolls everything back.
-  const disabledScheduleIds = await db.transaction(async (tx) => {
+  const { disabledScheduleIds, orphanedSpaceIds } = await db.transaction(async (tx) => {
     const deleted = await tx
       .delete(organizationMembers)
       .where(
@@ -395,6 +416,13 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
     // the person is re-invited.
     await deleteSpaceMembershipsInOrg(tx, orgId, userId);
 
+    // Start the offboarding window on the personal space they owned here. The
+    // space is NOT deleted now: for 30 days an owner or admin can convert it to
+    // a team space and keep what is in it, and a re-invite inside the window
+    // gives it back to them untouched (`ensurePersonalSpace`). After that the
+    // `personal-space-sweeper` worker empties and deletes it (spec §3.6).
+    const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
+
     // Disable (not delete — the row is org history) every schedule the
     // removed member owns as its execution actor in THIS org.
     const disabled = await tx
@@ -404,7 +432,7 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
         and(eq(schedules.orgId, orgId), eq(schedules.userId, userId), eq(schedules.enabled, true)),
       )
       .returning({ id: schedules.id });
-    return disabled.map((row) => row.id);
+    return { disabledScheduleIds: disabled.map((row) => row.id), orphanedSpaceIds };
   });
 
   // Queue removal can't join the DB transaction; run it after commit,
@@ -412,6 +440,7 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
   // the scheduler is the backstop for any repeatable job that survives a
   // crash between the commit and this call.
   await removeScheduleJobs(disabledScheduleIds);
+  return { orphanedSpaceIds };
 }
 
 /** @returns the explicit space grants the promotion revoked, for the audit trail. */
@@ -444,33 +473,6 @@ export async function updateMemberRole(
       ? await deleteSpaceMembershipsInOrg(tx, orgId, userId)
       : [];
   });
-}
-
-/**
- * Run statuses that make an organization undeletable. Deleting the org
- * cascade-drops `runs`/`run_logs`, so removing one while a run is live would
- * rip the rows out from under an executing container.
- */
-const IN_PROGRESS_RUN_STATUSES = ["pending", "running"] as const;
-
-/**
- * Single definition of "this org has live runs", shared by the pre-flight
- * assertion below and the in-transaction backstop in `deleteOrganization`.
- * Both must agree exactly: if the pre-flight used a narrower status set the
- * route would fire `onOrgDelete` for an org the transaction then refuses to
- * delete — the precise failure the pre-flight exists to prevent.
- *
- * `handle` accepts the base client (pre-flight, own snapshot) or an open
- * transaction (backstop, sees the transaction's locks).
- */
-async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<number> {
-  const [row] = await handle
-    .select({ inProgressCount: count() })
-    .from(runs)
-    .where(
-      scopedWhere(runs, { orgId, extra: [inArray(runs.status, [...IN_PROGRESS_RUN_STATUSES])] }),
-    );
-  return row?.inProgressCount ?? 0;
 }
 
 /**
@@ -510,7 +512,7 @@ export async function reserveOrgDeletion(orgId: string): Promise<void> {
       .for("update");
     if (!org) throw new Error("Failed to delete organization: not found");
 
-    if ((await countInProgressRuns(tx, orgId)) > 0) {
+    if ((await countInProgressRuns(tx, { orgId })) > 0) {
       throw new Error("Cannot delete organization: runs are in progress");
     }
 
@@ -546,7 +548,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
       .for("update");
     if (!lockedOrg) throw new Error("Failed to delete organization: not found");
 
-    if ((await countInProgressRuns(tx, orgId)) > 0) {
+    if ((await countInProgressRuns(tx, { orgId })) > 0) {
       throw new Error("Cannot delete organization: runs are in progress");
     }
 

@@ -361,7 +361,10 @@ export async function listOrgItems(
       version: typeof m.version === "string" ? m.version : null,
       auto_installed: row.autoInstalled,
       forked_from: row.forkedFrom ?? null,
-      home_space_id: row.homeSpaceId,
+      // camelCase, and NOT on the wire: the route projects the pair
+      // `home_space_id` / `home_writable` through `homeWireForCaller`, which
+      // needs the caller's reach and so cannot live in a service.
+      homeSpaceId: row.homeSpaceId,
     };
   });
 }
@@ -386,7 +389,8 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
   return {
     id: data.id,
     orgId: data.orgId,
-    home_space_id: data.homeSpaceId,
+    // camelCase, and NOT on the wire — see the note in `listOrgItems`.
+    homeSpaceId: data.homeSpaceId,
     name: getPackageDisplayName(data),
     description: m.description ?? null,
     content: data.draftContent,

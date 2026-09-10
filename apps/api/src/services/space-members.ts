@@ -56,7 +56,12 @@ export async function resolveOrgMemberEmail(orgId: string, email: string): Promi
  */
 export async function listSpaceMembers(
   orgId: string,
-  space: { id: string; visibility: string; defaultRole: SpaceRolePreset },
+  space: {
+    id: string;
+    visibility: string;
+    defaultRole: SpaceRolePreset;
+    ownerUserId: string | null;
+  },
   includeImplicit: boolean,
 ): Promise<SpaceMember[]> {
   const explicitRows = await db
@@ -103,10 +108,15 @@ export async function listSpaceMembers(
   for (const row of orgRows) {
     const found = explicit.get(row.userId);
     const orgRole = row.role;
+    // The fourth argument is the user THIS row is about, not the request's
+    // caller: the question asked of the resolver is "what would this person
+    // hold here". On a personal space that answers `admin` for its owner and
+    // `null` for everyone else, so the list is the owner alone (decision 10).
     const effective = resolveSpaceRole(
       orgRole,
       { id: space.id, ...spaceAccess(space) },
       found ? { ref: toRef(found) } : null,
+      row.userId,
     );
     if (!effective) continue;
     out.push({
@@ -123,10 +133,15 @@ export async function listSpaceMembers(
   return out;
 }
 
-function spaceAccess(space: { visibility: string; defaultRole: SpaceRolePreset }) {
+function spaceAccess(space: {
+  visibility: string;
+  defaultRole: SpaceRolePreset;
+  ownerUserId: string | null;
+}) {
   return {
     visibility: space.visibility as "open" | "closed" | "private",
     defaultRole: space.defaultRole,
+    ownerUserId: space.ownerUserId,
   };
 }
 
@@ -162,6 +177,7 @@ export async function saveSpaceMember(params: {
   // Serialize with org promotion/removal, which lock this row before cleaning
   // up space memberships. A transaction alone would still allow stale grants.
   return db.transaction(async (tx) => {
+    await assertSpaceTakesMembers(tx, spaceId);
     const target = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
     const targetRole = target?.role;
     if (!targetRole) throw notFound("User is not a member of this organization");
@@ -199,6 +215,27 @@ export async function saveSpaceMember(params: {
       .returning({ userId: spaceMembers.userId });
     if (inserted.length === 0) throw existingSpaceMember();
   });
+}
+
+/**
+ * A personal space has exactly one member — its owner — and no row for them
+ * (RBAC spec §3.6, decision 10). "Personal" has to mean one thing: collaboration
+ * goes through a team space, distribution through sharing. Converting the space
+ * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable.
+ */
+async function assertSpaceTakesMembers(tx: DbOrTx, spaceId: string): Promise<void> {
+  const [space] = await tx
+    .select({ ownerUserId: spaces.ownerUserId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
+    .limit(1);
+  if (space?.ownerUserId) {
+    throw conflict(
+      "personal_space_has_no_members",
+      "A personal space belongs to one member and takes no others. " +
+        "Convert it to a team space first.",
+    );
+  }
 }
 
 function existingSpaceMember() {
@@ -241,6 +278,10 @@ export async function deleteSpaceMembershipsInOrg(
   orgId: string,
   userId: string,
 ): Promise<RevokedSpaceAssignment[]> {
+  // Every space of the org, personal ones included, and that is not a leak:
+  // a personal space holds no `space_members` row at all
+  // ({@link assertSpaceTakesMembers}), so a promotion has nothing to revoke
+  // there and cannot reach inside one.
   const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
   if (orgSpaces.length === 0) return [];
   return tx

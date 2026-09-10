@@ -28,7 +28,7 @@ import {
 import { recordStorageDeletionSweep, recordStorageDeletionResult } from "@appstrate/core/telemetry";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
-import { prefixedId } from "../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";

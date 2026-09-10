@@ -523,12 +523,17 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
     throw forbidden("You cannot remove this member");
   }
 
-  await removeMember(orgId, targetUserId);
+  const { orphanedSpaceIds } = await removeMember(orgId, targetUserId);
   await recordAuditFromContext(c, {
     action: "org.member_removed",
     resourceType: "member",
     resourceId: targetUserId,
     orgIdOverride: orgId,
+    // The personal space(s) the removal put on the 30-day clock (RBAC spec
+    // §3.6). Named here because this is the event an owner comes back to when
+    // deciding whether to convert one or sweep it: the sweeper's own log line
+    // arrives 30 days later, and by then the space is gone.
+    after: { orphanedSpaceIds },
   });
   return c.body(null, 204);
 });

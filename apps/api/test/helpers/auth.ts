@@ -20,7 +20,7 @@ import { eq, sql } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
 import { db } from "./db.ts";
 import { seedSpaceMember } from "./seed.ts";
-import { prefixedId, SPACE_ID_RE } from "../../src/lib/ids.ts";
+import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   organizations,
   organizationMembers,

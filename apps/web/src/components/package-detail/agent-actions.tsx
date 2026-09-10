@@ -94,6 +94,7 @@ export function AgentActions({
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}
         homeSpaceId={detail.home_space_id}
+        homeWritable={detail.home_writable}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}

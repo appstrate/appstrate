@@ -69,12 +69,19 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
 
   // The default space must stay `open` — the API answers 400 otherwise, and a
   // DB check backs it, so the control is disabled rather than merely warned on.
+  // A PERSONAL space locks both controls for a stronger reason: it is always
+  // `private` and has no implicit members, so `PATCH` accepts nothing but the
+  // name (409 `personal_space_immutable`, RBAC spec §3.6).
   const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
   const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
   const visibility = editedVisibility ?? space.visibility;
   const defaultRole = editedDefaultRole ?? space.default_role;
   const defaultRoleLocked =
-    rolesLoading || !!rolesError || presetOptions.length === 0 || updateMutation.isPending;
+    space.personal ||
+    rolesLoading ||
+    !!rolesError ||
+    presetOptions.length === 0 ||
+    updateMutation.isPending;
 
   const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
     values: { name: space.name },
@@ -87,8 +94,9 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
         body: {
           name: data.name.trim(),
           settings: { allowedRedirectDomains: activeDomains },
-          visibility,
-          default_role: defaultRole,
+          // Sending the unchanged values would still be a 409 on a personal
+          // space: the route refuses the FIELD, not a change of value.
+          ...(space.personal ? {} : { visibility, default_role: defaultRole }),
         },
       },
       { onSuccess: () => toast.success(t("spaces.saved")) },
@@ -122,7 +130,7 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
             <RadioGroup
               value={visibility}
               onValueChange={(value) => setEditedVisibility(value as SpaceVisibility)}
-              disabled={space.isDefault || updateMutation.isPending}
+              disabled={space.personal || space.isDefault || updateMutation.isPending}
               aria-label={t("spaces.visibilityLabel")}
             >
               {SPACE_VISIBILITIES.map((value) => (
@@ -144,7 +152,10 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
                 </Field>
               ))}
             </RadioGroup>
-            <FieldDescription>{t("spaces.adminAccessHint")}</FieldDescription>
+            {!space.personal && <FieldDescription>{t("spaces.adminAccessHint")}</FieldDescription>}
+            {space.personal && (
+              <FieldDescription>{t("spaces.personal.settingsLocked")}</FieldDescription>
+            )}
             {space.isDefault && (
               <FieldDescription>{t("spaces.visibilityDefaultLocked")}</FieldDescription>
             )}
@@ -239,7 +250,9 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
       {/* Deleting a space is an ORG-level grant (`DELETE /api/spaces/:id`),
           not part of governing this one — a space admin who is an org member
           holds `space-settings:write` and still cannot delete it. */}
-      {!space.isDefault && can("spaces:delete") && (
+      {/* A personal space is not deletable here at all: it goes away through
+          offboarding (409 `personal_space_not_deletable`, RBAC spec §3.6). */}
+      {!space.isDefault && !space.personal && can("spaces:delete") && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("spaces.dangerZone")}

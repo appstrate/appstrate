@@ -14,16 +14,19 @@ import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
+  createTestUser,
   authHeaders,
   enableDashboardSso,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
+import { seedSpace } from "../../../../../../test/helpers/seed.ts";
 import oidcModule from "../../../index.ts";
 import {
   oauthClient,
   oauthAccessToken,
   oauthRefreshToken,
   oauthConsent,
+  spaces,
 } from "@appstrate/db/schema";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -355,6 +358,52 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       body: JSON.stringify(spaceLevelBody(ctx, { name: undefined })),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("POST refuses a client pinned to a PERSONAL space (409)", async () => {
+    // A client is an automation identity that outlives the session which
+    // registered it; a personal space belongs to one member and is removed when
+    // they leave (RBAC spec §3.6). Same reasoning as `POST /api/api-keys`, and
+    // a 409 for the same reason: only that space's owner reaches it at all.
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Mon espace",
+      visibility: "private",
+      ownerUserId: ctx.user.id,
+    });
+
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(spaceLevelBody(ctx, { referencedSpaceId: personal.id })),
+    });
+    expect(res.status, await res.clone().text()).toBe(409);
+    expect((await res.json()) as { code: string }).toMatchObject({
+      code: "personal_space_takes_no_oauth_clients",
+    });
+  });
+
+  it("GET /api/oauth/clients enumerates TEAM spaces only", async () => {
+    // The listing joins every space of the org to find space-level clients, so
+    // it named a member's personal space to every other administrator. No
+    // client can be registered in one any more (the 409 above), which is why
+    // the state is built by making the space personal AFTER the fact — a
+    // backstop is only tested by producing what it guards against.
+    const side = await seedSpace({ orgId: ctx.orgId, name: "Side", visibility: "private" });
+    const created = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(spaceLevelBody(ctx, { name: "Hidden", referencedSpaceId: side.id })),
+    });
+    expect(created.status, await created.clone().text()).toBe(201);
+
+    const departed = await createTestUser();
+    await db.update(spaces).set({ ownerUserId: departed.id }).where(eq(spaces.id, side.id));
+
+    const res = await app.request("/api/oauth/clients", { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { name: string | null }[] };
+    expect(body.data.map((c) => c.name)).not.toContain("Hidden");
   });
 
   it("GET /api/oauth/clients lists every client visible to the org", async () => {
