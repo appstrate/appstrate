@@ -66,6 +66,19 @@ const DEFAULT_TOTAL_MS = 20 * 60_000;
 /** Never fire `onProgress` more than once per this interval (plus a final tick). */
 const PROGRESS_THROTTLE_MS = 250;
 
+/**
+ * Bytes buffered in the destination `FileSink` before it flushes to disk.
+ *
+ * Load-bearing, not a tuning knob: a `FileSink` opened WITHOUT a
+ * `highWaterMark` accumulates every written chunk in memory and flushes only
+ * on `end()` — which for a 113 MB CLI binary is the whole artifact resident,
+ * exactly the buffering this streaming helper exists to avoid (see the module
+ * doc above). With an explicit watermark, peak resident bytes are bounded by
+ * ~one watermark. Same value, and the same reason, as core's streaming upload
+ * (`packages/core/src/storage-fs.ts`).
+ */
+const SINK_FLUSH_BYTES = 1024 * 1024;
+
 /** Reason tags carried on the AbortController so the catch can explain itself. */
 const STALL = Symbol("stall");
 const TOTAL = Symbol("total");
@@ -148,7 +161,7 @@ export async function streamDownload(
       throw new Error(`GET ${url} → empty response body`);
     }
 
-    sink = Bun.file(destPath).writer();
+    sink = Bun.file(destPath).writer({ highWaterMark: SINK_FLUSH_BYTES });
     const reader = res.body.getReader();
     armStall();
     try {
@@ -158,7 +171,13 @@ export async function streamDownload(
         armStall();
         const bytes = chunk.value;
         hasher.update(bytes);
-        sink.write(bytes);
+        // AWAITED: `FileSink.write` returns `number | Promise<number>`, and
+        // returns the promise exactly when the sink has to drain — which is
+        // what `SINK_FLUSH_BYTES` above makes happen. Un-awaited it dropped
+        // both the backpressure and the rollback: a mid-write failure left the
+        // `catch` below untriggered and escaped as an unhandled rejection
+        // (fatal in Bun), so the partial file at `destPath` was never unlinked.
+        await sink.write(bytes);
         received += bytes.byteLength;
         emit(false, total);
       }

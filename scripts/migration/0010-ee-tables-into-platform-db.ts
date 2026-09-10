@@ -477,7 +477,7 @@ async function move(src: SQL, target: SQL, targetUrl: string, apply: boolean): P
   const plans = await planTables(src, prefix);
 
   const sourceCounts = await Promise.all(
-    plans.map((plan) => (plan.source === null ? null : countRows(src, plan.source))),
+    plans.map(async (plan) => (plan.source === null ? null : await countRows(src, plan.source))),
   );
   const before = await Promise.all(EE_TABLES.map((t) => countRows(target, t)));
 
