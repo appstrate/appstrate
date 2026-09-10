@@ -117,6 +117,24 @@ export function isInvalidTextRepresentation(err: unknown): boolean {
 }
 
 /**
+ * True when a DB error is a referential-integrity violation on write:
+ * PostgreSQL raises `23503` (foreign_key_violation), while PGlite (tier 0)
+ * surfaces an `ON DELETE RESTRICT` as `23001` (restrict_violation). Both mean
+ * "rows still reference this one". Walks the `cause` chain for the same reason
+ * {@link isUniqueViolation} does.
+ */
+export function isForeignKeyViolation(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; current != null && depth < 5; depth++) {
+    if (typeof current !== "object") break;
+    const code = (current as { code?: unknown }).code;
+    if (code === "23503" || code === "23001") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * True when a DB error is Postgres `23505` (unique_violation). Walks the
  * `cause` chain for the same reason {@link isInvalidTextRepresentation} does:
  * Drizzle wraps the driver error in a `DrizzleQueryError` whose own `code` is

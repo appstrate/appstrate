@@ -35,6 +35,7 @@ import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstra
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
+import { isForeignKeyViolation } from "../lib/db-helpers.ts";
 import {
   ApiError,
   conflict,
@@ -74,27 +75,6 @@ export const updateSchema = z
     apiKey: z.string().min(1).optional(),
   })
   .strict();
-
-/** PG referential-integrity violation on delete. PostgreSQL raises
- * `foreign_key_violation` (23503); PGlite (tier 0) surfaces `ON DELETE
- * RESTRICT` as `restrict_violation` (23001). Both mean "rows still
- * reference this credential". */
-function isForeignKeyViolation(err: unknown): boolean {
-  const code = pgErrorCode(err);
-  return code === "23503" || code === "23001";
-}
-
-/** Walk the `cause` chain for a SQLSTATE `code` — Drizzle (and the PGlite
- * driver) wrap the underlying driver error one or more levels deep. */
-function pgErrorCode(err: unknown): string | undefined {
-  let cur: unknown = err;
-  for (let depth = 0; depth < 5 && typeof cur === "object" && cur !== null; depth++) {
-    const code = (cur as { code?: unknown }).code;
-    if (typeof code === "string") return code;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
 
 /** Exactly one of `credential_id` or inline `provider_id` + `api_key`; the route enforces which. */
 export const discoverSchema = z
