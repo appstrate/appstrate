@@ -4,9 +4,7 @@
 
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { CircleX, TriangleAlert } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
-import { cn } from "@appstrate/ui/cn";
+import { HealthIssueBadge } from "../health-card";
 import { Modal } from "../modal";
 import type { AgentDiagnostics } from "../../hooks/use-agent-diagnostics";
 import {
@@ -33,15 +31,10 @@ export function AgentDiagnosticsIssueBadge({
 }) {
   const { t } = useTranslation("agents");
   if (result.status === "healthy") return null;
-  const Icon = result.status === "blocking" ? CircleX : TriangleAlert;
   return (
-    <Badge
-      variant={result.status === "blocking" ? "failed" : "warning"}
-      className={cn("gap-1", className)}
-    >
-      <Icon className="size-3" aria-hidden />
+    <HealthIssueBadge blocking={result.status === "blocking"} className={className}>
       {agentDiagnosticsLabel(result, t)}
-    </Badge>
+    </HealthIssueBadge>
   );
 }
 

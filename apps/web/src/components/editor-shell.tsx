@@ -2,12 +2,20 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@appstrate/ui/components/select";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Braces, BrainCircuit, Code2, FileText, PackageOpen, Plug, Settings2 } from "lucide-react";
 import { Spinner } from "./spinner";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { PanelDialog } from "./panel-dialog";
+import { SettingsHeading } from "./settings/settings-heading";
 import { RailButton } from "./settings/rail-link";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
@@ -155,25 +163,45 @@ export function EditorShell({
       <PanelDialog
         title={dialogTitle}
         rail={rail}
+        mobileNav={
+          <Select value={activeTab} onValueChange={onTabChange}>
+            <SelectTrigger aria-label={dialogTitle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {tabs.map((tab) => (
+                <SelectItem key={tab.id} value={tab.id}>
+                  {tab.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
         contentScrollArea
         reserveCloseArea
         closeLabel={t("btn.close")}
         contentFooter={
           !hideSubmitBar ? (
-            <div className="bg-background border-border flex min-h-16 shrink-0 items-center gap-3 border-t px-6 py-3">
+            <div className="bg-background border-border flex min-h-16 shrink-0 items-center gap-3 border-t px-6 py-3 max-lg:flex-col max-lg:items-stretch">
               <span className="text-muted-foreground text-sm">
                 {isDirty ? t("unsaved.title", { ns: "common" }) : t("editor.noUnsavedChanges")}
               </span>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex items-center gap-2 max-lg:ml-0 max-lg:w-full">
                 <Button
                   variant="outline"
                   type="button"
                   onClick={onDiscardChanges}
+                  className="max-lg:min-w-0 max-lg:flex-1 max-lg:px-2 max-lg:text-xs"
                   disabled={!isDirty || !onDiscardChanges}
                 >
                   {t("editor.discardChanges")}
                 </Button>
-                <Button type="button" onClick={onSubmit} disabled={!isDirty || isPending}>
+                <Button
+                  type="button"
+                  onClick={onSubmit}
+                  disabled={!isDirty || isPending}
+                  className="max-lg:min-w-0 max-lg:flex-1 max-lg:px-2 max-lg:text-xs"
+                >
                   {isPending ? <Spinner /> : t("btn.save")}
                 </Button>
               </div>
@@ -183,19 +211,19 @@ export function EditorShell({
         onClose={onCancel}
       >
         <div className="space-y-4">
-          <div>
-            <h2 className="text-2xl font-semibold">
-              {tabs.find((tab) => tab.id === activeTab)?.label}
-            </h2>
-            {activeDescription && (
-              <p className="text-muted-foreground mt-1 max-w-2xl text-sm">{activeDescription}</p>
-            )}
-            {activeSecondaryDescription && (
-              <p className="text-muted-foreground mt-2 max-w-2xl text-sm">
-                {activeSecondaryDescription}
-              </p>
-            )}
-          </div>
+          <SettingsHeading
+            title={tabs.find((tab) => tab.id === activeTab)?.label}
+            description={
+              activeDescription || activeSecondaryDescription ? (
+                <>
+                  {activeDescription}
+                  {activeSecondaryDescription && (
+                    <p className="mt-2">{activeSecondaryDescription}</p>
+                  )}
+                </>
+              ) : undefined
+            }
+          />
           {error && (
             <div className="bg-destructive/15 text-destructive rounded-md px-3 py-2 text-sm">
               {error}

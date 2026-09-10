@@ -54,13 +54,11 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   return (
     <div>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <p className="text-muted-foreground max-w-xl text-sm">
-          {t(
-            level === "application"
-              ? "settings:oauthClients.introApp"
-              : "settings:oauthClients.introOrg",
-          )}
-        </p>
+        {level === "application" && (
+          <p className="text-muted-foreground max-w-xl text-sm">
+            {t("settings:oauthClients.introApp")}
+          </p>
+        )}
         <SettingsPageActions>
           <PageActionsMenu>
             <DropdownMenuItem data-page-action="create" onSelect={() => setSelectedClient("new")}>

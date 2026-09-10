@@ -18,6 +18,8 @@ import { pickActiveEntry, type PackageFileEntry } from "../../lib/package-file-t
 import { LoadingState, ErrorState, EmptyState } from "../page-states";
 import { ReadOnlyFileTree } from "./read-only-file-tree";
 import { FilePreview } from "./file-preview";
+import { Input } from "@appstrate/ui/components/input";
+import { AgentDetailSplit, AgentDetailPaneHeader } from "../agent-detail/agent-detail-split";
 
 interface FileExplorerProps {
   packageId: string;
@@ -29,6 +31,7 @@ interface FileExplorerProps {
 export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
   const { t } = useTranslation("agents");
   const scope = useOrgScope();
+  const [search, setSearch] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   // Ties the tree to the panel it drives (`aria-controls` → `id`).
   const previewId = useId();
@@ -69,16 +72,46 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-      <ReadOnlyFileTree
-        entries={entries}
-        selectedPath={activeEntry.path}
-        onSelect={setSelectedPath}
-        label={t("files.treeLabel")}
-        controlsId={previewId}
-        className="border-border bg-card max-h-[560px] rounded-lg border p-1"
-      />
-      <FilePreview id={previewId} packageId={packageId} version={version} entry={activeEntry} />
+    <div className="@container/package-files">
+      <AgentDetailSplit
+        className="@max-2xl/package-files:grid-cols-1"
+        railClassName="@max-2xl/package-files:border-r-0 @max-2xl/package-files:border-b"
+        rail={
+          <>
+            <AgentDetailPaneHeader>
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("files.search")}
+                aria-label={t("files.search")}
+                className="h-8"
+              />
+            </AgentDetailPaneHeader>
+            {search &&
+              !entries.some((entry) =>
+                entry.path.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+              ) && <p className="text-muted-foreground px-3 py-4 text-xs">{t("files.noMatch")}</p>}
+            <ReadOnlyFileTree
+              entries={entries.filter((entry) =>
+                entry.path.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+              )}
+              selectedPath={activeEntry.path}
+              onSelect={setSelectedPath}
+              label={t("files.treeLabel")}
+              controlsId={previewId}
+              className="bg-card max-h-[560px] p-3"
+            />
+          </>
+        }
+      >
+        <FilePreview
+          id={previewId}
+          packageId={packageId}
+          version={version}
+          entry={activeEntry}
+          className="rounded-none border-0"
+        />
+      </AgentDetailSplit>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { lazy, Suspense, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useParams, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -13,18 +13,15 @@ import {
   useAgentBundleExport,
   usePackageDownload,
   useDeletePackage,
-  useAgents,
   useVersionInfo,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { EmptyState, LoadingState } from "../components/page-states";
-import { CardGrid } from "../components/card-grid";
+import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
-import { Layers } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 
 // Shared components
@@ -35,8 +32,7 @@ import { VersionBanners } from "../components/version-banners";
 import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { FileExplorer } from "../components/package-files/file-explorer";
-import { ManifestOverview } from "../components/package-manifest/manifest-overview";
-import { primaryDisplayFile } from "../lib/package-files";
+import { PackageOverview } from "../components/package-detail/package-overview";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
@@ -47,7 +43,7 @@ import { AgentSettingsView } from "../components/agent-detail/agent-settings-vie
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { RunAgentButton } from "../components/run-agent-button";
-import { PackageCard } from "../components/package-card";
+import { PackageUsage } from "../components/package-detail/package-usage";
 import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 
 type DetailTab =
@@ -168,7 +164,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
 
   // Agents list for "Used by" tab enrichment
-  const { data: allAgents } = useAgents();
 
   // Type-narrowed aliases for type-specific branches
   const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
@@ -223,20 +218,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     type === "agent"
       ? [...AGENT_DETAIL_TABS]
       : ["overview", "versions", "diff", "content", "usedBy"];
-  // Agents open on their installation overview. Every other type opens where its SUBSTANCE
-  // lives, which `lib/package-files.ts` already encodes and which does not
-  // depend on how much metadata the author happened to fill in: a skill IS its
-  // SKILL.md (`source: "content"`) → open the files; an mcp-server IS its
-  // manifest (`source: "manifest"`, it has no content file at all) → open the
-  // rendered view. Same distinction that made the old content tab carry a
-  // filename as its label. Pure derivation, so a URL that already names a tab
-  // still wins in `useTabWithHash`.
-  const defaultTab: DetailTab =
-    type === "agent"
-      ? "overview"
-      : primaryDisplayFile(type).source === "content"
-        ? "content"
-        : "overview";
+  // Every detail has a useful summary; explicit file/version deep links still win.
+  const defaultTab: DetailTab = "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   const openAgentSettings = (section: "map" | "files" | "model") => {
     const search = new URLSearchParams(location.search);
@@ -350,6 +333,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     source: source ?? ("local" as const),
     type,
     version: isHistoricalVersion ? versionDetail?.version : version,
+    icon:
+      type === "agent"
+        ? agentDetail?.icon
+        : typeof pkgDetail?.manifest?.icon === "string"
+          ? pkgDetail.manifest.icon
+          : undefined,
+    color: type === "agent" ? agentDetail?.color : undefined,
   };
 
   // ── Render ──
@@ -367,7 +357,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // The rendered manifest, next to the raw artifact it comes from.
   const overviewTab: { id: DetailTab; label: string } = {
     id: "overview",
-    label: t("detail.tabOverview"),
+    label: t("detail.overview.summary"),
   };
 
   const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
@@ -409,13 +399,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         isHistoricalVersion={isHistoricalVersion}
         hasUnarchivedChanges={hasArchivableChanges}
         latestPublishedVersion={versionInfo?.latest_published_version}
-        activeSubpage={
-          type === "agent"
-            ? {
-                label: agentTabLabels[tab as (typeof AGENT_DETAIL_TABS)[number]],
-              }
-            : undefined
-        }
+        activeSubpage={{
+          label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
+        }}
         statusBadges={
           type === "agent" ? (
             <AgentReadinessBadge packageId={packageId} versionLabel={versionLabel} />
@@ -446,6 +432,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           ) : (
             <div className="flex items-center gap-2">
               <PackageActionsDropdown
+                labelledTrigger
                 packageId={packageId}
                 type={type}
                 isOwned={isOwned}
@@ -592,67 +579,59 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {type !== "agent" && (
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
-          <div className="max-w-full overflow-x-auto pb-1">
-            <TabsList className="w-max">
-              {tabDefs.map((td) => (
-                <TabsTrigger key={td.id} value={td.id}>
-                  {td.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-        </Tabs>
-      )}
-
-      {/* Non-Agent tab content */}
-      {/* Both follow the version being viewed: the explorer through
+        <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
+          <DetailTabsList className="mt-6 mb-3">
+            {tabDefs.map((td) => (
+              <DetailTabsTrigger key={td.id} value={td.id}>
+                {td.label}
+              </DetailTabsTrigger>
+            ))}
+          </DetailTabsList>
+          {/* Non-Agent tab content */}
+          {/* Both follow the version being viewed: the explorer through
           `versionLabel`, the overview through the manifest picked above. */}
-      {type !== "agent" && tab === "overview" && (
-        <ManifestOverview manifest={effectiveManifest} type={type} />
-      )}
+          <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+            {pkgDetail && (
+              <PackageOverview
+                type={type}
+                description={unifiedForHeader.description}
+                content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
+                manifest={effectiveManifest}
+                version={unifiedForHeader.version}
+                historical={isHistoricalVersion}
+                agentCount={pkgDetail.agents.length}
+                onOpenFiles={() => setTab("content")}
+                onOpenUsage={() => setTab("usedBy")}
+              />
+            )}
+          </TabsContent>
 
-      {type !== "agent" && tab === "content" && (
-        <FileExplorer packageId={packageId} type={type} version={versionLabel} />
-      )}
+          <TabsContent
+            value="content"
+            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+          >
+            <FileExplorer packageId={packageId} type={type} version={versionLabel} />
+          </TabsContent>
 
-      {type !== "agent" &&
-        tab === "usedBy" &&
-        pkgDetail &&
-        (() => {
-          const agentIds = new Set(pkgDetail.agents.map((a) => a.id));
-          const enrichedAgents = allAgents?.filter((a) => agentIds.has(a.id)) ?? [];
-          return (
-            <CardGrid
-              items={enrichedAgents}
-              itemKey={(agent) => agent.id}
-              renderCard={(agent) => (
-                <PackageCard
-                  id={agent.id}
-                  displayName={agent.display_name ?? agent.id}
-                  description={agent.description ?? null}
-                  type="agent"
-                  source={agent.source}
-                  keywords={agent.keywords}
-                  runningRuns={agent.running_runs}
-                />
-              )}
-              empty={<EmptyState message={t("packages.noAgents")} icon={Layers} compact />}
-            />
-          );
-        })()}
+          <TabsContent value="usedBy" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+            {pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />}
+          </TabsContent>
 
-      {type !== "agent" && tab === "versions" && (
-        <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />
-      )}
+          <TabsContent value="versions" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+            <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />
+          </TabsContent>
 
-      {type !== "agent" && tab === "diff" && latestVersionForDiff && (
-        <DiffTab
-          type={type}
-          latestVersion={latestVersionForDiff}
-          currentManifest={currentManifest}
-          currentContent={currentContent}
-        />
+          <TabsContent value="diff" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+            {latestVersionForDiff && (
+              <DiffTab
+                type={type}
+                latestVersion={latestVersionForDiff}
+                currentManifest={currentManifest}
+                currentContent={currentContent}
+              />
+            )}
+          </TabsContent>
+        </Tabs>
       )}
 
       <CreateVersionModal

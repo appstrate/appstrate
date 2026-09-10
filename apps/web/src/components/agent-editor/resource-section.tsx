@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
-import { packageListPath } from "../../lib/package-paths";
+import { packageDetailPath, packageListPath } from "../../lib/package-paths";
 import {
   usePackageList,
   useUploadPackage,
@@ -22,8 +22,11 @@ import {
 } from "@appstrate/ui/components/select";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Button } from "@appstrate/ui/components/button";
-import { ShieldCheck, AlertTriangle } from "lucide-react";
+import { ShieldCheck, AlertTriangle, ArrowUpRight, SearchX } from "lucide-react";
 import { Spinner } from "../spinner";
+import { ListToolbar } from "../list-toolbar";
+import { Badge } from "@appstrate/ui/components/badge";
+import { ErrorState, EmptyState } from "../page-states";
 import { useActivateIntegration } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
@@ -59,6 +62,7 @@ function VersionSelect({
   value: string;
   onChange: (version: string) => void;
 }) {
+  const { t } = useTranslation("agents");
   const { data: versions, isLoading } = usePackageVersions(type, packageId);
   const available = useMemo(() => versions?.filter((v) => !v.yanked), [versions]);
   const ranges = useMemo(() => available?.map((v) => caretRange(v.version)) ?? [], [available]);
@@ -74,14 +78,18 @@ function VersionSelect({
   if (!available || available.length === 0) {
     return (
       <span className="bg-muted text-muted-foreground inline-block rounded px-2 py-0.5 font-mono text-xs">
-        *
+        {value || "*"}
       </span>
     );
   }
 
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-7 w-[100px] text-xs" onClick={(e) => e.stopPropagation()}>
+      <SelectTrigger
+        aria-label={t("editor.resourceVersion", { name: packageId })}
+        className="h-8 w-[100px] text-xs"
+        onClick={(e) => e.stopPropagation()}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -107,10 +115,17 @@ export function ResourceSection({
 }: ResourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resourceId = useId();
+  const [search, setSearch] = useState("");
+  const [selection, setSelection] = useState<string[]>([]);
   // Integrations must be active (installed + enabled) in this app to be
   // usable. Filter server-side (`?active=true`) so the editor never pulls the
   // full catalogue — only active integrations are offered.
-  const { data: items, isLoading } = usePackageList(type, {
+  const {
+    data: items,
+    isLoading,
+    error,
+  } = usePackageList(type, {
     activeOnly: type === "integration",
   });
   const upload = useUploadPackage(type);
@@ -201,9 +216,48 @@ export function ResourceSection({
     </label>
   );
 
+  const matchesFilter = (id: string, name = "", description = "") => {
+    const needle = search.trim().toLocaleLowerCase();
+    return (
+      `${id} ${name} ${description}`.toLocaleLowerCase().includes(needle) &&
+      (selection.length === 0 || selection.includes(selectedMap.has(id) ? "selected" : "available"))
+    );
+  };
+  const visibleItems = (items ?? []).filter((item) =>
+    matchesFilter(item.id, item.name ?? "", item.description ?? ""),
+  );
+  const visibleMissingIds = inactiveDeclaredIds.filter((id) => matchesFilter(id));
+
+  const toolbar = (
+    <ListToolbar
+      placement="panel"
+      panelFiltersAdjacent
+      search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
+      filters={[
+        {
+          id: "selection",
+          label: t("editor.resourceSelection"),
+          values: selection,
+          options: [
+            { value: "selected", label: t("editor.resourceSelected") },
+            { value: "available", label: t("editor.resourceAvailable") },
+          ],
+          onChange: setSelection,
+        },
+      ]}
+      actions={uploadButton}
+      onReset={() => {
+        setSearch("");
+        setSelection([]);
+      }}
+    />
+  );
+
   const content = (
     <>
-      {isLoading ? (
+      {error ? (
+        <ErrorState message={String(error)} compact />
+      ) : isLoading ? (
         <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />
         </div>
@@ -215,9 +269,9 @@ export function ResourceSection({
           </p>
         </>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="border-border flex flex-col border-t">
           {leadingItems}
-          {(items ?? []).map((item) => {
+          {visibleItems.map((item) => {
             const isSelected = selectedMap.has(item.id);
             const isBuiltIn = item.source === "system";
             const entry = selectedMap.get(item.id);
@@ -226,18 +280,20 @@ export function ResourceSection({
               <div
                 key={item.id}
                 className={cn(
-                  "border-border rounded-md border transition-colors",
-                  isSelected && "border-primary bg-primary/5",
+                  "border-border border-b transition-colors",
+                  isSelected && "bg-muted/10",
                 )}
               >
-                <label
-                  className={cn(
-                    "flex cursor-pointer items-center gap-2.5 px-3 py-2",
-                    !isSelected && "hover:bg-muted/50 rounded-md",
-                  )}
-                >
-                  <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
-                  <div className="flex min-w-0 flex-1 flex-col">
+                <div className="hover:bg-muted/30 flex items-center gap-2.5 py-4">
+                  <Checkbox
+                    id={`${resourceId}-${item.id}`}
+                    checked={isSelected}
+                    onCheckedChange={() => toggle(item.id)}
+                  />
+                  <label
+                    htmlFor={`${resourceId}-${item.id}`}
+                    className="flex min-w-0 flex-1 cursor-pointer flex-col"
+                  >
                     <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                       {item.name || item.id}
                       {isBuiltIn && (
@@ -249,7 +305,7 @@ export function ResourceSection({
                         {item.description}
                       </span>
                     )}
-                  </div>
+                  </label>
                   {isSelected && (
                     <div className="ml-auto shrink-0">
                       <VersionSelect
@@ -260,9 +316,19 @@ export function ResourceSection({
                       />
                     </div>
                   )}
-                </label>
+                  <Button asChild variant="ghost" size="icon" className="size-8 shrink-0">
+                    <Link
+                      to={packageDetailPath(type, item.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={t("editor.resourceOpen", { name: item.name || item.id })}
+                    >
+                      <ArrowUpRight className="size-4" />
+                    </Link>
+                  </Button>
+                </div>
                 {isSelected && type === "integration" && entry && (
-                  <div className="px-3 pb-3">
+                  <div className="pb-4">
                     <IntegrationToolPicker
                       packageId={item.id}
                       entry={entry}
@@ -282,10 +348,13 @@ export function ResourceSection({
               "activate it to connect it", and until now nothing on this screen
               could: the checkbox only removes the dependency. So the one action
               the sentence asks for had no button anywhere. */}
-          {inactiveDeclaredIds.map((id) => (
+          {visibleItems.length === 0 && visibleMissingIds.length === 0 && !leadingItems && (
+            <EmptyState icon={SearchX} message={t("editor.resourceNoMatch")} compact />
+          )}
+          {visibleMissingIds.map((id) => (
             <div
               key={id}
-              className="border-destructive/40 bg-destructive/5 flex items-center gap-2 rounded-md border pr-2"
+              className="border-destructive/40 bg-destructive/5 flex flex-wrap items-center gap-2 border-b pr-2"
             >
               <label className="flex flex-1 cursor-pointer items-center gap-2.5 px-3 py-2">
                 <Checkbox checked={selectedMap.has(id)} onCheckedChange={() => toggle(id)} />
@@ -320,21 +389,20 @@ export function ResourceSection({
 
   if (surface === "settings") {
     return (
-      <section className="space-y-4">
-        <div>
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-lg font-semibold">{title}</h3>
-            {uploadButton}
-          </div>
-          <div className="border-border mt-2 border-b" />
+      <section aria-label={title} className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold">{t("editor.resourceSelection")}</h3>
+          <Badge variant="secondary">{selectedEntries.length}</Badge>
         </div>
-        <div className="space-y-3">{content}</div>
+        {toolbar}
+        {content}
       </section>
     );
   }
 
   return (
-    <SectionCard title={title} headerRight={uploadButton}>
+    <SectionCard title={title}>
+      {toolbar}
       {content}
     </SectionCard>
   );

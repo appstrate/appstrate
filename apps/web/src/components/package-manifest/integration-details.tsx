@@ -22,7 +22,7 @@
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { IntegrationManifestDetails } from "../../lib/package-manifest";
-import { SectionCard } from "../section-card";
+import { DetailSectionCard as SectionCard } from "../detail-section-card";
 import { FactGrid } from "./manifest-fact";
 
 export function IntegrationDetails({ details }: { details: IntegrationManifestDetails }) {
@@ -32,7 +32,7 @@ export function IntegrationDetails({ details }: { details: IntegrationManifestDe
   return (
     <>
       {source && (
-        <SectionCard title={t("manifest.source")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.source")}>
           {source.kind === "local" && (
             <>
               <p className="text-sm">{t("manifest.sourceLocal")}</p>
@@ -63,7 +63,7 @@ export function IntegrationDetails({ details }: { details: IntegrationManifestDe
       )}
 
       {auths.length > 0 && (
-        <SectionCard title={t("manifest.auths")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.auths")}>
           {auths.map((auth) => (
             <div key={auth.id} className="border-border/40 border-b pb-3 last:border-b-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -96,7 +96,7 @@ export function IntegrationDetails({ details }: { details: IntegrationManifestDe
       )}
 
       {allowUndeclaredTools && (
-        <SectionCard title={t("manifest.toolsPolicy")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.toolsPolicy")}>
           <p className="text-muted-foreground text-xs">{t("manifest.allowUndeclaredTools")}</p>
         </SectionCard>
       )}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { SettingsHeading } from "../settings/settings-heading";
 import {
   Select,
   SelectContent,
@@ -483,10 +484,7 @@ export function SchemaSection({
   if (surface === "settings") {
     return (
       <section className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <div className="border-border mt-2 border-b" />
-        </div>
+        <SettingsHeading level="group" title={title} />
         <div className="space-y-3">{content}</div>
       </section>
     );

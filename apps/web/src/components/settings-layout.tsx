@@ -26,6 +26,7 @@ import type { LucideIcon } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AppVersion } from "./app-version";
 import { PanelDialog } from "./panel-dialog";
+import { SettingsHeading } from "./settings/settings-heading";
 import { openAsModal, useBackgroundLocation } from "../lib/modal-route";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -186,7 +187,7 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
       mobileNav={mobileNav}
       onClose={() => navigate(background?.pathname ?? "/", { replace: true })}
     >
-      {activeItem && <h3 className="mb-6 text-lg font-semibold">{activeItem.label}</h3>}
+      {activeItem && <SettingsHeading title={activeItem.label} />}
       <Outlet />
     </PanelDialog>
   );

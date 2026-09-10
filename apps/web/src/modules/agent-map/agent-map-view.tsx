@@ -27,9 +27,6 @@ import {
 import {
   ReactFlow,
   Background,
-  Controls,
-  MarkerType,
-  Panel,
   useReactFlow,
   useNodesState,
   useStore,
@@ -40,14 +37,11 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
+import { MapControls } from "../../components/map-controls";
+import { styleMapEdge } from "../../components/map-edge";
 import { Badge } from "@appstrate/ui/components/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+
 import { useAgentMap } from "./use-agent-map";
 import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
 import { ErrorState, LoadingState } from "../../components/page-states";
@@ -84,30 +78,6 @@ import {
  * `nodeTypes` object identity changes between renders.
  */
 const FIT_VIEW_OPTIONS = { padding: 0.06, maxZoom: 1 } as const;
-
-/**
- * Re-frames the graph whenever the canvas changes size: expanding to full
- * screen, resizing the window, collapsing the sidebar.
- *
- * Keyed on the STORE's width/height, not on the expand flag nor a DOM
- * ResizeObserver, because `fitView` frames against those store values and React
- * Flow only writes them after its own measurement pass — reacting any earlier
- * fits against stale numbers and silently leaves the zoom untouched.
- *
- * Note it does NOT gate on `useNodesInitialized()`: with these nodes that hook
- * stays false indefinitely, so gating on it means never fitting at all (measured
- * — an earlier version of this component did exactly that and did nothing).
- * The FIRST frame is handled by React Flow's own `fitView` prop.
- */
-function FitOnCanvasResize() {
-  const canvasSize = useStore((s) => `${Math.round(s.width)}x${Math.round(s.height)}`);
-  const { fitView } = useReactFlow();
-  useEffect(() => {
-    if (canvasSize === "0x0") return; // bootstrap frame, nothing measured yet
-    void fitView(FIT_VIEW_OPTIONS);
-  }, [fitView, canvasSize]);
-  return null;
-}
 
 /** Center the semantic target requested by a support/deep link. */
 function FocusDiagnosticTarget({ nodeId, requestKey }: { nodeId: string; requestKey: string }) {
@@ -365,68 +335,15 @@ function MeasuredSemanticLayout({
 const CONFIG_RELATION_IDS = new Set(["connections", "input_values", "schedules", "model", "proxy"]);
 
 function projectedEdge(edge: Edge): Edge {
-  if (edge.id === "input->agent" || edge.id === "agent->output") {
-    return {
-      ...edge,
-      type: "smoothstep",
-      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--foreground)" },
-      animated: false,
-      style: { stroke: "var(--foreground)", strokeWidth: 3 },
-      zIndex: 3,
-    };
-  }
-  if (edge.id.startsWith("dependency-")) {
-    return {
-      ...edge,
-      type: "smoothstep",
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: "var(--muted-foreground)",
-        width: 12,
-        height: 12,
-      },
-      animated: false,
-      style: {
-        stroke: "color-mix(in oklab, var(--muted-foreground) 70%, transparent)",
-        strokeWidth: 1.25,
-      },
-      zIndex: 3,
-    };
-  }
-  return {
-    ...edge,
-    type: "smoothstep",
-    animated: false,
-    ...(edge.id === "resolution-memory"
-      ? {
-          markerStart: {
-            type: MarkerType.ArrowClosed,
-            color: "var(--muted-foreground)",
-            width: 14,
-            height: 14,
-          },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: "var(--muted-foreground)",
-            width: 14,
-            height: 14,
-          },
-        }
-      : {
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: "var(--muted-foreground)",
-            width: 12,
-            height: 12,
-          },
-        }),
-    style: {
-      stroke: "var(--muted-foreground)",
-      strokeWidth: 1.75,
-      strokeDasharray: "7 5",
-    },
-    zIndex: 3,
-  };
+  return styleMapEdge(
+    edge,
+    edge.id === "input->agent" || edge.id === "agent->output"
+      ? "flow"
+      : edge.id.startsWith("dependency-")
+        ? "dependency"
+        : "resolution",
+    edge.id === "resolution-memory",
+  );
 }
 
 export function AgentMapView({
@@ -768,29 +685,7 @@ export function AgentMapView({
             onPaneClick={() => setSelectedRelation(null)}
           >
             <Background gap={24} size={1} />
-            <Controls position="top-right" showInteractive={false} style={{ top: 34 }} />
-            <Panel position="top-right">
-              <TooltipProvider delayDuration={250}>
-                <Tooltip>
-                  <div className="react-flow__controls">
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="react-flow__controls-button"
-                        onClick={() => setExpanded((value) => !value)}
-                        aria-label={expanded ? t("agent-map:collapse") : t("agent-map:expand")}
-                      >
-                        {expanded ? <Minimize2 /> : <Maximize2 />}
-                      </button>
-                    </TooltipTrigger>
-                  </div>
-                  <TooltipContent side="left">
-                    {expanded ? t("agent-map:collapse") : t("agent-map:expand")}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </Panel>
-            <FitOnCanvasResize />
+            <MapControls expanded={expanded} onToggle={() => setExpanded((value) => !value)} />
             <MeasuredSemanticLayout layoutKey={layoutKey} setNodes={setNodes} />
             {requestedDiagnostic && requestedNodeId && (
               <FocusDiagnosticTarget

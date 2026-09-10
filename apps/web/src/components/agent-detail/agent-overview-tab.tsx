@@ -4,12 +4,10 @@ import { useState } from "react";
 import { Link, useLocation, type To } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  Activity,
   ArrowRight,
   Brain,
   CalendarClock,
   ChartNoAxesCombined,
-  CircleX,
   Cpu,
   Database,
   FileInput,
@@ -20,7 +18,6 @@ import {
   Puzzle,
   Server,
   SlidersHorizontal,
-  TriangleAlert,
   Wrench,
 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -50,6 +47,8 @@ import {
   agentDiagnosticLocateTarget,
 } from "../../lib/agent-diagnostics";
 import { OverviewCardAction } from "../overview-card-action";
+import { OperationalStat } from "../operational-stat";
+import { HealthCard, HealthCardItem, HealthAction } from "../health-card";
 
 function AgentHealthSection({
   packageId,
@@ -96,7 +95,6 @@ function AgentHealthSection({
   const visible = result?.diagnostics.slice(0, 3) ?? [];
   const isUnknown = diagnostics.isError || !result;
   const tone = isUnknown ? "unknown" : result.status;
-  const Icon = tone === "blocking" ? CircleX : tone === "warning" ? TriangleAlert : Activity;
   const title = isUnknown
     ? t("detail.diagnostics.unknownTitle")
     : result.status === "blocking"
@@ -104,122 +102,87 @@ function AgentHealthSection({
       : t("detail.diagnostics.warningTitle", { count: result.warning_count });
   return (
     <>
-      <section
-        aria-labelledby="agent-health-heading"
-        className={cn(
-          "border-border rounded-lg border",
-          cardHeaders ? "bg-muted/35 overflow-hidden" : "bg-card p-4",
-          tone === "blocking" && "border-destructive/30",
-          tone === "warning" && "border-warning/30",
-        )}
-      >
-        <div
-          className={cn(
-            "flex flex-wrap items-center gap-2",
-            cardHeaders && "bg-muted/35 px-4 py-3",
-          )}
-        >
-          <Icon
-            className={cn(
-              "size-4 shrink-0",
-              tone === "blocking"
-                ? "text-destructive"
-                : tone === "warning"
-                  ? "text-warning"
-                  : "text-muted-foreground",
-            )}
-            aria-hidden
-          />
-          <h2 id="agent-health-heading" className="text-sm font-semibold">
-            {t("detail.diagnostics.sectionTitle")}
-          </h2>
-          {result ? (
+      <HealthCard
+        title={t("detail.diagnostics.sectionTitle")}
+        tone={tone}
+        cardHeaders={cardHeaders}
+        badge={
+          result ? (
             <button type="button" onClick={() => setIssuesOpen(true)}>
               <AgentDiagnosticsIssueBadge result={result} />
             </button>
           ) : (
             <StatusPill variant="pending">{title}</StatusPill>
+          )
+        }
+      >
+        <div className={cn(cardHeaders && "px-4")}>
+          {result?.status === "blocking" && result.warning_count > 0 && (
+            <p className="text-muted-foreground pt-4 text-xs">
+              {t("detail.diagnostics.warningAlongside", { count: result.warning_count })}
+            </p>
           )}
-        </div>
-        <div className={cn(cardHeaders && "bg-card overflow-hidden rounded-t-lg border-t")}>
-          <div className={cn(cardHeaders && "px-4")}>
-            {result?.status === "blocking" && result.warning_count > 0 && (
-              <p className="text-muted-foreground pt-4 text-xs">
-                {t("detail.diagnostics.warningAlongside", { count: result.warning_count })}
-              </p>
-            )}
 
-            {visible.length > 0 && (
-              <ul
-                className={cn(
-                  "divide-y",
-                  !cardHeaders && "mt-3",
-                  cardHeaders &&
-                    result?.status === "blocking" &&
-                    result.warning_count > 0 &&
-                    "mt-3",
-                )}
-              >
-                {visible.map((diagnostic) => (
-                  <li
-                    key={`${diagnostic.code}:${diagnostic.field}`}
-                    className={cn(
-                      "grid gap-2 py-4 sm:grid-cols-[minmax(0,1fr)_auto]",
-                      cardHeaders ? "first:pt-4 last:pb-4" : "first:pt-0 last:pb-0",
-                    )}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{diagnostic.title}</p>
-                      <p className="text-muted-foreground mt-0.5 text-xs">
-                        {diagnostic.explanation}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs sm:self-center">
-                      <Link
+          {visible.length > 0 && (
+            <ul
+              className={cn(
+                "divide-y",
+                !cardHeaders && "mt-3",
+                cardHeaders && result?.status === "blocking" && result.warning_count > 0 && "mt-3",
+              )}
+            >
+              {visible.map((diagnostic) => (
+                <HealthCardItem
+                  key={`${diagnostic.code}:${diagnostic.field}`}
+                  title={diagnostic.title}
+                  description={diagnostic.explanation}
+                  cardHeaders={cardHeaders}
+                  actions={
+                    <>
+                      <HealthAction
                         to={agentDiagnosticCorrectionTarget(
                           diagnostic,
                           location.pathname,
                           location.search,
                         )}
-                        className="text-primary hover:underline"
                       >
                         {t("detail.diagnostics.fix")}
-                      </Link>
-                      <Link
+                      </HealthAction>
+                      <HealthAction
                         to={agentDiagnosticLocateTarget(
                           diagnostic,
                           location.pathname,
                           location.search,
                         )}
-                        className="text-muted-foreground hover:text-foreground hover:underline"
+                        secondary
                       >
                         {t("detail.diagnostics.locate")}
-                      </Link>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+                      </HealthAction>
+                    </>
+                  }
+                />
+              ))}
+            </ul>
+          )}
 
-            {result && result.diagnostics.length > 3 && !cardHeaders && (
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => setIssuesOpen(true)}
-                  className="text-primary text-xs font-medium hover:underline"
-                >
-                  {t("detail.diagnostics.seeAll")}
-                </button>
-              </div>
-            )}
-          </div>
-          {result && result.diagnostics.length > 3 && cardHeaders && (
-            <OverviewCardAction onClick={() => setIssuesOpen(true)}>
-              {t("detail.diagnostics.seeAll")}
-            </OverviewCardAction>
+          {result && result.diagnostics.length > 3 && !cardHeaders && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setIssuesOpen(true)}
+                className="text-primary text-xs font-medium hover:underline"
+              >
+                {t("detail.diagnostics.seeAll")}
+              </button>
+            </div>
           )}
         </div>
-      </section>
+        {result && result.diagnostics.length > 3 && cardHeaders && (
+          <OverviewCardAction onClick={() => setIssuesOpen(true)}>
+            {t("detail.diagnostics.seeAll")}
+          </OverviewCardAction>
+        )}
+      </HealthCard>
       <AgentDiagnosticsDialog
         result={result}
         open={issuesOpen}
@@ -984,41 +947,6 @@ export function AgentOverviewTab({
         </Boundary>
         <RelationLegend />
       </section>
-    </div>
-  );
-}
-
-function OperationalStat({
-  label,
-  value,
-  to,
-  className,
-}: {
-  label: string;
-  value: React.ReactNode;
-  to?: To;
-  className?: string;
-}) {
-  const content = (
-    <>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
-      <dd className="mt-1 text-xl font-semibold tabular-nums">{value}</dd>
-    </>
-  );
-
-  return (
-    <div className={cn("min-w-0", className)}>
-      {to ? (
-        <Link
-          className="group hover:bg-muted/20 focus-visible:ring-ring relative flex h-full min-h-20 flex-col justify-center px-4 py-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
-          to={to}
-        >
-          {content}
-          <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
-        </Link>
-      ) : (
-        <div className="flex h-full min-h-20 flex-col justify-center px-4 py-4">{content}</div>
-      )}
     </div>
   );
 }

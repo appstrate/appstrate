@@ -30,19 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/component
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 import { cn } from "@appstrate/ui/cn";
-
-function OrgAvatar({ name, className }: { name: string; className?: string }) {
-  return (
-    <div
-      className={cn(
-        "bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center rounded-lg font-bold",
-        className,
-      )}
-    >
-      {name.charAt(0).toUpperCase()}
-    </div>
-  );
-}
+import { OrganizationAvatar } from "./organization-avatar";
 
 function ColumnHeader({
   label,
@@ -169,8 +157,9 @@ export function OrgSwitcher({
             aria-label={t("switcher.orgAriaLabel")}
             className="hover:bg-accent data-[state=open]:bg-accent flex h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-sm transition-colors"
           >
-            <OrgAvatar
+            <OrganizationAvatar
               name={currentOrg.name}
+              logo={currentOrg.logo}
               className="size-6 shrink-0 rounded-md text-[0.7rem]"
             />
             <span className="flex min-w-0 flex-1 items-center text-left">
@@ -198,8 +187,9 @@ export function OrgSwitcher({
             aria-label={t("switcher.orgAriaLabel")}
             className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0!"
           >
-            <OrgAvatar
+            <OrganizationAvatar
               name={currentOrg.name}
+              logo={currentOrg.logo}
               className="size-6 shrink-0 rounded-md text-[0.7rem]"
             />
             <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
@@ -228,8 +218,9 @@ export function OrgSwitcher({
             aria-label={t("switcher.orgAriaLabel")}
             className="bg-card hover:bg-accent data-[state=open]:bg-accent flex h-10 w-full items-center gap-2 rounded-lg border px-2 text-sm shadow-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:px-0! group-data-[collapsible=icon]:shadow-none"
           >
-            <OrgAvatar
+            <OrganizationAvatar
               name={currentOrg.name}
+              logo={currentOrg.logo}
               className="size-6 shrink-0 rounded-md text-[0.7rem] group-data-[collapsible=icon]:size-6 group-data-[collapsible=icon]:rounded-[5px] group-data-[collapsible=icon]:text-[0.65rem]"
             />
             <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
@@ -254,7 +245,11 @@ export function OrgSwitcher({
             aria-label={t("switcher.orgAriaLabel")}
             className="hover:bg-accent data-[state=open]:bg-accent flex min-w-0 shrink items-center gap-1.5 rounded-md py-1 pr-1.5 pl-1 text-sm transition-colors"
           >
-            <OrgAvatar name={currentOrg.name} className="size-5 rounded-[5px] text-[0.65rem]" />
+            <OrganizationAvatar
+              name={currentOrg.name}
+              logo={currentOrg.logo}
+              className="size-5 rounded-[5px] text-[0.65rem]"
+            />
             <span className="truncate font-semibold">{currentOrg.name}</span>
             {currentApp && (
               <>
@@ -321,7 +316,11 @@ export function OrgSwitcher({
                     onClick={() => setExploredOrgId(org.id)}
                     className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
                   >
-                    <OrgAvatar name={org.name} className="size-[30px] text-[0.82rem]" />
+                    <OrganizationAvatar
+                      name={org.name}
+                      logo={org.logo}
+                      className="size-[30px] text-[0.82rem]"
+                    />
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate text-sm font-medium">{org.name}</span>
                       <span className="text-muted-foreground text-xs">

@@ -14,9 +14,10 @@ import { CardGrid } from "../components/card-grid";
 import { PackagesTable, usePackageColumns } from "../components/packages-table";
 import { columnMenu, visibleColumns } from "../components/data-table";
 import { useColumnVisibility } from "../stores/column-visibility-store";
-import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { ListFooter, ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { usePackageViewStore } from "../stores/list-view-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useListParams } from "../lib/list-params";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { ImportModal } from "../components/import-modal";
@@ -41,7 +42,6 @@ export interface CardItem {
 
 interface PackageTabProps {
   title?: string;
-  emoji?: string;
   breadcrumbs?: BreadcrumbEntry[];
   items: CardItem[] | undefined;
   isLoading: boolean;
@@ -70,7 +70,6 @@ function matches(item: CardItem, query: string): boolean {
 
 export function PackageTab({
   title,
-  emoji,
   breadcrumbs,
   items,
   isLoading,
@@ -89,27 +88,68 @@ export function PackageTab({
   // Client-side on purpose, and honestly so: this catalogue arrives whole, so
   // the box searches the whole list rather than the page on screen — which is
   // exactly why the run list, paginated server-side, has no box.
-  const [query, setQuery] = useState("");
+  const list = useListParams(["origin", "activity"]);
+  const query = list.search;
+  const origins = list.values("origin", ["local", "system"] as const);
+  const activities = list.values("activity", ["active", "inactive"] as const);
   const allColumns = usePackageColumns(holds);
   const searchPlaceholder = useSearchPlaceholder(entity);
   const visibility = useColumnVisibility("packages");
 
   const header = title ? (
-    <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} actions={extraActions}>
+    <PageHeader title={title} variant="collection" breadcrumbs={breadcrumbs} actions={extraActions}>
       {headerContent}
     </PageHeader>
   ) : null;
 
-  const shown = (items ?? []).filter((item) => matches(item, query));
+  const shown = (items ?? []).filter((item) => {
+    if (!matches(item, query)) return false;
+    if (origins.length > 0 && !origins.includes(item.source ?? "local")) return false;
+
+    const isActive = holds === "agent" ? Boolean(item.runningRuns) : Boolean(item.usedByAgents);
+    if (activities.includes("active") && !activities.includes("inactive") && !isActive)
+      return false;
+    if (activities.includes("inactive") && !activities.includes("active") && isActive) return false;
+    return true;
+  });
+  const filters: FilterSpec[] = [
+    {
+      id: "origin",
+      label: t("list.filter.origin"),
+      values: origins,
+      options: [
+        { value: "local", label: t("list.filter.local") },
+        { value: "system", label: t("list.filter.system") },
+      ],
+      onChange: list.setValues("origin"),
+    },
+    {
+      id: "activity",
+      label: t(holds === "agent" ? "list.filter.execution" : "list.filter.usage"),
+      values: activities,
+      options:
+        holds === "agent"
+          ? [
+              { value: "active", label: t("list.filter.running") },
+              { value: "inactive", label: t("list.filter.idle") },
+            ]
+          : [
+              { value: "active", label: t("list.filter.used") },
+              { value: "inactive", label: t("list.filter.unused") },
+            ],
+      onChange: list.setValues("activity"),
+    },
+  ];
+  const filtering = Boolean(query) || origins.length > 0 || activities.length > 0;
 
   // An empty list, a search that matched nothing, and a request that failed are
   // three different sentences, and the body says whichever applies IN PLACE —
   // the bar and the count above and below it never move. This used to be three
   // early returns above the toolbar, which is how an empty list lost its bar
   // and had to re-offer the page's own actions as unlabelled icons.
-  const emptyBody = query ? (
+  const emptyBody = filtering ? (
     <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
-      <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+      <Button variant="outline" size="sm" onClick={list.reset}>
         {t("toolbar.clearAll", { ns: "common" })}
       </Button>
     </EmptyState>
@@ -127,10 +167,11 @@ export function PackageTab({
       <ListToolbar
         search={{
           value: query,
-          onChange: setQuery,
+          onChange: list.setSearch,
           placeholder: searchPlaceholder,
         }}
-        filters={[]}
+        filters={filters}
+        onReset={list.reset}
         // Only the table view has columns to choose from.
         columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
         view={view}
@@ -192,7 +233,6 @@ export function PackageList() {
         title={t("list.tabAgents")}
         entity={t("list.tabAgents")}
         holds="agent"
-        emoji="⚡"
         breadcrumbs={[{ label: t("list.tabAgents") }]}
         items={items}
         isLoading={isLoading}

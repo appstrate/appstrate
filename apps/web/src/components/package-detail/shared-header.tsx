@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Wrench, Plug, Blocks } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Badge } from "@appstrate/ui/components/badge";
 import {
@@ -14,13 +14,7 @@ import { packageDetailPath, packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
 import { IntegrationIcon } from "../integration-icon";
-
-const emojiMap: Record<PackageType, string> = {
-  agent: "⚡",
-  skill: "🧠",
-  "mcp-server": "🔌",
-  integration: "🧩",
-};
+import { AgentIdentityTile } from "../agent-identity";
 
 interface SharedHeaderDetail {
   id: string;
@@ -29,8 +23,10 @@ interface SharedHeaderDetail {
   source: string;
   type: PackageType;
   version?: string | null;
-  /** Raw AFPS manifest `icon` (image URL or Iconify id); integrations only. */
+  /** AFPS icon token for agents, raw image URL or Iconify id for integrations. */
   icon?: string;
+  /** Appstrate Agent presentation colour token. */
+  color?: string;
 }
 
 export function SharedHeader({
@@ -61,18 +57,34 @@ export function SharedHeader({
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
 
   const iconNode =
-    detail.type === "integration" && detail.icon ? (
+    detail.type === "agent" ? (
+      <AgentIdentityTile
+        agentId={detail.id}
+        icon={detail.icon}
+        color={detail.color}
+        className="size-10 rounded-[10px]"
+      />
+    ) : detail.type === "integration" && detail.icon ? (
       <IntegrationIcon src={detail.icon} />
-    ) : undefined;
+    ) : (
+      <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
+        {detail.type === "skill" ? (
+          <Wrench className="size-5" aria-hidden />
+        ) : detail.type === "mcp-server" ? (
+          <Plug className="size-5" aria-hidden />
+        ) : (
+          <Blocks className="size-5" aria-hidden />
+        )}
+      </span>
+    );
 
   return (
     <>
       <PageHeader
         title={detail.displayName}
-        titleClassName={detail.type === "agent" ? "text-xl" : undefined}
-        emoji={emojiMap[detail.type]}
+        titleClassName="text-xl"
         icon={iconNode}
-        wrapActions={detail.type === "integration" || detail.type === "agent"}
+        wrapActions
         breadcrumbs={[
           { label: breadcrumbLabel, href: breadcrumbPath },
           {
@@ -84,24 +96,21 @@ export function SharedHeader({
         actions={
           <>
             {detail.type !== "agent" && detail.source === "system" && (
-              <span title={t("packages.sourceBuiltIn", { ns: "settings" })}>
-                <ShieldCheck className="text-muted-foreground h-4 w-4" />
-              </span>
+              <Badge variant="secondary" className="gap-1.5">
+                <ShieldCheck className="size-3" aria-hidden />
+                {t("packages.sourceBuiltIn", { ns: "settings" })}
+              </Badge>
             )}
             {detail.type !== "agent" && detail.version && (
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[0.65rem] font-medium">
+              <Badge variant="secondary" className="font-mono">
                 v{detail.version}
-              </span>
+              </Badge>
             )}
             {detail.type !== "agent" && hasUnarchivedChanges && !isHistoricalVersion && (
-              <span className="bg-warning/15 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
-                {t("version.modified")}
-              </span>
+              <Badge variant="warning">{t("version.modified")}</Badge>
             )}
             {detail.type !== "agent" && isHistoricalVersion && (
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
-                {t("version.readOnly")}
-              </span>
+              <Badge variant="secondary">{t("version.readOnly")}</Badge>
             )}
             {detail.type === "agent" && detail.source === "system" && (
               <TooltipProvider delayDuration={250}>

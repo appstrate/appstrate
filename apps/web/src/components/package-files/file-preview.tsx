@@ -81,7 +81,7 @@ export function FilePreview({
       className={cn("border-border bg-card flex min-w-0 flex-col rounded-lg border", className)}
     >
       {!hideHeader && (
-        <div className="border-border flex items-center gap-3 border-b px-3 py-2">
+        <div className="border-border flex h-14 min-h-14 items-center gap-3 border-b px-3 py-2">
           <span
             className="text-foreground min-w-0 flex-1 truncate font-mono text-xs"
             title={entry.path}
@@ -94,9 +94,15 @@ export function FilePreview({
           {/* "Télécharger le fichier", not "Télécharger": the actions dropdown
             already shows a Download-icon "Télécharger" for the WHOLE archive,
             and both are visible on this tab at the same time. */}
-          <Button variant="outline" size="sm" onClick={() => void download(entry.path)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            aria-label={t("files.downloadFile")}
+            onClick={() => void download(entry.path)}
+          >
             <Download size={14} />
-            {t("files.downloadFile")}
+            <span className="hidden sm:inline">{t("files.downloadFile")}</span>
           </Button>
         </div>
       )}

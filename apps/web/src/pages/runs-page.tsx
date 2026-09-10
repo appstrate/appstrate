@@ -90,7 +90,7 @@ export function RunsPage() {
     <div>
       <PageHeader
         title={t("runs.title")}
-        emoji="▶️"
+        variant="collection"
         breadcrumbs={[{ label: t("runs.title") }]}
         actions={
           <PageActionsMenu>

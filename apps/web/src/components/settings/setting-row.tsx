@@ -14,6 +14,32 @@
  */
 import type { ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
+import { SettingsHeading } from "./settings-heading";
+
+/** Read-only counterpart of a setting field. Render inside a description list. */
+export function SettingValue({
+  label,
+  children,
+  technical = false,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  technical?: boolean;
+}) {
+  return (
+    <div className="pb-8 last:pb-0">
+      <dt className="text-sm font-medium">{label}</dt>
+      <dd
+        className={cn(
+          "text-muted-foreground mt-1 space-y-2 text-sm leading-relaxed break-words",
+          technical && "font-mono break-all",
+        )}
+      >
+        {children}
+      </dd>
+    </div>
+  );
+}
 
 export function SettingsGroup({
   title,
@@ -26,21 +52,21 @@ export function SettingsGroup({
 }) {
   return (
     <section className={cn("mb-8", className)}>
-      {title && <h4 className="mb-1 text-base font-semibold">{title}</h4>}
-      <div className="border-border border-t">{children}</div>
+      {title && <SettingsHeading level="group" title={title} />}
+      <div>{children}</div>
     </section>
   );
 }
 
 export function SettingRow({
-  variant,
+  variant = "field",
   label,
   description,
   children,
   status,
   className,
 }: {
-  variant: "field" | "toggle" | "action";
+  variant?: "field" | "toggle" | "action";
   label: ReactNode;
   description?: ReactNode;
   /** The control. Its kind decides the row's shape. */
@@ -52,17 +78,15 @@ export function SettingRow({
   const copy = (
     <div className="min-w-0">
       <div className="text-sm font-medium">{label}</div>
-      {description && <div className="text-muted-foreground mt-0.5 text-sm">{description}</div>}
+      {description && (
+        <div className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</div>
+      )}
     </div>
   );
 
   if (variant === "field") {
     return (
-      <div
-        data-slot="setting-row"
-        data-variant="field"
-        className={cn("border-border border-b py-4", className)}
-      >
+      <div data-slot="setting-row" data-variant="field" className={cn("pb-8 last:pb-0", className)}>
         {copy}
         <div className="mt-3 flex w-full max-w-lg items-center gap-2">
           {children}
@@ -77,14 +101,16 @@ export function SettingRow({
       <div
         data-slot="setting-row"
         data-variant="toggle"
-        className={cn("border-border border-b py-4", className)}
+        className={cn("pb-8 last:pb-0", className)}
       >
         <div className="flex items-center gap-2">
           {children}
           <div className="text-sm font-medium">{label}</div>
           {status}
         </div>
-        {description && <div className="text-muted-foreground mt-1 text-sm">{description}</div>}
+        {description && (
+          <div className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</div>
+        )}
       </div>
     );
   }
@@ -93,10 +119,7 @@ export function SettingRow({
     <div
       data-slot="setting-row"
       data-variant="action"
-      className={cn(
-        "border-border flex items-center justify-between gap-6 border-b py-4",
-        className,
-      )}
+      className={cn("flex items-center justify-between gap-6 pb-8 last:pb-0", className)}
     >
       {copy}
       <div className="flex shrink-0 items-center gap-2">

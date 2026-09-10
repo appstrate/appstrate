@@ -128,7 +128,11 @@ function DocumentsCollection({
 
   return (
     <div>
-      <PageHeader title={t("page.title")} emoji="📄" breadcrumbs={[{ label: t("page.title") }]} />
+      <PageHeader
+        title={t("page.title")}
+        variant="collection"
+        breadcrumbs={[{ label: t("page.title") }]}
+      />
 
       {overLimit && (
         <Alert variant="warning" className="mb-4">

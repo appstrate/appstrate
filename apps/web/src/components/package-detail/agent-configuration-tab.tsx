@@ -34,26 +34,7 @@ import {
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { JsonView } from "../json-view";
-
-function SettingRow({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="max-w-2xl py-4">
-      <div>
-        <h3 className="text-sm font-medium">{label}</h3>
-        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</p>
-      </div>
-      <div className="mt-3 max-w-md">{children}</div>
-    </div>
-  );
-}
+import { SettingRow } from "../settings/setting-row";
 
 // ─── Config Section ─────────────────────────────────────────────────
 

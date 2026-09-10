@@ -17,11 +17,7 @@ import type { OrgModelInfo } from "../hooks/use-models";
 export function ModelUnavailableBadge({ className }: { className?: string }) {
   const { t } = useTranslation("settings");
   return (
-    <Badge
-      variant="destructive"
-      className={className}
-      title={t("models.credentialUnavailableHint")}
-    >
+    <Badge variant="failed" className={className} title={t("models.credentialUnavailableHint")}>
       {t("models.credentialUnavailable")}
     </Badge>
   );

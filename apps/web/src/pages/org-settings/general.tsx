@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Building, HardDrive, AlertTriangle } from "lucide-react";
+import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -21,6 +21,39 @@ import { Spinner } from "../../components/spinner";
 import { EmptyState } from "../../components/page-states";
 import { orgKeys } from "../../lib/query-keys";
 import { toast } from "sonner";
+import { OrganizationAvatar } from "../../components/organization-avatar";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+
+const ORGANIZATION_EMOJIS = ["⚡️", "🚜", "🏢", "🧠", "✨", "🔵", "🟣", "🟠"];
+const MAX_LOGO_SOURCE_BYTES = 5 * 1024 * 1024;
+const MAX_LOGO_LENGTH = 180_000;
+
+async function normalizeOrganizationLogo(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("logo_file_type");
+  if (file.size > MAX_LOGO_SOURCE_BYTES) throw new Error("logo_file_size");
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    const crop = Math.min(bitmap.width, bitmap.height);
+    const sourceX = (bitmap.width - crop) / 2;
+    const sourceY = (bitmap.height - crop) / 2;
+
+    for (const size of [192, 160, 128, 96]) {
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("logo_processing");
+      context.drawImage(bitmap, sourceX, sourceY, crop, crop, 0, 0, size, size);
+      const encoded = canvas.toDataURL("image/webp", 0.82);
+      if (encoded.length <= MAX_LOGO_LENGTH) return encoded;
+    }
+  } finally {
+    bitmap.close();
+  }
+
+  throw new Error("logo_processing");
+}
 
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -38,6 +71,8 @@ export function OrgSettingsGeneralPage() {
   const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_WARN;
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [processingLogo, setProcessingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   const updateNameMutation = $api.useMutation("put", "/api/orgs/{orgId}", {
     onSuccess: () => {
@@ -67,6 +102,109 @@ export function OrgSettingsGeneralPage() {
   return (
     <>
       <SettingsGroup title={t("orgSettings.orgTitle")}>
+        <SettingRow
+          variant="field"
+          label={t("orgSettings.logoLabel")}
+          description={t("orgSettings.logoDescription")}
+          status={(updateNameMutation.isPending || processingLogo) && <Spinner />}
+        >
+          <div className="flex items-center gap-3">
+            <OrganizationAvatar
+              name={currentOrg.name}
+              logo={currentOrg.logo}
+              className="size-16 rounded-xl text-2xl"
+            />
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                className="sr-only"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file || !orgId) return;
+                  setProcessingLogo(true);
+                  try {
+                    const logo = await normalizeOrganizationLogo(file);
+                    updateNameMutation.mutate({
+                      params: { path: { orgId } },
+                      body: { logo },
+                    });
+                  } catch {
+                    toast.error(t("orgSettings.logoError"));
+                  } finally {
+                    setProcessingLogo(false);
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!isAdmin || updateNameMutation.isPending || processingLogo}
+                onClick={() => logoInputRef.current?.click()}
+              >
+                <Upload />
+                {t("orgSettings.logoUpload")}
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!isAdmin || updateNameMutation.isPending || processingLogo}
+                  >
+                    <Smile />
+                    {t("orgSettings.logoEmoji")}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto p-2">
+                  <div className="grid grid-cols-4 gap-1">
+                    {ORGANIZATION_EMOJIS.map((emoji) => (
+                      <Button
+                        key={emoji}
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-lg"
+                        aria-label={t("orgSettings.logoUseEmoji", { emoji })}
+                        onClick={() => {
+                          if (!orgId) return;
+                          updateNameMutation.mutate({
+                            params: { path: { orgId } },
+                            body: { logo: `emoji:${emoji}` },
+                          });
+                        }}
+                      >
+                        {emoji}
+                      </Button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+              {currentOrg.logo && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!isAdmin || updateNameMutation.isPending || processingLogo}
+                  onClick={() => {
+                    if (!orgId) return;
+                    updateNameMutation.mutate({
+                      params: { path: { orgId } },
+                      body: { logo: null },
+                    });
+                  }}
+                >
+                  <Trash2 />
+                  {t("orgSettings.logoRemove")}
+                </Button>
+              )}
+            </div>
+          </div>
+        </SettingRow>
         <SettingRow
           variant="field"
           label={t("orgSettings.nameLabel")}

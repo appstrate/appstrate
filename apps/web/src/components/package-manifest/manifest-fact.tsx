@@ -22,17 +22,17 @@ export function FactGrid({ facts }: { facts: ManifestLink[] }) {
   if (facts.length === 0) return null;
 
   return (
-    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
       {facts.map((entry, index) => (
         <div key={`${index}:${entry.labelKey}:${entry.value}`} className="min-w-0">
           <dt className="text-muted-foreground text-xs">{t(entry.labelKey)}</dt>
-          <dd className="text-sm break-words">
+          <dd className="text-foreground mt-1 text-sm break-words">
             {entry.href ? (
               <a
                 href={entry.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-400 hover:underline"
+                className="text-primary hover:underline"
               >
                 {entry.value}
               </a>

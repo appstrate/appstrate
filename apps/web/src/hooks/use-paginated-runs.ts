@@ -73,7 +73,10 @@ export function usePaginatedRuns({
     queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
       if (scheduleId) {
         const { data } = await client.GET("/api/schedules/{id}/runs", {
-          params: { path: { id: scheduleId }, query: { limit, offset } },
+          params: {
+            path: { id: scheduleId },
+            query: { limit, offset, status: statusKey, q: search || undefined },
+          },
         });
         return data!;
       }

@@ -1,52 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration detail page.
- *
- * Shares the unified package layout (SharedHeader + PackageActionsDropdown)
- * with agents and skills. The activate/deactivate toggle lives in the header
- * (left action); download / fork / delete live in the actions dropdown. The
- * manifest's metadata is rendered by the À propos tab. Integrations are
- * import-only — there is no in-app editor.
- *
- * Tabs:
- *   - Connexions — per-auth connect CTA (always the resolved default client —
- *     the org's custom client when registered, else the system client) and a
- *     table of connected accounts with rename / share / reconnect / disconnect.
- *     Runtime view, visible to members.
- *   - Configuration (admin) — per-auth metadata (scopes, resource, authorized
- *     URIs), the OAuth clients table (system + custom) and the BYO-app
- *     registration form, the org-wide access rules (block member connections,
- *     default connection, per-agent pins), and the publisher setup guide.
- *   - Outils — read-only catalog of tools the integration exposes (resolved
- *     server-side via `resolveIntegrationToolCatalog`: MCPB-canonical from
- *     the referenced mcp-server minus `hidden_tools` and connect.tool
- *     primitives). Per-tool description + required scopes + URL patterns.
- *   - À propos — metadata (version, author, license, repo, …), privacy policy,
- *     keywords.
- *   - Contenu — the artifact's own files, read-only, opening on
- *     INTEGRATION.md. This is where `manifest.json` is readable verbatim: an
- *     admin auditing a third-party integration before granting it OAuth scopes
- *     must not have to download the `.afps` and unzip it.
- *   - Versions — read-only release history (non-system packages only).
- *
- * Connect drives a popup through the hosted connect portal (issue #769) —
- * mint `/connect/session`, open the returned `connect_url` (which dispatches to
- * the provider OAuth screen or the hosted credential form), then refetch the
- * detail to surface the new connection row.
+ * Integration detail: capabilities and usage, connected accounts, tools,
+ * authentication/access settings, and the read-only artifact. Technical auth
+ * identifiers never stand in for navigation or capability activation.
+ * OAuth client and connection mutations retain their existing ownership gates.
  */
 
 import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { CopyBlock } from "../components/copy-block";
-import { ManifestOverview } from "../components/package-manifest/manifest-overview";
+import { IntegrationOverview } from "../components/package-detail/integration-overview";
+import {
+  IntegrationFunctioning,
+  IntegrationMap,
+} from "../components/package-detail/integration-structure";
 import { FileExplorer } from "../components/package-files/file-explorer";
 import { CallbackUrlHint } from "../components/package-detail/callback-url-hint";
 
-/** Tab ids, also the URL fragments that select them. `content` is the same id
- *  the unified package page uses for its file explorer, so a deep link reads
- *  the same on either page. */
+/** Keep legacy fragments readable after moving files into settings. */
 const INTEGRATION_TABS = [
+  "overview",
   "connections",
   "configuration",
   "tools",
@@ -55,24 +29,46 @@ const INTEGRATION_TABS = [
   "versions",
 ] as const;
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { Navigate, useParams, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Trash2, ShieldCheck, Plus, KeyRound, Plug, ChevronRight } from "lucide-react";
+import {
+  Trash2,
+  ShieldCheck,
+  Plus,
+  KeyRound,
+  Plug,
+  FolderTree,
+  Wrench,
+  Workflow,
+} from "lucide-react";
+import { authMethodLabel } from "../lib/integration-presentation";
+import { AddIntegrationConnection } from "../components/integration-connect/add-integration-connection";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
+import { SettingsHeading } from "../components/settings/settings-heading";
 import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "@appstrate/ui/components/collapsible";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@appstrate/ui/components/select";
+import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { DataTable } from "../components/data-table";
 import { useIntegrationClientColumns, useConnectionColumns } from "./integration-columns";
+import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import { PackageToolCatalog } from "../components/package-detail/package-tool-catalog";
+import { ListToolbar } from "../components/list-toolbar";
+import {
+  AgentDetailSplit,
+  AgentDetailSectionHeader,
+} from "../components/agent-detail/agent-detail-split";
+import { RailLink } from "../components/settings/rail-link";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -101,18 +97,14 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
   type IntegrationAuthStatus,
-  type IntegrationAuthType,
   type IntegrationClient,
   type IntegrationConnection,
   type IntegrationManifestAuth,
+  type IntegrationDetailWire,
 } from "../hooks/use-integrations";
 import { useIntegrations } from "../hooks/use-integrations";
 import { useAuth } from "../hooks/use-auth";
-import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
-import {
-  connectionDisplayLabel,
-  isConnectionOwnedBy,
-} from "../components/integration-connect/connection-label";
+import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 
 // ─────────────────────────────────────────────
@@ -399,22 +391,8 @@ function ClientsTable({
 
   return (
     <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
-      {/* Registering this exact string on the provider's OAuth app is a
-          prerequisite to the FIRST connect attempt, so it is shown before the
-          clients table rather than only inside the registration modal — an
-          admin setting the app up at the provider needs it before there is any
-          client to register. */}
-      <div className="mb-3 space-y-1">
-        <p className="text-muted-foreground text-xs font-semibold">
-          {t("integration.oauthClient.platformRedirectUri")}
-        </p>
-        <CopyBlock value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
-      </div>
-
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h4 className="text-muted-foreground text-xs font-semibold">
-          {t("integration.clients.title")}
-        </h4>
+        <h4 className="text-sm font-medium">{t("integration.clients.title")}</h4>
         {canRegister && (
           <Button
             type="button"
@@ -431,6 +409,8 @@ function ClientsTable({
       </div>
 
       <DataTable
+        surface="integrated"
+        columnMode="scroll"
         label={t("integration.clients.title")}
         columns={columns}
         rows={rows}
@@ -469,13 +449,14 @@ function ClientsTable({
           type="button"
           variant="ghost"
           size="sm"
-          className="mt-2"
           onClick={() => setShowManual(true)}
           data-testid={`oauth-client-manual-toggle-${authKey}`}
         >
           {t("integration.oauthClient.registerManually")}
         </Button>
       )}
+
+      <AuthTechnicalSettings redirectUri={effectiveRedirectUri} authKey={authKey} />
 
       {modal && (
         <OAuthClientModal
@@ -508,105 +489,6 @@ function ClientsTable({
 }
 
 // ─────────────────────────────────────────────
-// Auth header (shared chrome for both tabs)
-// ─────────────────────────────────────────────
-
-/** Auth identity row reused by the Connexions and Configuration blocks. */
-function AuthHeader({ status }: { status: IntegrationAuthStatus }) {
-  const { t } = useTranslation("settings");
-  return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
-      <ShieldCheck size={16} className="text-muted-foreground" />
-      <span className="font-mono text-sm font-semibold">{status.auth_key}</span>
-      <Badge variant="outline">{status.type}</Badge>
-      {status.required ? (
-        <Badge variant="default">{t("integration.auth.required")}</Badge>
-      ) : (
-        <Badge variant="secondary">{t("integration.auth.optional")}</Badge>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Connexions tab — per-auth connect CTA + accounts table
-// ─────────────────────────────────────────────
-
-/**
- * Per-auth connect surface: the "+ Ajouter" CTA (admin) — which always connects
- * via the resolved default client (no per-connect picker) — and the table of
- * connected accounts with rename/share/reconnect/disconnect. Runtime view — the
- * OAuth client setup lives in the Configuration tab (see {@link ConfigAuthBlock}).
- *
- * Scope-aware connect/upgrade still also lives on the agent surfaces
- * (AgentIntegrationsBlock + MissingConnectionsModal) where the per-agent scope
- * context is known; the "+ Ajouter" here connects with default scopes.
- */
-function ConnectAuthBlock({
-  packageId,
-  status,
-  isAdmin,
-}: {
-  packageId: string;
-  status: IntegrationAuthStatus;
-  isAdmin: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  const { user } = useAuth();
-  const isOAuth = status.type === "oauth2";
-  // Connectable when a client is usable: org-registered, shared system client,
-  // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
-  const clientMissing = isOAuth && !isOauthAuthConnectable(status);
-  // `status.connections` is the own ∪ org-shared union, but "force the IdP's
-  // account chooser" is about the CALLER's own accounts — it exists so a second
-  // connect can't silently re-pick the account already signed in on this
-  // browser. Someone else's shared connection says nothing about that.
-  const ownConnectionCount = status.connections.filter((c) =>
-    isConnectionOwnedBy(c, user?.id),
-  ).length;
-
-  return (
-    <section data-testid={`auth-section-${status.auth_key}`}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <AuthHeader status={status} />
-        {/* Connect CTA / locked state. A missing oauth2 client blocks connecting:
-            admins are pointed at the Configuration tab, members get a hint. User-
-            facing connect also lives on agent surfaces where the agent's scope
-            context is known; here the "+ Ajouter" connects with default scopes. */}
-        {clientMissing ? (
-          <p
-            className="text-muted-foreground text-xs"
-            data-testid={`no-oauth-client-hint-${status.auth_key}`}
-          >
-            {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
-          </p>
-        ) : isAdmin ? (
-          <InlineConnectButton
-            packageId={packageId}
-            authKey={status.auth_key}
-            intent="connect"
-            label={t("integration.auth.addAccount")}
-            forceAccountSelect={ownConnectionCount > 0}
-            lockToAuthKey
-          />
-        ) : null}
-      </div>
-
-      <ConnectionsTable
-        packageId={packageId}
-        authKey={status.auth_key}
-        authType={status.type}
-        connections={status.connections}
-        // Renew via OAuth needs a usable client; when none is available the
-        // connect CTA is already hidden, so gate the per-row renew button the
-        // same way to avoid a guaranteed 403.
-        canRenew={isOAuth && !clientMissing}
-      />
-    </section>
-  );
-}
-
-// ─────────────────────────────────────────────
 // Configuration tab — per-auth metadata + OAuth clients
 // ─────────────────────────────────────────────
 
@@ -614,8 +496,32 @@ function ConnectAuthBlock({
  * Per-auth admin configuration: the declared auth metadata (scopes, resource,
  * authorized URIs) plus the OAuth clients table (system + custom) and the
  * registration form to add/rotate/delete the org's own (BYO-app) client.
- * Separated from the runtime connections view (see {@link ConnectAuthBlock}).
+ * Separated from the connected accounts table.
  */
+function AuthTechnicalSettings({
+  redirectUri,
+  authKey,
+}: {
+  redirectUri?: string;
+  authKey: string;
+}) {
+  const { t } = useTranslation("settings");
+  if (!redirectUri) return null;
+  return (
+    <section className="mt-8">
+      <h4 className="mb-4 text-sm font-medium">{t("integration.presentation.technicalDetails")}</h4>
+      {redirectUri && (
+        <div className="mb-4 space-y-2">
+          <p className="text-muted-foreground text-sm">
+            {t("integration.oauthClient.platformRedirectUri")}
+          </p>
+          <CopyBlock value={redirectUri} testId={`platform-redirect-uri-${authKey}`} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ConfigAuthBlock({
   packageId,
   status,
@@ -630,39 +536,13 @@ function ConfigAuthBlock({
 
   return (
     <section data-testid={`auth-config-${status.auth_key}`}>
-      <AuthHeader status={status} />
-
-      {/* Scopes / resource (RFC 8707 — `resource` in AFPS §7.3) */}
-      {(status.scopes.length > 0 ||
-        status.resource ||
-        (authDecl.authorized_uris?.length ?? 0) > 0) && (
-        <div className="text-muted-foreground mb-3 grid gap-1 text-xs">
-          {status.scopes.length > 0 && (
-            <p>
-              <span className="font-semibold">{t("integration.auth.scopes")}:</span>{" "}
-              <span className="font-mono">{status.scopes.join(", ")}</span>
-            </p>
-          )}
-          {status.resource && (
-            <p>
-              <span className="font-semibold">{t("integration.auth.resource")}:</span>{" "}
-              <span className="font-mono">{status.resource}</span>
-            </p>
-          )}
-          {(authDecl.authorized_uris?.length ?? 0) > 0 && (
-            <p className="truncate">
-              <span className="font-semibold">{t("integration.auth.authorizedUris")}:</span>{" "}
-              <span className="font-mono text-[0.7rem]">
-                {authDecl.authorized_uris!.slice(0, 3).join(", ")}
-                {authDecl.authorized_uris!.length > 3 &&
-                  ` (+${authDecl.authorized_uris!.length - 3})`}
-              </span>
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* OAuth clients (system + custom) — list, register, rotate, delete, default. */}
+      <p className="text-muted-foreground mb-5 text-sm">
+        {t(
+          isOAuth
+            ? "integration.presentation.oauthDescription"
+            : "integration.presentation.credentialsDescription",
+        )}
+      </p>
       {isOAuth && (
         <ClientsTable
           packageId={packageId}
@@ -671,19 +551,270 @@ function ConfigAuthBlock({
           autoProvisioned={status.client_auto_provisioned}
         />
       )}
-      {!isOAuth && (
-        <p className="text-muted-foreground text-xs">{t("integration.config.noOAuthClient")}</p>
-      )}
     </section>
   );
 }
 
-/**
- * Org-wide access policy for this integration — collapsed by default, admin
- * only. Cross-cutting (not tied to one authKey): who may create connections,
- * the org-wide default, and per-agent pin exceptions.
- */
-function AccessRulesSection({
+function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
+  return <IntegrationFunctioning detail={detail} />;
+}
+
+function IntegrationTools({
+  detail,
+  withHeading = false,
+}: {
+  detail: IntegrationDetailWire;
+  withHeading?: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <div className="space-y-4">
+      {detail.allow_undeclared_tools && (
+        <div
+          className="rounded-md border-l-2 border-amber-500/30 bg-amber-500/5 p-3 text-xs"
+          data-testid="integration-tools-wildcard-notice"
+        >
+          <p className="font-medium">{t("integration.tools.wildcardNotice.title")}</p>
+          <p className="text-muted-foreground mt-1">{t("integration.tools.wildcardNotice.body")}</p>
+        </div>
+      )}
+      <PackageToolCatalog
+        title={withHeading ? t("integration.tabs.tools") : undefined}
+        inspection={detail.tool_catalog_inspection}
+        tools={(detail.tool_catalog ?? []).map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          permissions: tool.policy?.required_scopes,
+        }))}
+      />
+    </div>
+  );
+}
+
+function IntegrationSettings({
+  packageId,
+  detail,
+  blockUserConnections,
+  isAdmin,
+  onActivate,
+  activationPending,
+}: {
+  packageId: string;
+  detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
+  blockUserConnections: boolean;
+  isAdmin: boolean;
+  onActivate: () => void;
+  activationPending: boolean;
+}) {
+  const { t } = useTranslation(["settings", "agents"]);
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const requested = params.get("integrationSettings");
+  const active =
+    requested === "tools" || requested === "functioning" || requested === "map"
+      ? requested
+      : requested === "files" || !isAdmin
+        ? "files"
+        : requested === "access"
+          ? "access"
+          : "authentication";
+  const steps = detail.manifest.setup_guide?.steps ?? [];
+  const groups = [
+    ...(isAdmin
+      ? [
+          {
+            label: t("detail.settings.configurationGroup", { ns: "agents" }),
+            items: [
+              {
+                id: "authentication",
+                label: t("integration.presentation.authentication"),
+                icon: KeyRound,
+              },
+              { id: "access", label: t("integration.admin.accessRules.title"), icon: ShieldCheck },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: t("detail.settings.structureGroup", { ns: "agents" }),
+      items: [
+        { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
+        { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
+        { id: "map", label: t("integration.structure.map"), icon: Workflow },
+        { id: "files", label: t("detail.overview.explorer", { ns: "agents" }), icon: FolderTree },
+      ],
+    },
+  ];
+  return (
+    <AgentDetailSplit
+      className="max-lg:grid-cols-1"
+      railClassName="p-6 max-lg:border-r-0 max-lg:border-b"
+      rail={
+        <nav className="space-y-5" aria-label={t("integration.tabs.configuration")}>
+          {groups.map((group) => (
+            <section key={group.label}>
+              <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
+                {group.label}
+              </h2>
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((section) => {
+                  const next = new URLSearchParams(params);
+                  next.set("integrationSettings", section.id);
+                  return (
+                    <RailLink
+                      key={section.id}
+                      item={{
+                        to: `?${next.toString()}#configuration`,
+                        icon: section.icon,
+                        labelKey: section.label,
+                      }}
+                      label={section.label}
+                      active={active === section.id}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </nav>
+      }
+    >
+      {active === "files" ? (
+        <FileExplorer packageId={packageId} type="integration" />
+      ) : active === "functioning" || active === "map" ? (
+        <div className="p-6">
+          <AgentDetailSectionHeader
+            title={t(
+              active === "map" ? "integration.structure.map" : "integration.structure.functioning",
+            )}
+            description={null}
+          />
+          {active === "map" ? (
+            <IntegrationMap
+              detail={detail}
+              packageId={packageId}
+              renderPanel={(section, openPanel) => {
+                if (section === "files")
+                  return <FileExplorer packageId={packageId} type="integration" />;
+                if (section === "tools") return <IntegrationTools detail={detail} />;
+                if (section === "functioning") return <IntegrationGeneral detail={detail} />;
+                if (section.startsWith("connections:"))
+                  return (
+                    <ConnectionsTable
+                      key={section}
+                      packageId={packageId}
+                      detail={detail}
+                      isAdmin={isAdmin}
+                      initialMethod={section.slice("connections:".length)}
+                      onConfigure={(authKey) =>
+                        openPanel(`auth:${authKey ?? detail.auths[0]?.auth_key ?? ""}`)
+                      }
+                    />
+                  );
+                if (!isAdmin)
+                  return (
+                    <p className="text-muted-foreground text-sm">
+                      {t("integration.health.adminRequired")}
+                    </p>
+                  );
+                if (!detail.active)
+                  return <ActivationHint onActivate={onActivate} pending={activationPending} />;
+                if (section === "access")
+                  return (
+                    <IntegrationAccessRules
+                      packageId={packageId}
+                      blockUserConnections={blockUserConnections}
+                    />
+                  );
+                const authKey = section.slice("auth:".length);
+                const status = detail.auths.find((auth) => auth.auth_key === authKey);
+                const authDecl = detail.manifest.auths?.[authKey];
+                return status && authDecl ? (
+                  <ConfigAuthBlock
+                    key={authKey}
+                    packageId={packageId}
+                    status={status}
+                    authDecl={authDecl}
+                  />
+                ) : null;
+              }}
+            />
+          ) : (
+            <IntegrationGeneral detail={detail} />
+          )}
+        </div>
+      ) : active === "tools" ? (
+        <div className="p-6">
+          <IntegrationTools detail={detail} withHeading />
+        </div>
+      ) : !detail.active ? (
+        <div className="p-6">
+          <ActivationHint onActivate={onActivate} pending={activationPending} />
+        </div>
+      ) : (
+        <div className="p-6">
+          <AgentDetailSectionHeader
+            title={t(
+              active === "access"
+                ? "integration.admin.accessRules.title"
+                : "integration.presentation.authentication",
+            )}
+            description={t(
+              active === "access"
+                ? "integration.config.accessDescription"
+                : "integration.presentation.authenticationDescription",
+            )}
+          />
+          {active === "authentication" && (
+            <div className="space-y-6">
+              <SetupGuideSteps steps={steps} />
+              {detail.auths.length === 0 && <p className="text-sm">{t("integration.auth.none")}</p>}
+              <div className="space-y-8">
+                {detail.auths.map((status) => {
+                  const authDecl = detail.manifest.auths?.[status.auth_key];
+                  if (!authDecl) return null;
+                  return (
+                    <section
+                      key={status.auth_key}
+                      id={`auth-${status.auth_key}`}
+                      className="min-w-0"
+                    >
+                      <div className="mb-4 flex items-center gap-3">
+                        <h3 className="text-base font-semibold">
+                          {authMethodLabel(
+                            status,
+                            detail.auths,
+                            t(`integration.auth.type.${status.type}`),
+                          )}
+                        </h3>
+                        <Badge variant="secondary">
+                          {t(
+                            status.required
+                              ? "integration.auth.required"
+                              : "integration.auth.optional",
+                          )}
+                        </Badge>
+                      </div>
+                      <ConfigAuthBlock packageId={packageId} status={status} authDecl={authDecl} />
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {active === "access" && (
+            <IntegrationAccessRules
+              packageId={packageId}
+              blockUserConnections={blockUserConnections}
+            />
+          )}
+        </div>
+      )}
+    </AgentDetailSplit>
+  );
+}
+
+function IntegrationAccessRules({
   packageId,
   blockUserConnections,
 }: {
@@ -691,30 +822,15 @@ function AccessRulesSection({
   blockUserConnections: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [open, setOpen] = useState(false);
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className="border-border bg-muted/20 rounded-md border"
-      data-testid="access-rules-section"
-    >
-      <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left">
-        <ChevronRight
-          size={16}
-          className={`text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
-        />
-        <span className="text-sm font-semibold">{t("integration.admin.accessRules.title")}</span>
-        <span className="text-muted-foreground ml-2 text-xs">
-          {t("integration.admin.accessRules.help")}
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="px-4 pb-2">
+    <div className="space-y-8" data-testid="access-rules-section">
+      <section>
+        <SettingsHeading level="group" title={t("integration.admin.accounts.title")} />
         <BlockUserConnectionsToggle packageId={packageId} initialBlocked={blockUserConnections} />
         <OrgDefaultSection packageId={packageId} />
-        <PinManagementSection packageId={packageId} />
-      </CollapsibleContent>
-    </Collapsible>
+      </section>
+      <PinManagementSection packageId={packageId} />
+    </div>
   );
 }
 
@@ -727,39 +843,54 @@ function BlockUserConnectionsToggle({
 }) {
   const { t } = useTranslation("settings");
   const updateSettings = useUpdateIntegrationSettings();
-  // Drives the checkbox from server state — pending mutation reads the
+  const { data: orgDefault, isLoading, isError } = useIntegrationOrgDefault(packageId);
+  const forced = orgDefault?.enforce === true;
+  // Drives the control from server state. A pending mutation reads the
   // about-to-be-applied value, idle reads the latest fetched value.
   const blocked =
     updateSettings.isPending && updateSettings.variables?.params.path.packageId === packageId
       ? updateSettings.variables.body.block_user_connections
       : initialBlocked;
   return (
-    <div
-      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
-      data-testid="block-user-connections-section"
-    >
-      <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          checked={blocked}
-          disabled={updateSettings.isPending}
-          onChange={(e) =>
-            updateSettings.mutate({
-              params: { path: { packageId } },
-              body: { block_user_connections: e.target.checked },
-            })
+    <div className="grid gap-6 pb-8 md:grid-cols-2" data-testid="block-user-connections-section">
+      <div className="min-w-0">
+        <p id="account-creation-label" className="mb-3 text-sm font-medium">
+          {t("integration.admin.creation.title")}
+        </p>
+        <Select
+          value={blocked || forced ? "admins" : "members"}
+          disabled={forced || isLoading || isError || updateSettings.isPending}
+          onValueChange={(value) =>
+            updateSettings.mutate(
+              {
+                params: { path: { packageId } },
+                body: { block_user_connections: value === "admins" },
+              },
+              {
+                onError: (error) => toast.error(getErrorMessage(error)),
+              },
+            )
           }
-          data-testid="block-user-connections-toggle"
-          className="mt-0.5"
-        />
-        <div className="flex-1">
-          <label className="text-sm font-semibold">
-            {t("integration.admin.blockUserConnections.label")}
-          </label>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {t("integration.admin.blockUserConnections.help")}
+        >
+          <SelectTrigger
+            aria-labelledby="account-creation-label"
+            data-testid="block-user-connections-toggle"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(["admins", "members"] as const).map((value) => (
+              <SelectItem key={value} value={value}>
+                {t(`integration.admin.creation.${value}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {forced && (
+          <p className="text-muted-foreground mt-2 text-sm">
+            {t("integration.admin.creation.forced")}
           </p>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -786,7 +917,7 @@ function connectionOptionLabel(c: IntegrationConnection): string {
 
 function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
-  const { data: orgDefault } = useIntegrationOrgDefault(packageId);
+  const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
   const { data: connections } = useIntegrationConnections(packageId);
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
@@ -798,89 +929,105 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
     return connectionOptionLabel(c);
   };
 
-  const [connectionId, setConnectionId] = useState("");
-  const [enforce, setEnforce] = useState(false);
-
-  // Seed the form from the persisted default once loaded.
-  const seededFor = orgDefault?.connection_id ?? null;
-  const [seeded, setSeeded] = useState<string | null>(null);
-  if (seededFor !== seeded) {
-    setSeeded(seededFor);
-    setConnectionId(orgDefault?.connection_id ?? "");
-    setEnforce(orgDefault?.enforce ?? false);
-  }
+  const [pendingValue, setPendingValue] = useState<{
+    connection_id: string;
+    enforce: boolean;
+  } | null>(null);
+  const connectionId = pendingValue?.connection_id ?? orgDefault?.connection_id ?? "";
+  const enforce = pendingValue?.enforce ?? orgDefault?.enforce ?? false;
+  const [draftMode, setDraftMode] = useState<string | null>(null);
+  const mode = draftMode ?? (connectionId ? (enforce ? "forced" : "default") : "choice");
+  const save = async (nextId: string, nextEnforce: boolean) => {
+    setPendingValue({ connection_id: nextId, enforce: nextEnforce });
+    try {
+      if (nextId)
+        await upsert.mutateAsync({
+          params: { path: { packageId } },
+          body: { connection_id: nextId, enforce: nextEnforce },
+        });
+      else await remove.mutateAsync({ params: { path: { packageId } } });
+      await refetch();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setPendingValue(null);
+      setDraftMode(null);
+    }
+  };
 
   return (
-    <div
-      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
-      data-testid="org-default-section"
-    >
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">{t("integration.admin.orgDefault.title")}</h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {t("integration.admin.orgDefault.help")}
-        </p>
-      </div>
-
-      {shared.length === 0 ? (
-        <p className="text-muted-foreground text-xs italic">
-          {t("integration.admin.orgDefault.noPinnableConnections")}
-        </p>
-      ) : (
-        <div className="border-border bg-background flex flex-wrap items-end gap-3 rounded-md border p-3">
-          <div className="min-w-[14rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.orgDefault.connection")}
-            </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={connectionId}
-              onChange={(e) => setConnectionId(e.target.value)}
-              data-testid="org-default-connection"
-            >
-              <option value="">{t("integration.admin.orgDefault.none")}</option>
-              {shared.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <label className="flex items-center gap-2 pb-1 text-xs">
-            <Checkbox
-              checked={enforce}
-              onCheckedChange={(v) => setEnforce(v === true)}
-              data-testid="org-default-enforce"
-            />
-            {t("integration.admin.orgDefault.enforce")}
-          </label>
-          <Button
-            size="sm"
-            onClick={() =>
-              connectionId &&
-              upsert.mutate({
-                params: { path: { packageId } },
-                body: { connection_id: connectionId, enforce },
-              })
-            }
-            disabled={!connectionId || upsert.isPending}
-            data-testid="org-default-save"
-          >
-            {t("integration.admin.orgDefault.save")}
-          </Button>
-          {orgDefault ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => remove.mutate({ params: { path: { packageId } } })}
-              disabled={remove.isPending}
-              data-testid="org-default-clear"
-            >
-              {t("integration.admin.orgDefault.clear")}
-            </Button>
-          ) : null}
+    <div className="grid items-start gap-6 md:grid-cols-2" data-testid="org-default-section">
+      <div className="min-w-0">
+        <div className="mb-3">
+          <p className="text-sm font-medium">{t("integration.admin.usage.title")}</p>
         </div>
-      )}
+
+        <Select
+          value={mode}
+          disabled={isLoading || isError || pendingValue !== null}
+          onValueChange={(value) => {
+            if (value === "choice") {
+              setDraftMode(null);
+              if (connectionId) void save("", false);
+            } else if (connectionId) void save(connectionId, value === "forced");
+            else setDraftMode(value);
+          }}
+        >
+          <SelectTrigger aria-label={t("integration.admin.usage.title")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(["choice", "default", "forced"] as const).map((value) => (
+              <SelectItem
+                key={value}
+                value={value}
+                disabled={value !== "choice" && shared.length === 0}
+              >
+                {t(`integration.admin.usage.${value}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-muted-foreground mt-2 text-sm">
+          {t(`integration.admin.usage.${mode}Help`)}
+        </p>
+        {shared.length === 0 ? (
+          <p className="text-muted-foreground text-xs italic">
+            {t("integration.admin.orgDefault.noPinnableConnections")}
+          </p>
+        ) : null}
+      </div>
+      {shared.length > 0 && mode !== "choice" ? (
+        <div className="min-w-0">
+          <Label htmlFor="org-default-connection" className="mb-3 block text-sm font-medium">
+            {t(
+              `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
+            )}
+          </Label>
+          <Select
+            value={connectionId || ""}
+            disabled={isLoading || isError || pendingValue !== null}
+            onValueChange={(value) => void save(value, mode === "forced")}
+          >
+            <SelectTrigger
+              id="org-default-connection"
+              data-testid="org-default-connection"
+              aria-label={t(
+                `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
+              )}
+            >
+              <SelectValue placeholder={t("integration.admin.orgDefault.select")} />
+            </SelectTrigger>
+            <SelectContent>
+              {shared.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {connectionDisplay(c.id)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -900,6 +1047,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
+  const [adding, setAdding] = useState(false);
   const [newConnectionId, setNewConnectionId] = useState("");
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
@@ -924,6 +1072,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
         onSuccess: () => {
           setNewAgent("");
           setNewConnectionId("");
+          setAdding(false);
         },
       },
     );
@@ -938,22 +1087,18 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   );
 
   return (
-    <div
-      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
-      data-testid="pin-management-section"
-    >
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">{t("integration.admin.exceptions.title")}</h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {t("integration.admin.exceptions.help")}
-        </p>
-      </div>
+    <div className="pb-0" data-testid="pin-management-section">
+      <SettingsHeading
+        level="group"
+        title={t("integration.admin.exceptions.title")}
+        description={t("integration.admin.exceptions.help")}
+      />
 
       {/* Existing pins */}
       {(pins ?? []).length > 0 ? (
-        <div className="border-border bg-background mb-3 overflow-hidden rounded-md border">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/40 text-muted-foreground">
+        <div className="mb-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-muted-foreground border-y">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">
                   {t("integration.admin.pinManagement.colAgent")}
@@ -1017,51 +1162,62 @@ function PinManagementSection({ packageId }: { packageId: string }) {
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>
+      ) : !adding ? (
+        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+          {t("integration.admin.pinManagement.add")}
+        </Button>
       ) : (
-        <div className="border-border bg-background flex flex-wrap items-end gap-2 rounded-md border p-3">
+        <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[12rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+            <Label htmlFor="pin-add-agent" className="mb-2 block text-sm">
               {t("integration.admin.pinManagement.colAgent")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newAgent}
-              onChange={(e) => setNewAgent(e.target.value)}
-              data-testid="pin-add-agent"
-            >
-              <option value="">—</option>
-              {pinnableAgents.map((a) => (
-                <option key={a.packageId} value={a.packageId}>
-                  {a.display_name}
-                </option>
-              ))}
-            </select>
+            <Select value={newAgent} onValueChange={setNewAgent}>
+              <SelectTrigger id="pin-add-agent" data-testid="pin-add-agent">
+                <SelectValue placeholder={t("integration.admin.pinManagement.colAgent")} />
+              </SelectTrigger>
+              <SelectContent>
+                {pinnableAgents.map((a) => (
+                  <SelectItem key={a.packageId} value={a.packageId}>
+                    {a.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="min-w-[12rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+            <Label htmlFor="pin-add-connection" className="mb-2 block text-sm">
               {t("integration.admin.pinManagement.colConnection")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newConnectionId}
-              onChange={(e) => setNewConnectionId(e.target.value)}
-              data-testid="pin-add-connection"
-            >
-              <option value="">—</option>
-              {pinnableConnections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
-                </option>
-              ))}
-            </select>
+            <Select value={newConnectionId} onValueChange={setNewConnectionId}>
+              <SelectTrigger id="pin-add-connection" data-testid="pin-add-connection">
+                <SelectValue placeholder={t("integration.admin.pinManagement.colConnection")} />
+              </SelectTrigger>
+              <SelectContent>
+                {pinnableConnections.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {connectionDisplay(c.id)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <Button
             size="sm"
+            variant="outline"
             onClick={onSubmitNewPin}
             disabled={!newAgent || !newConnectionId || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={upsertPin.isPending}
+            onClick={() => setAdding(false)}
+          >
+            {t("common:cancel")}
           </Button>
         </div>
       )}
@@ -1070,7 +1226,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 }
 
 /**
- * Connected accounts for one auth.
+ * Connected accounts across all authentication methods.
  *
  * The rows come from the detail query the page already awaits, so the table has
  * no loading or failure of its own to draw — an empty auth is an ANSWER, and it
@@ -1080,36 +1236,145 @@ function PinManagementSection({ packageId }: { packageId: string }) {
  */
 function ConnectionsTable({
   packageId,
-  authKey,
-  authType,
-  connections,
-  canRenew,
+  detail,
+  isAdmin,
+  onConfigure,
+  initialMethod,
 }: {
   packageId: string;
-  authKey: string;
-  authType: IntegrationAuthType;
-  connections: IntegrationConnection[];
-  canRenew: boolean;
+  detail: IntegrationDetailWire;
+  isAdmin: boolean;
+  onConfigure: (authKey?: string) => void;
+  initialMethod?: string;
 }) {
   const { t } = useTranslation("settings");
+  const [search, setSearch] = useState("");
+  const [sharing, setSharing] = useState<string[]>([]);
+  const location = useLocation();
+  const [methods, setMethods] = useState<string[]>(() => {
+    const method = initialMethod ?? new URLSearchParams(location.search).get("connectionMethod");
+    return detail.auths.some((auth) => auth.auth_key === method) ? [method!] : [];
+  });
   const { user } = useAuth();
-  const { isAdmin } = usePermissions();
+  const connections = detail.auths.flatMap((auth) =>
+    auth.connections.map((connection) => ({ ...connection, auth_key: auth.auth_key })),
+  );
+  const labelFor = (auth: IntegrationAuthStatus) =>
+    authMethodLabel(auth, detail.auths, t(`integration.auth.type.${auth.type}`));
   const columns = useConnectionColumns({
     packageId,
-    authKey,
-    authType,
-    canRenew,
+    authKey: "",
+    authType: "custom",
+    canRenew: false,
     userId: user?.id,
     isAdmin,
+    authForConnection: (connection) => {
+      const auth = detail.auths.find((item) => item.auth_key === connection.auth_key);
+      return {
+        authKey: connection.auth_key,
+        authType: auth?.type ?? "custom",
+        canRenew: auth?.type === "oauth2" && isOauthAuthConnectable(auth),
+      };
+    },
+  });
+  const displayColumns = [
+    columns[0]!,
+    {
+      id: "method",
+      header: t("integration.presentation.method"),
+      width: "minmax(150px,1fr)" as const,
+      cell: (connection: IntegrationConnection) => {
+        const auth = detail.auths.find((item) => item.auth_key === connection.auth_key);
+        return (
+          <span className="text-muted-foreground text-xs">
+            {auth ? labelFor(auth) : connection.auth_key}
+          </span>
+        );
+      },
+    },
+    ...columns.slice(1),
+  ];
+  const rows = connections.filter((connection) => {
+    const auth = detail.auths.find((item) => item.auth_key === connection.auth_key);
+    return (
+      `${connectionOptionLabel(connection)} ${connection.owner_name ?? ""} ${auth ? labelFor(auth) : ""}`
+        .toLocaleLowerCase()
+        .includes(search.trim().toLocaleLowerCase()) &&
+      (sharing.length === 0 ||
+        sharing.includes(connection.shared_with_org ? "shared" : "private")) &&
+      (methods.length === 0 || methods.includes(connection.auth_key))
+    );
   });
   return (
-    <div data-testid={`connections-table-${authKey}`}>
+    <div data-testid="integration-connections-table">
+      <ListToolbar
+        placement="panel"
+        panelFiltersAdjacent
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: t("detail.connectionsTable.search", { ns: "agents" }),
+        }}
+        filters={[
+          {
+            id: "sharing",
+            label: t("integration.connection.col.shared"),
+            values: sharing,
+            options: [
+              { value: "shared", label: t("detail.sharingShared", { ns: "agents" }) },
+              { value: "private", label: t("detail.sharingPrivate", { ns: "agents" }) },
+            ],
+            onChange: setSharing,
+          },
+          ...(detail.auths.length > 1
+            ? [
+                {
+                  id: "method",
+                  label: t("integration.presentation.method"),
+                  values: methods,
+                  options: detail.auths.map((auth) => ({
+                    value: auth.auth_key,
+                    label: labelFor(auth),
+                  })),
+                  onChange: setMethods,
+                },
+              ]
+            : []),
+        ]}
+        onReset={() => {
+          setSearch("");
+          setSharing([]);
+          setMethods([]);
+        }}
+        actions={
+          isAdmin ? (
+            <AddIntegrationConnection
+              packageId={packageId}
+              detail={detail}
+              userId={user?.id}
+              onConfigure={onConfigure}
+            />
+          ) : undefined
+        }
+      />
       <DataTable
+        surface="integrated"
+        columnMode="scroll"
         label={t("integration.connection.tableLabel")}
-        columns={columns}
-        rows={connections}
-        rowKey={(c) => c.id}
-        empty={<EmptyState message={t("integration.auth.noConnection")} icon={Plug} compact />}
+        columns={displayColumns}
+        rows={rows}
+        rowKey={(connection) => connection.id}
+        empty={
+          <EmptyState
+            message={t(
+              search || sharing.length || methods.length
+                ? "integration.presentation.noMatch"
+                : "integration.auth.noConnection",
+            )}
+            icon={Plug}
+            compact
+          />
+        }
       />
     </div>
   );
@@ -1154,17 +1419,38 @@ export function IntegrationDetailPage() {
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
-  const [tab, setTab] = useTabWithHash(INTEGRATION_TABS, "connections");
+  const [storedTab, setTab] = useTabWithHash(INTEGRATION_TABS, "overview");
+  // Keep legacy #about links useful without retaining a duplicate destination.
+  const tab = storedTab === "about" ? "overview" : storedTab;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const openAuthentication = (authKey?: string) => {
+    const params = new URLSearchParams(location.search);
+    params.set("integrationSettings", authKey ? `auth:${authKey}` : "authentication");
+    void navigate({ search: params.toString(), hash: "configuration" });
+  };
+  const openConnections = (authKey?: string) => {
+    const params = new URLSearchParams(location.search);
+    if (authKey) params.set("connectionMethod", authKey);
+    else params.delete("connectionMethod");
+    void navigate({ search: params.toString(), hash: "connections" });
+  };
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+
+  if (storedTab === "content" || storedTab === "tools") {
+    const params = new URLSearchParams(location.search);
+    params.set("integrationSettings", storedTab === "tools" ? "tools" : "files");
+    return <Navigate replace to={{ search: params.toString(), hash: "#configuration" }} />;
+  }
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={String(error)} />;
   if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const summary = integrations?.find((i) => i.id === packageId);
-  const active = Boolean(summary?.active);
+  const active = detail.active;
   const m = detail.manifest;
   const source = pkg?.source ?? summary?.source ?? "local";
   const version = pkg?.version ?? m.version;
@@ -1186,16 +1472,13 @@ export function IntegrationDetailPage() {
           icon: typeof m.icon === "string" ? m.icon : undefined,
         }}
         isHistoricalVersion={false}
+        activeSubpage={{
+          label: t(`integration.tabs.${tab}`),
+        }}
         actionsLeft={
-          <span
-            className={
-              active
-                ? "rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
-                : "bg-warning/10 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-            }
-          >
+          <Badge variant={active ? "success" : "warning"}>
             {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
-          </span>
+          </Badge>
         }
         actionsRight={
           <>
@@ -1234,205 +1517,72 @@ export function IntegrationDetailPage() {
         onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
         className="mt-2"
       >
-        <div className="max-w-full overflow-x-auto pb-1">
-          <TabsList className="w-max">
-            <TabsTrigger value="connections" data-testid="tab-connections">
-              {t("integration.tabs.connections")}
-            </TabsTrigger>
-            {isAdmin && (
-              <TabsTrigger value="configuration" data-testid="tab-configuration">
-                {t("integration.tabs.configuration")}
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="tools" data-testid="tab-tools">
-              {t("integration.tabs.tools")}
-              {detail.tool_catalog && detail.tool_catalog.length > 0 && (
-                <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
-                  {detail.tool_catalog.length}
-                  {detail.allow_undeclared_tools ? "+" : ""}
-                </Badge>
-              )}
-              {detail.tool_catalog &&
-                detail.tool_catalog.length === 0 &&
-                detail.allow_undeclared_tools && (
-                  <Badge
-                    variant="outline"
-                    className="ml-1.5 text-[0.65rem]"
-                    data-testid="tab-tools-wildcard-badge"
-                  >
-                    *
-                  </Badge>
-                )}
-            </TabsTrigger>
-            <TabsTrigger value="about" data-testid="tab-about">
-              {t("integration.tabs.about")}
-            </TabsTrigger>
-            <TabsTrigger value="content" data-testid="tab-content">
-              {t("detail.tabFiles", { ns: "agents" })}
-            </TabsTrigger>
-            {!isBuiltIn && (
-              <TabsTrigger value="versions" data-testid="tab-versions">
-                {t("integration.tabs.versions")}
-              </TabsTrigger>
-            )}
-          </TabsList>
-        </div>
+        <DetailTabsList className="mt-6 mb-3">
+          <DetailTabsTrigger value="overview" data-testid="tab-overview">
+            {t("integration.tabs.overview")}
+          </DetailTabsTrigger>
+          <DetailTabsTrigger value="connections" data-testid="tab-connections">
+            {t("integration.tabs.connections")}
+          </DetailTabsTrigger>
+          <DetailTabsTrigger value="configuration" data-testid="tab-configuration">
+            {t("integration.tabs.configuration")}
+          </DetailTabsTrigger>
+          {!isBuiltIn && (
+            <DetailTabsTrigger value="versions" data-testid="tab-versions">
+              {t("integration.tabs.versions")}
+            </DetailTabsTrigger>
+          )}
+        </DetailTabsList>
 
-        {/* ─── Connexions (per-auth connect CTA + accounts table) ─── */}
-        <TabsContent value="connections" className="mt-4 space-y-8">
+        {/* One connected-accounts table, with each row retaining its auth context. */}
+        <TabsContent
+          value="connections"
+          className="bg-card mt-0 space-y-8 rounded-lg border p-6 shadow-sm"
+        >
           {!active ? (
             <ActivationHint onActivate={onActivate} pending={activate.isPending} />
           ) : detail.auths.length === 0 ? (
             <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
           ) : (
-            detail.auths.map((authStatus) => (
-              <ConnectAuthBlock
-                key={authStatus.auth_key}
-                packageId={packageId}
-                status={authStatus}
-                isAdmin={isAdmin}
-              />
-            ))
+            <ConnectionsTable
+              packageId={packageId}
+              detail={detail}
+              isAdmin={isAdmin}
+              onConfigure={openAuthentication}
+            />
           )}
         </TabsContent>
 
-        {/* ─── Configuration (admin: OAuth clients, auth metadata, access
-            rules, publisher setup guide). Separated from the runtime
-            Connexions view so client setup and connected accounts no longer
-            share one crowded card. ─── */}
-        {isAdmin && (
-          <TabsContent value="configuration" className="mt-4 space-y-8">
-            {!active ? (
-              <ActivationHint onActivate={onActivate} pending={activate.isPending} />
-            ) : (
-              <>
-                {/* AFPS §7.10 — publisher-authored prerequisites (OAuth app
-                    creation, redirect URI registration, …): admin setup, so it
-                    belongs with the client configuration. */}
-                {(m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
-                  .setup_guide?.steps &&
-                  (m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
-                    .setup_guide!.steps!.length > 0 && (
-                    <SetupGuideSteps
-                      steps={
-                        (
-                          m as {
-                            setup_guide?: { steps?: Array<{ label: string; url?: string }> };
-                          }
-                        ).setup_guide!.steps!
-                      }
-                    />
-                  )}
-                {detail.auths.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
-                ) : (
-                  detail.auths.map((authStatus) => {
-                    const declared = (m.auths ?? {})[authStatus.auth_key];
-                    if (!declared) return null;
-                    return (
-                      <ConfigAuthBlock
-                        key={authStatus.auth_key}
-                        packageId={packageId}
-                        status={authStatus}
-                        authDecl={declared}
-                      />
-                    );
-                  })
-                )}
-                <AccessRulesSection
-                  packageId={packageId}
-                  blockUserConnections={summary?.block_user_connections ?? false}
-                />
-              </>
-            )}
-          </TabsContent>
-        )}
+        {/* Configuration is admin-only; package files stay readable for every member. */}
+        <TabsContent
+          value="configuration"
+          className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+        >
+          <IntegrationSettings
+            packageId={packageId}
+            detail={detail}
+            blockUserConnections={detail.block_user_connections}
+            isAdmin={isAdmin}
+            onActivate={onActivate}
+            activationPending={activate.isPending}
+          />
+        </TabsContent>
 
         {/* ─── Outils (effective tool catalog — read-only) ─── */}
-        <TabsContent value="tools" className="mt-4">
-          <div className="max-w-2xl space-y-3">
-            <p className="text-muted-foreground text-xs">{t("integration.tools.intro")}</p>
-            {detail.allow_undeclared_tools && (
-              <div
-                className="rounded-md border-l-2 border-amber-500/30 bg-amber-500/5 p-3 text-xs"
-                data-testid="integration-tools-wildcard-notice"
-              >
-                <p className="font-medium">{t("integration.tools.wildcardNotice.title")}</p>
-                <p className="text-muted-foreground mt-1">
-                  {t("integration.tools.wildcardNotice.body")}
-                </p>
-              </div>
-            )}
-            {(detail.tool_catalog ?? []).length === 0 ? (
-              <p className="text-muted-foreground text-sm">{t("integration.tools.none")}</p>
-            ) : (
-              <div className="grid gap-2">
-                {(detail.tool_catalog ?? []).map((tool) => {
-                  const scopesByAuth = Object.entries(tool.policy?.required_scopes ?? {}).filter(
-                    ([, s]) => s.length > 0,
-                  );
-                  return (
-                    <div
-                      key={tool.name}
-                      className="bg-muted/30 rounded-md border p-3 text-xs"
-                      data-testid={`integration-tool-${tool.name}`}
-                    >
-                      <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="font-mono text-sm font-semibold">{tool.name}</span>
-                      </div>
-                      {tool.description && (
-                        <p className="text-muted-foreground mt-1">{tool.description}</p>
-                      )}
-                      {scopesByAuth.map(([authKey, scopes]) => (
-                        <p key={authKey} className="text-muted-foreground mt-2">
-                          {t("integration.tools.requires")}{" "}
-                          <Badge variant="outline" className="mr-1 font-mono text-[0.65rem]">
-                            {authKey}
-                          </Badge>
-                          {scopes.map((s) => (
-                            <Badge
-                              key={s}
-                              variant="secondary"
-                              className="mr-1 font-mono text-[0.65rem]"
-                            >
-                              {s}
-                            </Badge>
-                          ))}
-                        </p>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </TabsContent>
 
-        {/* ─── À propos (manifest, rendered) ───
-            The same component the Aperçu tab of the unified package page
-            mounts. It replaced a local metadata block that built
-            `<a href={manifest.repository}>` with no protocol check — a
-            published integration carrying `"repository": "javascript:…"` ran
-            on the platform origin as soon as someone clicked it. The href is
-            now gated on `normalizeHttpUrl`. */}
-        <TabsContent value="about" className="mt-4">
-          <div className="max-w-2xl">
-            <ManifestOverview manifest={m} type="integration" />
-          </div>
-        </TabsContent>
-
-        {/* ─── Contenu (the artifact's own files, read-only) ───
-            Same generic explorer the unified package page mounts; the type
-            only decides which file opens first (INTEGRATION.md here). No
-            `version` prop: this page has no historical-version view, so the
-            explorer reads the live draft. */}
-        <TabsContent value="content" className="mt-4">
-          <FileExplorer packageId={packageId} type="integration" />
+        {/* Capabilities, connected accounts and package usage are distinct concepts. */}
+        <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+          <IntegrationOverview
+            detail={detail}
+            agents={pkg?.agents}
+            onOpenConnections={openConnections}
+            onConfigureAuth={isAdmin ? openAuthentication : undefined}
+          />
         </TabsContent>
 
         {/* ─── Versions (read-only history; non-system only) ─── */}
         {!isBuiltIn && (
-          <TabsContent value="versions" className="mt-4">
+          <TabsContent value="versions" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
             <VersionHistory packageId={packageId} type="integration" isOwned={isOwned} />
           </TabsContent>
         )}

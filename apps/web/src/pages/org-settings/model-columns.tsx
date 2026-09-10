@@ -105,7 +105,7 @@ export function useModelColumns({
     {
       id: "status",
       header: t("models.col.status"),
-      width: "minmax(68px,1fr)",
+      width: "minmax(210px,1fr)",
       tier: 2,
       cell: (m) => (
         <div className="relative z-10 min-w-0">

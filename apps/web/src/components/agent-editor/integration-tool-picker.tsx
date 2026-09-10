@@ -44,6 +44,8 @@ import {
 } from "./tool-selection.ts";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Spinner } from "../spinner";
+import { Button } from "@appstrate/ui/components/button";
+import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
 
@@ -463,61 +465,43 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
               {t("agentEditor.integrations.tools.title")}
             </span>
             <div className="flex items-center gap-2">
-              <button
+              <Button
                 type="button"
-                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+                variant="ghost"
+                size="sm"
                 onClick={selectAllTools}
                 disabled={allSelected}
                 data-testid={`integ-tools-select-all-${packageId}`}
               >
                 {t("agentEditor.integrations.tools.selectAll")}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+                variant="ghost"
+                size="sm"
                 onClick={selectNoTools}
                 disabled={noneSelected}
                 data-testid={`integ-tools-select-none-${packageId}`}
               >
                 {t("agentEditor.integrations.tools.selectNone")}
-              </button>
+              </Button>
             </div>
           </div>
           <p className="text-muted-foreground mb-2 text-[11px]">
             {t("agentEditor.integrations.tools.explicitNotice")}
           </p>
-          <div className="grid gap-1.5">
-            {nativeCatalog.map((entry) => {
-              const requiredScopes = [
-                ...new Set(Object.values(entry.policy?.required_scopes ?? {}).flat()),
-              ];
-              return (
-                <label
-                  key={entry.name}
-                  className="flex cursor-pointer items-start gap-2 text-xs"
-                  data-testid={`integ-tool-${packageId}-${entry.name}`}
-                >
-                  <Checkbox
-                    checked={selectedTools.has(entry.name)}
-                    onCheckedChange={() => toggleTool(entry.name)}
-                    className="mt-0.5"
-                  />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="font-mono">{entry.name}</span>
-                    {entry.description && (
-                      <span className="text-muted-foreground text-[11px]">{entry.description}</span>
-                    )}
-                    {requiredScopes.length > 0 && (
-                      <span className="text-muted-foreground">
-                        {t("agentEditor.integrations.tools.requires")}{" "}
-                        <span className="font-mono">{requiredScopes.join(", ")}</span>
-                      </span>
-                    )}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
+          <PackageToolCatalog
+            tools={nativeCatalog.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              permissions: tool.policy?.required_scopes,
+            }))}
+            selection={{
+              values: selectedTools,
+              onToggle: toggleTool,
+              testIdPrefix: `integ-tool-${packageId}-`,
+            }}
+          />
         </div>
       )}
 

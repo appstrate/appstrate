@@ -28,6 +28,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { client } from "../../api/client";
 import { AppVersion } from "../../components/app-version";
+import { SettingsHeading } from "../../components/settings/settings-heading";
 import { SettingsPageActionTargetsProvider } from "../../components/settings/settings-page-actions";
 import { RailLink } from "../../components/settings/rail-link";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
@@ -450,7 +451,7 @@ export function UnifiedSettingsLayout() {
             <ChevronDown className="size-4 shrink-0" />
           </Button>
           <div className="mt-6 flex min-h-9 items-center justify-between gap-3">
-            <h1 className="text-xl font-semibold">{label(activeItem.labelKey)}</h1>
+            <SettingsHeading className="mb-0" title={label(activeItem.labelKey)} />
             <div
               ref={setMobileActionTarget}
               data-page-actions
@@ -462,7 +463,7 @@ export function UnifiedSettingsLayout() {
       {mobileNavigation}
       {activeItem && (
         <div className="mb-6 hidden min-h-9 items-center justify-between gap-4 md:flex">
-          <h3 className="text-lg font-semibold">{label(activeItem.labelKey)}</h3>
+          <SettingsHeading className="mb-0" title={label(activeItem.labelKey)} />
           <div
             ref={setDesktopActionTarget}
             data-page-actions

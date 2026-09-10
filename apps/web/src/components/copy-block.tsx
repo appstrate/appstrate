@@ -22,6 +22,7 @@ export function CopyBlock({
   multiline = false,
   dense = false,
   testId,
+  plain = false,
 }: {
   value: string;
   /** Preserve newlines and scroll horizontally instead of wrapping. */
@@ -29,17 +30,19 @@ export function CopyBlock({
   /** Tighter padding for inline use inside a form. */
   dense?: boolean;
   testId?: string;
+  /** Settings rows already provide their own visual container. */
+  plain?: boolean;
 }) {
   const { t } = useTranslation("common");
   const { copied, copy } = useCopyToClipboard();
   return (
     <div
-      className="border-border bg-muted/50 relative rounded-md border"
+      className={plain ? "relative" : "border-border bg-muted/50 relative rounded-md border"}
       {...(testId ? { "data-testid": testId } : {})}
     >
       <code
         className={`text-foreground block font-mono text-xs select-all ${
-          dense ? "px-2 py-1.5 pr-9" : "px-3 py-2 pr-12"
+          plain ? "py-2 pr-12" : dense ? "px-2 py-1.5 pr-9" : "px-3 py-2 pr-12"
         } ${multiline ? "overflow-x-auto whitespace-pre" : "break-all"}`}
       >
         {value}

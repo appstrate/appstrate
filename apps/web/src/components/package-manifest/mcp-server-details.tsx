@@ -10,8 +10,9 @@
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { ManifestFact, McpServerManifestDetails } from "../../lib/package-manifest";
-import { SectionCard } from "../section-card";
+import { DetailSectionCard as SectionCard } from "../detail-section-card";
 import { FactGrid } from "./manifest-fact";
+import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 
 export function McpServerDetails({ details }: { details: McpServerManifestDetails }) {
   const { t } = useTranslation("agents");
@@ -37,26 +38,24 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
   return (
     <>
       {facts.length > 0 && (
-        <SectionCard title={t("manifest.server")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.server")}>
           <FactGrid facts={facts} />
         </SectionCard>
       )}
 
       {tools.length > 0 && (
-        <SectionCard title={t("manifest.tools")}>
-          {tools.map((tool) => (
-            <div key={tool.name}>
-              <code className="text-sm">{tool.name}</code>
-              {tool.description && (
-                <p className="text-muted-foreground mt-0.5 text-xs">{tool.description}</p>
-              )}
-            </div>
-          ))}
+        <SectionCard
+          bodyClassName="space-y-4 p-4"
+          headerInside
+          title={t("manifest.tools")}
+          className="lg:col-span-2"
+        >
+          <PackageToolCatalog tools={tools} />
         </SectionCard>
       )}
 
       {userConfig.length > 0 && (
-        <SectionCard title={t("manifest.userConfig")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.userConfig")}>
           {userConfig.map((entry) => (
             <div key={entry.key}>
               <div className="flex flex-wrap items-center gap-2">

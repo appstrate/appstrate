@@ -32,7 +32,7 @@ import {
   readManifestOverview,
   readMcpServerDetails,
 } from "../../lib/package-manifest";
-import { SectionCard } from "../section-card";
+import { DetailSectionCard as SectionCard } from "../detail-section-card";
 import { EmptyState } from "../page-states";
 import { FactGrid } from "./manifest-fact";
 import { IntegrationDetails } from "./integration-details";
@@ -42,15 +42,19 @@ interface ManifestOverviewProps {
   /** The manifest of the version being viewed — jsonb, so `unknown`-shaped. */
   manifest: unknown;
   type: PackageType;
+  /** Overview pages provide capability-specific sections themselves. */
+  metadataOnly?: boolean;
 }
 
-export function ManifestOverview({ manifest, type }: ManifestOverviewProps) {
+export function ManifestOverview({ manifest, type, metadataOnly = false }: ManifestOverviewProps) {
   const { t } = useTranslation("agents");
   const overview = readManifestOverview(manifest);
   // Read here rather than inside the tails so this component can tell an
   // entirely undeclared manifest from one whose only content is its tail.
-  const integration = type === "integration" ? readIntegrationDetails(manifest) : undefined;
-  const mcpServer = type === "mcp-server" ? readMcpServerDetails(manifest) : undefined;
+  const integration =
+    !metadataOnly && type === "integration" ? readIntegrationDetails(manifest) : undefined;
+  const mcpServer =
+    !metadataOnly && type === "mcp-server" ? readMcpServerDetails(manifest) : undefined;
 
   const tailEmpty = integration?.isEmpty ?? mcpServer?.isEmpty ?? true;
   if (overview.isEmpty && tailEmpty) {
@@ -58,21 +62,25 @@ export function ManifestOverview({ manifest, type }: ManifestOverviewProps) {
   }
 
   return (
-    <div>
+    <div className="grid items-start gap-6 lg:grid-cols-2">
       {overview.longDescription && (
-        <SectionCard title={t("manifest.longDescription")}>
+        <SectionCard
+          bodyClassName="space-y-4 p-4"
+          headerInside
+          title={t("manifest.longDescription")}
+        >
           <p className="text-sm whitespace-pre-wrap">{overview.longDescription}</p>
         </SectionCard>
       )}
 
       {overview.facts.length > 0 && (
-        <SectionCard title={t("manifest.metadata")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.metadata")}>
           <FactGrid facts={overview.facts} />
         </SectionCard>
       )}
 
       {overview.keywords.length > 0 && (
-        <SectionCard title={t("manifest.keywords")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.keywords")}>
           <div className="flex flex-wrap gap-1.5">
             {/* Index in the key: `keywords` is author-controlled jsonb and the
                 reader keeps duplicates verbatim rather than editing the data to
@@ -87,13 +95,13 @@ export function ManifestOverview({ manifest, type }: ManifestOverviewProps) {
       )}
 
       {overview.links.length > 0 && (
-        <SectionCard title={t("manifest.links")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.links")}>
           <FactGrid facts={overview.links} />
         </SectionCard>
       )}
 
       {overview.dependencies.length > 0 && (
-        <SectionCard title={t("manifest.dependencies")}>
+        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.dependencies")}>
           {overview.dependencies.map((group) => (
             <div key={group.labelKey}>
               <p className="text-muted-foreground text-xs">{t(group.labelKey)}</p>

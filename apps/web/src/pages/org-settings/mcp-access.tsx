@@ -17,7 +17,7 @@ export function OrgSettingsMcpAccessPage() {
 
   return (
     <SettingsGroup title={t("orgSettings.mcpTitle")}>
-      <div className="border-border border-b py-4">
+      <div className="pb-8">
         <p className="text-muted-foreground mb-4 text-sm">{t("orgSettings.mcpDesc")}</p>
         <McpClientConnect
           serverName={`appstrate-${currentOrg.slug}`}

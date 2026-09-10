@@ -16,6 +16,7 @@ import { FormField } from "../components/form-field";
 
 // Agent editor components
 import { MetadataSection } from "../components/agent-editor/metadata-section";
+import { AgentAppearanceFields } from "../components/agent-editor/agent-appearance-fields";
 import { SchemaSection } from "../components/agent-editor/schema-section";
 import { ResourceSection } from "../components/agent-editor/resource-section";
 import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
@@ -261,6 +262,9 @@ function AgentEditorInner({
           onChange={onMetadataChange}
           isEdit={isEdit}
           surface={presentation === "panel-dialog" ? "settings" : "card"}
+          identityChildren={
+            <AgentAppearanceFields manifest={state.manifest} onChange={updateManifest} />
+          }
         >
           <div className="space-y-2">
             <FormField
@@ -347,8 +351,7 @@ function AgentEditorInner({
           {presentation === "panel-dialog" && (
             <section className="space-y-4">
               <div>
-                <h3 className="text-lg font-semibold">{t("editor.tabRuntimeTools")}</h3>
-                <div className="border-border mt-2 border-b" />
+                <h3 className="text-sm font-semibold">{t("editor.tabRuntimeTools")}</h3>
               </div>
               <RuntimeToolsGroup
                 selected={getRuntimeTools(state.manifest)}

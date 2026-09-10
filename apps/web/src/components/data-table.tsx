@@ -76,6 +76,8 @@ interface DataTableProps<T> extends CollectionState {
   rowKey: (row: T) => string;
   /** Where the row leads. A row without one is rendered static. */
   rowHref?: (row: T) => string | undefined;
+  /** Open an in-place detail. Navigation must keep using rowHref. */
+  rowAction?: (row: T) => void;
   /**
    * What the row's link is called. Needed because the link lives in the FIRST
    * cell: left to itself it would be announced as "#131", which names nothing.
@@ -168,6 +170,7 @@ export function DataTable<T>({
   rows,
   rowKey,
   rowHref,
+  rowAction,
   rowLabel,
   rowState,
   banner,
@@ -306,7 +309,7 @@ export function DataTable<T>({
                       className={cn(
                         rowGrid,
                         "border-border/60 relative min-h-12 border-b py-2 last:border-b-0",
-                        href && "hover:bg-muted/50 transition-colors",
+                        (href || rowAction) && "hover:bg-muted/50 transition-colors",
                       )}
                     >
                       {columns.map((col, i) => (
@@ -332,6 +335,16 @@ export function DataTable<T>({
                             >
                               {col.cell(row)}
                             </Link>
+                          ) : i === linkColumn && rowAction ? (
+                            <>
+                              <button
+                                type="button"
+                                aria-label={rowLabel?.(row) ?? rowKey(row)}
+                                onClick={() => rowAction(row)}
+                                className="focus-visible:outline-ring absolute inset-0 cursor-pointer rounded-none bg-transparent p-0 hover:bg-transparent focus-visible:outline-2 focus-visible:-outline-offset-2"
+                              />
+                              {col.cell(row)}
+                            </>
                           ) : (
                             col.cell(row)
                           )}

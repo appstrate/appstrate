@@ -8,6 +8,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import { FormField } from "../form-field";
 import { SectionCard } from "../section-card";
+import { SettingsHeading } from "../settings/settings-heading";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 
 export interface MetadataState {
@@ -31,6 +32,8 @@ interface MetadataSectionProps {
    * the fields every package type shares.
    */
   children?: React.ReactNode;
+  /** Package-specific identity controls, such as Agent icon and colour. */
+  identityChildren?: React.ReactNode;
   surface?: "card" | "settings";
 }
 
@@ -39,6 +42,7 @@ export function MetadataSection({
   onChange,
   isEdit,
   children,
+  identityChildren,
   surface = "card",
 }: MetadataSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
@@ -100,6 +104,7 @@ export function MetadataSection({
         description={t("editor.metaScopeDesc")}
         disabled
       />
+      {identityChildren}
     </>
   );
 
@@ -190,11 +195,8 @@ export function MetadataSection({
 function SettingsFieldGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <div>
-        <h3 className="text-lg font-semibold">{title}</h3>
-        <div className="border-border mt-2 border-b" />
-      </div>
-      <div className="max-w-2xl space-y-5 pt-4">{children}</div>
+      <SettingsHeading level="group" title={title} />
+      <div className="max-w-2xl space-y-5">{children}</div>
     </section>
   );
 }

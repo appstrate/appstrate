@@ -29,6 +29,7 @@ import type { DataColumn } from "../components/data-table";
 import { DefaultCell } from "../components/default-cell";
 import { TableRowActions } from "../components/table-row-actions";
 import { isConnectionOwnedBy } from "../components/integration-connect/connection-label";
+import type { ConnectionAuthContext } from "../lib/integration-presentation";
 import type {
   IntegrationAuthType,
   IntegrationClient,
@@ -78,7 +79,7 @@ export function useIntegrationClientColumns({
       header: t("integration.clients.col.clientId"),
       width: "minmax(200px,2fr)",
       cell: (client) => (
-        <span className="block truncate font-mono text-xs" title={client.client_id}>
+        <span className="text-muted-foreground block truncate text-sm" title={client.client_id}>
           {client.client_id}
         </span>
       ),
@@ -108,7 +109,7 @@ export function useIntegrationClientColumns({
           isDefault={client.is_default}
           defaultLabel={t("integration.clients.default")}
           setLabel={t("integration.clients.setDefault.action")}
-          canSetDefault={canChooseDefault}
+          canSetDefault={false}
           disabled={settingDefaultClientRef !== null}
           isPending={settingDefaultClientRef === client.client_ref}
           onSetDefault={() => onSetDefault(client)}
@@ -128,26 +129,33 @@ export function useIntegrationClientColumns({
         // allowed: it re-triggers registration.
         const editable = client.source === "custom" && !client.auto_provisioned;
         const deletable = client.source === "custom";
-        if (!editable && !deletable) return null;
+        const canSetDefault = canChooseDefault && !client.is_default;
+        if (!editable && !deletable && !canSetDefault) return null;
         return (
           <TableRowActions
-            primary={
-              editable
-                ? {
-                    label: t("integration.oauthClient.btnRotate"),
-                    onSelect: () => onRotate(client),
-                    icon: RotateCcw,
-                  }
-                : undefined
-            }
             menuLabel={
-              deletable
+              editable || deletable || canSetDefault
                 ? t("integration.oauthClient.moreActions", { name: client.client_id })
                 : undefined
             }
             isPending={deletingClientRef === client.client_ref}
             pendingLabel={t("common:loading")}
           >
+            {editable && (
+              <DropdownMenuItem onSelect={() => onRotate(client)}>
+                <RotateCcw />
+                {t("integration.oauthClient.btnRotate")}
+              </DropdownMenuItem>
+            )}
+            {canSetDefault && (
+              <DropdownMenuItem
+                onSelect={() => onSetDefault(client)}
+                disabled={settingDefaultClientRef !== null}
+                data-testid={`set-default-client-${client.client_ref}`}
+              >
+                {t("integration.clients.setDefault.action")}
+              </DropdownMenuItem>
+            )}
             {deletable && (
               <DropdownMenuItem
                 onSelect={() => onDelete(client)}
@@ -189,6 +197,7 @@ export function useConnectionColumns({
   canRenew,
   userId,
   isAdmin,
+  authForConnection,
 }: {
   packageId: string;
   authKey: string;
@@ -198,6 +207,8 @@ export function useConnectionColumns({
   canRenew: boolean;
   userId: string | undefined;
   isAdmin: boolean;
+  /** Mixed-method tables resolve renew against the row's own authentication. */
+  authForConnection?: (connection: IntegrationConnection) => ConnectionAuthContext;
 }): DataColumn<IntegrationConnection>[] {
   const { t } = useTranslation("settings");
   // Said once rather than in each of the four cells that key off it.
@@ -215,7 +226,7 @@ export function useConnectionColumns({
     {
       id: "status",
       header: t("integration.connection.col.status"),
-      width: "minmax(88px,1fr)",
+      width: "minmax(170px,1fr)",
       tier: 2,
       cell: (c) => <StatusCell connection={c} />,
     },
@@ -274,9 +285,7 @@ export function useConnectionColumns({
         <ConnectionActionsCell
           connection={c}
           packageId={packageId}
-          authKey={authKey}
-          authType={authType}
-          canRenew={canRenew}
+          {...(authForConnection?.(c) ?? { authKey, authType, canRenew })}
           isOwn={owns(c)}
         />
       ),

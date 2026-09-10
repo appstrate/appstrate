@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
+import { Badge, type BadgeProps } from "@appstrate/ui/components/badge";
 
 /**
  * Health states a connection pill can express. `needsReconnection` is a
@@ -9,10 +10,10 @@ import type { ReactNode } from "react";
  */
 export type ConnectionStatusTone = "connected" | "needsReconnection" | "missingScopes";
 
-const TONE_CLASSES: Record<ConnectionStatusTone, string> = {
-  connected: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  needsReconnection: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  missingScopes: "border-destructive/40 bg-destructive/10 text-destructive",
+const TONE_VARIANTS: Record<ConnectionStatusTone, BadgeProps["variant"]> = {
+  connected: "success",
+  needsReconnection: "warning",
+  missingScopes: "failed",
 };
 
 /**
@@ -32,9 +33,5 @@ export function ConnectionStatusBadge({
   tone: ConnectionStatusTone;
   children: ReactNode;
 }) {
-  return (
-    <span className={`rounded-full border px-2 py-px text-[0.65rem] ${TONE_CLASSES[tone]}`}>
-      {children}
-    </span>
-  );
+  return <Badge variant={TONE_VARIANTS[tone]}>{children}</Badge>;
 }

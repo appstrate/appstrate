@@ -19,16 +19,14 @@ type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 /** Per-type presentation for the generic browse tab. */
 const TYPE_PRESENTATION: Record<
   BrowseType,
-  { emoji: string; emptyIcon: typeof Wrench; typeKey: string; titleKey: string }
+  { emptyIcon: typeof Wrench; typeKey: string; titleKey: string }
 > = {
   skill: {
-    emoji: "🧠",
     emptyIcon: Wrench,
     typeKey: "packages.type.skill",
     titleKey: "packages.type.skills",
   },
   "mcp-server": {
-    emoji: "🔌",
     emptyIcon: Plug,
     typeKey: "packages.type.mcp-server",
     titleKey: "packages.type.mcp-servers",
@@ -69,7 +67,6 @@ export function ItemTab({
       <PackageTab
         items={items}
         isLoading={isLoading}
-        emoji={presentation.emoji}
         entity={title}
         holds={type}
         emptyMessage={t("packages.emptyItems", { type: typeLabel })}

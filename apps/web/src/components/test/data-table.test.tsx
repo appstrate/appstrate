@@ -156,6 +156,15 @@ describe("the row's link", () => {
 });
 
 describe("states", () => {
+  it("offers one full-row button for an in-place detail", () => {
+    const html = table({ rowHref: undefined, rowAction: () => {} });
+    expect(html).not.toContain("<a ");
+    expect([...html.matchAll(/<button /g)]).toHaveLength(ROWS.length);
+    expect(html).toContain('aria-label="Ligne Alpha"');
+    expect(html).toContain("absolute inset-0 cursor-pointer");
+    expect(html).toContain("hover:bg-muted/50");
+  });
+
   it("replaces the head with the empty node — it would label nothing", () => {
     const html = table({ rows: [], empty: <p>Rien ici</p> });
     expect(html).toContain("Rien ici");

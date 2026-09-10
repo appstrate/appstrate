@@ -3,7 +3,7 @@
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Switch } from "@appstrate/ui/components/switch";
 import { Label } from "@appstrate/ui/components/label";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
@@ -39,7 +39,7 @@ export function OrgSettingsOAuthPage() {
 
   return (
     <>
-      <SettingsGroup title={t("orgSettings.dashboardSsoTitle")}>
+      <SettingsGroup>
         <SettingRow
           variant="toggle"
           label={
@@ -50,7 +50,7 @@ export function OrgSettingsOAuthPage() {
           description={t("orgSettings.dashboardSsoDesc")}
           status={updateSettingsMutation.isPending && <Spinner />}
         >
-          <Checkbox
+          <Switch
             id="dashboard-sso"
             checked={orgSettings?.dashboard_sso_enabled ?? false}
             disabled={!currentOrg || updateSettingsMutation.isPending}

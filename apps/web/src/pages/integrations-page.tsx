@@ -314,8 +314,8 @@ export function IntegrationsPage() {
   return (
     <div>
       <PageHeader
-        emoji="🧩"
         title={t("integrations.title")}
+        variant="collection"
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
         actions={

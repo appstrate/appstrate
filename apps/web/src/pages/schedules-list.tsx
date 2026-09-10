@@ -93,7 +93,7 @@ export function SchedulesListPage() {
     <div>
       <PageHeader
         title={t("schedules.title")}
-        emoji="📅"
+        variant="collection"
         breadcrumbs={[{ label: t("schedules.title") }]}
         actions={isAdmin ? actions : undefined}
       />

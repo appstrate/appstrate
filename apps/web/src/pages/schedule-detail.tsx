@@ -6,8 +6,12 @@ import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
+import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import { DetailSectionCard } from "../components/detail-section-card";
+import { FactGrid } from "../components/package-manifest/manifest-fact";
+import { ListToolbar } from "../components/list-toolbar";
+import { runStatusValues, type RunStatus } from "@appstrate/shared-types";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -22,12 +26,21 @@ import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
-import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
 import { formatDateField } from "../lib/markdown";
-import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
+import {
+  ChevronDown,
+  Pencil,
+  Trash2,
+  Play,
+  Pause,
+  Clock,
+  CalendarClock,
+  FileInput,
+  CirclePlay,
+} from "lucide-react";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -39,8 +52,8 @@ export function ScheduleDetailPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  const tabs = ["runs", "details"] as const;
-  const [activeTab, setActiveTab] = useTabWithHash(tabs, "runs");
+  const tabs = ["details", "runs"] as const;
+  const [activeTab, setActiveTab] = useTabWithHash(tabs, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
@@ -55,10 +68,19 @@ export function ScheduleDetailPage() {
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
         <PageHeader
           title={schedule.name || schedule.id}
-          emoji="📅"
+          titleClassName="text-xl"
+          wrapActions
+          icon={
+            <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
+              <CalendarClock className="size-5" aria-hidden />
+            </span>
+          }
           breadcrumbs={[
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
-            { label: schedule.name || schedule.id },
+            { label: schedule.name || schedule.id, href: `/schedules/${schedule.id}` },
+            {
+              label: activeTab === "details" ? t("detail.overview.summary") : t("schedule.tabRuns"),
+            },
           ]}
           actions={
             <>
@@ -66,8 +88,9 @@ export function ScheduleDetailPage() {
               {isAdmin && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <MoreHorizontal size={16} />
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5">
+                      {t("pageActions.label", { ns: "common" })}
+                      <ChevronDown size={16} />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -93,18 +116,17 @@ export function ScheduleDetailPage() {
               )}
             </>
           }
-        >
-          <TabsList className="mt-3">
-            <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>
-            <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
-          </TabsList>
-        </PageHeader>
+        />
+        <DetailTabsList className="mt-6 mb-3">
+          <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
+          <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>
+        </DetailTabsList>
 
-        <TabsContent value="runs">
+        <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
           <ScheduleHistory schedule={schedule} />
         </TabsContent>
 
-        <TabsContent value="details">
+        <TabsContent value="details" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
           <ScheduleParams schedule={schedule} />
         </TabsContent>
       </Tabs>
@@ -152,69 +174,64 @@ function ScheduleParams({
   const input = schedule.input;
 
   return (
-    <>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramActor")}</p>
-          <p className="inline-flex items-center gap-1.5 text-sm font-medium">
-            <ActorLabel
-              actor_type={schedule.actor_type}
-              actor_name={schedule.actor_name}
-              iconSize="size-3.5"
-            />
-            {schedule.actor_type && (
-              <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
-                {schedule.actor_type}
-              </UIBadge>
-            )}
-          </p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramAgent")}</p>
-          <Link
-            to={`/agents/${schedule.packageId}`}
-            className="text-sm font-medium hover:underline"
-          >
-            {agentDisplayName}
-          </Link>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramCron")}</p>
-          <p className="font-mono text-sm">{schedule.cron_expression}</p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramTimezone")}</p>
-          <p className="text-sm font-medium">{schedule.timezone ?? "UTC"}</p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramNextRun")}</p>
-          <p className="text-sm font-medium">
-            {schedule.next_run_at ? formatDateField(schedule.next_run_at) : "-"}
-          </p>
-        </div>
-
-        <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramLastRun")}</p>
-          <p className="text-sm font-medium">
-            {schedule.last_run_at ? formatDateField(schedule.last_run_at) : "-"}
-          </p>
-        </div>
-      </div>
-
-      {/* Input data */}
-      {input && Object.keys(input).length > 0 && (
-        <div className="mt-6">
-          <h3 className="text-muted-foreground mb-3 text-sm font-medium">
-            {t("schedule.tabInput")}
-          </h3>
+    <div className="grid items-start gap-6 lg:grid-cols-2">
+      <DetailSectionCard headerInside title={t("run.infoExecution")} icon={CirclePlay}>
+        <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+          <div className="min-w-0">
+            <dt className="text-muted-foreground text-xs">{t("schedule.paramAgent")}</dt>
+            <dd className="mt-1 text-sm">
+              <Link className="text-primary hover:underline" to={`/agents/${schedule.packageId}`}>
+                {agentDisplayName}
+              </Link>
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground text-xs">{t("schedule.paramActor")}</dt>
+            <dd className="mt-1 text-sm break-words">{schedule.actor_name || "–"}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground text-xs">{t("run.infoVersion")}</dt>
+            <dd className="mt-1 text-sm">
+              {schedule.version_override || t("schedule.inheritedVersion")}
+            </dd>
+          </div>
+        </dl>
+      </DetailSectionCard>
+      <DetailSectionCard headerInside title={t("schedule.timing")} icon={CalendarClock}>
+        <FactGrid
+          facts={[
+            { labelKey: "schedule.paramCron", value: schedule.cron_expression },
+            { labelKey: "schedule.paramTimezone", value: schedule.timezone ?? "UTC" },
+            {
+              labelKey: "schedule.paramNextRun",
+              value:
+                schedule.enabled && schedule.next_run_at
+                  ? formatDateField(schedule.next_run_at)
+                  : t("schedule.noNextRun"),
+            },
+            {
+              labelKey: "schedule.paramLastRun",
+              value: schedule.last_run_at
+                ? formatDateField(schedule.last_run_at)
+                : t("schedule.notRunYet"),
+            },
+          ]}
+        />
+      </DetailSectionCard>
+      <DetailSectionCard
+        headerInside
+        title={t("schedule.tabInput")}
+        icon={FileInput}
+        className="lg:col-span-2"
+      >
+        <p className="text-muted-foreground mb-4 text-sm">{t("schedule.inputHint")}</p>
+        {input && Object.keys(input).length > 0 ? (
           <JsonView data={input} />
-        </div>
-      )}
-    </>
+        ) : (
+          <p className="text-muted-foreground text-sm">{t("schedule.noInput")}</p>
+        )}
+      </DetailSectionCard>
+    </div>
   );
 }
 
@@ -225,7 +242,9 @@ function ScheduleHistory({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  const { t } = useTranslation(["agents"]);
+  const { t } = useTranslation(["agents", "common"]);
+  const [search, setSearch] = useState("");
+  const [statuses, setStatuses] = useState<RunStatus[]>([]);
   const { data: agents } = useAgents();
   const agentName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
@@ -263,7 +282,7 @@ function ScheduleHistory({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const previewRow =
-    isActive && showNext && schedule.next_run_at ? (
+    !search && statuses.length === 0 && isActive && showNext && schedule.next_run_at ? (
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
@@ -276,13 +295,44 @@ function ScheduleHistory({
     <RunList
       scheduleId={schedule.id}
       pageSize={12}
+      status={statuses}
+      search={search}
+      tableSurface="integrated"
+      toolbar={({ columns }) => (
+        <ListToolbar
+          placement="panel"
+          panelFiltersAdjacent
+          columns={columns}
+          search={{ value: search, onChange: setSearch, placeholder: t("detail.runsSearch") }}
+          filters={[
+            {
+              id: "status",
+              label: t("runs.filterStatus"),
+              values: statuses,
+              options: runStatusValues.map((value) => ({
+                value,
+                label: t(`status.${value}`, { ns: "common" }),
+              })),
+              onChange: (values) => setStatuses(values as RunStatus[]),
+            },
+          ]}
+          onReset={() => {
+            setSearch("");
+            setStatuses([]);
+          }}
+        />
+      )}
       fixedAgentName={agentName}
       firstPageBanner={previewRow}
       emptyState={
-        <div className="border-border rounded-md border">
+        <div>
           {previewRow}
           <div className="p-6">
-            <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
+            <EmptyState
+              message={t(search || statuses.length ? "runs.emptyFiltered" : "schedule.noRuns")}
+              icon={Clock}
+              compact
+            />
           </div>
         </div>
       }

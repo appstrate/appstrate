@@ -8,6 +8,8 @@ export type { BreadcrumbEntry };
 
 interface PageHeaderProps {
   title: string;
+  /** Level-one collection pages use a larger destination title. */
+  variant?: "default" | "collection";
   titleClassName?: string;
   /** Status or other compact metadata that semantically qualifies the title. */
   titleTrailing?: ReactNode;
@@ -23,6 +25,7 @@ interface PageHeaderProps {
 
 export function PageHeader({
   title,
+  variant = "default",
   titleClassName,
   titleTrailing,
   emoji,
@@ -53,7 +56,13 @@ export function PageHeader({
             : "flex min-h-9 items-center justify-between gap-4"
         }
       >
-        <h2 className={cn("flex items-center gap-2 text-lg font-semibold", titleClassName)}>
+        <h2
+          className={cn(
+            "flex items-center gap-2 font-semibold",
+            variant === "collection" ? "text-lg md:text-2xl" : "text-lg",
+            titleClassName,
+          )}
+        >
           {icon ?? (emoji && <span>{emoji}</span>)}
           {title}
           {titleTrailing}

@@ -28,10 +28,7 @@ export function useOAuthClientColumns({
       width: "minmax(88px,1.3fr)",
       tier: 2,
       cell: (client) => (
-        <span
-          className="text-muted-foreground block truncate font-mono text-xs"
-          title={client.clientId}
-        >
+        <span className="text-muted-foreground block truncate text-sm" title={client.clientId}>
           {client.clientId}
         </span>
       ),
