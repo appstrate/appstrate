@@ -24,6 +24,7 @@ import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
 import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
+import { assertCustomRolesFeature } from "./space-roles.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -261,7 +262,13 @@ export async function deleteSpaceMembershipsInOrg(
     });
 }
 
-/** The FK alone would accept another org's bundle, so the org is checked here. */
+/**
+ * The FK alone would accept another org's bundle, so the org is checked here.
+ *
+ * Granting a bundle is the licensed half of the feature, not just defining one
+ * — the gate comes before the lookup so the refusal is about the deployment
+ * and says nothing about which `srl_` ids exist. Presets never ask.
+ */
 async function assignmentColumns(
   orgId: string,
   assignment: SpaceRoleAssignment,
@@ -272,6 +279,7 @@ async function assignmentColumns(
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
+  assertCustomRolesFeature("assign");
   const [role] = await tx
     .select({
       id: spaceRoles.id,

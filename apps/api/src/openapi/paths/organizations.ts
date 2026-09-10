@@ -9,7 +9,7 @@ import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 const SPACE_ASSIGNMENTS_BODY = {
   type: "array",
   description:
-    "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+    "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting.",
   items: { $ref: "#/components/schemas/SpaceAssignment" },
 } as const;
 
@@ -265,7 +265,7 @@ export const organizationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
@@ -412,7 +412,7 @@ export const organizationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

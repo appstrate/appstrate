@@ -6,7 +6,12 @@
  * ORG-scoped: a bundle belongs to the organization and is assignable in any of
  * its spaces, so `roles:*` is an org-level permission and this router stays
  * outside `SPACE_SCOPED_PREFIXES`. Reading is always available; DEFINING a
- * bundle is what `features.custom_roles` turns on (§9).
+ * bundle is what `features.custom_roles` turns on (§9), and so is granting one
+ * (`assertCustomRolesFeature`, called from the assignment paths).
+ *
+ * DELETE is deliberately NOT gated: it is the only verb that shrinks what a
+ * leftover bundle reaches, and a deployment that lost the feature is exactly
+ * the one that needs it.
  */
 
 import { Hono } from "hono";
@@ -53,10 +58,10 @@ export const updateSpaceRoleSchema = z
   })
   .strict();
 
-/** Gate the write routes on `features.custom_roles` (`assertCustomRolesFeature`). */
+/** Gate the authoring routes on `features.custom_roles` (`assertCustomRolesFeature`). */
 function requireCustomRolesFeature() {
   return async (_c: Context<AppEnv>, next: Next) => {
-    assertCustomRolesFeature();
+    assertCustomRolesFeature("define");
     return next();
   };
 }
@@ -111,7 +116,8 @@ export function createRolesRouter() {
   });
 
   // Refused with a count while anyone still holds the role — see the service.
-  router.delete("/:id", requirePermission("roles", "delete"), featureGate, async (c) => {
+  // No feature gate: see the module header.
+  router.delete("/:id", requirePermission("roles", "delete"), async (c) => {
     const id = roleIdParam(c);
     const role = await deleteSpaceRole(c.get("orgId"), id);
     await recordAuditFromContext(c, {

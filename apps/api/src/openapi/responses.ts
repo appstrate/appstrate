@@ -41,6 +41,47 @@ export const responses = {
       },
     },
   },
+  /**
+   * The 403 of anything that DEFINES or GRANTS a custom space role: two causes,
+   * one status. `code` is what tells them apart, so both are named — the
+   * generic `Forbidden` documents only the first.
+   */
+  CustomRoleFeatureForbidden: {
+    description:
+      "`forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        examples: {
+          forbidden: {
+            summary: "Missing permission",
+            value: {
+              type: "https://docs.appstrate.dev/errors/forbidden",
+              title: "Forbidden",
+              status: 403,
+              detail: "Insufficient permissions",
+              instance: "urn:appstrate:request:req_2f1c6d84",
+              code: "forbidden",
+              requestId: "req_2f1c6d84",
+            },
+          },
+          feature_unavailable: {
+            summary: "Feature not on this deployment",
+            value: {
+              type: "https://docs.appstrate.dev/errors/feature-unavailable",
+              title: "Feature Unavailable",
+              status: 403,
+              detail:
+                "Defining a custom space role requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
+              instance: "urn:appstrate:request:req_2f1c6d84",
+              code: "feature_unavailable",
+              requestId: "req_2f1c6d84",
+            },
+          },
+        },
+      },
+    },
+  },
   NotFound: {
     description: "Resource not found",
     content: {

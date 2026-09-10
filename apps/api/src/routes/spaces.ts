@@ -74,7 +74,7 @@ import {
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { listSpaceRoles } from "../services/space-roles.ts";
+import { hasCustomRoles, listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
@@ -432,16 +432,23 @@ export function createSpacesRouter() {
     ]),
     async (c) => {
       const permissions = c.get("permissions");
+      // This listing answers "what can I assign HERE", so it is filtered by the
+      // same two things the assignment refuses on: the feature, then the
+      // caller's own permissions. A bundle nobody can grant is not offered —
+      // the org catalogue (`GET /api/roles`) still lists leftovers, which is
+      // where a downgraded deployment finds them to delete.
+      const customGrantable = hasCustomRoles();
       const roles = await listSpaceRoles(c.get("orgId"));
       return c.json(
         listResponse(
           roles.filter((role) =>
-            canGrantSpaceRole(
-              permissions,
-              role.kind === "preset"
-                ? { kind: "preset", preset: role.key as SpaceRolePreset }
-                : { kind: "custom", role: { ...role, id: role.id! } },
-            ),
+            role.kind === "preset"
+              ? canGrantSpaceRole(permissions, {
+                  kind: "preset",
+                  preset: role.key as SpaceRolePreset,
+                })
+              : customGrantable &&
+                canGrantSpaceRole(permissions, { kind: "custom", role: { ...role, id: role.id! } }),
           ),
         ),
       );

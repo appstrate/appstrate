@@ -532,7 +532,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "List assignable space roles",
       description:
-        "Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.",
+        "Returns presets and organization roles whose permissions are held by the caller in this space, and nothing the caller could not actually grant: where `custom_roles` is unavailable the bundles are omitted here (the org catalogue `GET /api/roles` still lists them, which is where a leftover is deleted). Requires space-members:invite, space-members:change-role, or space-settings:write.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XViewAs" },
@@ -611,7 +611,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Add a space member",
       description:
-        "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
+        "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise); a `preset_role` never does.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -649,7 +649,7 @@ export const spacesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
@@ -670,7 +670,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Change a space member's role",
       description:
-        "Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.",
+        "Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise), so moving a holder OFF a leftover bundle and onto a preset stays available where moving another one onto it does not.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -704,7 +704,7 @@ export const spacesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:

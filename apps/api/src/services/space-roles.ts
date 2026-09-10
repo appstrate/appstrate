@@ -65,15 +65,33 @@ export function hasCustomRoles(): boolean {
   return getAppConfig().features.custom_roles === true;
 }
 
-/** {@link hasCustomRoles} as the write routes' refusal. */
-export function assertCustomRolesFeature(): void {
+/** What a refused call was about to do, so the 403 names the act, not the flag. */
+export type CustomRoleAct = "define" | "assign";
+
+const ACT_DETAIL: Record<CustomRoleAct, string> = {
+  define: "Defining a custom space role",
+  assign: "Assigning a custom space role",
+};
+
+/**
+ * {@link hasCustomRoles} as a refusal.
+ *
+ * The licence covers both halves of a bundle's life — DEFINING one and
+ * GRANTING one — because either half alone is the feature: an org that keeps
+ * assigning bundles it authored under licence keeps the whole of what it paid
+ * for. REMOVING one never asks. A deployment that loses the feature therefore
+ * keeps exactly the verbs that SHRINK what leftover bundles reach, which is
+ * what makes an EE → OSS downgrade a state one can leave rather than a state
+ * that freezes with bundles nobody can grant and nobody can delete.
+ */
+export function assertCustomRolesFeature(act: CustomRoleAct): void {
   if (hasCustomRoles()) return;
   throw new ApiError({
     status: 403,
     code: "feature_unavailable",
     title: "Feature Unavailable",
     detail:
-      "Defining custom space roles requires the `custom_roles` feature, provided by the " +
+      `${ACT_DETAIL[act]} requires the \`custom_roles\` feature, provided by the ` +
       "Appstrate Cloud plan (the `@appstrate/module-ee` module). The built-in presets " +
       `(${SPACE_ROLE_PRESETS.join(", ")}) are always available.`,
   });
