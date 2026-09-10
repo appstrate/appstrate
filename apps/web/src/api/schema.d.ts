@@ -14881,7 +14881,7 @@ export interface operations {
                     redirectUris?: string[];
                     /** @description URIs allowed for post-logout redirects (OIDC RP-Initiated Logout). */
                     postLogoutRedirectUris?: string[];
-                    /** @description OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes`. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations. */
+                    /** @description OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes` — minus the scopes no end-user token can carry (`runs:read-all`) when the client is space-level. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations. */
                     scopes?: string[];
                     disabled?: boolean;
                     isFirstParty?: boolean;

@@ -69,9 +69,30 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
 ]);
 
 /**
+ * Permissions an OAuth client may REQUEST but that no end-user token can
+ * carry — the requestable vocabulary is wider than the end-user allowlist.
+ *
+ * `runs:read-all` is the space-wide supervision read (`lib/run-visibility.ts`).
+ * It must stay out of {@link OIDC_ALLOWED_SCOPES}: an embedding app acting for
+ * an end-user must never see a colleague's or another end-user's run. But an
+ * org-level client acting for a dashboard user IS the supervision surface —
+ * `scopesToPermissions("dashboard_user", role)` intersects the request with the
+ * subject's live authority, so an admin gets it and a `runner` does not. Absent
+ * from the vocabulary entirely, the scope could not be asked for at all and
+ * every dashboard token was silently capped at its own runs (issue #1372).
+ *
+ * Self-service (DCR / CIMD) registrants are unaffected: their ceiling is
+ * {@link getSelfServiceScopes}, which lists no core action scope.
+ */
+export const OIDC_DASHBOARD_ONLY_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
+  "runs:read-all",
+]);
+
+/**
  * Static core scope vocabulary: identity scopes first, then the core
- * `Permission` strings drawn from `OIDC_ALLOWED_SCOPES` — no translation
- * layer, the scope `agents:run` grants the `agents:run` permission verbatim.
+ * `Permission` strings a client may request — the end-user allowlist plus the
+ * dashboard-only scopes. No translation layer: the scope `agents:run` grants
+ * the `agents:run` permission verbatim.
  *
  * Module-contributed scopes (e.g. `mcp:read`/`mcp:invoke`) are NOT listed
  * here — they are merged dynamically by `getAppstrateScopes()` from each
@@ -84,6 +105,7 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
 export const APPSTRATE_BUILTIN_SCOPES: readonly string[] = [
   ...OIDC_IDENTITY_SCOPES,
   ...OIDC_ALLOWED_SCOPES,
+  ...OIDC_DASHBOARD_ONLY_SCOPES,
 ];
 
 /**
@@ -111,4 +133,22 @@ export function getAppstrateScopes(): readonly string[] {
 /** O(1) membership check on the full vocabulary. Materialized per call (cheap). */
 export function getAppstrateScopeSet(): ReadonlySet<string> {
   return new Set(getAppstrateScopes());
+}
+
+/**
+ * The subset of the vocabulary an END-USER token can actually carry — exactly
+ * what `scopesToPermissions(…, "end_user")` keeps.
+ *
+ * The registration gate for space-level clients: everything a space client
+ * requests is minted onto `end_user` tokens, so a dashboard-only scope
+ * registered there would be dropped at every mint and the operator would never
+ * hear about it. Refusing it at registration keeps the silent narrowing this
+ * module fixed for dashboard tokens from reappearing for space clients.
+ */
+export function getEndUserScopeSet(): ReadonlySet<string> {
+  return new Set<string>([
+    ...OIDC_IDENTITY_SCOPES,
+    ...OIDC_ALLOWED_SCOPES,
+    ...getModuleEndUserAllowedScopes(),
+  ]);
 }

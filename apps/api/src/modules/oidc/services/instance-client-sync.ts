@@ -235,7 +235,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
     // to land here and used to have its own branch; a typo, a scope dropped
     // from `OIDC_ALLOWED_SCOPES`, or a module that stopped contributing one all
     // land here identically, and all of them deserve the same answer.
-    const unusableScopes = invalidScopesIn(entry.scopes);
+    const unusableScopes = invalidScopesIn(entry.scopes, "instance");
     if (unusableScopes.length > 0) {
       throw new InstanceClientSyncError(
         `OIDC_INSTANCE_CLIENTS: client '${entry.clientId}' declares scopes outside the OIDC ` +

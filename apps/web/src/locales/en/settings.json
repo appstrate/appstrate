@@ -321,6 +321,7 @@
   "oauthClients.scopeLabels.agents:read": "List your agents",
   "oauthClients.scopeLabels.agents:run": "Run agents on your behalf",
   "oauthClients.scopeLabels.runs:read": "View your run history",
+  "oauthClients.scopeLabels.runs:read-all": "View every run in the space, not only your own",
   "oauthClients.scopeLabels.runs:cancel": "Cancel your in-progress runs",
   "oauthClients.scopeLabels.files:read": "View the files your runs produced",
   "oauthClients.scopeLabels.integrations:read": "List your integrations and connections",
