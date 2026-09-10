@@ -250,6 +250,73 @@ describe("NOTIFY triggers (regression)", () => {
     expect(received[1]).toMatchObject({ message: "large data", data: "[payload too large]" });
   });
 
+  // `left()` counts CHARACTERS while pg_notify's ceiling is BYTES: a 2 000-
+  // character emoji log line is 8 000 bytes on its own. The trigger used to cap
+  // with `LEFT(NEW.message, 2000)`, so such a line made pg_notify raise INSIDE
+  // the trigger and the agent lost the run_logs ROW, not just the live frame.
+  it("notify_run_log_insert keeps a multibyte log line and trims it by bytes", async () => {
+    const run = await seedRun({
+      packageId: "@notifyorg/trigger-agent",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      status: "running",
+    });
+
+    const received: Array<Record<string, unknown>> = [];
+    await listenClient.listen("run_log_insert", (raw) => {
+      try {
+        const payload = JSON.parse(raw) as Record<string, unknown>;
+        if (payload.run_id === run.id) received.push(payload);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // 400 × 3 bytes = 1 200 bytes — inside the 2 000-byte message budget.
+    const fits = "漢".repeat(400);
+    // 2 000 × 4 bytes = 8 000 bytes — over the whole NOTIFY ceiling by itself.
+    const overflows = "😀".repeat(2_000);
+
+    // Both `seedRunLog` calls RETURNING the row is half the assertion: a
+    // trigger that raises aborts the INSERT, so the second one used to throw
+    // `payload string too long` here.
+    await seedRunLog({ runId: run.id, orgId: ctx.orgId, event: "fits", message: fits });
+    await seedRunLog({ runId: run.id, orgId: ctx.orgId, event: "overflows", message: overflows });
+    for (let i = 0; i < 40 && received.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    expect(received).toHaveLength(2);
+    // Under budget → delivered verbatim; the budget is bytes, not a blanket
+    // character cap that would mangle CJK that comfortably fits.
+    expect(received[0]).toMatchObject({ event: "fits", message: fits });
+
+    // Over budget → trimmed on whole code points, never mid-character.
+    const trimmed = received[1]!.message as string;
+    const bytes = new TextEncoder().encode(trimmed).length;
+    expect(bytes).toBeLessThanOrEqual(2_000);
+    expect(bytes).toBeGreaterThan(1_900);
+    expect(trimmed).toBe("😀".repeat(bytes / 4));
+  });
+
+  // Same defect, worse blast radius: `notify_run_change` interpolates
+  // `runs.error`, and it fires on the finalize UPDATE. A raise there rolls the
+  // finalize back and leaves the run stuck in 'running' forever.
+  it("notify_run_change survives a multibyte run error", async () => {
+    const run = await seedRun({
+      packageId: "@notifyorg/trigger-agent",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      status: "running",
+    });
+
+    await db.execute(
+      sql`UPDATE runs SET status = 'failed', error = ${"😀".repeat(2_000)}, completed_at = now() WHERE id = ${run.id}`,
+    );
+  });
+
   // Drives the live "Reconnection required" badge end-to-end: trigger →
   // pg_notify → LISTEN → SSE event. The actor filter on the realtime
   // subscriber is exercised separately in services/realtime tests; here we
