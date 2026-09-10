@@ -8,6 +8,7 @@ import {
   resetStripeMock,
   generateWebhookEvent,
   setSubscriptionResponse,
+  requests,
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { billingAccounts, stripeEvents } from "../../../drizzle/schema.ts";
@@ -141,6 +142,82 @@ describe("handleWebhook", () => {
       expect(account!.subscriptionStatus).toBe("trialing");
       expect(account!.stripeSubscriptionId).toBe("sub_trial_001");
       expect(account!.creditQuota).toBe(20000);
+    });
+
+    it("cancels a duplicate paid subscription the account cannot be attached to", async () => {
+      // Two Checkout sessions opened before either was paid; the first one paid won the row.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_dup_001",
+        stripeSubscriptionId: "sub_dup_winner",
+        subscriptionStatus: "active",
+        creditQuota: 20000,
+      });
+
+      setSubscriptionResponse({
+        id: "sub_dup_loser",
+        object: "subscription",
+        status: "active",
+        metadata: { orgId, planId: "starter" },
+        items: { object: "list", data: [{ id: "si_dup", price: { id: "price_starter_test" } }] },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_checkout_dup_001",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            customer: "cus_dup_001",
+            subscription: "sub_dup_loser",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      // The winner keeps the account untouched...
+      expect(account!.stripeSubscriptionId).toBe("sub_dup_winner");
+      expect(account!.subscriptionStatus).toBe("active");
+      // ...and the loser is no longer billing the customer.
+      expect(requests).toContainEqual({
+        method: "DELETE",
+        path: "/v1/subscriptions/sub_dup_loser",
+        body: null,
+      });
+    });
+
+    it("does not cancel when the refusal names no winner — the org has no billing row", async () => {
+      setSubscriptionResponse({
+        id: "sub_orphan_001",
+        object: "subscription",
+        status: "active",
+        metadata: { orgId, planId: "starter" },
+        items: { object: "list", data: [{ id: "si_orphan", price: { id: "price_starter_test" } }] },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_checkout_orphan_001",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            customer: "cus_orphan_001",
+            subscription: "sub_orphan_001",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      expect(requests.filter((r) => r.method === "DELETE")).toEqual([]);
     });
   });
 
