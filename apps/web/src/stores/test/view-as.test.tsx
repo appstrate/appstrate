@@ -430,6 +430,17 @@ describe("banner", () => {
     expect(html).not.toContain("Direction");
   });
 
+  // A persona restricts the caller without replacing them, so every capability
+  // gated on identity — own runs, own files, own connections — survives the
+  // preview. The banner is the one place that boundary is stated.
+  it("states that what the previewer created stays visible, whatever the persona", () => {
+    const withSpace = renderBanner(PERSONA, "org_a");
+    expect(withSpace).toContain("Ce que vous avez créé reste visible");
+
+    const orgOnly = renderBanner({ orgId: "org_a", orgRole: "guest", space: null }, "org_a");
+    expect(orgOnly).toContain("Ce que vous avez créé reste visible");
+  });
+
   it("renders nothing outside the previewed organization", () => {
     expect(renderBanner(PERSONA, "org_b")).toBe("");
   });

@@ -111,6 +111,7 @@
   "viewAs.banner": "Vous voyez l'organisation en tant que <b>{{role}}</b>",
   "viewAs.bannerSpace": "Vous voyez l'organisation en tant que <b>{{role}}</b>, <b>{{spaceRole}}</b> dans <b>{{space}}</b>",
   "viewAs.bannerHere": "· dans <b>{{space}}</b> : <b>{{role}}</b> (espace ouvert)",
+  "viewAs.bannerOwn": "Ce que vous avez créé reste visible — vos runs, vos fichiers, vos connexions. Ce rôle en voit moins.",
   "viewAs.exit": "Quitter",
   "viewAs.stopped.invalid_view_as": "Prévisualisation arrêtée : la prévisualisation enregistrée n'est plus lisible.",
   "viewAs.stopped.view_as_unsupported": "Prévisualisation arrêtée : cette session ne peut pas prévisualiser de rôle.",
