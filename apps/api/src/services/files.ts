@@ -314,9 +314,15 @@ function isFileCreator(
  *    (`visible`) but get an opaque reference (`metadata: false`, `download:
  *    false`) — never the bytes, the real name, or the hash (kills the
  *    cross-member disclosure + CDN-abuse vectors).
- *  - `keep` / `delete` — the file's creator OR a caller holding
- *    `files:delete` (owner/admin). The management permission does NOT grant
+ *  - `keep` / `delete` — a caller holding `files:delete` (`opts.canManage`),
+ *    OR the file's own creator when the CREDENTIAL admits file lifecycle
+ *    (`opts.creatorCanManage`). The management permission does NOT grant
  *    metadata or download of another member's upload — only lifecycle control.
+ *
+ * The creator arm is an ownership right, not a role grant, so it is the one
+ * capability here that no permission set narrows: `opts.creatorCanManage` is
+ * its credential ceiling, and both lifecycle inputs default to FALSE so a
+ * caller that does not state its authority gets none.
  *
  * `opts.visible` is the container-ACL outcome (resolved by
  * {@link getFileForActor} / the list SQL / a valid preview token); when
@@ -325,7 +331,7 @@ function isFileCreator(
 export function getFileCapabilities(
   doc: { purpose: FilePurpose; userId: string | null; endUserId: string | null; mime: string },
   actor: Actor,
-  opts: { visible: boolean; canManage?: boolean },
+  opts: { visible: boolean; canManage?: boolean; creatorCanManage?: boolean },
 ): FileCapabilities {
   if (!opts.visible) {
     return {
@@ -347,8 +353,9 @@ export function getFileCapabilities(
   // not sensitive and stays visible to opaque readers.
   const metadata = isAgentOutput || isCreator;
   const preview = download && previewKind(doc.mime) !== null;
-  // Lifecycle control: creator OR the org's manage permission.
-  const manage = isCreator || (opts.canManage ?? false);
+  // Lifecycle control: the org's manage permission, or the creator's own
+  // ownership right as far as its credential reaches.
+  const manage = (opts.canManage ?? false) || (isCreator && (opts.creatorCanManage ?? false));
   return { visible: true, metadata, download, preview, keep: manage, delete: manage };
 }
 
@@ -1213,12 +1220,20 @@ const fileSelect = {
  * source) — `permissions` supplies the `files:delete` grant that decides the
  * `keep` / `delete` capabilities, and the `runs:read-all` grant that widens a
  * run container beyond the caller's own runs.
+ *
+ * `opts.creatorCanManage` is the other half of the lifecycle answer: the
+ * creator's ownership right is not a role grant, so `permissions` cannot
+ * narrow it and the CREDENTIAL must (see `credentialAdmits`). It defaults to
+ * FALSE — a caller that does not state its credential's reach grants no
+ * ownership override, and a surface with no `keep` / `delete` affordance says
+ * so explicitly.
  */
 export async function getFileForActor(
   scope: SpaceScope,
   actor: Actor,
   fileId: string,
   permissions: ReadonlySet<string>,
+  opts: { creatorCanManage?: boolean } = {},
 ): Promise<ResolvedFile | null> {
   if (!FILE_ID_RE.test(fileId)) return null;
   const [row] = await db
@@ -1271,6 +1286,7 @@ export async function getFileForActor(
   const capabilities = getFileCapabilities(row, actor, {
     visible: true,
     canManage: permissions.has("files:delete"),
+    creatorCanManage: opts.creatorCanManage,
   });
   return { row: row as FileRow, capabilities };
 }
@@ -1319,7 +1335,11 @@ export async function resolveChatAttachment(
   if (isFileUri(request.uri)) {
     const fileId = parseFileUri(request.uri);
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
-    const resolved = await getFileForActor(scope, actor, fileId, request.permissions);
+    // Attach = read: this resolver exposes no `keep` / `delete` affordance, so
+    // a creator's ownership right never applies through it.
+    const resolved = await getFileForActor(scope, actor, fileId, request.permissions, {
+      creatorCanManage: false,
+    });
     if (!resolved) throw notFound(`File '${fileId}' not found`);
     const { row } = resolved;
     return { uri: fileUri(row.id), name: row.name, mime: row.mime, size: row.size };
@@ -1448,12 +1468,17 @@ async function chatContextFileFilter(
  *
  * Keyset pagination on `(createdAt, id)` DESC — the same stable tuple cursor as
  * the end-users list.
+ *
+ * `opts.creatorCanManage` carries the same credential ceiling on the creator's
+ * own `keep` / `delete` right as {@link getFileForActor}, so a list row's
+ * `capabilities` and the enforcement on that row agree.
  */
 export async function listFilesForActor(
   scope: SpaceScope,
   actor: Actor,
   filters: ListFilesFilters,
   permissions: ReadonlySet<string>,
+  opts: { creatorCanManage?: boolean } = {},
 ): Promise<ListEnvelope<FileDto>> {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
   const fetchLimit = limit + 1;
@@ -1534,13 +1559,18 @@ export async function listFilesForActor(
     .limit(fetchLimit);
 
   const canManage = permissions.has("files:delete");
+  const { creatorCanManage } = opts;
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {
     const row = r as FileRow;
     // Every row passed the visibility SQL, so `visible: true`. No `mintPreview` —
     // list rows carry only the `previewable` boolean; the signed preview token is
     // minted on the single-file GET.
-    const capabilities = getFileCapabilities(row, actor, { visible: true, canManage });
+    const capabilities = getFileCapabilities(row, actor, {
+      visible: true,
+      canManage,
+      creatorCanManage,
+    });
     return toFileDto(row, actor, capabilities);
   });
   return { ...listResponse(data, { hasMore }), limit };
@@ -1764,8 +1794,9 @@ export async function deleteFile(scope: SpaceScope, fileId: string): Promise<voi
  * action (GitLab model): a file a caller explicitly keeps is exempted from
  * the expiry GC and never swept. Idempotent: pinning an already-permanent
  * file (NULL `expires_at`) is a no-op that returns the row unchanged.
- * Org+space scoped; authorization (creator OR `files:delete`) is enforced by
- * the caller (same rule as delete). Returns the updated row.
+ * Org+space scoped; authorization is `capabilities.keep` (see
+ * {@link getFileCapabilities}), enforced by the caller — same rule as delete.
+ * Returns the updated row.
  */
 export async function clearFileExpiry(scope: SpaceScope, fileId: string): Promise<FileRow> {
   const [row] = await db

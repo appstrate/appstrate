@@ -162,17 +162,17 @@ The `outcome` and `files` panes read the SAME query (the run's files in one page
 
 ## HTTP surface
 
-| Method + path                        | Guard                                             | Purpose                                                 |
-| ------------------------------------ | ------------------------------------------------- | ------------------------------------------------------- |
-| `GET /api/files`                     | `files:read` + actor filter                       | Gallery listing, keyset-paginated                       |
-| `GET /api/files/{id}`                | `files:read` + container ACL                      | Metadata DTO; the only surface that mints `preview_url` |
-| `GET /api/files/{id}/content`        | `files:read` + `download` capability              | 307 → presigned GET, or proxy-stream                    |
-| `DELETE /api/files/{id}`             | `capabilities.delete` (creator OR `files:delete`) | Delete; 409 `file_in_use` on a linked file              |
-| `POST /api/files/{id}/keep`          | `capabilities.keep`                               | Clear `expires_at`                                      |
-| `GET /preview/files/{id}?t=…`        | signed token only, no auth pipeline               | Hardened preview bytes — contract below                 |
-| `GET /api/runs/{runId}/files`        | run HMAC                                          | The input manifest the runtime mounts                   |
-| `POST /api/runs/{runId}/files`       | run upload HMAC                                   | Publish an `agent_output`                               |
-| `GET /api/runs/{runId}/files/{name}` | run HMAC                                          | Fetch one mounted input by workspace name               |
+| Method + path                        | Guard                                         | Purpose                                                 |
+| ------------------------------------ | --------------------------------------------- | ------------------------------------------------------- |
+| `GET /api/files`                     | `files:read` + actor filter                   | Gallery listing, keyset-paginated                       |
+| `GET /api/files/{id}`                | `files:read` + container ACL                  | Metadata DTO; the only surface that mints `preview_url` |
+| `GET /api/files/{id}/content`        | `files:read` + `download` capability          | 307 → presigned GET, or proxy-stream                    |
+| `DELETE /api/files/{id}`             | `capabilities.delete` (see capability matrix) | Delete; 409 `file_in_use` on a linked file              |
+| `POST /api/files/{id}/keep`          | `capabilities.keep`                           | Clear `expires_at`                                      |
+| `GET /preview/files/{id}?t=…`        | signed token only, no auth pipeline           | Hardened preview bytes — contract below                 |
+| `GET /api/runs/{runId}/files`        | run HMAC                                      | The input manifest the runtime mounts                   |
+| `POST /api/runs/{runId}/files`       | run upload HMAC                               | Publish an `agent_output`                               |
+| `GET /api/runs/{runId}/files/{name}` | run HMAC                                      | Fetch one mounted input by workspace name               |
 
 **That table is the whole HTTP surface.** The nine pre-#1177 `/documents` registrations — `/api/documents…`, `/api/runs/{runId}/documents…`, `/preview/documents/{id}` — are gone, along with `lib/legacy-file-paths.ts` and the two spec-side alias generators. `v1.0.0-beta.51` **was** on the other side of them: it registers `/api/runs/{runId}/documents` and `/api/runs/{runId}/documents/{name}` and not one `/files` route, `runtime-pi/publish.ts` posts deliverables to `…/documents` under `X-Document-Name`, and `runtime-pi/provision.ts` fetches its input manifest from the same path. What makes the removal safe is not that nobody spoke them — it is that the PAIRING of such an artifact with this platform is refused at boot: the env schema will not start unless `APP_VERSION` and both runtime image tags agree (`findRuntimeImageTagMismatch`, `@appstrate/core/image-ref`). That check has blind spots — its own carve-outs, enumerated with the comparison in `@appstrate/core/image-ref`, and, since it is an env-schema check evaluated at boot, containers **already running** when the platform restarts. The last one is why the upgrade carries a drain step; see OPERATOR ACTIONS in the changelog entry for #1177. What is verified on the consumer side is narrower: the released CLI never called the retired paths, the billing module (then the separate `cloud/` repo, now `packages/module-ee`) and `connect-helper/` contain no retired wire shape, and the SPA is baked into the platform image so a served build cannot be older than the platform serving it. Every retired path is a 404, and `/api/documents` is correspondingly absent from `SPACE_SCOPED_PREFIXES` (`apps/api/src/middleware/space-context.ts`) — the entry existed only so the alias handlers could pin the space id.
 
@@ -323,12 +323,14 @@ Parent teardowns use the same invariant: they lock the parent first (closing the
 
 ### Capability matrix (D2 + upload privacy)
 
-`getFileCapabilities(doc, actor, { visible, canManage })` is the ONE access computation every consumer (REST route, DTO serializer, preview mint, MCP `resources/read`) derives its gates from — no ad-hoc re-derivation:
+`getFileCapabilities(doc, actor, { visible, canManage, creatorCanManage })` is the ONE access computation every consumer (REST route, DTO serializer, preview mint, MCP `resources/read`) derives its gates from — no ad-hoc re-derivation:
 
-| purpose        | `visible` (container ACL) | `metadata` (real name/mime/sha256) | `download` (bytes) | `preview`              | `keep` / `delete`         |
-| -------------- | ------------------------- | ---------------------------------- | ------------------ | ---------------------- | ------------------------- |
-| `agent_output` | any container reader      | ✅ any reader                      | ✅ any reader      | ✅ if previewable mime | creator OR `files:delete` |
-| `user_upload`  | any container reader      | ✅ creator only                    | ✅ creator only    | ✅ creator + mime      | creator OR `files:delete` |
+| purpose        | `visible` (container ACL) | `metadata` (real name/mime/sha256) | `download` (bytes) | `preview`              | `keep` / `delete`          |
+| -------------- | ------------------------- | ---------------------------------- | ------------------ | ---------------------- | -------------------------- |
+| `agent_output` | any container reader      | ✅ any reader                      | ✅ any reader      | ✅ if previewable mime | `files:delete` OR creator* |
+| `user_upload`  | any container reader      | ✅ creator only                    | ✅ creator only    | ✅ creator + mime      | `files:delete` OR creator* |
+
+\* The creator arm (`creatorCanManage`) is an **ownership** right, not a role grant, so no permission set narrows it — the CREDENTIAL does. `credentialAdmits(c, "files:delete")` (`apps/api/src/lib/permissions.ts`) reads the request's scope ceiling: a cookie session is unbounded and keeps the right, an API key or OIDC token keeps it only when its own scopes name `files:delete`. Without that cap a key minted with, say, `agents:run` would delete — and pin against the retention GC — every file its creator ever produced, because under API-key auth the actor IS the key's creator (RBAC spec §7.1). The two lifecycle routes carry no `files:*` guard at layer 1 (an end-user cleaning up its own upload holds no org permission), so this ceiling is the only thing between a scope-limited credential and its creator's files. It is `false` by default: `getFileForActor` / `listFilesForActor` grant no ownership override unless the caller states one, and the read-only surfaces (MCP `resources/read`, the `appfile://` run-input resolver, the chat attachment resolver) pass `false` explicitly — they expose no lifecycle affordance. `files:delete` is not end-user-grantable (`OIDC_ALLOWED_SCOPES`), so an end-user JWT never carries the creator arm either; end-user cleanup runs through an API key that holds the scope.
 
 A non-creator run reader of a `user_upload` stays `visible` but gets an **opaque reference**: `projectFileMetadata` degrades the DTO/MCP read to a generic name (`file`) + mime (`application/octet-stream`) with **no sha256**, and `/content` is a 403 with **no `Repr-Digest`**. This kills the cross-member disclosure + CDN-abuse vectors. The `files:delete` management permission grants lifecycle control ONLY — never metadata or bytes of another member's upload.
 

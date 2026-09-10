@@ -1317,7 +1317,12 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
         throw new McpError(ErrorCode.InvalidParams, `Not a file resource URI: ${uri}`);
       }
 
-      const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
+      // Read-only surface: MCP exposes no `keep` / `delete` affordance, so a
+      // creator's ownership right never applies through the reported
+      // `capabilities` (the grant arm still does).
+      const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions, {
+        creatorCanManage: false,
+      });
       if (!resolved) {
         throw new McpError(ErrorCode.InvalidParams, `File not found: ${uri}`);
       }
