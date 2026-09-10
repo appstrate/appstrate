@@ -1122,6 +1122,30 @@ skills sync is running` and kept the stale plugin. The lock is now
 
 ### Security
 
+- **A forwarded chain shorter than `TRUST_PROXY` no longer picks the client's
+  own address.** `lib/client-ip.ts` reads `X-Forwarded-For` from the RIGHT,
+  which is unspoofable while each trusted hop appends its entry. When the chain
+  carried FEWER entries than the hop count it used to clamp to the LEFTMOST
+  one — an entry no proxy wrote — so any caller could name its own IP under any
+  `TRUST_PROXY >= 1` and mint a fresh bucket per request. Every per-IP control
+  keyed on that answer, including the rate limit that is the stated defence
+  against `AUTH_BOOTSTRAP_TOKEN` brute force, the Better Auth production limiter
+  and the address recorded on sessions and audit events. A short chain now fails
+  closed: the whole forwarded set is distrusted (`X-Real-IP` included, or
+  stripping the chain would just move the hole) and the socket peer answers.
+
+  The resolved value must also **be** an IP address now. Port suffixes and
+  bracketed IPv6 normalize to the address they name; anything else is dropped.
+  That closes a one-caller denial of service: an unparseable address made
+  Better Auth's `getIP` drop _every_ caller into one shared rate-limit bucket.
+
+  **Operators:** the hop count must match the topology. `TRUST_PROXY=1` behind a
+  single reverse proxy that appends `X-Forwarded-For`; a TLS-terminating L4 load
+  balancer (AWS NLB TLS listener, GCP TCP proxy) appends nothing and is not a
+  hop. Verify too that the origin port is not reachable around the proxy — the
+  shipped compose publishes it on all host interfaces, and Docker's rules bypass
+  host firewalls.
+
 - **The sidecar's HTTP control surface is authenticated, deny-by-default.**
   Every route on the sidecar app now sits behind an `app.use("*")` middleware
   (`runtime-pi/sidecar/app.ts`) that refuses any request not presenting the
