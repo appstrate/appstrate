@@ -10,6 +10,7 @@ import { logger } from "../logger.ts";
 import {
   getPlans,
   isPlanId,
+  ENDED_SUBSCRIPTION_STATUSES,
   HELD_SUBSCRIPTION_STATUSES,
   type Plans,
   type PlanDefinition,
@@ -108,12 +109,26 @@ function unattachedAccount(orgId: string): SQL {
 /**
  * The predicate for `checkout.session.completed` and `invoice.paid`: they carry
  * AUTHORITATIVE data and also write the account already carrying that subscription.
+ *
+ * `noHeldSubscription()` deliberately matches a cancelled account, so this predicate alone
+ * does NOT prove the subscription is alive — callers MUST first gate on the live object
+ * from Stripe ({@link isEndedSubscription}), or a late event re-attaches a dead id.
  */
 function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   return and(
     eq(billingAccounts.orgId, orgId),
     or(noHeldSubscription(), eq(billingAccounts.stripeSubscriptionId, subscriptionId)),
   )!;
+}
+
+/**
+ * A subscription Stripe will never bill again. The event payload cannot decide this — it
+ * freezes at emission and Stripe guarantees no delivery order, so a `checkout.session.completed`
+ * delivered after the cancellation still describes a live subscription. Only the retrieved
+ * object does, which is why both attach paths retrieve before granting entitlements.
+ */
+function isEndedSubscription(subscription: Stripe.Subscription): boolean {
+  return ENDED_SUBSCRIPTION_STATUSES.has(subscription.status);
 }
 
 /** One line for an event on a subscription this org is not on — a replacement's tail. */
@@ -127,6 +142,21 @@ function logSupersededSubscription(
     type: event.type,
     orgId,
     subscriptionId,
+  });
+}
+
+/** One line for an attach refused because Stripe no longer holds the subscription. */
+function logEndedSubscription(
+  event: Stripe.Event,
+  orgId: string,
+  subscription: Stripe.Subscription,
+): void {
+  logger.warn("Stripe event skipped — subscription has ended, no entitlement granted", {
+    eventId: event.id,
+    type: event.type,
+    orgId,
+    subscriptionId: subscription.id,
+    status: subscription.status,
   });
 }
 
@@ -243,6 +273,27 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
 
+      // The session froze at completion; Stripe may have cancelled the subscription since
+      // (deliveries are unordered). Retrieve the live object BEFORE granting: throwing on
+      // failure deletes the claim so Stripe retries, as on the invoice.paid path — the
+      // grant is billing-critical and must not proceed on unverified state.
+      let checkoutSubscription: Stripe.Subscription;
+      try {
+        checkoutSubscription = await getStripe().subscriptions.retrieve(subscriptionId);
+      } catch (err) {
+        logger.error("Failed to retrieve subscription for checkout attach", {
+          eventId: event.id,
+          subscriptionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+
+      if (isEndedSubscription(checkoutSubscription)) {
+        logEndedSubscription(event, orgId, checkoutSubscription);
+        break;
+      }
+
       const [linked] = await db
         .update(billingAccounts)
         .set({
@@ -250,7 +301,9 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           creditQuota: plan.creditQuota,
           stripeCustomerId: customerId,
           stripeSubscriptionId: subscriptionId,
-          subscriptionStatus: "active",
+          // The live status, not a hardcoded "active": a checkout that opens a trial is
+          // `trialing`, and the row must not claim a state Stripe does not hold.
+          subscriptionStatus: checkoutSubscription.status,
           updatedAt: new Date(),
         })
         .where(attachableSubscription(orgId, subscriptionId))
@@ -271,19 +324,10 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // the periodic resync repairs a miss).
       await syncOrgStorageEntitlement(orgId);
 
-      // Email: subscription confirmation — retrieve real period end from Stripe
-      let checkoutPeriodEnd: Date | null = null;
-      try {
-        const sub = await getStripe().subscriptions.retrieve(subscriptionId);
-        checkoutPeriodEnd = subscriptionPeriodEnd(sub);
-      } catch {
-        // Best-effort — send email without precise date if Stripe call fails
-      }
-
       sendBillingEmail(orgId, "subscription-confirmed", {
         planName: plan.name,
         price: plan.monthlyPrice,
-        periodEnd: (checkoutPeriodEnd ?? new Date()).toISOString(),
+        periodEnd: (subscriptionPeriodEnd(checkoutSubscription) ?? new Date()).toISOString(),
         locale: "fr",
       });
       break;
@@ -392,6 +436,13 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
       const { orgId } = metadata;
+
+      // Same guard as the checkout attach: an invoice settled after the cancellation must
+      // not re-attach the dead subscription with a fresh quota.
+      if (isEndedSubscription(subscription)) {
+        logEndedSubscription(event, orgId, subscription);
+        break;
+      }
 
       const plan = planForSubscription(subscription, plans);
       if (!plan) {
