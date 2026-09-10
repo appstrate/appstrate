@@ -381,7 +381,7 @@ async function move(src: SQL, target: SQL, targetUrl: string, apply: boolean): P
   }
 
   const sourceCounts = await Promise.all(
-    plans.map((plan) => (plan.source === null ? null : countRows(src, plan.source))),
+    plans.map(async (plan) => (plan.source === null ? null : await countRows(src, plan.source))),
   );
 
   for (const line of planLines(prefix, plans)) out(line);
