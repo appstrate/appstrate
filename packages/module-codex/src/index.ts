@@ -163,6 +163,34 @@ const codexHooks: ModelProviderHooks = {
 };
 
 // ---------------------------------------------------------------------------
+// Plan gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Codex model ids the vendor recommends only for **Pro plans and above**.
+ *
+ * Source: https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in),
+ * read 2026-09-07 for `gpt-6-astra` and 2026-07-27 for `gpt-5.3-codex-spark`.
+ *
+ * Why a hand-written deny-list and not a plan-tier model: the platform cannot
+ * know which plan a credential is on. `docs/architecture/
+ * SUBSCRIPTION_COMPLIANCE.md` forbids ANY call that would enumerate a
+ * subscription, and neither vendored feed (the OpenAI pricing catalog, the
+ * `chatgpt` subscription-watch snapshot) carries plan tiers — so "Pro-only" is
+ * knowable from the vendor page and nowhere else. One id per line, with the
+ * page that says so, is the whole mechanism.
+ *
+ * What it buys: these ids stay in `modelDiscoveryCandidates` below (a Pro
+ * subscriber can still select them) but are kept OUT of `featuredModels`, which is not just a picker section — the platform
+ * auto-seeds every featured id into `org_models` on first connection and
+ * promotes the first inserted row to the org default. Featuring a Pro-only id
+ * hands a Plus subscriber a model their plan refuses, discovered at the first
+ * run. `packages/module-codex/test/unit/discovery-candidates.test.ts` enforces
+ * both halves.
+ */
+export const PRO_PLAN_MODEL_IDS = ["gpt-6-astra", "gpt-5.3-codex-spark"] as const;
+
+// ---------------------------------------------------------------------------
 // Provider definition
 // ---------------------------------------------------------------------------
 
@@ -221,12 +249,14 @@ const codexProvider: ModelProviderDefinition = {
   // serve is recorded — after checking the doc above — in
   // `apps/api/src/data/subscription-watch/reviewed.json`, never just dropped.
   //
-  // Recommended set, newest first. `gpt-6-astra` is documented for Pro plans
-  // and above — like `gpt-5.3-codex-spark`, which is also recommended but is
-  // absent from openai.json, so the boot check forbids featuring it and it
-  // lives in the candidate list only. A plan that does not serve a featured
-  // id finds out at the first run, as for every other id here.
-  featuredModels: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  // Recommended set, newest first, minus `PRO_PLAN_MODEL_IDS`: every id
+  // here is recommended for ChatGPT sign-in on EVERY plan, because the
+  // platform auto-seeds all of them on first connection and defaults the org
+  // to the first one. `gpt-6-astra` and `gpt-5.3-codex-spark` are recommended
+  // too, but only from Pro up, so they are candidates and not featured — a
+  // Plus subscriber would otherwise be handed them by default and find out at
+  // the first run.
+  featuredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
   // OFFLINE validation: the platform issues ZERO Codex API calls to test
   // a credential or discover models. The connection test runs the
   // `validateCredential` hook below (local JWT decode) — its mere presence is
@@ -235,12 +265,13 @@ const codexProvider: ModelProviderDefinition = {
   // availability is checked at the first agent run (on the Pi engine).
   // Served as-is (∩ catalog) — what THIS account's plan actually serves is
   // discovered by the user at first run, not by the platform. Superset of
-  // `featuredModels`:
-  // the documented "recommended" set in doc order (incl. the Pro-only
-  // `gpt-5.3-codex-spark` preview), then the "other available" models — which
-  // is why the tail is not strictly newest-first. `gpt-5.2` and
-  // `gpt-5.3-codex` are deprecated for ChatGPT sign-in and were dropped from
-  // both lists.
+  // `featuredModels`: the documented "recommended" set in doc order (including
+  // both `PRO_PLAN_MODEL_IDS`), then the "other available" models —
+  // which is why the tail is not strictly newest-first. This is the right list
+  // for a plan-gated id: selecting one is a deliberate act by someone who
+  // knows their plan, unlike the featured list, which the platform seeds on
+  // everyone's behalf. `gpt-5.2` and `gpt-5.3-codex` are deprecated for
+  // ChatGPT sign-in and were dropped from both lists.
   modelDiscoveryCandidates: [
     "gpt-6-astra",
     "gpt-5.6-sol",
