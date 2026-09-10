@@ -29,14 +29,154 @@ but production use needs a written agreement. Every `.ts` file carries
 
 ### Removing the module from a redistribution
 
-Deleting `packages/module-ee/` alone leaves `bun run check` red — stale
-allowlist entries fail it by design. Also drop the seven `Ee*` rows from
-`apps/api/src/openapi/response-type-registry.ts` (`EeBillingAccount`,
-`EeBillingPlan`, `EeBillingUpgradePlan`, `EeCheckoutPlanId`, `EeBillingManager`,
-`EeBillingManagerList`, `EeBillingContact`) and the `POST /api/billing/webhooks`
-row from `apps/api/src/openapi/zod-schema-registry.ts`; remove
-`@appstrate/module-ee` from `apps/api/package.json` and its `knip.config.ts`
-block; regenerate `apps/web/src/api/schema.d.ts` with `bun run generate:api`.
+Deleting `packages/module-ee/` alone leaves `bun run check` red. The commercial
+tree is opt-in at RUNTIME, not at build time: the platform's gates, the OpenAPI
+registries, the SPA, the i18n bundles and several gate self-tests all name the
+module or its wire contract, and every stale reference fails something by
+design. The complete recipe is below.
+
+`scripts/test/module-ee-removal-recipe.test.ts` holds this list to the code: it
+derives, from the tracked files, every file that names an `Ee*` schema, an
+`/api/billing` path or a `packages/module-ee` path, and fails unless each one is
+named here. A new coupling therefore cannot be added without extending this
+section.
+
+**1. Delete the module and the one-off that moved its tables**
+
+- `packages/module-ee/`
+- `scripts/migration/0010-ee-tables-into-platform-db.ts` and
+  `scripts/test/migration-0010-ee-tables-into-platform-db.test.ts` — the script
+  that moved the `ee_*` tables into the platform database. Its test reads the
+  script from disk, so leaving the test behind crashes `bun test` with `ENOENT`.
+- `scripts/test/module-ee-removal-recipe.test.ts` — the gate that holds this
+  section to the code. It reads this README, so it goes with it.
+
+**2. API — the wire contract**
+
+- `apps/api/src/openapi/response-type-registry.ts` — drop the seven `Ee*` rows:
+  `EeBillingAccount`, `EeBillingPlan`, `EeBillingUpgradePlan`,
+  `EeCheckoutPlanId`, `EeBillingManager`, `EeBillingManagerList`,
+  `EeBillingContact`.
+- `apps/api/src/openapi/zod-schema-registry.ts` — drop the
+  `POST /api/billing/webhooks` row.
+- `apps/api/package.json` — drop the `@appstrate/module-ee` workspace
+  dependency.
+
+**3. SPA — delete (14 files)**
+
+`apps/web/src/components/billing-contact-section.tsx`,
+`apps/web/src/components/billing-managers-section.tsx`,
+`apps/web/src/components/plan-card.tsx`,
+`apps/web/src/components/sidebar-billing.tsx`,
+`apps/web/src/components/test/plan-card.test.tsx`,
+`apps/web/src/hooks/use-billing.ts`,
+`apps/web/src/lib/billing-contact.ts`,
+`apps/web/src/lib/billing-managers.ts`,
+`apps/web/src/lib/test/billing-contact.test.ts`,
+`apps/web/src/lib/test/billing-managers.test.ts`,
+`apps/web/src/pages/onboarding/plan-step.tsx`,
+`apps/web/src/pages/org-settings/billing.tsx`,
+`apps/web/src/pages/test/billing-admin-sections.test.tsx`,
+`apps/web/src/pages/test/billing-plan-change.test.tsx`.
+
+**4. SPA — edit (6 files)**
+
+- `apps/web/src/app.tsx` — drop the two `lazy()` imports (`OnboardingPlanStep`,
+  `OrgSettingsBillingPage`) and their two `<Route>` blocks (`/onboarding/plan`,
+  and `path="billing"` under `RequirePermission billing:read`).
+- `apps/web/src/components/app-sidebar.tsx` — drop the `SidebarBilling` import
+  and its usage.
+- `apps/web/src/components/onboarding-layout.tsx` — drop `"plan"` from the
+  `StepKey` union and its `ALL_STEPS` entry. The `showWhen: "billing"` mechanism
+  becomes vestigial; it is unused, not broken.
+- `apps/web/src/pages/org-settings/layout.tsx` — drop the
+  `/org-settings/billing` nav entry AND the `CreditCard` lucide import it was
+  the only user of.
+- `apps/web/src/pages/onboarding/done-step.tsx` — drop the `useBilling` and
+  `useAppConfig` imports, both hook calls, and the `{features.billing && billing
+&& (…)}` card.
+- `apps/web/src/hooks/use-global-run-sync.ts` — drop the
+  `qc.invalidateQueries({ queryKey: ["get", "/api/billing"] })` call. It is
+  untyped, so nothing fails if it stays; it is dead either way.
+
+**5. i18n — the keys must go, a gate checks it**
+
+`apps/web/src/locales/test/locale-keys.test.ts` runs the reverse guard (every
+declared key must be referenced by some source file) plus en/fr parity, so an
+orphaned key is a test failure, not dead weight.
+
+- `apps/web/src/locales/en/settings.json` and
+  `apps/web/src/locales/fr/settings.json` — 55 keys each: `billing.*` (24),
+  `billingContact.*` (10), `billingManagers.*` (12), `onboarding.plan*` (8),
+  `onboarding.summaryPlan`.
+- `apps/web/src/locales/en/common.json` and
+  `apps/web/src/locales/fr/common.json` — `nav.credits`.
+
+**6. Gates and shared packages**
+
+- `scripts/verify-no-migration-dml.ts` — **required**: it reads
+  `packages/module-ee/drizzle/migrations` from disk and exits 1 with `ENOENT`
+  once the directory is gone. Drop the `SCANS` entry, the `EE_GRANDFATHERED`
+  constant with its doc block, and the header sentences that describe two
+  migration trees.
+- `knip.config.ts` — drop `ee|` from `ignoreDependencies` and the whole
+  `"packages/module-ee": { entry: [...] }` workspace block. Both, not either.
+- `packages/emails/src/index.ts` — drop the `RenderedEmail` and
+  `SupportedLocale` re-exports. They exist only for the module's
+  `emailOverrides`, and become dead exports (`verify:dead-code`).
+- `scripts/verify-license-boundary.ts` (`COMMERCIAL_PREFIX`),
+  `scripts/verify-module-isolation.ts` (`COMMERCIAL_MODULE_PREFIX`) and
+  `scripts/verify-module-contract.ts` (the `module-ee` owner entry) keep
+  `packages/module-ee` constants that simply match nothing once the directory is
+  gone. Nothing fails whether you drop them or not.
+- `scripts/generate-api-types.ts` — its banner explains that the generated SPA
+  schema carries this module's contract. Update it only together with
+  `scripts/test/verify-license-boundary.test.ts`, which asserts the banner text.
+
+**7. Gate self-tests that assert this module is present**
+
+These run in CI under `bun test` and assert against the REAL repo, so they go
+red the moment the module is gone. Relax each to its post-removal truth (or
+delete the case):
+
+- `scripts/test/verify-module-isolation.test.ts` — asserts the scan reached
+  `packages/module-ee/drizzle/schema.ts`.
+- `scripts/test/verify-module-sql-boundary.test.ts` — negative control asserts
+  the run did NOT report `0 raw-SQL literal(s) read`.
+- `scripts/test/verify-compose-defaults.test.ts` — asserts the run did NOT
+  report `0 module schema(s)`.
+- `scripts/test/verify-env-docs.test.ts` — asserts at least one module schema
+  was discovered; after relaxing it, drop the then-unused `out` binding.
+- `scripts/test/module-env-schemas.test.ts` — asserts a discovered schema with
+  `id === "ee"`, `STRIPE_SECRET_KEY` in its shape and `eeEnvSchema` as its
+  export name.
+- `scripts/test/verify-no-migration-dml.test.ts` — indexes `SCANS[1]`, which
+  stops existing with the `SCANS` entry removed in step 6.
+
+Two more name the module in SYNTHETIC fixtures only and keep passing untouched
+— `scripts/test/check-index-drift.test.ts` and
+`apps/api/test/unit/module-isolation-acceptances.test.ts`. Leave them, or rename
+the fixtures for tidiness.
+
+**8. Reinstall and regenerate**
+
+```sh
+bun install
+bun run generate:api    # rewrites apps/web/src/api/schema.d.ts without the EE contract
+bun run check
+```
+
+`apps/web/src/api/schema.d.ts` is generated from whatever `packages/module-*`
+directories exist on disk, so regenerating it — not editing it — is what drops
+the `Ee*` schemas and `/api/billing/*` paths from the SPA's typed client.
+
+Stale mentions with no gate behind them, cosmetic only: `docs/ENV.md` (the
+`MODULES` row and the `STRIPE_*` / `EE_RECONCILIATION_*` rows), the commented EE
+block in `.env.example`, `.github/workflows/stripe-live.yml` (the whole workflow
+targets this module's live tests), and comment-only references in
+`scripts/check-consumer-versions.ts`, `test/setup/preload.ts`,
+`test/setup/modules.test.ts`, `packages/env/src/index.ts`,
+`packages/db/src/schema/organizations.ts` and `packages/emails/src/registry.ts`.
 
 ## Architecture
 
