@@ -19,6 +19,7 @@ import {
   listProfiles,
   resolveProfileName,
   resolveActiveProfileOrNull,
+  syncSpaceIds,
   type Config,
 } from "../src/lib/config.ts";
 import { useTempConfigHome } from "./helpers/auth-fixture.ts";
@@ -368,7 +369,9 @@ describe("resolveActiveProfileOrNull", () => {
 });
 
 describe("sync space configuration validation", () => {
-  it("rejects malformed selections without rewriting the user's config", async () => {
+  /** Two profiles, `work` carrying a hand-edited `syncSpaces` that is not a
+   *  list of space IDs. Returns the config path so a test can re-read it. */
+  async function withMalformedWorkProfile(value: string): Promise<string> {
     await setProfile("default", {
       instance: "https://app.example.com",
       userId: "u_test",
@@ -376,14 +379,48 @@ describe("sync space configuration validation", () => {
       orgId: "org_1",
       spaceId: "spc_active",
     });
+    await setProfile("work", {
+      instance: "https://app.example.com",
+      userId: "u_work",
+      email: "alice@work.example.com",
+      orgId: "org_2",
+    });
     const { writeFile } = await import("node:fs/promises");
     const path = join(configHome.dir(), "appstrate", "config.toml");
-    const valid = await readFile(path, "utf8");
-    for (const value of ['"spc_active"', '[""]', '["spc_active", 123]']) {
-      const malformed = `${valid}\nsyncSpaces = ${value}\n`;
-      await writeFile(path, malformed);
-      await expect(readConfig()).rejects.toThrow("Invalid syncSpaces");
-      expect(await readFile(path, "utf8")).toBe(malformed);
+    await writeFile(path, `${await readFile(path, "utf8")}syncSpaces = ${value}\n`);
+    return path;
+  }
+
+  // #1363: `readConfig` runs first in every command, so throwing on a typo in
+  // one profile left no command able to repair or log out of it.
+  it("keeps every profile loadable when one has a malformed selection", async () => {
+    const path = await withMalformedWorkProfile('"spc_active"');
+    const { writeFile } = await import("node:fs/promises");
+    const base = (await readFile(path, "utf8")).replace(/syncSpaces = .*\n/, "");
+    for (const value of ['"spc_active"', '[""]', '["spc_active", 123]', "42"]) {
+      await writeFile(path, `${base}syncSpaces = ${value}\n`);
+      const config = await readConfig();
+      expect(Object.keys(config.profiles).sort()).toEqual(["default", "work"]);
+      expect(config.profiles.default?.syncSpaces).toBeUndefined();
+      expect(syncSpaceIds("default", config.profiles.default!)).toBeUndefined();
+      expect(() => syncSpaceIds("work", config.profiles.work!)).toThrow(
+        /Invalid syncSpaces for profile "work"/,
+      );
     }
+  });
+
+  it("lets logout remove the offending profile", async () => {
+    const path = await withMalformedWorkProfile('"spc_active"');
+    expect(await deleteProfile("work")).toBe(true);
+    expect(await listProfiles()).toEqual(["default"]);
+    expect(await readFile(path, "utf8")).not.toContain("syncSpaces");
+  });
+
+  it("writes a malformed selection back verbatim when another profile changes", async () => {
+    const path = await withMalformedWorkProfile('"spc_active"');
+    await updateProfile("default", { spaceId: "spc_other" });
+    expect(await readFile(path, "utf8")).toContain('syncSpaces = "spc_active"');
+    const reread = await readConfig();
+    expect(() => syncSpaceIds("work", reread.profiles.work!)).toThrow("Invalid syncSpaces");
   });
 });

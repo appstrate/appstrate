@@ -10,7 +10,7 @@
  */
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { resolveActiveProfile, type Profile } from "../lib/config.ts";
+import { resolveActiveProfile, syncSpaceIds, type Profile } from "../lib/config.ts";
 import { ApiError } from "../lib/api.ts";
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
@@ -660,13 +660,14 @@ async function selectedSpaces(
     }
     return [...new Set(chosen.map((space) => space.id))];
   }
-  if (!profile.syncSpaces) return spaces.filter(suppliesSkills).map((space) => space.id);
+  const configured = syncSpaceIds(profileName, profile);
+  if (!configured) return spaces.filter(suppliesSkills).map((space) => space.id);
   // A stored list outlives the grants it was written against. An id this
   // profile no longer reaches is dropped with a note, not a failure: losing
   // access is a decision elsewhere, and it must not break the other spaces.
   const listed = new Map(spaces.map((space) => [space.id, space]));
   const kept: string[] = [];
-  for (const id of profile.syncSpaces) {
+  for (const id of configured) {
     const space = listed.get(id);
     if (space && suppliesSkills(space)) {
       kept.push(id);
