@@ -5,8 +5,10 @@
  * serves before any credential exists, and prefill each id from the vendored
  * catalog.
  *
- * The invariants under test: the endpoint spends the supplied key exactly once
- * against `GET <base_url>/models`, writes NOTHING (a `credential_id` round must
+ * The invariants under test: the endpoint spends the supplied key on
+ * `GET <base_url>/models` and on nothing else — once for a listing that fits in
+ * one page, once more per page a paginated listing declares — writes NOTHING (a
+ * `credential_id` round must
  * leave `available_model_ids` alone), never returns a per-token cost, and never
  * reads a subscription (OAuth) token. The harness also validates every JSON
  * body against the OpenAPI response schema, so these tests gate the documented
@@ -59,21 +61,67 @@ function registerPinnedUrlProvider(): void {
  * for them. A wrong key is a 401; `/bad/models` answers a body that is JSON
  * but carries no listing.
  */
+/** Listing requests the stub served, per credential — pagination must not spend more than it needs. */
+const listingRequests = new Map<string, number>();
+
+function countRequest(key: string): void {
+  listingRequests.set(key, (listingRequests.get(key) ?? 0) + 1);
+}
+
 const stub = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   fetch(req) {
-    const { pathname } = new URL(req.url);
+    const { pathname, searchParams } = new URL(req.url);
     if (pathname === "/bad/models") {
       return Response.json({ nope: true });
+    }
+    // Gemini's listing: keyed by query parameter, paged by `nextPageToken`.
+    if (pathname === "/gemini/models") {
+      countRequest("gemini");
+      const token = searchParams.get("pageToken");
+      if (token === null) {
+        return Response.json({
+          models: [{ name: "models/gemini-page1" }],
+          nextPageToken: "tok-2",
+        });
+      }
+      if (token === "tok-2") {
+        return Response.json({ models: [{ name: "models/gemini-page2" }] });
+      }
+      return Response.json({ models: [] });
     }
     if (pathname === "/v1/models") {
       const anthropicKey = req.headers.get("x-api-key");
       if (anthropicKey !== null) {
-        if (anthropicKey !== "good-key") {
+        if (anthropicKey !== "good-key" && anthropicKey !== "paged-key") {
           return Response.json({ error: "unauthorized" }, { status: 401 });
         }
-        return Response.json({ data: [{ id: "claude-x", display_name: "Claude X" }] });
+        if (anthropicKey === "good-key") {
+          countRequest("anthropic");
+          return Response.json({ data: [{ id: "claude-x", display_name: "Claude X" }] });
+        }
+        // The Anthropic listing pages at 20 entries: `has_more` + `last_id`,
+        // spent as `after_id`. Two entries per page is the same protocol.
+        countRequest("paged");
+        const after = searchParams.get("after_id");
+        if (after === null) {
+          return Response.json({
+            data: [{ id: "claude-a" }, { id: "claude-b" }],
+            has_more: true,
+            first_id: "claude-a",
+            last_id: "claude-b",
+          });
+        }
+        if (after === "claude-b") {
+          return Response.json({
+            data: [{ id: "claude-c" }],
+            has_more: false,
+            first_id: "claude-c",
+            last_id: "claude-c",
+          });
+        }
+        return Response.json({ data: [], has_more: false });
       }
       // A server that publishes per-entry capability fields (vLLM's
       // `max_model_len`), routed by its own key so the catalog-only case above
@@ -83,9 +131,21 @@ const stub = Bun.serve({
           data: [{ id: "local-llm", max_model_len: 32768 }, { id: "gpt-4o" }],
         });
       }
+      // An endpoint whose cursor never ends — the page cap has to stop it.
+      if (req.headers.get("authorization") === "Bearer endless-key") {
+        countRequest("endless");
+        const after = searchParams.get("after_id");
+        const next = after === null ? 1 : Number(after.split("-")[1]) + 1;
+        return Response.json({
+          data: [{ id: `endless-${next}` }],
+          has_more: true,
+          last_id: `endless-${next}`,
+        });
+      }
       if (req.headers.get("authorization") !== "Bearer good-key") {
         return Response.json({ error: "unauthorized" }, { status: 401 });
       }
+      countRequest("openai");
       return Response.json({ data: [{ id: "gpt-4o" }, { id: "qwen3:8b" }] });
     }
     return new Response("not found", { status: 404 });
@@ -97,6 +157,7 @@ const BAD_BASE_URL = `http://127.0.0.1:${stub.port}/bad`;
 // `anthropic-messages` appends `/v1/models` itself, so its base URL stops at
 // the host.
 const ANTHROPIC_BASE_URL = `http://127.0.0.1:${stub.port}`;
+const GEMINI_BASE_URL = `http://127.0.0.1:${stub.port}/gemini`;
 
 interface DiscoverModel {
   id: string;
@@ -111,6 +172,7 @@ interface DiscoverModel {
 interface DiscoverBody {
   outcome: string;
   models: DiscoverModel[];
+  truncated: boolean;
   message: string | null;
 }
 
@@ -152,6 +214,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     await truncateAll();
     ctx = await createTestContext();
     registerPinnedUrlProvider();
+    listingRequests.clear();
   });
 
   it("enumerates an inline endpoint and prefills catalog metadata", async () => {
@@ -322,6 +385,69 @@ describe("POST /api/model-provider-credentials/discover", () => {
       base_url_override: GOOD_BASE_URL,
     });
     expect(res.status).toBe(400);
+  });
+
+  it("reads a one-page listing with exactly one request", async () => {
+    const res = await discover(ctx, {
+      provider_id: "openai-compatible",
+      api_key: "good-key",
+      base_url_override: GOOD_BASE_URL,
+    });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as DiscoverBody).truncated).toBe(false);
+    expect(listingRequests.get("openai")).toBe(1);
+  });
+
+  it("follows the listing cursor instead of returning a silently short first page", async () => {
+    const res = await discover(ctx, {
+      provider_id: "anthropic-compatible",
+      api_key: "paged-key",
+      base_url_override: ANTHROPIC_BASE_URL,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.outcome).toBe("ok");
+    // Page two exists only because `has_more` was followed — one fetch would
+    // have reported success with `claude-c` missing.
+    expect(body.models.map((m) => m.id)).toEqual(["claude-a", "claude-b", "claude-c"]);
+    expect(body.truncated).toBe(false);
+    // Two pages, two requests: the last page declares `has_more: false`, so
+    // nothing is spent asking for a third.
+    expect(listingRequests.get("paged")).toBe(2);
+  });
+
+  it("follows the Google listing's nextPageToken", async () => {
+    const res = await discover(ctx, {
+      provider_id: "google-ai",
+      api_key: "good-key",
+      base_url_override: GEMINI_BASE_URL,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.outcome).toBe("ok");
+    expect(body.models.map((m) => m.id)).toEqual(["gemini-page1", "gemini-page2"]);
+    expect(body.truncated).toBe(false);
+    expect(listingRequests.get("gemini")).toBe(2);
+  });
+
+  it("reports truncated when a cursor that never ends hits the page cap", async () => {
+    const res = await discover(ctx, {
+      provider_id: "openai-compatible",
+      api_key: "endless-key",
+      base_url_override: GOOD_BASE_URL,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.outcome).toBe("ok");
+    // Success, but declared short — the operator is not told this is the whole
+    // list. The cap bounds the requests spent on one call.
+    expect(body.truncated).toBe(true);
+    expect(listingRequests.get("endless")).toBe(10);
+    expect(body.models).toHaveLength(10);
   });
 
   it("returns 401 without authentication", async () => {
