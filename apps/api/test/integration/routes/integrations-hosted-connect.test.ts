@@ -18,7 +18,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const app = getTestApp();
@@ -452,6 +452,76 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
     expect(html).toContain("Ask an administrator");
     for (const internal of ["CONNECTION_ENCRYPTION_KEY", "cannot be decrypted", clientId]) {
       expect(html).not.toContain(internal);
+    }
+  });
+});
+
+/**
+ * The completion payload the popup broadcasts, as the browser would read it.
+ *
+ * The page inlines it as a single `var detail = {…};` statement of flat JSON
+ * (`buildIntegrationConnectCompletion` produces no nested object), so the line
+ * itself is the whole payload.
+ */
+function completionDetail(html: string): Record<string, unknown> {
+  const match = /^\s*var detail = (\{.*\});$/m.exec(html);
+  expect(match).not.toBeNull();
+  return JSON.parse(match![1]!) as Record<string, unknown>;
+}
+
+describe("hosted connect portal — error completions are addressed (issue #1346)", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, apiKeyManifest("@myorg/gmail"));
+    await seedIntegration(ctx.orgId, oauthManifest("@myorg/gsuite"));
+  });
+
+  // A completion naming NOTHING is delivered to every waiting surface by
+  // contract (`completionMatches`), and both carriers fan out — so a failing
+  // Gmail link used to drive an open ClickUp card into an error naming Gmail.
+  it("names the package on the OAuth-begin refusal", async () => {
+    const res = await startConnect(await mintSession(ctx, "@myorg/gsuite", "google"));
+    expect(res.status).toBe(403);
+    expect(completionDetail(await res.text())).toMatchObject({
+      ok: false,
+      packageId: "@myorg/gsuite",
+    });
+  });
+
+  it("names the package when the link has already been used", async () => {
+    const token = await mintSession(ctx, "@myorg/gmail", "api");
+    expect((await startConnect(token)).status).toBe(302);
+    const again = await startConnect(token);
+    expect(again.status).toBe(410);
+    const detail = completionDetail(await again.text());
+    expect(detail).toMatchObject({ ok: false, packageId: "@myorg/gmail" });
+  });
+
+  it("names the package when the integration is gone", async () => {
+    const token = await mintSession(ctx, "@myorg/gmail", "api");
+    await db.delete(packages).where(eq(packages.id, "@myorg/gmail"));
+    const res = await startConnect(token);
+    expect(res.status).toBe(410);
+    expect(completionDetail(await res.text())).toMatchObject({
+      ok: false,
+      packageId: "@myorg/gmail",
+    });
+  });
+
+  // The other half of the rule: the two pages that run BEFORE the claims are
+  // decoded resolved no package and no state, so they stay context-less — that
+  // is the case `completionMatches`'s permissive tail exists for, and widening
+  // it is not what this fix does.
+  it("leaves the pre-claims pages context-less", async () => {
+    for (const query of ["", "?token=not-a-token"]) {
+      const res = await app.request(`/api/integrations/connect/start${query}`, {
+        redirect: "manual",
+      });
+      const detail = completionDetail(await res.text());
+      expect(detail.packageId).toBeUndefined();
+      expect(detail.state).toBeUndefined();
     }
   });
 });
