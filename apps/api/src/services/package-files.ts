@@ -664,11 +664,19 @@ function assertTreeConforms(files: Record<string, Uint8Array>, touched: Iterable
  * apply IN ORDER, so a batch can move a file and then write the new path, or
  * delete a file it created earlier — the caller's sequence is the caller's.
  *
- * The type's content entry (`SKILL.md` / `prompt.md`) can be written, and can
- * be the destination of a move — both are ways of authoring it. It cannot be
- * deleted or moved AWAY: a package of that type is defined by having it, and
- * `assertArchiveContentConforms` would refuse the result anyway, with a message
- * about frontmatter rather than about the operation the caller asked for.
+ * A `write` overwrites its path, because that is what saving a file means. A
+ * `move` does NOT: a rename whose destination is taken is refused
+ * (`path_conflict`), so the one gesture that carries a file the author cannot
+ * see in the operation cannot destroy another one. A caller that means to
+ * replace spells it out — `delete` the destination, then `move` onto the freed
+ * path, in the same batch. Moving a file onto itself is a no-op.
+ *
+ * The type's content entry (`SKILL.md` / `prompt.md`) is authored by writing
+ * it. It cannot be deleted or moved AWAY: a package of that type is defined by
+ * having it, and `assertArchiveContentConforms` would refuse the result anyway,
+ * with a message about frontmatter rather than about the operation the caller
+ * asked for. Since it always exists, and deleting it is refused, it is not a
+ * reachable move destination either.
  *
  * @throws PackageFileWriteError — the only failure mode.
  */
@@ -724,6 +732,9 @@ export function applyFileOperations(
         }
         if (!Object.hasOwn(result, op.from)) {
           throw new PackageFileWriteError("not_found", op.from, `'${op.from}' does not exist`);
+        }
+        if (op.to !== op.from && Object.hasOwn(result, op.to)) {
+          throw new PackageFileWriteError("path_conflict", op.to, `'${op.to}' already exists`);
         }
         const bytes = result[op.from]!;
         delete result[op.from];

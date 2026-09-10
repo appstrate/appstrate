@@ -8,8 +8,7 @@ import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { lockOrgMemberForSpaceGrant } from "./space-members.ts";
-
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /**
  * Validate deferred grants before saving an invitation or OAuth signup policy.

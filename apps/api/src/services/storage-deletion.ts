@@ -31,6 +31,7 @@ import { getEnv } from "@appstrate/env";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
   RUN_WORKSPACE_BUCKET,
@@ -38,9 +39,6 @@ import {
   parseRunFilesManifest,
   runWorkspaceFileKey,
 } from "./run-workspace-manifest.ts";
-
-/** A Drizzle executor — either the root `db` or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** One object to purge. `storageKey` is the IN-BUCKET path (no `bucket/` prefix). */
 export interface StorageDeletionJobInput {

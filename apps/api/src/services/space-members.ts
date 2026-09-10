@@ -24,9 +24,7 @@ import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
 import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
-
-/** Accepts either the base client or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };

@@ -713,12 +713,13 @@ describe("applyFileOperations — the operations", () => {
     expect(texts(result)).toEqual({ "SKILL.md": SKILL, "a.md": "A" });
   });
 
-  it("accepts a move ONTO the content entry — that is a way of writing it", () => {
-    const result = apply({ "SKILL.md": "stale", "next.md": SKILL }, [
-      { op: "move", from: "next.md", to: "SKILL.md" },
+  it("replaces a file through delete-then-move, the caller having said so", () => {
+    const result = apply({ "SKILL.md": SKILL, "a.md": "A", "b.md": "B" }, [
+      { op: "delete", path: "b.md" },
+      { op: "move", from: "a.md", to: "b.md" },
     ]);
 
-    expect(texts(result)).toEqual({ "SKILL.md": SKILL });
+    expect(texts(result)).toEqual({ "SKILL.md": SKILL, "b.md": "A" });
   });
 });
 
@@ -807,6 +808,41 @@ describe("applyFileOperations — the refusals", () => {
         ]),
       "not_found",
       "a.md",
+    );
+  });
+
+  it("path_conflict: a move never overwrites — and leaves the caller's map alone", () => {
+    const before = tree({ "SKILL.md": SKILL, "a.md": "A", "b.md": "B" });
+    const snapshot = texts(before);
+
+    expectRefusal(
+      () =>
+        applyFileOperations(before, [{ op: "move", from: "a.md", to: "b.md" }], { type: "skill" }),
+      "path_conflict",
+      "b.md",
+    );
+    expect(texts(before)).toEqual(snapshot);
+
+    // The destination of an earlier operation counts as taken too.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "a.md": "A", "c.md": "C" }, [
+          { op: "move", from: "c.md", to: "b.md" },
+          { op: "move", from: "a.md", to: "b.md" },
+        ]),
+      "path_conflict",
+      "b.md",
+    );
+
+    // The content entry always exists and cannot be deleted, so it is not a
+    // reachable destination: it is authored with a write.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": "stale", "next.md": SKILL }, [
+          { op: "move", from: "next.md", to: "SKILL.md" },
+        ]),
+      "path_conflict",
+      "SKILL.md",
     );
   });
 

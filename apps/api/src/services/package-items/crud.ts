@@ -17,10 +17,7 @@ import {
 } from "../../lib/package-helpers.ts";
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
-import { scopedWhere } from "../../lib/db-helpers.ts";
-
-/** The Drizzle client, or a transaction handle a caller already owns. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
