@@ -29,8 +29,11 @@ import {
  *     the tick instead of trickling one batch per interval; the remainder rides
  *     the next tick.
  *   - Per-replica jitter so multi-replica deployments don't sweep in lockstep.
- *   - The throttled storage-entitlement reconcile, STARTED (not awaited) by the
- *     tick — see {@link maybeResyncEntitlements}.
+ *   - The MAINTENANCE half of the tick — see {@link runMaintenance} — which is
+ *     not metering and therefore outlives a paused sweep: the throttled
+ *     storage-entitlement reconcile (STARTED, not awaited — see
+ *     {@link maybeResyncEntitlements}) and the retry of Stripe cancellations
+ *     `onOrgDelete` could not confirm.
  *
  * OBSERVABILITY. Every tick emits one structured summary line: this is the money
  * path, and a silent tick is indistinguishable from a dead one. On top of that:
@@ -58,18 +61,22 @@ import {
  * contract carries one, structured
  * pino logs are the honest transport.
  *
- * Disable: set `EE_RECONCILIATION_INTERVAL_SECONDS=0`.
+ * Pause METERING: set `EE_RECONCILIATION_INTERVAL_SECONDS=0`. The timer keeps
+ * running — at {@link MAINTENANCE_INTERVAL_SECONDS}, sweep skipped — because
+ * the maintenance half is not metering and stopping it charges customers for
+ * organizations that no longer exist.
  */
 
 let sweeperTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = false;
 
 /**
- * The currently-running timer-driven sweep, if any. `shutdown()` awaits it
+ * The currently-running timer-driven tick, if any — a full sweep tick, or the
+ * maintenance-only tick when metering is paused. `shutdown()` awaits it
  * (bounded) after clearing the timer so an in-flight pass finishes cleanly
  * before the DB pool closes, rather than being torn out mid-transaction.
  */
-let inFlightSweep: Promise<unknown> | null = null;
+let inFlightTick: Promise<unknown> | null = null;
 
 /**
  * Head-of-line stall tracking. A single wedged run stalls the global cursor for
@@ -93,15 +100,24 @@ const ALERT_AFTER_FAILED_TICKS = 3;
  */
 const MAX_DRAIN_ITERATIONS = 50;
 
+/**
+ * Tick cadence when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering.
+ * Matches the default sweep cadence: {@link runMaintenance} is idempotent and,
+ * in steady state, one indexed SELECT that returns nothing.
+ */
+const MAINTENANCE_INTERVAL_SECONDS = 300;
+
 /** Cadence of the fleet-wide storage-entitlement reconcile. */
 const ENTITLEMENT_RESYNC_INTERVAL_MS = 60 * 60 * 1000;
 let lastEntitlementResyncAt = 0;
 let inFlightResync: Promise<unknown> | null = null;
 
 /**
- * Start the periodic billing sweep. No-op if
- * `EE_RECONCILIATION_INTERVAL_SECONDS` is `0` (disabled). Safe to
- * call once at module init — re-entry is guarded.
+ * Start the periodic worker. `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses the
+ * METERING sweep only — the timer still runs, at
+ * {@link MAINTENANCE_INTERVAL_SECONDS}, so {@link runMaintenance} keeps
+ * retrying pending Stripe cancellations. Safe to call once at module init —
+ * re-entry is guarded.
  */
 export function startBillingSweeper(): void {
   if (sweeperTimer !== null) {
@@ -110,16 +126,22 @@ export function startBillingSweeper(): void {
   }
   const env = getEeEnv();
   const intervalSec = env.EE_RECONCILIATION_INTERVAL_SECONDS;
+  stopped = false;
+
   if (intervalSec === 0) {
-    logger.info("billing sweeper disabled (EE_RECONCILIATION_INTERVAL_SECONDS=0)");
+    logger.info(
+      "billing metering paused (EE_RECONCILIATION_INTERVAL_SECONDS=0) — maintenance tick still running",
+      { intervalSeconds: MAINTENANCE_INTERVAL_SECONDS },
+    );
+    scheduleNext(MAINTENANCE_INTERVAL_SECONDS, runMaintenance);
     return;
   }
-  stopped = false;
+
   logger.info("billing sweeper started", {
     intervalSeconds: intervalSec,
     batchSize: env.EE_RECONCILIATION_BATCH_SIZE,
   });
-  scheduleNext(intervalSec);
+  scheduleNext(intervalSec, runBillingSweepTick);
 }
 
 /**
@@ -134,18 +156,18 @@ export function stopBillingSweeper(): void {
   }
 }
 
-function scheduleNext(intervalSec: number): void {
+function scheduleNext(intervalSec: number, tick: () => Promise<unknown>): void {
   if (stopped) return;
   // Per-replica jitter (±15%) prevents multi-replica deployments from sweeping
   // in lockstep.
   const jitter = 1 + (Math.random() - 0.5) * 0.3;
   const delayMs = Math.round(intervalSec * 1000 * jitter);
   sweeperTimer = setTimeout(() => {
-    const pass = runBillingSweepTick().finally(() => {
-      if (inFlightSweep === pass) inFlightSweep = null;
-      scheduleNext(intervalSec);
+    const pass = tick().finally(() => {
+      if (inFlightTick === pass) inFlightTick = null;
+      scheduleNext(intervalSec, tick);
     });
-    inFlightSweep = pass;
+    inFlightTick = pass;
   }, delayMs);
   // Don't keep the event loop alive on shutdown for the trailing tick.
   sweeperTimer.unref?.();
@@ -158,8 +180,8 @@ function scheduleNext(intervalSec: number): void {
 const DRAIN_TIMEOUT_MS = 60_000;
 
 /**
- * Await the in-flight timer-driven work — the sweep, plus the entitlement
- * reconcile the tick may have started. Called from `shutdown()` AFTER
+ * Await the in-flight timer-driven work — the tick, plus the entitlement
+ * reconcile it may have started. Called from `shutdown()` AFTER
  * `stopBillingSweeper()` clears the timer, so no new pass starts while this
  * drains. Best-effort: on timeout it returns and lets shutdown proceed (a wedged
  * pass rolls back on its own, losing nothing; the reconcile is an idempotent
@@ -172,9 +194,7 @@ const DRAIN_TIMEOUT_MS = 60_000;
 export async function drainBillingSweeper(): Promise<void> {
   const deadline = Date.now() + DRAIN_TIMEOUT_MS;
   for (;;) {
-    const pending = [inFlightSweep, inFlightResync].filter(
-      (p): p is Promise<unknown> => p !== null,
-    );
+    const pending = [inFlightTick, inFlightResync].filter((p): p is Promise<unknown> => p !== null);
     if (pending.length === 0) return;
 
     const remainingMs = deadline - Date.now();
@@ -234,8 +254,31 @@ function maybeResyncEntitlements(): void {
 }
 
 /**
- * One scheduled tick: the sweep, then the throttled entitlement reconcile
- * (started, not awaited), plus the failure accounting the timer path needs.
+ * The half of a tick that is NOT metering, and therefore keeps its own timer
+ * when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses the sweep: the throttled
+ * entitlement reconcile, and the retry of every Stripe cancellation
+ * `onOrgDelete` could not confirm. A pending cancellation means a customer is
+ * still being charged for an organization that is gone — pausing metering must
+ * not make that permanent.
+ *
+ * Never throws: on the timer path there is no caller left to catch it.
+ */
+async function runMaintenance(): Promise<void> {
+  maybeResyncEntitlements();
+
+  // Awaited because steady state is zero rows and one indexed SELECT.
+  try {
+    await retryPendingCancellations();
+  } catch (err) {
+    logger.error("retrying pending Stripe cancellations failed — will retry next tick", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * One scheduled tick when metering is on: the sweep, then {@link runMaintenance},
+ * plus the failure accounting the timer path needs.
  * Never throws — a failing tick is a logged event, not an unhandled rejection.
  * Exported so tests and ops jobs can drive the failure-escalation path directly.
  */
@@ -260,18 +303,7 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
     }
   }
 
-  maybeResyncEntitlements();
-
-  // Cancellations `onOrgDelete` could not confirm: a pending row means a customer may
-  // still be charged for an organization that is gone. Awaited because steady state is
-  // zero rows and zero work.
-  try {
-    await retryPendingCancellations();
-  } catch (err) {
-    logger.error("retrying pending Stripe cancellations failed — will retry next tick", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await runMaintenance();
 
   return result;
 }
@@ -448,7 +480,7 @@ export function _resetBillingSweeperForTests(): void {
   consecutiveStalls = 0;
   stallStartedAt = 0;
   consecutiveFailures = 0;
-  inFlightSweep = null;
+  inFlightTick = null;
   lastEntitlementResyncAt = 0;
   inFlightResync = null;
 }

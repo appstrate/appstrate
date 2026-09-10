@@ -23,8 +23,12 @@ export const eeEnvSchema = z.object({
   // debits credits. A failed pass advances nothing; the next tick retries.
   //
   // INTERVAL is the sweep cadence, BATCH_SIZE the max rows per tick. Defaults
-  // tuned for a small deployment: 5-min cadence, 100 rows per tick. Set
-  // INTERVAL=0 to disable.
+  // tuned for a small deployment: 5-min cadence, 100 rows per tick.
+  //
+  // INTERVAL=0 pauses METERING and nothing else. The tick's other half is not
+  // metering — it retries the Stripe cancellations `onOrgDelete` could not
+  // confirm — and keeps its own timer, because a paused sweep that also stopped
+  // those retries would keep charging customers for deleted organizations.
   EE_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
   // Max 1000 is the platform's `usage.list` hard ceiling (LLM_USAGE_LIST_MAX_LIMIT):
   // the cursor read is capped there server-side, so a larger batch would silently
