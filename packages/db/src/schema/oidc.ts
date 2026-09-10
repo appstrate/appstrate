@@ -26,6 +26,19 @@
  * with no column here raises `SchemaMismatchError` and rejects auth traffic.
  * Adding a plugin means adding its tables here in the same change.
  *
+ * READ THAT CHECK NARROWLY — it says NOTHING about any database (issue #1349).
+ * `findDrizzleSchemaProblems` diffs the plugin's expectations against THIS
+ * TYPESCRIPT OBJECT; all three findings it can emit (`missing-table`,
+ * `missing-column`, `unexpected-required-column`) are computed from TS, it
+ * never reads `information_schema`, and it does not look at indexes at all. A
+ * database missing a column declared below therefore boots perfectly clean and
+ * fails as a Postgres 42703 on the first `/oauth2/token`. The two checks that
+ * do look at a database are `apps/api/test/unit/migration-schema-parity.test.ts`
+ * (CI: replays the journal into a throwaway PGlite and diffs the catalog
+ * against this file) and `scripts/check-index-drift.ts` (operator: diffs a LIVE
+ * database against its own watermark snapshot — the only one that can see a
+ * production database that predates the `0000_init.sql` squash).
+ *
  * Raw-SQL CHECK constraints from the module's migrations are reproduced here
  * via Drizzle `check()` so regen keeps them. The `oauth_clients_level_immutable`
  * BEFORE UPDATE trigger (not expressible in Drizzle) is carried in the
@@ -186,6 +199,7 @@ export const oauthClient = pgTable(
   (t) => [
     index("idx_oauth_clients_org").on(t.referencedOrgId),
     index("idx_oauth_clients_space").on(t.referencedSpaceId),
+    index("idx_oauth_clients_user").on(t.userId),
     // Raw-SQL CHECKs preserved verbatim from the module's 0000/0001 migrations.
     check(
       "oauth_clients_level_check",
@@ -237,6 +251,13 @@ export const oauthRefreshToken = pgTable(
     // Replaying an authorization code deletes every token minted from it, by
     // this column, on both token tables.
     index("idx_oauth_refresh_tokens_auth_code").on(t.authorizationCodeId),
+    // The three FK columns the plugin declares `index: true` on. Postgres does
+    // not index a referencing column for you, so without these every parent
+    // delete — a logout for `session_id`, a user deletion for `user_id`, a
+    // client deletion for `client_id` — sequential-scans this table.
+    index("idx_oauth_refresh_tokens_client").on(t.clientId),
+    index("idx_oauth_refresh_tokens_session").on(t.sessionId),
+    index("idx_oauth_refresh_tokens_user").on(t.userId),
   ],
 );
 
@@ -265,26 +286,43 @@ export const oauthAccessToken = pgTable(
     // RFC 9449 DPoP proof-of-possession confirmation (`cnf`) claim.
     confirmation: jsonb("confirmation"),
   },
-  (t) => [index("idx_oauth_access_tokens_auth_code").on(t.authorizationCodeId)],
+  (t) => [
+    index("idx_oauth_access_tokens_auth_code").on(t.authorizationCodeId),
+    // See `oauth_refresh_tokens` above — same FK-cascade cost, plus `refresh_id`,
+    // which a refresh-token deletion cascades through.
+    index("idx_oauth_access_tokens_client").on(t.clientId),
+    index("idx_oauth_access_tokens_session").on(t.sessionId),
+    index("idx_oauth_access_tokens_user").on(t.userId),
+    index("idx_oauth_access_tokens_refresh").on(t.refreshId),
+  ],
 );
 
-export const oauthConsent = pgTable("oauth_consents", {
-  id: text("id").primaryKey(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => oauthClient.clientId, { onDelete: "cascade" }),
-  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-  referenceId: text("reference_id"),
-  scopes: text("scopes").array().notNull(),
-  // RFC 8707 resource indicators (Better Auth 1.7+) — the resources the user
-  // consented the client to access.
-  resources: text("resources").array(),
-  // The userinfo claims (OIDC Core §5.5) this consent covers, alongside the
-  // scopes — a later request for a wider claim set re-prompts.
-  requestedUserInfoClaims: text("requested_user_info_claims").array(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+export const oauthConsent = pgTable(
+  "oauth_consents",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    referenceId: text("reference_id"),
+    scopes: text("scopes").array().notNull(),
+    // RFC 8707 resource indicators (Better Auth 1.7+) — the resources the user
+    // consented the client to access.
+    resources: text("resources").array(),
+    // The userinfo claims (OIDC Core §5.5) this consent covers, alongside the
+    // scopes — a later request for a wider claim set re-prompts.
+    requestedUserInfoClaims: text("requested_user_info_claims").array(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    // `/authorize` looks a consent up by (client_id, user_id, reference_id) on
+    // every request, and both columns are `ON DELETE cascade` targets.
+    index("idx_oauth_consents_client").on(t.clientId),
+    index("idx_oauth_consents_user").on(t.userId),
+  ],
+);
 
 // ─── Better Auth: OAuth protected resources (RFC 8707) ────────────────────────
 //

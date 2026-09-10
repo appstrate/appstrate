@@ -21,6 +21,41 @@ const API_BARREL_BAN = {
   message:
     "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
 };
+// Supply-chain guard: the single-vendor Pi SDK. Shared so the `apps/api` block
+// below can re-state it — ESLint flat config REPLACES a rule across blocks
+// rather than merging it, so a later block that re-declares
+// `no-restricted-imports` for files this one already covers must carry every
+// pattern that still applies to them.
+const PI_SDK_BAN = {
+  // `**` (not `*`) so deep subpaths like pi-ai/dist/foo are caught.
+  group: ["@earendil-works/pi-*", "@earendil-works/pi-*/**"],
+  message:
+    "Import the Pi SDK only through the package-local pi-sdk barrel (pi-sdk.ts) — see docs/architecture/SUPPLY_CHAIN.md",
+};
+// Instance-identity guard. `@better-auth/core` modules hold state that is
+// private to the module copy — `oauth2/verify.mjs` marks insufficient-scope
+// errors in a module-level WeakSet — so a symbol must come from the SAME copy
+// as the better-auth code that reads it. Reaching for `@better-auth/core/*`
+// pins us to whichever copy the package manager happens to link for `apps/api`,
+// which is decided by the peer graph, not by us: #1295 was exactly that (two
+// copies split by a `jose` skew, the marker lookup missed, and the MCP 403 lost
+// its `WWW-Authenticate` step-up). `better-auth/*` re-exports the same symbols
+// from the copy better-auth itself uses, so it is right whatever the graph does.
+//
+// `utils/host` is the one exception, and it is carved out here rather than
+// disabled at the import site: `better-auth` re-exports no host classifier (its
+// own `utils/url.mjs` deliberately keeps the zod-carrying one out of the client
+// bundle), and `isLoopbackHost` is a pure predicate — no module state, so no
+// identity to get wrong. `oidc/services/redirect-uri.ts` needs the very
+// predicate DCR applies, and re-implementing it is the drift #1012 is about.
+const BETTER_AUTH_CORE_BAN = {
+  // Everything under `@better-auth/core`, except `@better-auth/core/utils/host`
+  // itself (deep subpaths of it stay banned). gitignore-style `group` can't
+  // re-include a child of an excluded prefix, so use a regex.
+  regex: "^@better-auth/core(?:/(?!utils/host$).*)?$",
+  message:
+    "Import better-auth symbols through the `better-auth/*` facade (e.g. better-auth/oauth2), not `@better-auth/core/*` — see #1295.",
+};
 // Every TypeScript file in the repo, minus the top-level `ignores` block below
 // (`**/dist`, `**/node_modules`, `.claude/`, the generated OpenAPI types).
 //
@@ -591,19 +626,20 @@ export default tseslint.config(
       parser: tseslint.parser,
     },
     rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              // `**` (not `*`) so deep subpaths like pi-ai/dist/foo are caught.
-              group: ["@earendil-works/pi-*", "@earendil-works/pi-*/**"],
-              message:
-                "Import the Pi SDK only through the package-local pi-sdk barrel (pi-sdk.ts) — see docs/architecture/SUPPLY_CHAIN.md",
-            },
-          ],
-        },
-      ],
+      "no-restricted-imports": ["error", { patterns: [PI_SDK_BAN] }],
+    },
+  },
+  {
+    // `apps/api` is the only workspace that depends on better-auth, so the
+    // instance-identity guard lives here. This block overlaps the Pi SDK block
+    // above on `apps/api/src/**` and therefore REPLACES its rule for those
+    // files — hence PI_SDK_BAN is restated, not dropped. Widened to
+    // `apps/api/**` so `test/` and the module-local `src/**/test/` dirs are
+    // covered too: a test that mints a marker from the wrong copy asserts the
+    // wrong thing.
+    files: ["apps/api/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [PI_SDK_BAN, BETTER_AUTH_CORE_BAN] }],
     },
   },
   {

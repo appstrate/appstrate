@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { declaredIndexes, runCheck } from "../check-index-drift.ts";
+import { declaredColumns, declaredIndexes, diffColumns, runCheck } from "../check-index-drift.ts";
 import {
   declaredTables,
   latestSnapshotName,
@@ -42,6 +42,33 @@ const snapshot = (tables: Record<string, string[] | null>): DrizzleSnapshot => (
 });
 
 /**
+ * Overlay column declarations onto a snapshot's tables: `table → column → NOT NULL`.
+ *
+ * Kept separate from `snapshot()` so every index case above stays exactly as it
+ * was written — a table with no entry here declares no column, which is what a
+ * snapshot with no `columns` key means.
+ */
+const withColumns = (
+  snap: DrizzleSnapshot,
+  columns: Record<string, Record<string, boolean>>,
+): DrizzleSnapshot => ({
+  tables: Object.fromEntries(
+    Object.entries(snap.tables).map(([key, entry]) => [
+      key,
+      {
+        ...entry,
+        columns: Object.fromEntries(
+          Object.entries(columns[key.slice(key.indexOf(".") + 1)] ?? {}).map(([name, notNull]) => [
+            name,
+            { name, type: "text", primaryKey: false, notNull },
+          ]),
+        ),
+      },
+    ]),
+  ),
+});
+
+/**
  * `when` is what drizzle stores verbatim in `drizzle.__drizzle_migrations.created_at`,
  * so the watermark cases below pass `whenOf(idx)`, never `idx`.
  */
@@ -65,6 +92,8 @@ const check = (over: {
   trackingTableExists?: boolean;
   watermark?: number | null;
   actual?: [string, string][];
+  /** `[table, column, NOT NULL]`, mirroring `PUBLIC_COLUMNS_QUERY`'s rows. */
+  actualColumns?: [string, string, boolean][];
   constraintBacked?: string[];
   moduleTables?: Record<string, string>;
   snapshots?: Record<string, DrizzleSnapshot>;
@@ -74,6 +103,11 @@ const check = (over: {
     trackingTableExists: over.trackingTableExists ?? true,
     watermark: over.watermark === undefined ? whenOf(1) : over.watermark,
     actual: (over.actual ?? []).map(([indexname, tablename]) => ({ indexname, tablename })),
+    actualColumns: (over.actualColumns ?? []).map(([tablename, columnname, notnull]) => ({
+      tablename,
+      columnname,
+      notnull,
+    })),
     constraintBacked: new Set(over.constraintBacked ?? []),
     moduleTables: new Map(Object.entries(over.moduleTables ?? {})),
     loadSnapshot: async (name) => {
@@ -100,8 +134,8 @@ describe("runCheck — drift", () => {
     });
 
     expect(exitCode).toBe(1);
-    expect(lines.join("\n")).toContain("  missing  idx_runs_package_started");
-    expect(lines.join("\n")).toContain("  missing  idx_runs_schedule_id");
+    expect(lines.join("\n")).toContain("  missing index   idx_runs_package_started");
+    expect(lines.join("\n")).toContain("  missing index   idx_runs_schedule_id");
   });
 
   it("exits 0 and says definitions are not compared when nothing is missing", async () => {
@@ -113,7 +147,96 @@ describe("runCheck — drift", () => {
     expect(exitCode).toBe(0);
     expect(lines.join("\n")).toContain("No missing index");
     expect(lines.join("\n")).toContain("DEFINITIONS");
-    expect(lines.join("\n")).not.toContain("missing  ");
+    expect(lines.join("\n")).not.toContain("missing index  ");
+  });
+});
+
+describe("runCheck — column drift (#1349)", () => {
+  it("exits 1 and names a declared column the database lacks", async () => {
+    // The 42703 the Better Auth adapter check cannot see: it diffs the plugin's
+    // expectations against the TS object, never against a database.
+    const { exitCode, lines } = await check({
+      snapshots: {
+        "0001_snapshot.json": withColumns(snapshot({ oauth_clients: [] }), {
+          oauth_clients: { id: true, is_first_party: true },
+        }),
+      },
+      actualColumns: [["oauth_clients", "id", true]],
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines.join("\n")).toContain("  missing column  oauth_clients.is_first_party");
+    expect(lines.join("\n")).not.toContain("missing column  oauth_clients.id");
+  });
+
+  it("exits 1 when a column exists but disagrees on NOT NULL", async () => {
+    const { exitCode, lines } = await check({
+      snapshots: {
+        "0001_snapshot.json": withColumns(snapshot({ oauth_clients: [] }), {
+          oauth_clients: { id: true, name: true },
+        }),
+      },
+      actualColumns: [
+        ["oauth_clients", "id", true],
+        ["oauth_clients", "name", false],
+      ],
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines.join("\n")).toContain(
+      "nullability     oauth_clients.name: database says nullable, snapshot declares NOT NULL",
+    );
+  });
+
+  it("reports a missing index AND a missing column in the same run", async () => {
+    // Fixing one and re-running to discover the other is a second deploy window.
+    const { exitCode, lines } = await check({
+      snapshots: {
+        "0001_snapshot.json": withColumns(snapshot({ runs: ["idx_runs_schedule_id"] }), {
+          runs: { id: true, schedule_id: false },
+        }),
+      },
+      actual: [],
+      actualColumns: [["runs", "id", true]],
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines.join("\n")).toContain("  missing index   idx_runs_schedule_id");
+    expect(lines.join("\n")).toContain("  missing column  runs.schedule_id");
+  });
+
+  it("names an undeclared column without failing the run", async () => {
+    // Pre-squash residue: a column the schema stopped declaring with no forward
+    // DROP COLUMN. An operator decides; the check does not.
+    const { exitCode, lines } = await check({
+      snapshots: {
+        "0001_snapshot.json": withColumns(snapshot({ runs: [] }), { runs: { id: true } }),
+      },
+      actualColumns: [
+        ["runs", "id", true],
+        ["runs", "legacy_flow_id", false],
+      ],
+    });
+
+    expect(exitCode).toBe(0);
+    expect(lines.join("\n")).toContain("  undeclared column  runs.legacy_flow_id");
+    expect(lines.join("\n")).toContain("No missing column");
+  });
+
+  it("ignores columns on a table a MODULE owns", async () => {
+    const { exitCode, lines } = await check({
+      snapshots: {
+        "0001_snapshot.json": withColumns(snapshot({ runs: [] }), { runs: { id: true } }),
+      },
+      actualColumns: [
+        ["runs", "id", true],
+        ["ee_usage_records", "credits", true],
+      ],
+      moduleTables: { ee_usage_records: "packages/module-ee" },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(lines.join("\n")).not.toContain("ee_usage_records");
   });
 });
 
@@ -264,6 +387,38 @@ describe("declaredIndexes", () => {
       },
     });
     expect([...declared]).toEqual(["idx_runs_schedule_id"]);
+  });
+});
+
+describe("declaredColumns", () => {
+  it("keys by table without the schema prefix and tolerates a table with no `columns`", () => {
+    const declared = declaredColumns(
+      withColumns(snapshot({ runs: [], account: null }), { runs: { id: true, note: false } }),
+    );
+    expect([...declared.get("runs")!]).toEqual([
+      ["id", true],
+      ["note", false],
+    ]);
+    expect([...declared.get("account")!]).toEqual([]);
+  });
+
+  it("ignores tables outside the public schema, which the column query never returns", () => {
+    const declared = declaredColumns({
+      tables: {
+        "public.runs": { schema: "", columns: { id: { notNull: true } } },
+        "audit.events": { schema: "audit", columns: { id: { notNull: true } } },
+      },
+    });
+    expect([...declared.keys()]).toEqual(["runs"]);
+  });
+});
+
+describe("diffColumns", () => {
+  it("skips a declared table the database does not have at all", () => {
+    // The index half already names it once; forty "missing column" lines under
+    // it would bury that.
+    const diff = diffColumns(new Map([["runs", new Map([["id", true]])]]), new Map());
+    expect(diff).toEqual({ absent: [], nullability: [], undeclared: [] });
   });
 });
 

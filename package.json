@@ -143,6 +143,7 @@
   },
   "overrides": {
     "zod": "4.5.4",
+    "jose": "6.2.12",
     "ai": "^7.0.48",
     "@ai-sdk/react": "^4.0.51",
     "@ai-sdk/provider-utils": "^5.0.18"
