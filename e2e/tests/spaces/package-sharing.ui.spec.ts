@@ -48,14 +48,12 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   const name = `shared-${Date.now().toString(36)}`;
 
   // The agent lives in the organization's default space — its home, and where
-  // the sharing authority (`agents:share`) is held.
+  // the sharing authority (`agents:share`) is held. A share is installed
+  // PINNED, so the package needs a published version before it can be accepted
+  // at all: `POST /packages/agents` already mints the manifest's `0.1.0`
+  // (`createVersionSafe`), so republishing it here would be a 409
+  // `no_changes`, not a second version.
   await createAgent(apiClient, scope, name);
-  // A share is installed PINNED, so the package needs a published version
-  // before it can be accepted at all.
-  const published = await apiClient.post(`/packages/agents/${scope}/${name}/versions`, {
-    version: "0.1.0",
-  });
-  expect(published.status(), await published.text()).toBe(201);
 
   // A GUEST: invited for exactly one thing, with no space assignment. Named
   // distinctly on purpose — the member picker below is a Radix listbox driven

@@ -88,7 +88,8 @@ export const updateRoleSchema = z
 
 /**
  * Omitting `space_assignments` keeps the stored ones; the role rules are
- * re-checked against them, so `guest` on a space-less invitation is refused.
+ * re-checked against them, so `admin` on an invitation carrying grants is
+ * refused.
  */
 export const updateInvitationSchema = z
   .object({

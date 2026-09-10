@@ -15671,7 +15671,7 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     role: "guest" | "member" | "admin";
-                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    /** @description Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every space. */
                     space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
@@ -15750,7 +15750,7 @@ export interface operations {
                      * @enum {string}
                      */
                     role?: "guest" | "member" | "admin";
-                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    /** @description Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every space. */
                     space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };

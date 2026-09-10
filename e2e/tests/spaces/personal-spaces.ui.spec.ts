@@ -9,7 +9,7 @@
  * colleague opens, and the direct URL an admin might be handed.
  */
 
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
@@ -95,13 +95,19 @@ test("an agent authored in a personal space is invisible to a colleague and to t
   await createAgent(authorClient, scope, "draft");
   const agentPath = `/agents/${scope}/draft`;
 
-  // The author sees it in their own space.
+  // The author sees it in their own space. The library renders the manifest's
+  // `display_name`, never the package id, so the row is located by the link it
+  // carries to the detail page — which is the id, and unique. Matching on
+  // `${scope}/draft` there found nothing, and would have made the two
+  // `toHaveCount(0)` below pass vacuously.
+  const libraryRow = (page: Page) => page.locator(`a[href="${agentPath}"]`);
   const authorContext = await createAuthedContext(browser, author, orgId, personalId);
   try {
     const authorPage = await authorContext.newPage();
     await authorPage.goto("/library");
-    await expect(authorPage.getByText(`${scope}/draft`).first()).toBeVisible();
+    await expect(libraryRow(authorPage)).toBeVisible();
     await authorPage.goto(agentPath);
+    // The detail page DOES print the id, under the display name.
     await expect(authorPage.getByText(`${scope}/draft`).first()).toBeVisible();
   } finally {
     await authorContext.close();
@@ -115,7 +121,10 @@ test("an agent authored in a personal space is invisible to a colleague and to t
     try {
       const page = await context.newPage();
       await page.goto("/library");
-      await expect(page.getByText(`${scope}/draft`)).toHaveCount(0);
+      // An empty page satisfies a count of zero as happily as a rendered one,
+      // so wait for the type tabs before reading the absence.
+      await expect(page.getByRole("tab").first()).toBeVisible();
+      await expect(libraryRow(page)).toHaveCount(0);
 
       const detail = page.waitForResponse(
         (response) =>

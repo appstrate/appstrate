@@ -9,7 +9,7 @@ import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 const SPACE_ASSIGNMENTS_BODY = {
   type: "array",
   description:
-    "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+    "Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every space.",
   items: { $ref: "#/components/schemas/SpaceAssignment" },
 } as const;
 

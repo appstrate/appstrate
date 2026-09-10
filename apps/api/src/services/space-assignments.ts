@@ -13,8 +13,16 @@ type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Validate deferred grants before saving an invitation or OAuth signup policy.
- * Admins need no explicit grants; guests need at least one. All referenced
- * spaces and custom roles must belong to the organization.
+ * Admins need no explicit grants, and no role needs one. All referenced spaces
+ * and custom roles must belong to the organization.
+ *
+ * A `guest` used to be required to name at least one space, because without a
+ * grant the invitation produced an account that could reach nothing. That is no
+ * longer true: every membership provisions the member's own personal space
+ * (`provisionMember`, RBAC spec §3.6), where a guest holds `operator` — which
+ * is the whole point of inviting one for a single shared agent (plan decision
+ * 4). Requiring a team space on top granted MORE than the invitation meant to,
+ * so the rule is gone rather than worked around at the call sites.
  */
 export async function assertSpaceAssignmentsValid(
   params: {
@@ -29,12 +37,6 @@ export async function assertSpaceAssignmentsValid(
   if (role === "admin" && assignments.length > 0) {
     throw invalidRequest(
       `Admins already run every space in the organization; ${param} must be empty`,
-      param,
-    );
-  }
-  if (role === "guest" && assignments.length === 0) {
-    throw invalidRequest(
-      `A guest has no implicit space access; ${param} must name at least one space`,
       param,
     );
   }
