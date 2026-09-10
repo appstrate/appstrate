@@ -900,7 +900,12 @@ skills sync is running` and kept the stale plugin. The lock is now
   `0008` is idempotent, runs in one transaction, and verifies by coverage
   rather than by a count that reads the same whether it worked or not: it
   aborts unless every pre-flip (user, space) pair carries a `space_members` row
-  and every pending invitation carries its space snapshot.
+  and every pending invitation carries its space snapshot. It is run-once by
+  construction rather than by convention: the one step whose predicate does not
+  remove its own condition — the OAuth signup snapshot, which after the deploy
+  also matches a client an admin deliberately left with no assignments — is
+  skipped on every run past the first, off a marker the script writes in
+  `drizzle.migration_scripts`, and names the clients it declined to widen.
 
   **A third file can be needed first.** `0056` also creates the partial unique
   index behind "one pending invitation per (organization, email)", and a

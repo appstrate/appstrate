@@ -28,22 +28,24 @@
 -- directory has no such rule, and `0008` is in no released tag, so amending it
 -- was mechanically available. The reason not to is neither of those:
 --
--- `0008` CANNOT BE RE-RUN OUTSIDE ITS WINDOW, so "amend it" and "ship the fix"
--- are not the same act. Its step 4 capture predicate is
+-- `0008` DOES NOT REDO ITS STEP 4 OUTSIDE ITS WINDOW, so "amend it" and "ship
+-- the fix" are not the same act. Its step 4 capture predicate is
 -- `signup_role = 'guest' AND signup_space_assignments = '[]'::jsonb`, and that
--- is permanent — it re-matches ANY client still holding an empty snapshot,
+-- is permanent — it would re-match ANY client still holding an empty snapshot,
 -- including one an admin deliberately left with no assignments, and including
--- one whose org simply had no space at the time. On a later run step 4 then
--- hands that OIDC signup client `viewer` rows in every space created since.
--- `0008`'s own header says so.
+-- one whose org simply had no space at the time. That is why a `0008` run that
+-- commits records itself in `drizzle.migration_scripts` and every later run
+-- captures an EMPTY step-4 set, writing nothing. `0008`'s own header says so.
 --
--- Folding this UPDATE into `0008` therefore ships the fix as "re-run `0008`" —
--- a permission widening on the auto-provisioning path, to repair a handful of
--- invitation rows. "In no released tag" bounds who that reaches; it does not
--- empty the set. `main` is a documented build path and `0008` has been on it
--- since 2026-09-08, so the operator who has already run it is precisely the one
--- this file is for, and a bare UPDATE on one column of one table — no window,
--- no captured set — is the only shape that can be handed to them.
+-- That guard stops a re-run from widening the auto-provisioning path; it does
+-- not make `0008` the place for this UPDATE. Folding it in ships the fix as
+-- "re-run `0008`" — a five-table, 300-second transaction over the whole
+-- database, to repair a handful of invitation rows, whose step-4 behaviour now
+-- depends on whether the operator's marker row exists. `main` is a documented
+-- build path and `0008` has been on it since 2026-09-08, so the operator who
+-- has already run it is precisely the one this file is for, and a bare UPDATE
+-- on one column of one table — no window, no captured set — is the shape that
+-- can be handed to them.
 --
 -- Second, independently: the `pending_before` / `pending_after` counters below
 -- are a cross-check on a DIFFERENT script — non-zero means `0008` has not run.
