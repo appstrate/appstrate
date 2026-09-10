@@ -356,6 +356,24 @@ A public client is one whose `token_endpoint_auth_method` is `"none"` — that i
 - **PKCE is mandatory** for them: `isPKCERequired` returns "pkce is required for public clients" whenever `token_endpoint_auth_method` is `"none"`, whatever the client's own `require_pkce` says.
 - **Loopback ports are flexible** (RFC 8252 §7.3): the provider matches the requested redirect against the registered ones through `stripLoopbackRedirectPort`, so a client registered on `http://127.0.0.1/callback` matches `http://127.0.0.1:63785/callback` at runtime. It port-flexes `http:` loopback IP literals and the bare name `localhost`, and nothing else. Our registration gate (`services/redirect-uri.ts`, `isLoopbackHost`) is deliberately wider — it also admits `*.localhost` subdomains — so a `tenant.localhost` redirect registers but is matched port-exactly.
 
+## Self-service client registration (DCR / CIMD)
+
+Generic MCP clients onboard with no operator step, either by posting an RFC 7591 body to `/api/auth/oauth2/register` (DCR) or by identifying with a `client_id` URL that serves a Client ID Metadata Document (CIMD). Both paths land on `auth/plugins.ts` and are bounded by `getSelfServiceScopes()` — identity scopes plus every module scope opted in via `endUserGrantable: true`. A core action scope (`agents:run`, `llm-proxy:call`, …) is refused with `invalid_scope` at registration. Every such client is stamped `level = "instance"`, `self_service = true` by `markClientSelfService`, which is what confines its tokens to exactly one protected-resource audience at mint.
+
+### Registration-time `scope` is advisory
+
+A `scope` declared at registration is **validated** against the ceiling and then **discarded**: `persistOAuthClientRegistration` writes the whole ceiling to the row, so a client that publishes `scope: "openid"` is still able to request `mcp:invoke` at `/authorize`. This is Better Auth's documented contract — the persisted set is an operator-approved _capability_ set that a later user authorization steps up within, and a registration request "is not an authorization grant".
+
+The module keeps that behaviour rather than intersecting the declaration back in, for one reason: the declaration is client-controlled. A registrant that wanted the whole ceiling would simply declare it (DCR re-registers; CIMD edits its own document), so narrowing buys no confinement — while it would break every MCP client that publishes a minimal `scope` and then requests what the protected-resource metadata advertises. What actually bounds a self-service client is the ceiling itself, the single-audience rule at `/oauth2/token`, the consent screen, and the caller's live org role.
+
+Corollary: `markClientSelfService` writes `level` and `self_service` and nothing else. A scope backfill there would hand the client control of the ceiling `/authorize` enforces; it was removed in #1287 and must not come back.
+
+### What the consent screen promises
+
+For `org` and `space` clients the listed scopes are a real ceiling — an `org` token's claim is intersected with the live role, a `space` token gets exactly the claim. For an `instance` client (which is what every self-service registrant is) the token carries `actor_type: "user"`, `scopesToPermissions` returns an empty set and the pipeline writes no `scopeCeiling`: the request is served with whatever the user's live org role allows, inside the one MCP resource the token is bound to. The consent page says so explicitly for that level instead of letting the scope list imply a cap it does not have.
+
+Making that a real ceiling — minting instance tokens with the consented scope claim as `scopeCeiling` — would also change the CLI and the dashboard SPA, which are instance clients too. That is a product decision, not a bug fix, and is deliberately not taken here.
+
 ## Security notes
 
 - **JWKS rotation**: the Better Auth `jwt` plugin auto-rotates the ES256 keypair every 90 days with a 7-day grace window. `services/enduser-token.ts` verifies through `verifyJwsAccessToken`, which trusts a cached keyset for 300 seconds and re-reads it when the token's `kid` is not in that set, so key rotation propagates to verification within one token-verify cycle — no process restart required. External clients that cache the JWKS document directly should stay under a 5-minute ceiling for the same reason.

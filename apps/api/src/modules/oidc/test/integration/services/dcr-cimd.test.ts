@@ -41,6 +41,7 @@ import { getEnv } from "@appstrate/env";
 import { OIDC_IDENTITY_SCOPES } from "../../../auth/scopes.ts";
 import oidcModule from "../../../index.ts";
 import { APPSTRATE_CLI_CLIENT_ID, ensureCliClient } from "../../../services/ensure-cli-client.ts";
+import { markClientSelfService } from "../../../services/oauth-admin.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -671,6 +672,48 @@ describe("Dynamic Client Registration (RFC 7591)", () => {
       .where(eq(oauthClient.clientId, clientId))
       .limit(1);
     expect(row).toBeDefined();
+    expect(row!.level).toBe("instance");
+    expect(row!.selfService).toBe(true);
+  });
+
+  it("stamps level and self-service WITHOUT rewriting the scope set", async () => {
+    // The stamp once backfilled `scopes` too, to work around a Better Auth
+    // < 1.7.3 bug that handed the first `/authorize` a row with `scopes: []`.
+    // That path let the CLIENT decide the ceiling `/authorize` enforces, and it
+    // was removed in #1287. The recorded symptom ("CIMD 1st hit =
+    // invalid_scope") makes restoring it tempting, so pin the invariant
+    // directly: this function writes two columns and leaves `scopes` alone
+    // (issue #1351).
+    const { status, json } = await register({
+      client_name: "Stamp must not touch scopes",
+      redirect_uris: ["http://localhost:9921/callback"],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    expect([200, 201]).toContain(status);
+    const clientId = String(json.client_id);
+
+    // A sentinel the ceiling would never produce: a backfill of ANY shape —
+    // from the ceiling or from the registration body — overwrites it.
+    const sentinel = ["openid", "urn:appstrate:test:sentinel"];
+    await db
+      .update(oauthClient)
+      .set({ scopes: sentinel })
+      .where(eq(oauthClient.clientId, clientId));
+
+    await markClientSelfService(clientId);
+
+    const [row] = await db
+      .select({
+        scopes: oauthClient.scopes,
+        level: oauthClient.level,
+        selfService: oauthClient.selfService,
+      })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    expect(row!.scopes).toEqual(sentinel);
     expect(row!.level).toBe("instance");
     expect(row!.selfService).toBe(true);
   });
