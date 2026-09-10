@@ -621,6 +621,22 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **A Plus subscriber is no longer handed a Pro-only Codex model (#1357).**
+  `gpt-6-astra` is recommended by the vendor only from Pro plans up, but it sat
+  in the Codex `featuredModels` list — which is not merely a picker section:
+  the platform auto-seeds every featured id into `org_models` on first
+  connection and promotes the first inserted row to the org default. A Plus
+  subscriber was therefore given a model their plan refuses, and found out at
+  the first run. The two documented Pro-only ids (`gpt-6-astra`,
+  `gpt-5.3-codex-spark`) are now named in one place — `PRO_PLAN_MODEL_IDS` in
+  `@appstrate/module-codex`, with the vendor page that says so — and are kept
+  in `modelDiscoveryCandidates`, where a Pro subscriber selects them
+  deliberately, and out of `featuredModels`, which the platform applies on
+  everyone's behalf. A test pins both halves, so featuring a plan-gated id
+  fails CI rather than reaching a picker. Plan tiers appear in no vendored feed
+  and `SUBSCRIPTION_COMPLIANCE.md` forbids asking the vendor, so the
+  hand-written list is the whole mechanism.
+
 - **The hosted connect portal names the missing OAuth client instead of a
   generic "please try again" 502 (#1263).** Opening a `connect_url` for an
   oauth2 auth in a space with no registered client — and no system client or
