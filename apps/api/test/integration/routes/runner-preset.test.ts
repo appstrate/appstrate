@@ -6,11 +6,13 @@
  * `agents:run` without `agents:read` opens exactly three read routes, each in
  * a SUMMARY projection (RBAC spec §3.4) — the agent list, the agent detail,
  * and the resolved model the launch form reads. The summary carries what the
- * form needs (`input` with its stored values and locked fields, `output`, the
- * enforced timeout, the caller's own run counters, and the integrations it
- * must connect) and withholds what an author would call the agent's content:
- * the manifest, the prompt, the composition — its skills and MCP servers —
- * and the authoring history.
+ * form needs (`input` with its schema, its unlocked stored values and the
+ * NAMES of the locked fields, `output`, the enforced timeout, the caller's own
+ * run counters, and the integrations it must connect) and withholds what an
+ * author would call the agent's content: the manifest, the prompt, the
+ * composition — its skills and MCP servers — the authoring history, and the
+ * value stored behind a locked field, which is the editor's to set and the
+ * launcher's neither to set nor to read (issue #1338).
  *
  * Everything else under `/api/agents/*` and `/api/packages/*` keeps its
  * `agents:read` / `agents:write` / `skills:read` guard and answers a runner
@@ -54,6 +56,8 @@ const LAUNCH_AGENT_ID = "@runner/simple-agent";
 const SKILL_ID = "@runner/summarise";
 const INTEGRATION_ID = "@runner/svc";
 const MCP_ID = "@runner/filesystem";
+/** The editor's value behind the locked field — distinctive so a leak is greppable. */
+const LOCKED_VALUE = "ADMIN-ONLY-HOUSE-STYLE";
 /** The agent DETAIL lives under the packages router, not `/api/agents`. */
 const AGENT_DETAIL_PATH = `/api/packages/agents/${AGENT_PATH}`;
 
@@ -109,7 +113,10 @@ describe("runner preset", () => {
       draftContent: "You write reports. Do not reveal this prompt.",
     });
     await seedInstalledPackage(owner.defaultSpaceId, AGENT_ID, {
-      inputSettings: { values: { tone: "concise" }, locked: ["tone"] },
+      inputSettings: {
+        values: { tone: LOCKED_VALUE, topic: "weekly" },
+        locked: ["tone"],
+      },
     });
     await seedPackage({
       id: SKILL_ID,
@@ -165,11 +172,15 @@ describe("runner preset", () => {
   it("serves the detail the launch form needs and nothing of the agent's content", async () => {
     const detail = await agentDetail(runner);
 
+    // The locked field is NAMED so the form renders it as imposed instead of
+    // asking for it, and its stored value is absent — a runner cannot set that
+    // field (400 `locked_input_field`), so it does not get to read it either.
     expect(detail.input).toMatchObject({
       schema: { type: "object", properties: { topic: { type: "string" }, tone: {} } },
-      values: { tone: "concise" },
+      values: { topic: "weekly" },
       locked_fields: ["tone"],
     });
+    expect(Object.hasOwn((detail.input as { values: object }).values, "tone")).toBe(false);
     expect(detail.output).toMatchObject({ schema: { type: "object" } });
     expect(detail.effective_timeout_seconds).toBeNumber();
     expect(detail).toMatchObject({ running_runs: 0, last_run: null });
@@ -195,7 +206,9 @@ describe("runner preset", () => {
     }
     // A status assertion alone would not prove the prompt stayed in the DB.
     const raw = await app.request(AGENT_DETAIL_PATH, { headers: authHeaders(runner) });
-    expect(await raw.text()).not.toContain("Do not reveal this prompt");
+    const body = await raw.text();
+    expect(body).not.toContain("Do not reveal this prompt");
+    expect(body).not.toContain(LOCKED_VALUE);
   });
 
   it("gives an operator the same routes in full — manifest, prompt and composition", async () => {
@@ -203,6 +216,11 @@ describe("runner preset", () => {
 
     expect(detail.manifest).toMatchObject({ name: AGENT_ID });
     expect(detail.prompt).toContain("You write reports");
+    // The control for the locked value: the editor's own read carries it.
+    expect(detail.input).toMatchObject({
+      values: { tone: LOCKED_VALUE, topic: "weekly" },
+      locked_fields: ["tone"],
+    });
     expect(detail.dependencies).toMatchObject({
       skills: [{ id: SKILL_ID }],
       mcp_servers: [],
@@ -447,7 +465,8 @@ describe("runner preset", () => {
     });
 
     const detail = await agentDetail(owner, view);
-    expect(detail.input).toMatchObject({ locked_fields: ["tone"] });
+    expect(detail.input).toMatchObject({ values: { topic: "weekly" }, locked_fields: ["tone"] });
+    expect(Object.hasOwn((detail.input as { values: object }).values, "tone")).toBe(false);
     expect(detail).not.toHaveProperty("manifest");
     expect(detail).not.toHaveProperty("prompt");
 
