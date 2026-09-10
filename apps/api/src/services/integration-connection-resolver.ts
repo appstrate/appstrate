@@ -490,7 +490,7 @@ function connectTargetAuthKey(args: ResolveOneArgs): string | null {
  * meaningless. The item then carries neither `auth_key` nor `required_scopes`,
  * which is the "let the user choose" shape.
  *
- * Two of the three relay sites apply it, and the asymmetry is deliberate:
+ * Three relay sites, two of which apply it — the asymmetry is deliberate:
  *
  *  - {@link connectTargetAuthKey} — load-bearing. The key is the AGENT's pin,
  *    which nothing filters against the integration manifest.

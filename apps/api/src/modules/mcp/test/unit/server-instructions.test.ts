@@ -71,5 +71,10 @@ describe("MCP server instructions — connect bullet", () => {
     expect(external).not.toContain("do NOT paste the link");
     expect(external).toMatch(/Give the caller that `connect_url`/);
     expect(chat).not.toMatch(/Give the caller that `connect_url`/);
+    // Behaviour-shaping, not wording: dropping it turns a 412 into a poll loop.
+    for (const bullet of [chat, external]) {
+      expect(bullet).toMatch(/do NOT poll, loop, wait/);
+      expect(bullet).toMatch(/authKey: "<the error's auth_key/);
+    }
   });
 });

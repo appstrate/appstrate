@@ -324,7 +324,9 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
           <OAuthConnectCard
             authUrl={offer?.authUrl}
             state={offer?.state}
-            packageId={offer?.packageId ?? args?.path_params?.packageId}
+            // The session route returns no `package_id`; the call's own path
+            // param is the integration this card connects.
+            packageId={args?.path_params?.packageId}
             toolCallId={props.toolCallId}
             errorText={
               phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined

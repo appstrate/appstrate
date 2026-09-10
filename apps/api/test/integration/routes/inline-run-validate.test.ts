@@ -356,9 +356,10 @@ describe("POST /api/runs/inline/validate", () => {
       // One code is enough HERE: what this file proves is that the inline
       // surface runs `validateAgentIntegrationSelections` at all, in both
       // modes. The gate's per-code verdicts (`scope_not_in_catalog`,
-      // `wildcard_not_authorized`, …) are the function's own contract and are
-      // pinned in `packages/core/test/integration.test.ts` plus the publish
-      // route's `packages.test.ts`.
+      // `wildcard_not_authorized`, …) are the function's own contract, pinned
+      // in `packages/core/test/integration.test.ts`; `scope_not_in_catalog`
+      // is also proven on this route below, since the connect-offer mint
+      // relies on it upstream.
       await seedIntegration();
       for (const res of [
         await validate(manifestSelecting({ tools: ["exfiltrate"] })),

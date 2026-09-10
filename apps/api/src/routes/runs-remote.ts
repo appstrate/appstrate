@@ -223,6 +223,12 @@ export function createRunsRemoteRouter() {
       // Seeded by the inline preflight only — the registry branch resolves no
       // pins of its own, so `createRun` creates its own Map there.
       let manifestCache: IntegrationManifestCache | undefined;
+      // Normalize an empty map to null (mirrors the platform run route): a
+      // non-null map on the row means the run carried explicit overrides.
+      const dependencyOverrides =
+        body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
+          ? body.dependency_overrides
+          : null;
 
       if (src.kind === "registry") {
         // Server-resolved attribution. The runner names the package; we
@@ -295,6 +301,9 @@ export function createRunsRemoteRouter() {
           orgId,
           spaceId,
           actor,
+          // Same overrides `createRun` freezes with below, so the preflight
+          // memo holds the versions the run will spawn.
+          dependencyOverrides,
           body: {
             manifest: src.manifest,
             prompt: src.prompt,
@@ -344,10 +353,7 @@ export function createRunsRemoteRouter() {
         input: effectiveInput,
         // Normalize an empty map to null (mirrors the platform run route): a
         // non-null map on the row means the run carried explicit overrides.
-        dependencyOverrides:
-          body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
-            ? body.dependency_overrides
-            : null,
+        dependencyOverrides,
         apiKeyId: c.get("apiKeyId") ?? undefined,
         sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
         contextSnapshot: body.contextSnapshot,

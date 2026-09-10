@@ -94,6 +94,13 @@ export async function runInlinePreflight(params: {
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    */
   connectOffers?: ConnectOfferPolicy | null;
+  /**
+   * Caller-selected integration versions (`body.dependency_overrides`). Must be
+   * the SAME map the kickoff freezes with, so the memo seeded here holds the
+   * versions the run will spawn — the platform run route keeps its two seeds
+   * in step the same way.
+   */
+  dependencyOverrides?: Record<string, string> | null;
 }): Promise<InlineRunPreflightResult> {
   const { orgId, spaceId, actor, body, mode = "fail-fast" } = params;
 
@@ -176,6 +183,7 @@ export async function runInlinePreflight(params: {
     await resolveRunIntegrationVersions({
       agentManifest: manifest as unknown as Record<string, unknown>,
       orgId,
+      ...(params.dependencyOverrides ? { dependencyOverrides: params.dependencyOverrides } : {}),
       manifestCache,
     });
     const selectionErrors = await validateAgentIntegrationSelections({
