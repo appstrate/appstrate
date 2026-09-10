@@ -429,6 +429,22 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
     expect(html).not.toContain("dynamic client registration");
   });
 
+  it("burns a remote MCP link: its refusal follows a registration attempt (issue #1344)", async () => {
+    // The mirror image of the reusable classic 403 above. Client acquisition
+    // for this auth happens AT the authorization server — discovery, then an
+    // RFC 7591 registration POST — so by the time the refusal lands, the click
+    // has already spent outbound calls and may have left an orphan client
+    // registered upstream. A link that survived its own refusal would replay
+    // that on every click, for its whole TTL, on a route with no session.
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
+    expect((await startConnect(token)).status).toBe(403);
+
+    const again = await startConnect(token);
+    expect(again.status).toBe(410);
+    expect(await again.text()).toContain("already been used");
+  });
+
   it("never names the row or the env var when a client_secret cannot be decrypted", async () => {
     // The ciphertext no longer opens (key rotated without re-encrypt, or
     // corruption): `has_client_secret` still reads true from the column while
