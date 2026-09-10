@@ -414,6 +414,7 @@ services:
       - EE_RECONCILIATION_INTERVAL_SECONDS
       - EE_RECONCILIATION_BATCH_SIZE
       - EE_RECONCILIATION_REPLAY_WINDOW
+      - EE_RECONCILIATION_MAX_GAP_SECONDS
     volumes:
       # SECURITY: the `:ro` suffix makes only the SOCKET FILE read-only — it
       # does NOT make the Docker API read-only. A process with this mount can

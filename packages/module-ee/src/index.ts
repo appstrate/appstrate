@@ -16,6 +16,7 @@ import { quoteUsage } from "./billing/usage-quote.ts";
 import { logger } from "./logger.ts";
 import { DEFAULT_QUOTE_RATES } from "./config.ts";
 import {
+  assertCursorResumable,
   startBillingSweeper,
   stopBillingSweeper,
   drainBillingSweeper,
@@ -136,7 +137,14 @@ const eeModule: AppstrateModule = {
     // usage recorded between boot and the first sweep tick (~5 min) is billed by
     // that first tick instead of falling below a watermark only set at the tick.
     // Idempotent + race-safe (ON CONFLICT DO NOTHING); a warm boot is a no-op.
-    await ensureCursorSeeded(ctx.services, getEeDb());
+    const cursor = await ensureCursorSeeded(ctx.services, getEeDb());
+
+    // Refuse to silently resume a watermark the sweeper abandoned. Re-enabling
+    // the module after a window with it off leaves a gap the first tick would
+    // claim in one go and debit against today's quotas — irreversibly, and
+    // fleet-wide. Billing that gap or forgiving it is an operator's call, so
+    // this throws (a fatal boot) and names both actions.
+    await assertCursorResumable(cursor);
 
     // Billing sweeper — the EE metering consumer. Sweeps the platform's
     // append-only `llm_usage` ledger by serial-`id` cursor, claims the

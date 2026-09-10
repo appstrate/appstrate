@@ -8,8 +8,10 @@ import {
   addPricingFaults,
   noPricingFaults,
   sweepLedgerBatch,
+  type CursorSeedResult,
   type SweepResult,
 } from "./usage-recorder.ts";
+import { getPlatformServices } from "../platform.ts";
 
 /**
  * Periodic billing sweeper — the EE metering consumer.
@@ -111,6 +113,71 @@ const MAINTENANCE_INTERVAL_SECONDS = 300;
 const ENTITLEMENT_RESYNC_INTERVAL_MS = 60 * 60 * 1000;
 let lastEntitlementResyncAt = 0;
 let inFlightResync: Promise<unknown> | null = null;
+
+/**
+ * Refuse to resume a watermark the sweeper abandoned — the enable → disable →
+ * re-enable gap.
+ *
+ * WHAT GOES WRONG WITHOUT THIS. Taking the module out of `MODULES` (or pausing
+ * metering) stops the sweep; it does NOT stop the platform appending to
+ * `llm_usage`. The watermark outlives the window, so the first tick after
+ * re-enabling claims every row that accumulated in it and debits the lot
+ * against TODAY's quotas: soft-cap overshoots, quota-warning emails fleet-wide,
+ * and credits already spent by the time an operator reads the heartbeat. None
+ * of it is reversible — the claim table is never purged, so the rows cannot be
+ * un-billed by re-reading them.
+ *
+ * Billing that gap or forgiving it is a commercial decision (customers were
+ * usually told billing was off), so neither is a default: the module refuses to
+ * boot and names both actions. The refusal is fatal on purpose — the loader
+ * turns it into a failed boot, and a warning on the money path is a warning
+ * nobody reads until the invoices land.
+ *
+ * THE PREDICATE IS DELIBERATELY TWO-PART — each half alone has a false positive
+ * that would brick a healthy boot. Age alone refuses a platform that was merely
+ * SHUT DOWN for a week (no sweep ran, but no usage accrued either); backlog
+ * alone refuses a deployment whose sweep is honestly behind while ticking
+ * normally, which needs capacity rather than an operator. Together they say:
+ * the sweeper was not running, AND a gap it cannot drain in one tick piled up
+ * while it wasn't.
+ *
+ * A stalled sweeper is not caught here, and must not be: an unsettled `system`
+ * row pins `settledFrontier()` at the same place it pins the watermark, so the
+ * backlog stays ~0 however long the stall lasts. That is the head-of-line
+ * warning's job, not this one's.
+ */
+export async function assertCursorResumable(cursor: CursorSeedResult): Promise<void> {
+  const env = getEeEnv();
+  // Metering is paused on purpose: no sweep is about to resume over anything.
+  // The gap keeps growing and is checked at the boot that un-pauses it.
+  if (env.EE_RECONCILIATION_INTERVAL_SECONDS === 0) return;
+  if (env.EE_RECONCILIATION_MAX_GAP_SECONDS === 0) return;
+
+  // Cheap half first: a fresh watermark needs no ledger read at all. A cursor
+  // seeded by THIS boot is `defaultNow()`, so the cutover path falls out here.
+  const absentSeconds = Math.floor((Date.now() - cursor.updatedAt.getTime()) / 1000);
+  if (absentSeconds <= env.EE_RECONCILIATION_MAX_GAP_SECONDS) return;
+
+  const frontierId = await getPlatformServices().usage.settledFrontier();
+  const backlog = frontierId - cursor.lastLlmUsageId;
+  // One tick's full drain capacity: below it the next tick clears the gap by
+  // itself, which is the ordinary catch-up this must not interrupt.
+  const drainCapacity = MAX_DRAIN_ITERATIONS * env.EE_RECONCILIATION_BATCH_SIZE;
+  if (backlog <= drainCapacity) return;
+
+  throw new Error(
+    `The billing sweep last confirmed its watermark ${Math.floor(absentSeconds / 3600)}h ago ` +
+      `and ${backlog} settled ledger rows have accumulated since ` +
+      `(watermark ${cursor.lastLlmUsageId}, settled frontier ${frontierId}). ` +
+      `Resuming would bill that whole gap against the organizations' CURRENT quotas. ` +
+      `Choose explicitly — forgive the gap with \`DELETE FROM ee_billing_cursor;\`, which makes ` +
+      `the next boot re-seed the watermark AND floor_id at the settled frontier exactly as the ` +
+      `original cutover did, so no row below it is ever read again; or bill it by setting ` +
+      `EE_RECONCILIATION_MAX_GAP_SECONDS above ${absentSeconds} (0 disables this check). ` +
+      `Either way, organizations created while the sweep was absent have no ee_billing_accounts ` +
+      `row — the sweep names each one, repair with \`bun run repair:account\`.`,
+  );
+}
 
 /**
  * Start the periodic worker. `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses the

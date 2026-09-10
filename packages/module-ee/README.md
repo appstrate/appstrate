@@ -513,6 +513,45 @@ The sum is the only way to apply that debt: the orphaned ledger rows were claime
 and the watermark advanced past them in the same committed transaction that
 recorded them, so no future sweep can ever read them again.
 
+### Turning the module off, and back on
+
+Taking `@appstrate/module-ee` out of `MODULES` (or pinning
+`EE_RECONCILIATION_INTERVAL_SECONDS=0`) stops the sweep. It does **not** stop the
+platform appending to `llm_usage` — metering is platform-side. Three things
+happen across such a window, and only the first is guarded:
+
+1. **The gap is still billable.** The watermark outlives the window, so the first
+   tick after re-enabling claims every row that accumulated in it and debits the
+   lot against the organizations' **current** quotas — soft-cap overshoots and
+   quota-warning emails fleet-wide, credits already spent by the time anyone
+   reads the heartbeat, and irreversible (the claim table is never purged, so the
+   rows cannot be un-billed by re-reading them). `assertCursorResumable`
+   (`src/billing/billing-sweeper.ts`) refuses that boot instead: it fires when the
+   sweep last confirmed the watermark more than `EE_RECONCILIATION_MAX_GAP_SECONDS`
+   ago (default a day) **and** more rows piled up than one tick can drain. Both
+   halves are required — age alone would refuse a platform that was simply shut
+   down for a week, backlog alone a sweep that is honestly behind while ticking.
+   The two decisions the refusal names:
+   - **forgive the gap** — `DELETE FROM ee_billing_cursor;`, then boot. `init()`
+     re-seeds the watermark _and_ `floor_id` at the current settled frontier,
+     exactly as the original cutover did, so nothing below it is ever read again.
+     This is the usual answer: customers were told billing was off;
+   - **bill the gap** — set `EE_RECONCILIATION_MAX_GAP_SECONDS` above the age the
+     refusal printed (`0` resumes over any gap). Rehearse it: the debits land
+     against today's balances, not the window's.
+2. **Orgs created in the window have no billing account.** `onOrgCreate` never
+   fired for them, so their first metered usage is refused (`no_account` →
+   `402 quota_exceeded`) and the sweep reports each one at `error`. Repair with
+   `bun run repair:account -- <orgId> <ownerEmail>` above. This is deliberately
+   NOT reconciled at boot: the module reads the platform only through
+   `ctx.services` and the two org queries, and none of them enumerates
+   organizations — a fleet-wide backfill would need a new core query, and
+   provisioning free tiers for orgs an operator never saw is a commercial call.
+3. **Usage of orgs deleted in the window is gone.** `onOrgDelete`'s final drain
+   never ran and the platform cascade took their `llm_usage` rows with them.
+   Nothing can recover that revenue after the fact — it is the cost of the window,
+   and worth knowing before opening one.
+
 ### Moving an existing deployment
 
 A deployment whose billing tables sit in a database of their own moves them with
