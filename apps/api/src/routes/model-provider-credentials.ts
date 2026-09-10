@@ -370,7 +370,9 @@ export function createModelProviderCredentialsRouter() {
 
   // POST /api/model-provider-credentials/discover — what an endpoint serves,
   // described from its listing and the catalog, BEFORE a credential exists.
-  // Persists nothing, never echoes the key; gated like `refresh-models`.
+  // Persists nothing, never echoes the key; gated like `refresh-models`. The
+  // listing is followed across its pages, and `truncated` says when a cap cut
+  // the read short rather than letting a partial list pass for a whole one.
   router.post(
     "/discover",
     rateLimit(6),
@@ -384,11 +386,13 @@ export function createModelProviderCredentialsRouter() {
         return c.json({
           outcome: listing.error.toLowerCase(),
           models: [],
+          truncated: false,
           message: listing.message,
         });
       }
       return c.json({
         outcome: "ok",
+        truncated: listing.truncated,
         models: listing.models.map(({ id, hints }) => {
           const described = describeServedModel(target.providerId, id, hints);
           return {

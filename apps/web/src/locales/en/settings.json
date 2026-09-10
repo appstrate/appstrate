@@ -642,6 +642,7 @@
   "models.form.discoverCount_one": "{{count}} model detected",
   "models.form.discoverCount_other": "{{count}} models detected",
   "models.form.discoverEmpty": "This endpoint returned no model.",
+  "models.form.discoverTruncated": "The endpoint serves more models than could be read; this list is incomplete.",
   "models.form.discoverAuthFailed": "The endpoint refused the key.",
   "models.form.discoverBlockedUrl": "The platform blocks this address (private or local network). Add the host to EGRESS_ALLOW_INTERNAL_HOSTS server-side to allow it.",
   "models.form.discoverFailed": "Could not list the models this endpoint serves.",

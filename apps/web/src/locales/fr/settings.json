@@ -642,6 +642,7 @@
   "models.form.discoverCount_one": "{{count}} modèle détecté",
   "models.form.discoverCount_other": "{{count}} modèles détectés",
   "models.form.discoverEmpty": "Aucun modèle renvoyé par ce endpoint.",
+  "models.form.discoverTruncated": "Le endpoint sert plus de modèles que ce qui a pu être lu ; cette liste est incomplète.",
   "models.form.discoverAuthFailed": "Clé refusée par le endpoint.",
   "models.form.discoverBlockedUrl": "Cette adresse est bloquée par la plateforme (réseau privé ou local). Ajoute l'hôte à EGRESS_ALLOW_INTERNAL_HOSTS côté serveur pour l'autoriser.",
   "models.form.discoverFailed": "Impossible de lister les modèles de ce endpoint.",

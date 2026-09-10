@@ -311,8 +311,15 @@ function ModelForm({
         }),
       },
       {
-        onSuccess: (data) => setDiscovery({ key, outcome: data.outcome, models: data.models }),
-        onError: () => setDiscovery({ key, outcome: "request_failed", models: [] }),
+        onSuccess: (data) =>
+          setDiscovery({
+            key,
+            outcome: data.outcome,
+            models: data.models,
+            truncated: data.truncated,
+          }),
+        onError: () =>
+          setDiscovery({ key, outcome: "request_failed", models: [], truncated: false }),
       },
     );
   };
