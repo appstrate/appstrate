@@ -24,8 +24,11 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   uploadPackageFiles,
+  downloadPackageFiles,
   SYSTEM_STORAGE_NAMESPACE,
 } from "../../../src/services/package-items/storage.ts";
+import { indexEtag, mutatePackageDraftFiles } from "../../../src/services/package-files.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { uploadPackageZip, buildMinimalZip } from "../../../src/services/package-storage.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import { hasPackageAccess } from "../../../src/services/space-packages.ts";
@@ -931,3 +934,184 @@ async function versionIntegrity(id: string): Promise<string | undefined> {
     .limit(1);
   return row?.integrity;
 }
+
+/**
+ * The WRITE half of the same tree — `mutatePackageDraftFiles`.
+ *
+ * Exercised through the package `PUT`, which is its only route today, and
+ * directly for the two guarantees a single HTTP request cannot show: that two
+ * writers of one package serialize, and that a caller presenting a validator
+ * for a tree that has moved is refused without either store being touched.
+ */
+describe("draft tree writes", () => {
+  const id = "@fexp/write-skill";
+  const SKILL_MD = "---\nname: write-skill\ndescription: A written skill.\n---\n\nBody.";
+  const NEXT_MD = "---\nname: write-skill\ndescription: A written skill.\n---\n\nRewritten.";
+  const decoder = new TextDecoder();
+  let ctx: TestContext;
+
+  function skillManifest(version = "1.0.0"): Record<string, unknown> {
+    return {
+      name: id,
+      version,
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "Write Skill",
+      description: "A written skill.",
+    };
+  }
+
+  /** The package's stored ZIP, as the next reader would unzip it. */
+  async function storedTree(): Promise<Record<string, Uint8Array>> {
+    const files = await downloadPackageFiles("skills", ctx.orgId, id);
+    expect(files).not.toBeNull();
+    return files!;
+  }
+
+  async function lockVersionOf(): Promise<number> {
+    const [row] = await db
+      .select({ lockVersion: packages.lockVersion })
+      .from(packages)
+      .where(eq(packages.id, id))
+      .limit(1);
+    return row!.lockVersion;
+  }
+
+  async function saveContent(content: string, lockVersion: number): Promise<Response> {
+    return app.request(`/api/packages/skills/${id}`, {
+      method: "PUT",
+      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ content, lock_version: lockVersion }),
+    });
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "fexp" });
+    await seedPackage({
+      id,
+      orgId: ctx.orgId,
+      type: "skill",
+      draftManifest: skillManifest(),
+      draftContent: SKILL_MD,
+    });
+    await seedInstalledPackage(ctx.defaultSpaceId, id);
+    await uploadPackageFiles("skills", ctx.orgId, id, {
+      "SKILL.md": encoder.encode(SKILL_MD),
+      "scripts/run.py": encoder.encode("print(1)"),
+      "assets/logo.bin": new Uint8Array([0, 1, 2, 3]),
+    });
+  });
+
+  it("a content-only PUT rewrites the content entry and keeps every other file", async () => {
+    const res = await saveContent(NEXT_MD, await lockVersionOf());
+    expect(res.status).toBe(200);
+
+    const stored = await storedTree();
+    expect(Object.keys(stored).sort()).toEqual(["SKILL.md", "assets/logo.bin", "scripts/run.py"]);
+    expect(decoder.decode(stored["SKILL.md"]!)).toBe(NEXT_MD);
+    expect(decoder.decode(stored["scripts/run.py"]!)).toBe("print(1)");
+    expect(Array.from(stored["assets/logo.bin"]!)).toEqual([0, 1, 2, 3]);
+
+    const { entries } = await listFiles(ctx, id);
+    expect(entries.map((e) => e.path)).toEqual([
+      "SKILL.md",
+      "assets/logo.bin",
+      "manifest.json",
+      "scripts/run.py",
+    ]);
+  });
+
+  it("a stale lock_version is still a 409, and neither store moves", async () => {
+    const stale = (await lockVersionOf()) + 7;
+    const res = await saveContent(NEXT_MD, stale);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("conflict");
+    expect(body.detail).toBe("Skill was modified concurrently. Reload and try again.");
+
+    // Negative control: the refusal happens before either write.
+    expect(decoder.decode((await storedTree())["SKILL.md"]!)).toBe(SKILL_MD);
+    const [row] = await db
+      .select({ draftContent: packages.draftContent })
+      .from(packages)
+      .where(eq(packages.id, id))
+      .limit(1);
+    expect(row!.draftContent).toBe(SKILL_MD);
+  });
+
+  it("serializes two concurrent writers — pg_advisory_xact_lock holds on this tier", async () => {
+    // Without the lock the second writer reads the tree the first has not
+    // stored yet and drops its file. Both files surviving is the lock working;
+    // the call itself proves `pg_advisory_xact_lock` exists on this tier.
+    const target = { id, type: "skill" as const, orgId: ctx.orgId };
+    const add = (path: string, text: string) => ({
+      label: "Skill",
+      precondition: { etag: "*" },
+      mutate: (files: Record<string, Uint8Array>) => ({
+        ...files,
+        [path]: encoder.encode(text),
+      }),
+    });
+
+    const [first, second] = await Promise.all([
+      mutatePackageDraftFiles(target, add("docs/a.md", "A")),
+      mutatePackageDraftFiles(target, add("docs/b.md", "B")),
+    ]);
+
+    const stored = await storedTree();
+    expect(Object.keys(stored).sort()).toEqual([
+      "SKILL.md",
+      "assets/logo.bin",
+      "docs/a.md",
+      "docs/b.md",
+      "scripts/run.py",
+    ]);
+    // Each write bumps the row exactly once, so the two tokens differ by one.
+    expect(Math.abs(first.lockVersion - second.lockVersion)).toBe(1);
+  });
+
+  it("accepts the ETag the index served, and refuses a stale one", async () => {
+    const { res } = await listFiles(ctx, id);
+    const etag = res.headers.get("ETag")!;
+    expect(etag).toMatch(/^"i-pd-[0-9a-f]{64}"$/);
+
+    const written = await mutatePackageDraftFiles(
+      { id, type: "skill", orgId: ctx.orgId },
+      {
+        label: "Skill",
+        precondition: { etag },
+        mutate: (files) => ({ ...files, "docs/note.md": encoder.encode("noted") }),
+      },
+    );
+    expect(Object.keys(written.snapshot.files).sort()).toEqual([
+      "SKILL.md",
+      "assets/logo.bin",
+      "docs/note.md",
+      "manifest.json",
+      "scripts/run.py",
+    ]);
+    // The returned snapshot is what the next GET reports, ETag included.
+    const after = await listFiles(ctx, id);
+    expect(after.res.headers.get("ETag")).toBe(indexEtag(written.snapshot.snapshotId));
+
+    // The same validator a second time now names a tree that has moved.
+    let refused: unknown;
+    await mutatePackageDraftFiles(
+      { id, type: "skill", orgId: ctx.orgId },
+      {
+        label: "Skill",
+        precondition: { etag },
+        mutate: (files) => ({ ...files, "docs/late.md": encoder.encode("late") }),
+      },
+    ).catch((err: unknown) => {
+      refused = err;
+    });
+    expect(refused).toBeInstanceOf(ApiError);
+    expect((refused as ApiError).status).toBe(412);
+    expect((refused as ApiError).code).toBe("precondition_failed");
+
+    // Negative control: nothing of the refused write reached storage.
+    expect(Object.keys(await storedTree())).not.toContain("docs/late.md");
+  });
+});

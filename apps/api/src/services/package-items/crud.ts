@@ -19,6 +19,9 @@ import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 
+/** The Drizzle client, or a transaction handle a caller already owns. */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export class PackageAlreadyExistsError extends Error {
   constructor(
     public packageId: string,
@@ -204,7 +207,14 @@ export async function createOrgItem(
   }
 }
 
-/** Update a package item with optimistic locking. Returns null on version mismatch (409). */
+/**
+ * Update a package item with optimistic locking. Returns null on version
+ * mismatch (409).
+ *
+ * `executor` lets a caller enlist the update in a transaction it already owns —
+ * `mutatePackageDraftFiles` writes this row and the package's ZIP under one
+ * advisory lock, and a bare `db` here would run outside both.
+ */
 export async function updateOrgItem(
   orgId: string,
   id: string,
@@ -213,8 +223,9 @@ export async function updateOrgItem(
     content: string;
   },
   expectedVersion: number,
+  executor: DbOrTx = db,
 ): Promise<Package | null> {
-  const rows = await db
+  const rows = await executor
     .update(packages)
     .set({
       draftManifest: payload.manifest,

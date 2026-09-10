@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Read-only file explorer for a package's artifact.
+ * A package's draft file tree — the reads that present it, and the one write
+ * that changes it ({@link mutatePackageDraftFiles}).
  *
  * Single choke point FOR THE FILE-EXPLORER ROUTES: both of them (the index and
  * the content route) read through this module, in two steps —
@@ -26,20 +27,41 @@
  * - **version** — exactly the pinned bytes, integrity-verified, no overlay. A
  *   published version is immutable by definition; a later draft edit must not
  *   be able to change what a historical version reports.
+ *
+ * The write half is one function on purpose. A draft tree lives in two stores
+ * that no transaction spans — the `packages` row and the ZIP object — so every
+ * writer has to serialize against the other writers, re-read, validate and
+ * persist in the same order, or the two halves drift. There is one such
+ * sequence and {@link mutatePackageDraftFiles} is it.
  */
 
+import { and, eq, sql } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { packages } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { notFound } from "../lib/errors.ts";
-import { downloadPackageFiles } from "./package-items/storage.ts";
+import { conflict, notFound, preconditionFailed } from "../lib/errors.ts";
+import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storage.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
 import { getVersionForDownload } from "./package-versions.ts";
-import { CONFIG_BY_TYPE, SYSTEM_STORAGE_NAMESPACE } from "./package-items/config.ts";
+import {
+  CONFIG_BY_TYPE,
+  SYSTEM_STORAGE_NAMESPACE,
+  assertArchiveContentConforms,
+} from "./package-items/config.ts";
+import { updateOrgItem } from "./package-items/crud.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import {
   PACKAGE_CONTENT_ENTRY,
   PACKAGE_FILE_INLINE_MAX_BYTES,
 } from "@appstrate/core/package-files";
+import {
+  ARCHIVE_MAX_FILES,
+  PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
+  isSafeArchivePath,
+} from "@appstrate/core/zip";
+import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
+import { asRecord } from "@appstrate/core/safe-json";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
@@ -516,4 +538,382 @@ export function buildFileIndex(snapshot: PackageFileSnapshot): PackageFileEntry[
   }
 
   return entries;
+}
+
+// ─────────────────────────────────────────────
+// Draft tree writes
+// ─────────────────────────────────────────────
+
+/** One edit to a draft tree. Paths are archive-relative, `/`-separated. */
+export type PackageFileOperation =
+  | { op: "write"; path: string; bytes: Uint8Array }
+  | { op: "delete"; path: string }
+  | { op: "move"; from: string; to: string };
+
+/**
+ * Why a batch of operations was refused. Every value maps to one HTTP status at
+ * the route boundary, which is where the mapping belongs — this module answers
+ * WHAT is wrong, not with which number to say it.
+ */
+export type PackageFileWriteErrorCode =
+  | "invalid_path"
+  | "reserved_entry"
+  | "content_entry_immovable"
+  | "not_found"
+  | "path_conflict"
+  | "file_too_large"
+  | "tree_too_large";
+
+/** A refused draft-tree edit, carrying the offending path when there is one. */
+export class PackageFileWriteError extends Error {
+  constructor(
+    readonly code: PackageFileWriteErrorCode,
+    /** The path the caller named, or `null` for a whole-tree limit. */
+    readonly path: string | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PackageFileWriteError";
+  }
+}
+
+/**
+ * A path an operation names must be one the archive can carry, and must not be
+ * the manifest: `manifest.json` is a projection of `packages.draft_manifest`,
+ * authored through the package `PUT` and validated by `validateManifestForRoute`.
+ * Writing it as a file would put a second, unvalidated manifest in the tree.
+ */
+function assertOperandPath(path: string): void {
+  if (!isSafeArchivePath(path)) {
+    throw new PackageFileWriteError("invalid_path", path, `'${path}' is not a usable file path`);
+  }
+  if (path === MANIFEST_FILE_NAME) {
+    throw new PackageFileWriteError(
+      "reserved_entry",
+      path,
+      `'${MANIFEST_FILE_NAME}' is authored through the package manifest, not the file tree`,
+    );
+  }
+}
+
+/**
+ * Whole-tree invariants, checked once on the RESULT rather than per operation:
+ * a batch is atomic, so every intermediate tree is allowed to be invalid (a
+ * move is a delete the caller has not finished yet).
+ *
+ * `touched` — the paths this batch created — scopes the file/directory
+ * shadowing check to what the caller is responsible for. A stored ZIP is free
+ * to contain both `a` and `a/b` (a ZIP is a flat list of names, not a
+ * filesystem), and refusing every later edit of such a package would punish the
+ * author for an archive they may not have built.
+ */
+function assertTreeConforms(files: Record<string, Uint8Array>, touched: Iterable<string>): void {
+  const paths = Object.keys(files);
+  if (paths.length > ARCHIVE_MAX_FILES) {
+    throw new PackageFileWriteError(
+      "tree_too_large",
+      null,
+      `A package holds at most ${ARCHIVE_MAX_FILES} files; this one would hold ${paths.length}`,
+    );
+  }
+
+  let total = 0;
+  for (const path of paths) total += files[path]!.byteLength;
+  if (total > PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES) {
+    throw new PackageFileWriteError(
+      "tree_too_large",
+      null,
+      `A package holds at most ${PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES} bytes of files; this one would hold ${total}`,
+    );
+  }
+
+  // Every path that is used as a DIRECTORY by some entry of the result.
+  const directories = new Set<string>();
+  for (const path of paths) {
+    for (let cut = path.indexOf("/"); cut >= 0; cut = path.indexOf("/", cut + 1)) {
+      directories.add(path.slice(0, cut));
+    }
+  }
+
+  for (const path of touched) {
+    if (directories.has(path)) {
+      throw new PackageFileWriteError(
+        "path_conflict",
+        path,
+        `'${path}' is a directory in this package and cannot also be a file`,
+      );
+    }
+    for (let cut = path.indexOf("/"); cut >= 0; cut = path.indexOf("/", cut + 1)) {
+      const ancestor = path.slice(0, cut);
+      if (Object.hasOwn(files, ancestor)) {
+        throw new PackageFileWriteError(
+          "path_conflict",
+          path,
+          `'${ancestor}' is a file in this package, so '${path}' cannot be created under it`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Apply a batch of operations to a file tree and return a NEW tree.
+ *
+ * Pure: the input map is never mutated, and neither are the byte arrays (an
+ * entry the batch does not touch is carried over by reference). Operations
+ * apply IN ORDER, so a batch can move a file and then write the new path, or
+ * delete a file it created earlier — the caller's sequence is the caller's.
+ *
+ * The type's content entry (`SKILL.md` / `prompt.md`) can be written, and can
+ * be the destination of a move — both are ways of authoring it. It cannot be
+ * deleted or moved AWAY: a package of that type is defined by having it, and
+ * `assertArchiveContentConforms` would refuse the result anyway, with a message
+ * about frontmatter rather than about the operation the caller asked for.
+ *
+ * @throws PackageFileWriteError — the only failure mode.
+ */
+export function applyFileOperations(
+  files: Record<string, Uint8Array>,
+  ops: readonly PackageFileOperation[],
+  ctx: { type: PackageType },
+): Record<string, Uint8Array> {
+  const contentEntry = PACKAGE_CONTENT_ENTRY[ctx.type]?.path ?? null;
+  const result = { ...files };
+  const touched = new Set<string>();
+
+  for (const op of ops) {
+    switch (op.op) {
+      case "write": {
+        assertOperandPath(op.path);
+        if (op.bytes.byteLength > PACKAGE_FILE_INLINE_MAX_BYTES) {
+          throw new PackageFileWriteError(
+            "file_too_large",
+            op.path,
+            `'${op.path}' is ${op.bytes.byteLength} bytes; a file written through the editor holds at most ${PACKAGE_FILE_INLINE_MAX_BYTES}`,
+          );
+        }
+        result[op.path] = op.bytes;
+        touched.add(op.path);
+        break;
+      }
+      case "delete": {
+        assertOperandPath(op.path);
+        if (op.path === contentEntry) {
+          throw new PackageFileWriteError(
+            "content_entry_immovable",
+            op.path,
+            `'${op.path}' is this package's content and cannot be deleted`,
+          );
+        }
+        if (!Object.hasOwn(result, op.path)) {
+          throw new PackageFileWriteError("not_found", op.path, `'${op.path}' does not exist`);
+        }
+        delete result[op.path];
+        touched.delete(op.path);
+        break;
+      }
+      case "move": {
+        assertOperandPath(op.from);
+        assertOperandPath(op.to);
+        if (op.from === contentEntry) {
+          throw new PackageFileWriteError(
+            "content_entry_immovable",
+            op.from,
+            `'${op.from}' is this package's content and cannot be renamed`,
+          );
+        }
+        if (!Object.hasOwn(result, op.from)) {
+          throw new PackageFileWriteError("not_found", op.from, `'${op.from}' does not exist`);
+        }
+        const bytes = result[op.from]!;
+        delete result[op.from];
+        touched.delete(op.from);
+        result[op.to] = bytes;
+        touched.add(op.to);
+        break;
+      }
+    }
+  }
+
+  assertTreeConforms(result, touched);
+  return result;
+}
+
+/**
+ * What the caller claims about the tree it is modifying.
+ *
+ * `etag` is the index validator the caller read (`If-Match`), compared against
+ * the tree under the lock — "the tree I am modifying is the tree I read". `*`
+ * matches any current representation (RFC 9110 §13.1.1), for a scripted caller
+ * that means to overwrite whatever is there. `lockVersion` is the row's
+ * optimistic token, the package `PUT`'s contract.
+ */
+export type DraftFilesPrecondition = { etag: string } | { lockVersion: number };
+
+export interface MutateDraftFilesInput {
+  /** How this package type is named in a conflict message ("Skill", "Agent"). */
+  label: string;
+  precondition: DraftFilesPrecondition;
+  /** Transform the overlaid tree. Runs under the lock; must return a new map. */
+  mutate: (files: Record<string, Uint8Array>) => Record<string, Uint8Array>;
+  /** Manifest to persist with this write. Defaults to the row's current draft. */
+  manifest?: Record<string, unknown>;
+  /**
+   * `packages.draft_content` to persist. Defaults to the resulting tree's
+   * content entry, decoded — which is what the column IS for a type whose entry
+   * is a real file. A type whose `content` is a manifest copy (`integration`,
+   * `mcp-server`) resolves the column on its own terms and passes it here; see
+   * {@link resolveDraftContent}.
+   */
+  draftContent?: string;
+  /**
+   * Whether `manifest.json` is a STORED file for this package type.
+   *
+   * For `agent` / `skill` it is not: the row owns the manifest, the read
+   * overlay materializes it (see {@link applyDraftOverlay}), publish rebuilds
+   * it from the row and the draft-run catalog synthesizes it — so storing a
+   * second copy in the ZIP only creates something that can go stale. It is
+   * dropped from the uploaded tree.
+   *
+   * For `integration` / `mcp-server` `manifest.json` IS the editor's storage
+   * sink (`storageFileName`, `routes/packages.ts`) and the bundle's portable
+   * manifest, so it is uploaded like any other file.
+   */
+  manifestIsStoredFile?: boolean;
+}
+
+/**
+ * The one read-modify-write of a package's draft tree.
+ *
+ * Every writer goes through here, because the tree lives in two stores: the
+ * `packages` row (`draft_manifest` / `draft_content`, which the read overlay
+ * lets WIN) and the ZIP object. Under one transaction-scoped advisory lock on
+ * the package id, concurrent writers of one package queue instead of clobbering
+ * each other's read-modify-write.
+ *
+ * ## Why the row is written before the object
+ *
+ * No transaction spans PostgreSQL and object storage, so one of the two lands
+ * first and a crash between them leaves a skew. The order is chosen so that the
+ * skew a failure produces is the one every reader already absorbs:
+ *
+ * - The storage upload runs INSIDE the transaction. When it fails — the likely
+ *   failure of the two, being a network round-trip — the row update rolls back
+ *   with it and the write simply did not happen.
+ * - When the upload succeeds and the COMMIT then fails, the object is ahead of
+ *   the row. The overlay makes the row's content entry win on every read, which
+ *   is exactly the rule it enforces for the opposite skew, so a reader sees the
+ *   old content entry and no invented file.
+ *
+ * The lock is therefore held across the storage round-trip. That is the cost of
+ * writes to one package being serialized at all, and writes to one package are
+ * what the editor produces.
+ *
+ * @returns the tree a subsequent `GET …/files` will report, and the row's new
+ *   `lock_version`.
+ * @throws 404 when the package is not in the org, 412 / 409 when the
+ *   precondition fails, and whatever `mutate` or the content gate throws.
+ */
+export async function mutatePackageDraftFiles(
+  target: { id: string; type: PackageType; orgId: string },
+  input: MutateDraftFilesInput,
+): Promise<{ snapshot: PackageFileSnapshot; lockVersion: number }> {
+  const lockKey = `package-files:${target.id}`;
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+
+    const [row] = await tx
+      .select({
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+        lockVersion: packages.lockVersion,
+      })
+      .from(packages)
+      .where(and(eq(packages.id, target.id), eq(packages.orgId, target.orgId)))
+      .limit(1);
+    if (!row) throw notFound(`${input.label} '${target.id}' not found`);
+
+    const source: PackageFileSource = {
+      id: target.id,
+      type: target.type,
+      orgId: target.orgId,
+      draftManifest: row.draftManifest,
+      draftContent: row.draftContent,
+    };
+
+    const before = await readPackageSnapshot(source, {
+      kind: "draft",
+      snapshotId: null,
+      yanked: false,
+    });
+
+    if ("etag" in input.precondition) {
+      const presented = input.precondition.etag;
+      if (presented !== "*" && presented !== indexEtag(before.snapshotId)) {
+        throw preconditionFailed(
+          `${input.label} '${target.id}' changed since its files were read. Reload and try again.`,
+        );
+      }
+    } else if (input.precondition.lockVersion !== row.lockVersion) {
+      throw conflict("conflict", `${input.label} was modified concurrently. Reload and try again.`);
+    }
+
+    const mutated = input.mutate(before.files);
+    // The bytes ABOUT TO BE STORED, not the ones the caller sent: a write that
+    // leaves the content entry unparseable is refused before either store moves.
+    assertArchiveContentConforms(target.type, mutated, "file");
+
+    const entry = PACKAGE_CONTENT_ENTRY[target.type];
+    const contentBytes = entry ? mutated[entry.path] : undefined;
+    const draftContent =
+      input.draftContent ??
+      (contentBytes ? decodeSkillMarkdown(contentBytes) : (row.draftContent ?? ""));
+
+    const updated = await updateOrgItem(
+      target.orgId,
+      target.id,
+      { manifest: input.manifest ?? asRecord(row.draftManifest), content: draftContent },
+      row.lockVersion,
+      tx,
+    );
+    // The advisory lock only binds writers that take it. A writer that bumps
+    // `lock_version` without it (a re-install, a version restore) still loses
+    // this update, and the caller is told so rather than being told the write
+    // landed.
+    if (!updated) {
+      throw conflict("conflict", `${input.label} was modified concurrently. Reload and try again.`);
+    }
+
+    const stored = { ...mutated };
+    if (!input.manifestIsStoredFile) delete stored[MANIFEST_FILE_NAME];
+    await uploadPackageFiles(
+      CONFIG_BY_TYPE[target.type].storageFolder,
+      target.orgId,
+      target.id,
+      stored,
+    );
+
+    // What the next read will produce: the stored tree with the overlay of the
+    // row we just wrote. Building it from the UPDATED row is what makes the
+    // returned `snapshotId` — and the ETag derived from it — the one a
+    // subsequent conditional request presents.
+    const files = { ...stored };
+    applyDraftOverlay(files, {
+      ...source,
+      draftManifest: updated.draftManifest,
+      draftContent: updated.draftContent,
+    });
+
+    logger.info("Package draft tree written", {
+      packageId: target.id,
+      fileCount: Object.keys(stored).length,
+      lockVersion: updated.lockVersion,
+    });
+
+    return {
+      snapshot: { files, snapshotId: draftSnapshotId(files) },
+      lockVersion: updated.lockVersion,
+    };
+  });
 }

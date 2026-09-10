@@ -32,7 +32,7 @@ import {
   PackageAlreadyExistsError,
 } from "../services/package-items/crud.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
+import { uploadPackageFiles } from "../services/package-items/storage.ts";
 import {
   CONFIG_BY_TYPE,
   assertContentConforms,
@@ -86,6 +86,7 @@ import {
   resolvePackageFileValidator,
   readPackageSnapshot,
   resolveDraftContent,
+  mutatePackageDraftFiles,
   buildFileIndex,
   indexEtag,
   fileEtag,
@@ -1051,27 +1052,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
         ? manifestText
         : content;
 
-    // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
-    // different files for the manifest-backed types — see `storageFileName`.
-    // `resolveDraftContent` guards the column; the storage write below is
-    // resolved on its own terms.
-    const updated = await updateOrgItem(
-      orgId,
-      itemId,
-      {
-        manifest: validatedManifest,
-        content: resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
-      },
-      body.lock_version,
-    );
-
-    if (!updated) {
-      throw conflict(
-        "conflict",
-        `${rcfg.labelSingular} was modified concurrently. Reload and try again.`,
-      );
-    }
-
     // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
     // content entry it is the manifest (integration, mcp-server), and it is
     // rebuilt from the VALIDATED manifest rather than echoing `content`: this
@@ -1079,16 +1059,34 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // carried forward above is `packages.draft_content` — which for an
     // integration is its INTEGRATION.md. Echoing it would overwrite the
     // package's `manifest.json` with its documentation.
-    const storageContent =
-      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName ? content : manifestText;
+    const manifestIsStoredFile =
+      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path !== rcfg.storageFileName;
+    const storageContent = manifestIsStoredFile ? manifestText : content;
 
-    // Update storage files (merge with existing to preserve ancillary files)
-    const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
-    const updatedFiles: Record<string, Uint8Array> = {
-      ...(existingFiles ?? {}),
-      [rcfg.storageFileName]: new TextEncoder().encode(storageContent),
-    };
-    await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
+    // One read-modify-write for the row and the stored tree, under the package's
+    // advisory lock — the same helper the file-tree writes take, so two writers
+    // of one package queue instead of overwriting each other's merge. The tree
+    // it hands `mutate` is the draft as the explorer shows it, so every file
+    // this PUT does not name is carried through untouched.
+    //
+    // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
+    // different files for the manifest-backed types — see `storageFileName`.
+    // `resolveDraftContent` guards the column; the storage entry is resolved on
+    // its own terms.
+    await mutatePackageDraftFiles(
+      { id: itemId, type: rcfg.cfg.type, orgId },
+      {
+        label: rcfg.labelSingular,
+        precondition: { lockVersion: body.lock_version },
+        manifest: validatedManifest,
+        draftContent: resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
+        manifestIsStoredFile,
+        mutate: (files) => ({
+          ...files,
+          [rcfg.storageFileName]: new TextEncoder().encode(storageContent),
+        }),
+      },
+    );
 
     // After-update hook (e.g. agent junction table sync)
     if (rcfg.afterUpdate) {
