@@ -378,9 +378,11 @@ export function createModelProviderCredentialsRouter() {
 
   // POST /api/model-provider-credentials/discover — what an endpoint serves,
   // described from its listing and the catalog, BEFORE a credential exists.
-  // Persists nothing, never echoes the key; gated like `refresh-models`. The
-  // listing is followed across its pages, and `truncated` says when a cap cut
-  // the read short rather than letting a partial list pass for a whole one.
+  // Writes no model state and never echoes the key — the probe itself is
+  // audited, since it spends a key on an operator-supplied URL. Gated like
+  // `refresh-models`. The listing is followed across its pages, and `truncated`
+  // says when a cap cut the read short rather than letting a partial list pass
+  // for a whole one.
   router.post(
     "/discover",
     rateLimit(6),
@@ -390,6 +392,21 @@ export function createModelProviderCredentialsRouter() {
       const body = await readJsonBody(c, discoverSchema);
       const target = await resolveDiscoverTarget(orgId, body);
       const listing = await listServedModels(target);
+      // The probe spends a key on an operator-supplied URL, so it leaves the
+      // same trail the create/update/delete routes do — the endpoint reached
+      // and what came back, never the key.
+      await recordAuditFromContext(c, {
+        action: "model_provider_credential.discovered",
+        resourceType: "model_provider_credential",
+        resourceId: body.credential_id ?? null,
+        after: {
+          providerId: target.providerId,
+          baseUrl: target.baseUrl,
+          outcome: listing.ok ? "ok" : listing.error.toLowerCase(),
+          modelCount: listing.ok ? listing.models.length : 0,
+          truncated: listing.ok && listing.truncated,
+        },
+      });
       if (!listing.ok) {
         return c.json({
           outcome: listing.error.toLowerCase(),
