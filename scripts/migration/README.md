@@ -92,19 +92,36 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
 
 ## OAuth-provider 1.7.3 rollout (drizzle `0057`, script `0011`)
 
-1. **Pre-flight, before any drizzle migration.** `0057` fills a NULL
-   `token_endpoint_auth_method` with `client_secret_basic`, which 1.7.3 then
-   enforces strictly. Count the confidential clients that have no method stored
-   — each one authenticates by putting its secret in the POST body and will be
-   answered `invalid_client`:
+1. **Pre-flight, before the 1.7.3 image is deployed.** 1.7.3 reads a stored
+   NULL `token_endpoint_auth_method` as `client_secret_basic` and then refuses
+   every other method, so a client that authenticates by putting its secret in
+   the POST body is answered `invalid_client` the moment the new code serves —
+   before `0057` runs, not because of it, since migrations apply at boot under
+   that same image. `0057` is why the count cannot wait: its fold writes
+   `client_secret_basic` into exactly these rows, and a written value is
+   indistinguishable from a registered one, so afterwards nothing enumerates
+   them. Run this while the old image is still up and **keep the rows**, not
+   just the count:
 
    ```sql
-   SELECT count(*) FROM oauth_clients
-   WHERE token_endpoint_auth_method IS NULL AND "public" = false;
+   SELECT id, client_id, "public", created_at
+   FROM oauth_clients
+   WHERE token_endpoint_auth_method IS NULL
+   ORDER BY created_at;
    ```
 
-   Non-zero → decide per client before applying: store `client_secret_post` by
-   hand, or tell the owner to move to `client_secret_basic`.
+   No `public` predicate: the column is nullable and the runtime default is read
+   from the method alone, so a row with `public` NULL breaks exactly like a
+   `public = false` one. It is also the single case the fold skips
+   (`… AND "public" IS NOT NULL`), which is why a count written against the
+   fold's own predicate misses it. Save the result with the release's rehearsal
+   notes; `0057` drops `public`, so nothing reconstructs the list.
+
+   Any row → decide per client before that image ships: store
+   `client_secret_post` by hand, or tell the owner to move to
+   `client_secret_basic`. The fail direction is safe either way — a NULL
+   resolves to `client_secret_basic`, never to `none`, so no confidential client
+   is downgraded to a public one.
 
 2. Apply pending Drizzle migrations, including `0057_oauth_provider_1_7_3.sql`.
    Its section D drops `oauth_clients.public` and `type`; an older build still
