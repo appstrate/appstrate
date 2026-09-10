@@ -28,6 +28,14 @@ import { useSpaces } from "../hooks/use-spaces";
  * banner also names the role it holds in the space being looked at — "Lecteur
  * dans Default" over a page answered for Marketing otherwise reads as a preview
  * that does not work.
+ *
+ * It also states the preview's one boundary. A persona is a restriction of the
+ * caller's own session and the caller stays themselves (`apps/api/src/lib/view-as.ts`),
+ * so every capability gated on IDENTITY rather than on role survives it: the
+ * runs the previewer launched (`runs:read` means "mine"), the files they
+ * uploaded, the integration connections they own. Previewing those would take
+ * impersonation, which the design refuses; naming the boundary is what keeps
+ * "see what this role sees" honest.
  */
 export function ViewAsBanner() {
   const { t } = useTranslation(["common", "settings"]);
@@ -88,6 +96,7 @@ export function ViewAsBanner() {
             />
           </>
         )}
+        <span className="block text-xs font-normal opacity-80">{t("viewAs.bannerOwn")}</span>
       </span>
       <Button variant="outline" size="sm" onClick={() => exitViewAs()}>
         {t("viewAs.exit")}

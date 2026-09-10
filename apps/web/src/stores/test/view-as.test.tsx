@@ -33,6 +33,7 @@ const {
   toViewAsPersona,
   STORAGE_KEY,
 } = await import("../view-as-store.ts");
+const { orgKeys } = await import("../../lib/query-keys.ts");
 const { orgStore } = await import("../org-store.ts");
 const { spaceStore } = await import("../space-store.ts");
 const { queryClient } = await import("../../lib/query-client.ts");
@@ -56,32 +57,48 @@ const PERSONA: ViewAsPersona = {
   },
 };
 
+type Organization = components["schemas"]["Organization"];
+
+/** `GET /api/orgs` as the server answers it FOR the persona — its permissions. */
+const ORGS_AS_PERSONA: Organization[] = [
+  {
+    id: "org_a",
+    name: "Acme",
+    slug: "acme",
+    role: "member",
+    permissions: ["org:read"],
+    createdAt: "2026-01-01T00:00:00Z",
+    deleting_at: null,
+  },
+];
+
 beforeEach(() => {
   fakeStorage.clear();
   viewAsStore.setState({ persona: null, stoppedReason: null });
   orgStore.setState({ id: "org_a" });
+  queryClient.removeQueries({ queryKey: orgKeys.all });
 });
 
 describe("view-as store", () => {
   it("serializes the header in the grammar the server parses", () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(getViewAsHeader()).toBe("org_role=member; space=spc_1; role=preset:viewer");
   });
 
   it("omits the space pair when the persona names no space", () => {
-    enterViewAs({ orgId: "org_a", orgRole: "guest", space: null });
+    enterViewAs({ orgId: "org_a", orgRole: "guest", space: null }, ORGS_AS_PERSONA);
     expect(getViewAsHeader()).toBe("org_role=guest");
   });
 
   it("stays silent in every organization but its own", () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     orgStore.setState({ id: "org_b" });
     expect(getViewAsHeader()).toBeNull();
     expect(buildScopingHeaders()["X-View-As"]).toBeUndefined();
   });
 
   it("rides on the scoping headers for the previewed organization", () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(buildScopingHeaders()).toMatchObject({
       "X-Org-Id": "org_a",
       "X-View-As": "org_role=member; space=spc_1; role=preset:viewer",
@@ -89,7 +106,7 @@ describe("view-as store", () => {
   });
 
   it("persists the persona and drops it on exit", () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(JSON.parse(fakeStorage.getItem(STORAGE_KEY)!)).toEqual(PERSONA);
     exitViewAs();
     expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
@@ -117,7 +134,9 @@ describe("cache reset", () => {
   function spyCache() {
     return {
       remove: spyOn(queryClient, "removeQueries").mockImplementation(() => {}),
-      refetch: spyOn(queryClient, "refetchQueries").mockImplementation(() => Promise.resolve()),
+      invalidate: spyOn(queryClient, "invalidateQueries").mockImplementation(() =>
+        Promise.resolve(),
+      ),
     };
   }
 
@@ -130,50 +149,67 @@ describe("cache reset", () => {
     expect(predicate({ queryKey: ["get", "/api/spaces"] })).toBe(true);
   }
 
-  it("empties the scoped cache and refetches the org list on entry", () => {
-    const { remove, refetch } = spyCache();
+  it("empties the scoped cache on entry", () => {
+    const { remove, invalidate } = spyCache();
     try {
-      enterViewAs(PERSONA);
+      enterViewAs(PERSONA, ORGS_AS_PERSONA);
       expect(remove).toHaveBeenCalledTimes(1);
-      expect(refetch).toHaveBeenCalledTimes(1);
-      expect(refetch.mock.calls[0]?.[0]).toEqual({ queryKey: ["orgs"] });
+      // The org list is HANDED to the store, so entering never waits on — nor
+      // gambles on — a refetch of it.
+      expect(invalidate).not.toHaveBeenCalled();
       assertOrgListSpared(remove);
     } finally {
       remove.mockRestore();
-      refetch.mockRestore();
+      invalidate.mockRestore();
     }
   });
 
-  it("does the same on exit", () => {
-    enterViewAs(PERSONA);
-    const { remove, refetch } = spyCache();
+  it("empties it again on exit and re-asks for the caller's own org row", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
+    const { remove, invalidate } = spyCache();
     try {
       exitViewAs();
       expect(remove).toHaveBeenCalledTimes(1);
-      expect(refetch).toHaveBeenCalledTimes(1);
+      // Invalidated, not just refetched: a refetch that fails would otherwise
+      // leave the persona's reduced row serving the caller for good.
+      expect(invalidate).toHaveBeenCalledTimes(1);
+      expect(invalidate.mock.calls[0]?.[0]).toEqual({ queryKey: ["orgs"] });
       assertOrgListSpared(remove);
     } finally {
       remove.mockRestore();
-      refetch.mockRestore();
+      invalidate.mockRestore();
     }
   });
 
   it("does nothing when there is no preview to leave", () => {
-    const { remove, refetch } = spyCache();
+    const { remove, invalidate } = spyCache();
     try {
       exitViewAs();
       expect(remove).not.toHaveBeenCalled();
-      expect(refetch).not.toHaveBeenCalled();
+      expect(invalidate).not.toHaveBeenCalled();
     } finally {
       remove.mockRestore();
-      refetch.mockRestore();
+      invalidate.mockRestore();
     }
+  });
+
+  it("publishes the persona's own org row in the same tick as the persona", () => {
+    // #1322: the persona used to be committed on its own and `["orgs"]` merely
+    // refetched. React Query serves the previous value for the whole of a
+    // background refetch — and forever if it fails — so `usePermissions` kept
+    // reading the previewer's permissions and every org-level admin entry
+    // stayed in the menu under a "Lecteur" banner.
+    queryClient.setQueryData(orgKeys.all, [
+      { ...ORGS_AS_PERSONA[0]!, role: "owner", permissions: ["org:read", "webhooks:read"] },
+    ]);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
+    expect(queryClient.getQueryData<Organization[]>(orgKeys.all)).toEqual(ORGS_AS_PERSONA);
   });
 });
 
 describe("realtime carrier", () => {
   it("appends `view_as` to the stream URL — those routes refuse the header", () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(withViewAsParam("/api/realtime/runs?orgId=org_a", getViewAsHeader())).toBe(
       "/api/realtime/runs?orgId=org_a&view_as=org_role%3Dmember%3B%20space%3Dspc_1%3B%20role%3Dpreset%3Aviewer",
     );
@@ -199,7 +235,7 @@ const previewedRequest = () => new Headers({ "X-View-As": "org_role=member" });
 
 describe("exit on refusal", () => {
   it("drops the persona and keeps the code when the server refuses it", async () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     await noteViewAsRefusal(previewedRequest(), refusal(404, "view_as_not_found"));
     expect(viewAsStore.getState().persona).toBeNull();
     // Held for the first mounted frame to say: the refusal lands on the boot
@@ -208,19 +244,19 @@ describe("exit on refusal", () => {
   });
 
   it("keeps the preview on a 404 the previewed role earned", async () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     await noteViewAsRefusal(previewedRequest(), refusal(404, "not_found"));
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
   });
 
   it("keeps the preview on an unrelated denial", async () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     await noteViewAsRefusal(previewedRequest(), refusal(403, "forbidden"));
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
   });
 
   it("ignores a failure on a request that carried no persona", async () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     await noteViewAsRefusal(new Headers(), refusal(403, "view_as_forbidden"));
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
   });
@@ -229,13 +265,13 @@ describe("exit on refusal", () => {
   // takes the header-less door. Its answer is what stops the reconnect loop —
   // a refused preview retried forever is an idle tab hammering a wall.
   it("reports a refused persona to the caller that must stop retrying", async () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(await endPreviewIfRefused(refusal(403, "view_as_forbidden"))).toBe(true);
     expect(viewAsStore.getState().persona).toBeNull();
   });
 
   it("reports a transient failure as no refusal, so the caller keeps retrying", async () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(await endPreviewIfRefused(new Response("gateway down", { status: 502 }))).toBe(false);
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
   });
@@ -251,14 +287,14 @@ describe("exit on refusal", () => {
       "view_as_forbidden",
       "view_as_not_found",
     ]) {
-      enterViewAs(PERSONA);
+      enterViewAs(PERSONA, ORGS_AS_PERSONA);
       expect(await endPreviewIfRefused(refusal(403, code))).toBe(true);
       expect(viewAsStore.getState().persona).toBeNull();
     }
   });
 
   it("keeps the preview when the failure carries no code at all", async () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(await endPreviewIfRefused(new Response("{}", { status: 403 }))).toBe(false);
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
   });
@@ -268,8 +304,8 @@ describe("leaving on purpose", () => {
   it("replaces a running preview rather than stacking a second one", () => {
     // The entry dialog stays reachable under a preview, so submitting again is
     // a replacement — no `exitViewAs()` dance at the call site.
-    enterViewAs(PERSONA);
-    enterViewAs(toViewAsPersona("org_a", "guest", undefined, undefined));
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
+    enterViewAs(toViewAsPersona("org_a", "guest", undefined, undefined), ORGS_AS_PERSONA);
     expect(viewAsStore.getState().persona).toEqual({
       orgId: "org_a",
       orgRole: "guest",
@@ -279,7 +315,7 @@ describe("leaving on purpose", () => {
   });
 
   it("leaves no reason behind when the user simply quits", () => {
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     exitViewAs();
     expect(viewAsStore.getState().stoppedReason).toBeNull();
   });
@@ -287,7 +323,7 @@ describe("leaving on purpose", () => {
   it("hands the reason out exactly once", () => {
     // StrictMode runs the effect that shows it twice; the second take must be
     // empty or the user sees the same toast twice.
-    enterViewAs(PERSONA);
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
     exitViewAs("view_as_forbidden");
     expect(takeViewAsStopped()).toBe("view_as_forbidden");
     expect(takeViewAsStopped()).toBeNull();
@@ -392,6 +428,17 @@ describe("banner", () => {
     const html = renderBanner(PERSONA, "org_a", { spaceId: "spc_3", spaces: [closed] });
     expect(html).toContain("Lecteur");
     expect(html).not.toContain("Direction");
+  });
+
+  // A persona restricts the caller without replacing them, so every capability
+  // gated on identity — own runs, own files, own connections — survives the
+  // preview. The banner is the one place that boundary is stated.
+  it("states that what the previewer created stays visible, whatever the persona", () => {
+    const withSpace = renderBanner(PERSONA, "org_a");
+    expect(withSpace).toContain("Ce que vous avez créé reste visible");
+
+    const orgOnly = renderBanner({ orgId: "org_a", orgRole: "guest", space: null }, "org_a");
+    expect(orgOnly).toContain("Ce que vous avez créé reste visible");
   });
 
   it("renders nothing outside the previewed organization", () => {
