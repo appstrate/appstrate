@@ -24,14 +24,17 @@ async function runGate(args: string[] = []): Promise<{ code: number; out: string
   return { code, out, err };
 }
 
-const verbose = await runGate(["--verbose"]);
+// Both spawns happen ONCE, here, and in parallel. The commercial-dependency
+// direction reads every tracked source file in the repository, so a spawn
+// inside an `it()` spends seconds of repo-wide I/O against that test's timeout
+// — which is what it started failing on.
+const [plain, verbose] = await Promise.all([runGate(), runGate(["--verbose"])]);
 
 describe("verify-module-isolation as a process", () => {
-  it("passes over this repository", async () => {
-    const { code, out, err } = await runGate();
-    expect(err).toBe("");
-    expect(code).toBe(0);
-    expect(out).toContain("module isolation clean");
+  it("passes over this repository", () => {
+    expect(plain.err).toBe("");
+    expect(plain.code).toBe(0);
+    expect(plain.out).toContain("module isolation clean");
   });
 
   it("reads a module's production code that lives outside `src/`", () => {
@@ -44,11 +47,33 @@ describe("verify-module-isolation as a process", () => {
     expect(verbose.out).toContain("scanned: scripts/test/verify-module-isolation.test.ts");
   });
 
-  it("keeps the two directions apart in its count line", () => {
-    const counts = /— (\d+) files across (\d+) modules, (\d+) platform files/.exec(verbose.out);
+  it("keeps the three directions apart in its count line", () => {
+    const counts =
+      /— (\d+) files across (\d+) modules, (\d+) platform files[^,]*, (\d+) tracked files/.exec(
+        verbose.out,
+      );
     expect(counts).not.toBeNull();
     expect(Number(counts![1])).toBeGreaterThan(0);
     expect(Number(counts![2])).toBeGreaterThan(0);
     expect(Number(counts![3])).toBeGreaterThan(0);
+    // The commercial pass reads every tracked source file, so it is necessarily
+    // the widest of the three — a narrowing edit shows up here as an inversion.
+    expect(Number(counts![4])).toBeGreaterThan(Number(counts![3]));
+  });
+
+  it("reads the trees the other two directions skip — a test tree and the SPA", () => {
+    // The blind spot #1373 named: `apps/api/test/**` sits under no platform
+    // scan root at all, and `apps/web` is waived from the core→module rule, so
+    // a static `@appstrate/module-ee` import in either passed every gate.
+    expect(verbose.out).toContain(
+      "scanned: apps/api/test/unit/module-isolation-acceptances.test.ts",
+    );
+    expect(verbose.out).toContain("scanned: apps/web/src/hooks/use-billing.ts");
+  });
+
+  it("names each file once, however many passes read it", () => {
+    const scanned = [...verbose.out.matchAll(/^ {3}scanned: (.+)$/gm)].map((m) => m[1]!);
+    expect(scanned.length).toBeGreaterThan(0);
+    expect(new Set(scanned).size).toBe(scanned.length);
   });
 });

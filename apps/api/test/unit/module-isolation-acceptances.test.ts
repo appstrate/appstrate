@@ -2,8 +2,9 @@
 
 /**
  * Unit tests for the pure decisions in `scripts/verify-module-isolation.ts` —
- * the two-directional acceptance check (module → module) and the platform
- * import review (core → module).
+ * the two-directional acceptance check (module → module), the platform
+ * import review (core → module) and the commercial-dependency review
+ * (Apache-2.0 → `packages/module-ee/`).
  *
  * `ACCEPTED_CROSS_MODULE_IMPORTS` is checked both ways: an accepted import must
  * not be reported as a violation, AND an acceptance with no matching import
@@ -24,6 +25,7 @@ import { describe, it, expect } from "bun:test";
 import {
   importSpecifiers,
   isScannedSource,
+  reviewCommercialDependencies,
   reviewCrossModuleImports,
   reviewPlatformModuleImports,
   type AcceptedCrossModuleImport,
@@ -208,6 +210,69 @@ describe("importSpecifiers", () => {
     // import behind it disappears from the scan.
     const source = ["const RE = /[\"']/g;", 'import "@appstrate/module-ee";'].join("\n");
     expect(importSpecifiers(source)).toEqual(["@appstrate/module-ee"]);
+  });
+
+  it("does not read an import QUOTED inside a string literal", () => {
+    // A quote inside a literal cannot open a specifier — the whole literal is
+    // one token. Without that, every file that talks ABOUT an import reads as
+    // performing one, and the commercial-dependency scan (which covers the test
+    // trees, where such fixtures live) reported this very file five times.
+    const source = [
+      "const fixture = 'import \"@appstrate/module-ee\";';",
+      'const other = "void import(`@appstrate/module-chat`)";',
+      'import { boot } from "./boot.ts";',
+    ].join("\n");
+    expect(importSpecifiers(source)).toEqual(["./boot.ts"]);
+  });
+});
+
+/**
+ * The Apache-2.0 → commercial direction. Unlike the other two it has no
+ * acceptance list and no root narrowing, so the only thing to pin is which
+ * specifiers count as reaching into `packages/module-ee/`.
+ */
+describe("reviewCommercialDependencies", () => {
+  const commercial: PlatformImport[] = [
+    { file: "apps/api/test/unit/x.test.ts", spec: "@appstrate/module-ee" },
+    { file: "apps/web/src/hooks/use-billing.ts", spec: "@appstrate/module-ee/schema" },
+    {
+      file: "packages/db/src/schema/x.ts",
+      spec: "../../../module-ee/drizzle/schema.ts",
+      resolved: "packages/module-ee/drizzle/schema.ts",
+    },
+  ];
+
+  it("reports a test tree, the SPA and a relative path alike", () => {
+    const problems = reviewCommercialDependencies(commercial);
+    expect(problems).toHaveLength(3);
+    for (const p of problems) expect(p).toContain("packages/module-ee/");
+  });
+
+  it("leaves every other module alone — this direction is about the LICENCE", () => {
+    expect(
+      reviewCommercialDependencies([
+        { file: "apps/api/test/unit/x.test.ts", spec: "@appstrate/module-claude-code" },
+        { file: "apps/web/src/x.ts", spec: "@appstrate/module-chat" },
+        {
+          file: "apps/api/src/x.ts",
+          spec: "../modules/oidc/index.ts",
+          resolved: "apps/api/src/modules/oidc/index.ts",
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("does not mistake a package whose name merely starts with the commercial one", () => {
+    expect(
+      reviewCommercialDependencies([
+        { file: "apps/api/src/x.ts", spec: "@appstrate/module-eels" },
+        {
+          file: "apps/api/src/x.ts",
+          spec: "../../module-eels/src/index.ts",
+          resolved: "packages/module-eels/src/index.ts",
+        },
+      ]),
+    ).toEqual([]);
   });
 });
 
