@@ -83,6 +83,7 @@ export function useEeReconciliationEnv(): void {
     "EE_RECONCILIATION_INTERVAL_SECONDS",
     "EE_RECONCILIATION_BATCH_SIZE",
     "EE_RECONCILIATION_REPLAY_WINDOW",
+    "EE_RECONCILIATION_MAX_GAP_SECONDS",
   ] as const;
 
   const previous: Record<string, string | undefined> = {};

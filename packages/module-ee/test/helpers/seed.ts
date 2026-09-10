@@ -170,13 +170,22 @@ export async function markLlmUsageBilled(args: {
 /**
  * Seed the singleton billing cursor at a given watermark. `floorId` defaults to the
  * column's own 0, so a test that cares about the exclusion bound has to state it.
+ * `updatedAt` defaults to now — pass a past date to stand for a sweep that has been
+ * absent that long (`assertCursorResumable`).
  */
-export async function seedBillingCursor(lastLlmUsageId: number, floorId = 0): Promise<void> {
+export async function seedBillingCursor(
+  lastLlmUsageId: number,
+  floorId = 0,
+  updatedAt = new Date(),
+): Promise<void> {
   const db = getEeDb();
   await db
     .insert(billingCursor)
-    .values({ id: true, lastLlmUsageId, floorId })
-    .onConflictDoUpdate({ target: billingCursor.id, set: { lastLlmUsageId, floorId } });
+    .values({ id: true, lastLlmUsageId, floorId, updatedAt })
+    .onConflictDoUpdate({
+      target: billingCursor.id,
+      set: { lastLlmUsageId, floorId, updatedAt },
+    });
 }
 
 /** Grant `billing:*` to a user through the EE-owned billing-manager table. */
