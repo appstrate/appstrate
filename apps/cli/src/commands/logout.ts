@@ -49,34 +49,39 @@ export async function logoutCommand(
   };
   let credentialsCleared = false;
   try {
-    await withSyncLock(async () => {
-      try {
-        const tokens = await loadTokens(profileName);
-        hadTokens = !!tokens;
-        const profile = await getProfile(profileName);
-        if (tokens && profile) {
-          await revokeCliRefreshToken(
-            normalizeInstance(profile.instance),
-            CLI_CLIENT_ID,
-            tokens.refreshToken,
+    await withSyncLock(
+      async () => {
+        try {
+          const tokens = await loadTokens(profileName);
+          hadTokens = !!tokens;
+          const profile = await getProfile(profileName);
+          if (tokens && profile) {
+            await revokeCliRefreshToken(
+              normalizeInstance(profile.instance),
+              CLI_CLIENT_ID,
+              tokens.refreshToken,
+            );
+          }
+        } catch (err) {
+          io.stderr.write(
+            `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
           );
+        } finally {
+          await clearCredentials();
+          credentialsCleared = true;
         }
-      } catch (err) {
-        io.stderr.write(
-          `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
-        );
-      } finally {
-        await clearCredentials();
-        credentialsCleared = true;
-      }
-      const cleanup = await cleanupProfileSkills(profileName);
-      if (cleanup.pluginReset)
-        io.stderr.write(
-          "Appstrate plugin reset. Run `claude plugin update appstrate@appstrate` and restart Claude, or start a new session with automatic plugin refresh enabled.\n",
-        );
-      for (const failure of cleanup.warnings)
-        io.stderr.write(`warning: ${failure}. Retry appstrate logout --profile ${profileName}.\n`);
-    });
+        const cleanup = await cleanupProfileSkills(profileName);
+        if (cleanup.pluginReset)
+          io.stderr.write(
+            "Appstrate plugin reset. Run `claude plugin update appstrate@appstrate` and restart Claude, or start a new session with automatic plugin refresh enabled.\n",
+          );
+        for (const failure of cleanup.warnings)
+          io.stderr.write(
+            `warning: ${failure}. Retry appstrate logout --profile ${profileName}.\n`,
+          );
+      },
+      { io },
+    );
   } catch (err) {
     io.stderr.write(
       `warning: could not complete skills cleanup (${formatError(err)}). Retry appstrate logout --profile ${profileName}.\n`,

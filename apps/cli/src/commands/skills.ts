@@ -120,86 +120,89 @@ export async function skillsSyncCommand(
   let pluginOk = false;
 
   try {
-    await withSyncLock(async () => {
-      const { profileName, profile } = await resolveActiveProfile(opts.profile);
-      const gap = connectionGap(profileName, profile);
-      if (gap && !printPath) throw new Error(`${gap.problem}. Run: ${gap.remedy}`);
-      const { state, corrupt } = await readSyncState();
-      if (corrupt) {
-        io.stderr.write(
-          "Sync state could not be used and has been ignored — this run re-materializes everything.\n",
-        );
-      }
-
-      if (gap) {
-        pluginOk = await bootstrapPlugin(gap, state, report);
-        return;
-      }
-
-      const context = syncContext(profileName, profile!);
-      // The pin is checked here although it is NOT part of the context: it is
-      // what `fixedFiles` was computed from at the start of the run, so a swap
-      // after it moved would commit a `.mcp.json` naming the previous space.
-      // The next run rewrites that file without treating anything as a switch.
-      const validate = async (): Promise<void> => {
-        const current = await resolveActiveProfile(opts.profile);
-        if (
-          !current.profile ||
-          !sameContext(context, syncContext(current.profileName, current.profile)) ||
-          current.profile.spaceId !== profile!.spaceId ||
-          JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
-        ) {
-          throw new Error("Active sync context changed; run skills sync again.");
-        }
-      };
-      const spaceIds = await selectedSpaces(profileName, profile!, opts.space, report);
-      const catalogue = await resolveAll(
-        profileName,
-        source,
-        state,
-        targets,
-        report,
-        spaceIds,
-        context,
-      );
-      const plans = await Promise.all(
-        targets.map((target) => diffTarget(target, catalogue, state, source, context)),
-      );
-      if (plans.some((plan) => plan.contextChanged) && catalogue.unresolved.size > 0) {
-        throw new Error(
-          "Could not resolve the new context completely; previous installation preserved.",
-        );
-      }
-      for (const plan of plans) {
-        for (const slug of plan.blocked) {
-          report.skill(
-            `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
+    await withSyncLock(
+      async () => {
+        const { profileName, profile } = await resolveActiveProfile(opts.profile);
+        const gap = connectionGap(profileName, profile);
+        if (gap && !printPath) throw new Error(`${gap.problem}. Run: ${gap.remedy}`);
+        const { state, corrupt } = await readSyncState();
+        if (corrupt) {
+          io.stderr.write(
+            "Sync state could not be used and has been ignored — this run re-materializes everything.\n",
           );
         }
-      }
 
-      if (opts.dryRun) {
-        reportPlans(plans, io.stdout);
-        return;
-      }
-      const fixedFiles = pluginFixedFiles({
-        instance: profile!.instance,
-        orgId: profile!.orgId!,
-        spaceId: profile!.spaceId!,
-      });
-      pluginOk = await executePlans(
-        profileName,
-        source,
-        plans,
-        state,
-        catalogue.bySlug,
-        fixedFiles,
-        report,
-        context,
-        validate,
-      );
-      if (!printPath) reportPlans(plans, io.stdout);
-    });
+        if (gap) {
+          pluginOk = await bootstrapPlugin(gap, state, report);
+          return;
+        }
+
+        const context = syncContext(profileName, profile!);
+        // The pin is checked here although it is NOT part of the context: it is
+        // what `fixedFiles` was computed from at the start of the run, so a swap
+        // after it moved would commit a `.mcp.json` naming the previous space.
+        // The next run rewrites that file without treating anything as a switch.
+        const validate = async (): Promise<void> => {
+          const current = await resolveActiveProfile(opts.profile);
+          if (
+            !current.profile ||
+            !sameContext(context, syncContext(current.profileName, current.profile)) ||
+            current.profile.spaceId !== profile!.spaceId ||
+            JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
+          ) {
+            throw new Error("Active sync context changed; run skills sync again.");
+          }
+        };
+        const spaceIds = await selectedSpaces(profileName, profile!, opts.space, report);
+        const catalogue = await resolveAll(
+          profileName,
+          source,
+          state,
+          targets,
+          report,
+          spaceIds,
+          context,
+        );
+        const plans = await Promise.all(
+          targets.map((target) => diffTarget(target, catalogue, state, source, context)),
+        );
+        if (plans.some((plan) => plan.contextChanged) && catalogue.unresolved.size > 0) {
+          throw new Error(
+            "Could not resolve the new context completely; previous installation preserved.",
+          );
+        }
+        for (const plan of plans) {
+          for (const slug of plan.blocked) {
+            report.skill(
+              `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
+            );
+          }
+        }
+
+        if (opts.dryRun) {
+          reportPlans(plans, io.stdout);
+          return;
+        }
+        const fixedFiles = pluginFixedFiles({
+          instance: profile!.instance,
+          orgId: profile!.orgId!,
+          spaceId: profile!.spaceId!,
+        });
+        pluginOk = await executePlans(
+          profileName,
+          source,
+          plans,
+          state,
+          catalogue.bySlug,
+          fixedFiles,
+          report,
+          context,
+          validate,
+        );
+        if (!printPath) reportPlans(plans, io.stdout);
+      },
+      { io },
+    );
   } catch (err) {
     report.run(formatError(err));
     pluginOk = false;
