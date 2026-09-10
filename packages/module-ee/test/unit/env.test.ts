@@ -64,6 +64,61 @@ describe("env", () => {
       expect(env.EE_RECONCILIATION_REPLAY_WINDOW).toBe(200);
     });
 
+    it("refuses a batch size the replay window leaves no room for", () => {
+      // REGRESSION (#1328). A pass reads `replayWindow + batchSize` rows and the
+      // platform caps that read at 1000, so a sum above the ceiling shrinks the
+      // FORWARD slice below `batchSize` instead of reading more — and the
+      // sweeper's within-tick drain loop, gated on `processed >= batchSize`,
+      // then stops after one pass. Raising the batch to clear a backlog made
+      // throughput fall, and the "drain cap reached" warning could not fire to
+      // say so. Boot has to refuse the combination, not clamp it.
+      const parse = (batchSize: string, replayWindow: string): boolean => {
+        process.env.EE_RECONCILIATION_BATCH_SIZE = batchSize;
+        process.env.EE_RECONCILIATION_REPLAY_WINDOW = replayWindow;
+        _resetEeEnvForTests();
+        try {
+          getEeEnv();
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      try {
+        // The default replay window leaves exactly 800 forward rows.
+        expect(parse("800", "200")).toBe(true);
+        expect(parse("801", "200")).toBe(false);
+        // Shrink the window and the same batch size becomes legal again — the
+        // two knobs share one budget rather than having independent maxima.
+        expect(parse("1000", "0")).toBe(true);
+        expect(parse("501", "500")).toBe(false);
+      } finally {
+        delete process.env.EE_RECONCILIATION_BATCH_SIZE;
+        delete process.env.EE_RECONCILIATION_REPLAY_WINDOW;
+        _resetEeEnvForTests();
+      }
+    });
+
+    it("names the batch size when the two reconciliation knobs overrun the read budget", () => {
+      // An operator who raised one knob has to be told which pair is wrong.
+      process.env.EE_RECONCILIATION_BATCH_SIZE = "1000";
+      process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
+      _resetEeEnvForTests();
+      try {
+        let message = "";
+        try {
+          getEeEnv();
+        } catch (err) {
+          message = describeEnvIssues(err);
+        }
+        expect(message).toContain("EE_RECONCILIATION_BATCH_SIZE");
+        expect(message).toContain("EE_RECONCILIATION_REPLAY_WINDOW");
+      } finally {
+        delete process.env.EE_RECONCILIATION_BATCH_SIZE;
+        delete process.env.EE_RECONCILIATION_REPLAY_WINDOW;
+        _resetEeEnvForTests();
+      }
+    });
+
     it("bounds the replay window so it can never starve the forward batch", () => {
       // A pass reads `replaySpan + BATCH_SIZE` capped at the platform's 1000-row
       // ceiling, so a window above 500 could leave a maxed-out batch with less

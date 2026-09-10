@@ -312,6 +312,72 @@ describe("migration chain upgrades", () => {
     );
     expect(named).toEqual([]);
   });
+
+  it("0006 → 0007 widens cost_credits to bigint past the int4 ceiling", async () => {
+    await resetToBlankSlate();
+    for (const tag of [
+      "0000_init",
+      "0001_cursor_billing",
+      "0002_numeric_cost",
+      "0003_normalize_free_subscription_status",
+      "0004_billing_managers_and_contact",
+      "0005_rename_ee_tables",
+      "0006_cutover_floor_and_pricing_status",
+    ]) {
+      await applyMigration(tag);
+    }
+
+    const [before] = await db.execute(
+      sql.raw(
+        `SELECT data_type FROM information_schema.columns
+         WHERE table_name = 'ee_usage_records' AND column_name = 'cost_credits'`,
+      ),
+    );
+    expect(before!.data_type).toBe("integer");
+
+    // A pre-existing row must survive the type change with its value intact.
+    const org = "00000000-0000-4000-a000-0000000000f1";
+    await db.execute(sql.raw(`INSERT INTO ee_billing_accounts (org_id) VALUES ('${org}')`));
+    await db.execute(
+      sql.raw(
+        `INSERT INTO ee_usage_records (org_id, context_type, context_id, cost_credits, cost_usd)
+         VALUES ('${org}', 'unattributed', '${org}', 2000000000, 2000000)`,
+      ),
+    );
+
+    await applyMigration("0007_bigint_cost_credits");
+
+    const [after] = await db.execute(
+      sql.raw(
+        `SELECT data_type FROM information_schema.columns
+         WHERE table_name = 'ee_usage_records' AND column_name = 'cost_credits'`,
+      ),
+    );
+    expect(after!.data_type).toBe("bigint");
+
+    const [kept] = await db.execute(
+      sql.raw(`SELECT cost_credits FROM ee_usage_records WHERE org_id = '${org}'`),
+    );
+    expect(Number(kept!.cost_credits)).toBe(2_000_000_000);
+
+    // The point of the widening: a cumulative past 2 147 483 647 credits now
+    // accumulates instead of aborting the sweep transaction that writes it.
+    await db.execute(
+      sql.raw(
+        `UPDATE ee_usage_records
+         SET cost_credits = round((cost_usd + 1000000) * 1000)::bigint,
+             cost_usd = cost_usd + 1000000
+         WHERE org_id = '${org}'`,
+      ),
+    );
+    const [grown] = await db.execute(
+      sql.raw(`SELECT cost_credits FROM ee_usage_records WHERE org_id = '${org}'`),
+    );
+    expect(Number(grown!.cost_credits)).toBe(3_000_000_000);
+
+    // Re-runnable: applying it a second time is a no-op, not an error.
+    await applyMigration("0007_bigint_cost_credits");
+  });
 });
 
 // The proof of the header's claim, held where a future edit that re-points this
@@ -328,6 +394,6 @@ describe("isolation from the platform test database", () => {
     const [applied] = await live.execute<{ count: number }>(sql`
       SELECT count(*)::int AS count FROM drizzle.ee_migrations
     `);
-    expect(applied?.count).toBe(7);
+    expect(applied?.count).toBe(8);
   });
 });

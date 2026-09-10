@@ -11,7 +11,7 @@ import { eq, sql, type SQL } from "drizzle-orm";
 import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 import { getAppUrl, getPlatformServices } from "../platform.ts";
-import { getEeEnv } from "../env.ts";
+import { getEeEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
 import { dollarsToCredits, CREDITS_PER_DOLLAR } from "../credits.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { billingSettingsUrl } from "../emails/layout.ts";
@@ -19,13 +19,6 @@ import { getPlans, isPlanId } from "../config.ts";
 
 /** Threshold at which we send a quota warning email (80%) */
 const QUOTA_WARNING_THRESHOLD = 0.8;
-
-/**
- * The platform's `usage.list` hard ceiling (`LLM_USAGE_LIST_MAX_LIMIT`). A read
- * asking for more is capped server-side, so the sweep clamps here explicitly
- * rather than requesting a limit it will not get.
- */
-const LEDGER_LIST_MAX_LIMIT = 1000;
 
 /**
  * Decimal places of `ee_usage_records.cost_usd` (`numeric(24,12)`). Every
@@ -134,6 +127,11 @@ export interface CursorSeedResult {
   lastLlmUsageId: number;
   /** Cutover exclusion bound: written once at seed, no ledger read goes below it. */
   floorId: number;
+  /** When a sweep pass last CONFIRMED this watermark — advanced it, or read the
+   * ledger and found nothing left to advance over. Read by
+   * `assertCursorResumable` as "how long has the sweeper been absent"; see the
+   * caught-up stamp in {@link sweepLedgerBatch}. */
+  updatedAt: Date;
 }
 
 /** First id a ledger read may start from (exclusive `afterId`): the replay window reaches
@@ -176,6 +174,7 @@ export async function ensureCursorSeeded(
   const columns = {
     lastLlmUsageId: billingCursor.lastLlmUsageId,
     floorId: billingCursor.floorId,
+    updatedAt: billingCursor.updatedAt,
   };
   const [existing] = await db.select(columns).from(billingCursor).where(eq(billingCursor.id, true));
   if (existing) return { seeded: false, ...existing };
@@ -414,6 +413,13 @@ export async function billLedgerRows(
   // `unattributed` bucket grows without bound, so a float column's absolute
   // error would grow with it.)
   //
+  // WIDTH: `cost_credits` is `bigint` and both casts below are `::bigint`. The
+  // cumulative grows without bound on the durable `unattributed` bucket, and an
+  // `integer out of range` raised here would abort the CALLER's transaction —
+  // one org's overflowing row would stop the sweep for every tenant. See the
+  // column's note in drizzle/schema.ts. The RETURNING delta comes back as a
+  // string (postgres.js renders int8 as text), hence the `Number()` below.
+  //
   // ROUNDING INVARIANT: exactly ONE rounding rule — half away from zero — is
   // shared by `dollarsToCredits` in src/credits.ts (JS `Math.round`, which is
   // half-away-from-zero for the non-negative dollars we bill) and every `round()`
@@ -436,11 +442,11 @@ export async function billLedgerRows(
         target: [orgUsageRecords.contextType, orgUsageRecords.contextId],
         set: {
           costUsd: sql`${orgUsageRecords.costUsd} + ${dollars}`,
-          costCredits: sql`round((${orgUsageRecords.costUsd} + ${dollars}) * ${CREDITS_PER_DOLLAR})::int`,
+          costCredits: sql`round((${orgUsageRecords.costUsd} + ${dollars}) * ${CREDITS_PER_DOLLAR})::bigint`,
         },
       })
       .returning({
-        deltaCredits: sql<number>`${orgUsageRecords.costCredits} - round((${orgUsageRecords.costUsd} - ${dollars}) * ${CREDITS_PER_DOLLAR})::int`,
+        deltaCredits: sql<number>`${orgUsageRecords.costCredits} - round((${orgUsageRecords.costUsd} - ${dollars}) * ${CREDITS_PER_DOLLAR})::bigint`,
       });
     const deltaCredits = Number(row!.deltaCredits);
     if (deltaCredits > 0) perOrg.set(b.orgId, (perOrg.get(b.orgId) ?? 0) + deltaCredits);
@@ -612,14 +618,20 @@ export async function sweepLedgerBatch(
   //    Read the replay span ON TOP of the batch, never out of it: at most
   //    `replaySpan` returned rows can have `id <= fromId`, so the FORWARD slice
   //    still gets its full `batchSize` and the drain loop's backlog accounting
-  //    keeps meaning what it says. Clamped at the platform ceiling; the env
-  //    bounds (replay ≤ 500, batch ≤ 1000) keep forward capacity ≥ 500 rows
-  //    even at that clamp, so no combination of the two knobs can wedge the
-  //    sweeper.
+  //    keeps meaning what it says. The `min` is defensive, not load-bearing —
+  //    the env schema rejects a `replayWindow + batchSize` above the ceiling at
+  //    boot, precisely so this clamp can never be the thing that silently
+  //    shortens the forward slice.
   const limit = Math.min(replaySpan + batchSize, LEDGER_LIST_MAX_LIMIT);
   const rows = await services.usage.list({ afterId: scanFromId, limit });
   if (rows.length === 0) {
-    // Caught up, nothing to sweep. Not a stall.
+    // Caught up, nothing to sweep. Not a stall — but still a CONFIRMATION that
+    // the watermark is current, so stamp it. `updated_at` has to mean "the sweep
+    // last looked and the watermark was right", never "the last row was billed":
+    // `assertCursorResumable` reads its age as "how long has the sweeper been
+    // absent", and a deployment quiet enough to read an empty ledger region
+    // would otherwise age into a refusal without a single row behind it.
+    await db.update(billingCursor).set({ updatedAt: new Date() }).where(eq(billingCursor.id, true));
     return noProgress({ cursorFrom: fromId, cursorTo: fromId });
   }
 

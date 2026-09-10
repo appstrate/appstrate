@@ -17,6 +17,7 @@ import {
   seedBillingAccount,
   seedLlmUsage,
   seedBillingCursor,
+  seedUsageRecord,
   markLlmUsageBilled,
 } from "../../helpers/seed.ts";
 import {
@@ -26,13 +27,17 @@ import {
   setMockLedgerListHook,
 } from "../../helpers/mock-platform.ts";
 import {
+  assertCursorResumable,
   runBillingSweep,
   runBillingSweepTick,
+  startBillingSweeper,
+  stopBillingSweeper,
   _resetBillingSweeperForTests,
 } from "../../../src/billing/billing-sweeper.ts";
 import {
   sweepLedgerBatch,
   ensureCursorSeeded,
+  type CursorSeedResult,
   type SweepResult,
 } from "../../../src/billing/usage-recorder.ts";
 import { _resetEeEnvForTests } from "../../../src/env.ts";
@@ -58,6 +63,15 @@ async function creditsUsed(org = orgId): Promise<number> {
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, org));
   return account!.creditsUsed;
+}
+
+async function cursorUpdatedAt(): Promise<Date> {
+  const db = getEeDb();
+  const [row] = await db
+    .select({ updatedAt: billingCursor.updatedAt })
+    .from(billingCursor)
+    .where(eq(billingCursor.id, true));
+  return row!.updatedAt;
 }
 
 async function cursorValue(): Promise<number> {
@@ -232,6 +246,42 @@ describe("billing sweep — cursor consumer", () => {
     expect(record!.contextType).toBe("unattributed");
     expect(Number(record!.costUsd)).toBeCloseTo(0.0008, 6);
     expect(record!.costCredits).toBe(1);
+  });
+
+  it("keeps sweeping when a context's cumulative credits exceed the int4 ceiling", async () => {
+    // The durable `unattributed` bucket never resets, so its cumulative
+    // `cost_credits` grows for the lifetime of the deployment. Past 2 147 483 647
+    // credits (~$2.15M) an `integer` column — and the `round(...)::int` casts
+    // that wrote it — raised "integer out of range" INSIDE the sweep
+    // transaction, rolling back the whole pass: no row claimed, no watermark
+    // advanced, billing dead for EVERY tenant until someone found the row.
+    await seedBillingCursor(0);
+    const beyondInt4 = 3_000_000_000; // credits, i.e. $3M cumulative
+    await seedUsageRecord({
+      orgId,
+      contextType: "unattributed",
+      contextId: orgId,
+      costCredits: beyondInt4,
+      costUsd: beyondInt4 / 1000,
+    });
+    seedLlmUsage({ orgId, costUsd: 0.05, contextType: null, contextId: null });
+
+    const result = await runBillingSweep();
+
+    // The pass committed: the row was claimed and the watermark moved.
+    expect(result.billed).toBe(1);
+    expect(await cursorValue()).toBe(1);
+
+    // Only the DELTA is debited — the $3M already on the record is not re-billed.
+    expect(await creditsUsed()).toBe(50);
+
+    const db = getEeDb();
+    const [record] = await db
+      .select()
+      .from(orgUsageRecords)
+      .where(eq(orgUsageRecords.contextId, orgId));
+    expect(record!.costCredits).toBe(beyondInt4 + 50);
+    expect(Number(record!.costUsd)).toBeCloseTo(3_000_000.05, 6);
   });
 
   it("bills a chat-context row and keys the usage record by chat session", async () => {
@@ -573,6 +623,30 @@ describe("billing sweep — cursor consumer", () => {
     expect(ok!.billed).toBe(1);
   });
 
+  it("keeps a maintenance tick armed when metering is paused (INTERVAL=0)", async () => {
+    // The regression: the early return on INTERVAL=0 armed NO timer, and the tick
+    // is the only caller of `retryPendingCancellations()` — so a deleted org whose
+    // Stripe cancel failed kept being charged for as long as metering stayed paused.
+    _resetBillingSweeperForTests();
+    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "0";
+    _resetEeEnvForTests();
+
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      startBillingSweeper();
+      // The re-entry guard warns only when a timer is actually armed.
+      startBillingSweeper();
+      expect(
+        warnSpy.mock.calls.filter(([msg]) => msg === "billing sweeper already running"),
+      ).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+      stopBillingSweeper();
+      _resetBillingSweeperForTests();
+      _resetEeEnvForTests();
+    }
+  });
+
   it("does not advance the watermark when the ledger read fails", async () => {
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.05 });
@@ -719,7 +793,7 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
   it("seeds an absent cursor at the settled frontier and reports it seeded", async () => {
     // Empty ledger at boot → frontier 0.
     const seed = await ensureCursorSeeded(mockPlatformServices, getEeDb());
-    expect(seed).toEqual({ seeded: true, lastLlmUsageId: 0, floorId: 0 });
+    expect(seed).toMatchObject({ seeded: true, lastLlmUsageId: 0, floorId: 0 });
     expect(await cursorValue()).toBe(0);
   });
 
@@ -731,7 +805,7 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
 
     const seed = await ensureCursorSeeded(mockPlatformServices, getEeDb());
 
-    expect(seed).toEqual({ seeded: true, lastLlmUsageId: 2, floorId: 2 });
+    expect(seed).toMatchObject({ seeded: true, lastLlmUsageId: 2, floorId: 2 });
   });
 
   it("bills usage recorded AFTER the init seed but BEFORE the first sweep tick", async () => {
@@ -757,14 +831,14 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
   it("is idempotent — a second call leaves an existing watermark untouched (no rewind)", async () => {
     await seedBillingCursor(7); // an already-advanced watermark
     const first = await ensureCursorSeeded(mockPlatformServices, getEeDb());
-    expect(first).toEqual({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
+    expect(first).toMatchObject({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
     expect(await cursorValue()).toBe(7);
 
     // Even with a higher frontier now available, a second call never reseeds or
     // rewinds — it is a pure no-op on an existing cursor.
     seedLlmUsage({ orgId, costUsd: 0.5 }); // would move the frontier if reseeded
     const second = await ensureCursorSeeded(mockPlatformServices, getEeDb());
-    expect(second).toEqual({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
+    expect(second).toMatchObject({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
     expect(await cursorValue()).toBe(7);
   });
 });
@@ -1449,5 +1523,112 @@ describe("billing sweep — rows the platform could not price", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * Enable → disable → re-enable. The watermark outlives a window with the module
+ * off while the platform keeps appending to `llm_usage`, so the first tick after
+ * re-enabling would claim the whole gap and debit it against TODAY's quotas.
+ * `assertCursorResumable` refuses that boot — but only for the gap, never for the
+ * two shapes that look like one.
+ */
+describe("billing cursor — resuming after the sweeper was absent", () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  // Default knobs: one tick drains MAX_DRAIN_ITERATIONS (50) × BATCH_SIZE (100).
+  const DRAIN_CAPACITY = 5000;
+
+  beforeEach(async () => {
+    await truncateEeTables();
+    // The suite pins metering to paused; this block is about what happens when a
+    // sweep is armed, so it un-pauses. `useEeReconciliationEnv` restores both.
+    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "300";
+    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
+    delete process.env.EE_RECONCILIATION_MAX_GAP_SECONDS;
+    _resetEeEnvForTests();
+  });
+
+  /** A cursor left behind `absentHours` ago, with `backlog` settled rows above it. */
+  async function seedGap(absentHours: number, backlog: number): Promise<CursorSeedResult> {
+    const watermark = 1;
+    await seedBillingCursor(watermark, 0, new Date(Date.now() - absentHours * HOUR_MS));
+    // One settled row AT the frontier is enough: the guard reads
+    // `settledFrontier()`, never the rows between.
+    if (backlog > 0) seedLlmUsage({ orgId, costUsd: 0.05, id: watermark + backlog });
+    return ensureCursorSeeded(mockPlatformServices, getEeDb());
+  }
+
+  it("refuses to boot over a gap the sweeper was absent for", async () => {
+    const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
+
+    await expect(assertCursorResumable(cursor)).rejects.toThrow(
+      /last confirmed its watermark 48h ago and 5001 settled ledger rows/,
+    );
+  });
+
+  it("names both operator decisions in the refusal", async () => {
+    const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
+
+    // The message IS the runbook — an operator reads it in a crashed boot log.
+    const message = await assertCursorResumable(cursor).catch((err: Error) => err.message);
+    expect(message).toContain("DELETE FROM ee_billing_cursor;");
+    expect(message).toMatch(/EE_RECONCILIATION_MAX_GAP_SECONDS above 1728\d\d/);
+    expect(message).toContain("repair:account");
+  });
+
+  it("boots a platform that was merely shut down — old cursor, no gap behind it", async () => {
+    // Nothing accrued while the platform was off, so there is nothing to back-bill
+    // and an age test on its own would have bricked this boot.
+    const cursor = await seedGap(48, DRAIN_CAPACITY);
+
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("boots a sweep that is behind but still ticking", async () => {
+    // Ingest above drain capacity is a capacity problem, not an operator decision:
+    // the watermark was confirmed a minute ago.
+    await seedBillingCursor(1, 0, new Date(Date.now() - 60_000));
+    seedLlmUsage({ orgId, costUsd: 0.05, id: 100_000 });
+    const cursor = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("stays out of the way while metering is deliberately paused", async () => {
+    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "0";
+    _resetEeEnvForTests();
+    const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
+
+    // Nothing resumes under a paused sweep; the gap is checked at the boot that
+    // un-pauses it.
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("resumes over any gap at EE_RECONCILIATION_MAX_GAP_SECONDS=0", async () => {
+    process.env.EE_RECONCILIATION_MAX_GAP_SECONDS = "0";
+    _resetEeEnvForTests();
+    const cursor = await seedGap(48 * 30, DRAIN_CAPACITY + 1);
+
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("boots the cutover it just seeded, whatever the ledger holds", async () => {
+    seedLlmUsage({ orgId, costUsd: 0.05, id: 100_000 });
+    const cursor = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+
+    expect(cursor.seeded).toBe(true);
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("stamps the watermark on a caught-up pass, so quiet days never age into a refusal", async () => {
+    await seedBillingCursor(5, 0, new Date(Date.now() - 48 * HOUR_MS));
+
+    // Empty ledger region: the pass bills nothing and advances nothing, but it DID
+    // confirm the watermark — `updated_at` has to say so.
+    const result = await sweepLedgerBatch(100);
+
+    expect(result.processed).toBe(0);
+    expect(await cursorValue()).toBe(5);
+    expect(Date.now() - (await cursorUpdatedAt()).getTime()).toBeLessThan(HOUR_MS);
   });
 });
