@@ -215,8 +215,8 @@ export function createRunsRouter() {
     `/agents/${SCOPED_PACKAGE_ROUTE}/run`,
     rateLimit(20),
     idempotency(),
-    requireAgent(),
     requirePermission("agents", "run"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const orgId = c.get("orgId");
@@ -826,13 +826,13 @@ export function createRunsRouter() {
   // DELETE /api/agents/:scope/:name/runs — delete all runs for an agent
   router.delete(
     `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
-    requireAgent(),
     requirePermission("runs", "delete"),
     // The only run mutation that is not per-row: it spans every run of the
     // agent in the space, so `assertRunVisible` has no row to apply and the
     // space-wide read is what authorizes the span. Without it a principal
     // scoped `runs:delete` alone would delete runs it cannot read.
     requirePermission("runs", "read-all"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const scope = getSpaceScope(c);
