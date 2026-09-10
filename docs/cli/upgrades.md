@@ -53,11 +53,17 @@ The command:
    own upgrades.
 3. If the binary has no stamp (built from source / copied), it exits 1 with
    a diagnostic. Re-install via curl to enable in-place upgrades.
-4. Otherwise: resolves the target version (default = latest from the
-   GitHub Releases API), downloads the asset + signed checksums + minisign
-   signature, verifies the signature against the same pubkey baked into
-   `scripts/bootstrap.sh`, verifies the SHA-256, and atomically renames the
-   new binary over `process.execPath`.
+4. Otherwise: resolves the target version (default = the **highest** platform
+   `v<semver>` Release, not the most recently created one — the Releases API
+   is listed and every page is read before the maximum is taken, so a hotfix
+   cut for an older line never becomes "latest"), downloads the asset + signed
+   checksums + minisign signature, verifies the signature against the same
+   pubkey baked into `scripts/bootstrap.sh`, verifies the SHA-256, and
+   atomically renames the new binary over `process.execPath`.
+
+A target **older** than the running binary is refused: the command exits 0,
+reports that it is not downgrading, and leaves the binary alone. Pass
+`--force` to install an older version deliberately.
 
 The verification posture is identical to the curl bootstrap — `minisign`
 must be on `$PATH`. There is no `--skip-verify` flag.
