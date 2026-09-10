@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it } from "bun:test";
-import { getTestApp } from "../../helpers/app.ts";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { getTestApp, setFeatureFlag } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -23,11 +23,19 @@ const app = getTestApp();
 describe("delegated space membership management", () => {
   let owner: TestContext;
   let guest: TestContext;
+  let restoreFlag: () => void;
 
   beforeEach(async () => {
     await truncateAll();
+    // These cases assign and list CUSTOM bundles, which is the licensed half of
+    // `features.custom_roles` — the gate itself is covered in `roles.test.ts`.
+    restoreFlag = setFeatureFlag("custom_roles", true);
     owner = await createTestContext({ orgSlug: "space-management" });
     guest = await memberContext(owner, "guest", "admin");
+  });
+
+  afterEach(() => {
+    restoreFlag();
   });
 
   function request(ctx: TestContext, path: string, method = "GET", body?: unknown) {
