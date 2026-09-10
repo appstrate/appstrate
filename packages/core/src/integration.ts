@@ -900,7 +900,10 @@ export function requiredScopesForAgent(input: {
   agentTools: readonly string[] | "*" | undefined;
   agentScopes: readonly string[] | undefined;
 }): string[] {
-  const viaExplicit = scopesDeclaredByAuth(input.manifest, input.authKey, input.agentScopes);
+  const viaExplicit = partitionScopesByAuthCatalog(
+    input.manifest.auths?.[input.authKey],
+    input.agentScopes,
+  ).declared;
   if (isToolsWildcard(input.agentTools)) {
     const defaultScopes = input.manifest.auths?.[input.authKey]?.default_scopes ?? [];
     return [...new Set([...defaultScopes, ...viaExplicit])];
@@ -914,20 +917,35 @@ export function requiredScopesForAgent(input: {
 }
 
 /**
- * The subset of `scopes` that `authKey`'s `scope_catalog` declares — every
- * entry when the auth declares no catalog at all (no closed set to filter
- * against). See {@link requiredScopesForAgent} for why the filter exists.
+ * Split `scopes` by membership of ONE auth's `scope_catalog` (§7.4):
+ * `declared` in caller order, `undeclared` deduped in caller order.
+ *
+ * The single definition of catalog membership. Both ends need it and need the
+ * same carve-out: an auth declaring no catalog declares no closed set, so
+ * everything counts as declared and the IdP arbitrates at consent time.
+ * `declared` filters what {@link requiredScopesForAgent} relays; `undeclared`
+ * is the connect kickoffs' rejection set.
+ *
+ * Keyed by ONE auth, never the union: a scope advertised by a SIBLING auth of
+ * the same integration is still not requestable here. That is the difference
+ * from {@link validateAgentIntegrationScopes}, which validates a selection that
+ * names no auth and so unions the catalogs ({@link getAvailableScopes}).
  */
-function scopesDeclaredByAuth(
-  manifest: IntegrationManifest,
-  authKey: string,
+export function partitionScopesByAuthCatalog(
+  auth: { scope_catalog?: readonly { value: string }[] } | undefined,
   scopes: readonly string[] | undefined,
-): string[] {
-  if (!scopes || scopes.length === 0) return [];
-  const catalog = manifest.auths?.[authKey]?.scope_catalog;
-  if (!catalog || catalog.length === 0) return [...scopes];
-  const declared = new Set(catalog.map((entry) => entry.value));
-  return scopes.filter((s) => declared.has(s));
+): { declared: string[]; undeclared: string[] } {
+  if (!scopes || scopes.length === 0) return { declared: [], undeclared: [] };
+  const catalog = auth?.scope_catalog;
+  if (!catalog || catalog.length === 0) return { declared: [...scopes], undeclared: [] };
+  const known = new Set(catalog.map((entry) => entry.value));
+  const declared: string[] = [];
+  const undeclared = new Set<string>();
+  for (const s of scopes) {
+    if (known.has(s)) declared.push(s);
+    else undeclared.add(s);
+  }
+  return { declared, undeclared: [...undeclared] };
 }
 
 /**
@@ -1208,7 +1226,12 @@ export interface ConnectionResolutionError {
    * against re-fetched pin ids.
    */
   source?: ConnectionResolutionSource;
-  /** True when the resolved connection belongs to the current actor. */
+  /**
+   * True when the resolved connection belongs to the current actor. Carried on
+   * the two connection-bound connect-flow codes — `insufficient_scopes` and
+   * `needs_reconnection` — because both remedies re-consent THAT row, which is
+   * its owner's to do.
+   */
   ownedByActor?: boolean;
   /**
    * AFPS §4.1 — agent dep's pinned `auth_key` when

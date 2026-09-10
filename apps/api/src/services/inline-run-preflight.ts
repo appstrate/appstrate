@@ -67,6 +67,14 @@ export interface InlineRunPreflightResult {
    * the run uses.
    */
   connectionOverrides: ConnectionOverrides | null;
+  /**
+   * The manifest memo this preflight seeded with the PINNED integration
+   * versions. Handed to the kickoff (`triggerInlineRun` → `prepareAndExecuteRun`)
+   * so the inline path shares ONE memo across preflight and pipeline, exactly
+   * as the registered-agent route does; a fresh Map there resolved every pin a
+   * second time.
+   */
+  manifestCache: IntegrationManifestCache;
 }
 
 type Mode = "fail-fast" | "accumulate";
@@ -80,11 +88,10 @@ export async function runInlinePreflight(params: {
   /** The transport must authorize caller-selected sources before readiness reads their metadata. */
   authorizeDependencies: (manifest: AgentManifest) => Promise<void>;
   /**
-   * Run-kickoff connect-link relay (#1207). Honoured on the fail-fast branch
-   * only: that is the one that throws the 412 a caller acts on. Accumulate mode
-   * serves `POST /api/runs/inline/validate`, a dry run that launches nothing —
-   * minting a single-use capability for a report nobody connects from would
-   * burn TTL and hand out a link the caller never asked to open.
+   * Run-kickoff connect-link relay (#1207), honoured on the fail-fast branch
+   * only: accumulate mode serves the dry-run validator, which launches nothing
+   * and so must not burn a single-use capability nobody will open. See
+   * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    */
   connectOffers?: ConnectOfferPolicy | null;
 }): Promise<InlineRunPreflightResult> {
@@ -157,8 +164,8 @@ export async function runInlinePreflight(params: {
   // and selecting a tool that version exposes was refused with `unknown_tool`
   // because the author had since dropped it from their working copy.
   //
-  // Resolved ONCE, before stage 1b, and shared with the readiness pass below:
-  // one resolution per preflight, not one per stage.
+  // Resolved ONCE, before stage 1b, shared with the readiness pass below AND
+  // returned so the kickoff reuses it: one resolution per inline run.
   //
   // The result is deliberately ignored, for the reason spelled out in
   // `resolveRunPreflight`: an unsatisfiable pin is a `dependency_unresolved`
@@ -288,6 +295,7 @@ export async function runInlinePreflight(params: {
     modelIdOverride,
     proxyIdOverride,
     connectionOverrides: runOverrides,
+    manifestCache,
   };
 }
 

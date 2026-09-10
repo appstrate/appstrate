@@ -339,19 +339,15 @@ export function createAgentsRouter() {
   // connection readiness for the agent: run-blocking CONNECTION verdict + the
   // per-integration management DTO.
   //
-  // It runs the same resolver, over the same pinned manifests, as the
-  // run-kickoff 412, but it is not the whole kickoff gate: readiness also
-  // refuses an integration that is not installed/enabled in the space
-  // (`integration_not_active`) and excludes those ids from the resolver
+  // Same resolver, same pinned manifests as the run-kickoff 412 — but not the
+  // whole kickoff gate: readiness also refuses an integration that is not
+  // installed/enabled in the space and excludes those ids from the resolver
   // (`skipIntegrationIds`). This endpoint runs no install/enable gate, so such
-  // an integration is reported here as a connection problem instead. Adding
-  // the skip alone would make it worse, not better — the item would drop out
-  // of `blocks_run` while the run still refuses it — so closing the gap means
-  // giving this DTO the install/enable verdict too, which is a wire change to
-  // the Connexions tab, not a comment fix.
-  //
-  // The kickoff remains the authority; this is what the badge and the
-  // Connexions tab render.
+  // an integration surfaces here as a connection problem. Adding the skip alone
+  // would make it worse (the item would drop out of `blocks_run` while the run
+  // still refuses it); closing the gap means giving this DTO the install/enable
+  // verdict too — a wire change to the Connexions tab. The kickoff remains the
+  // authority; this is what the badge renders.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/connection-readiness`,
     requireAgent(),

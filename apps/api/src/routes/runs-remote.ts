@@ -37,6 +37,7 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
+import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { collectFileRefs } from "../services/input-parser.ts";
 import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
@@ -219,6 +220,9 @@ export function createRunsRemoteRouter() {
       // Attribution path counter — emitted once per request so we can
       // track the inline-vs-registry split over time.
       let attributionPath: "registry" | "inline_shadow";
+      // Seeded by the inline preflight only — the registry branch resolves no
+      // pins of its own, so `createRun` creates its own Map there.
+      let manifestCache: IntegrationManifestCache | undefined;
 
       if (src.kind === "registry") {
         // Server-resolved attribution. The runner names the package; we
@@ -302,6 +306,9 @@ export function createRunsRemoteRouter() {
         attributionPath = "inline_shadow";
 
         effectiveInput = preflight.effectiveInput;
+        // Already seeded with the PINNED integration manifests — `createRun`
+        // reuses it instead of resolving every pin a second time.
+        manifestCache = preflight.manifestCache;
       }
 
       async function createShadowAgent(
@@ -346,6 +353,7 @@ export function createRunsRemoteRouter() {
         contextSnapshot: body.contextSnapshot,
         runnerName: runner.name,
         runnerKind: runner.kind,
+        ...(manifestCache ? { manifestCache } : {}),
       });
 
       if (!result.ok) {

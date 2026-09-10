@@ -95,8 +95,8 @@ import { isUserConnectionCreationBlocked } from "../services/integration-connect
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
-  scopesNotInAuthCatalog,
 } from "../services/integration-manifest-helpers.ts";
+import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
 import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
@@ -114,6 +114,7 @@ import {
 import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
 import {
   buildConnectUrl,
+  connectClaimsFor,
   readConnectToken,
   consumeJti,
   releaseJti,
@@ -367,17 +368,14 @@ async function assertConnectionBelongsToActor(
  * contributes to the consent request (defaults and already-granted scopes are
  * computed server-side), so a typo there is otherwise carried all the way to
  * the provider's consent screen, where it fails as an opaque `invalid_scope`.
- *
- * An auth declaring no catalog declares no closed set — nothing is rejected
- * and the IdP arbitrates, the same contract `validateAgentIntegrationScopes`
- * applies to an agent manifest's selection.
+ * Membership (and the no-catalog carve-out) is `partitionScopesByAuthCatalog`.
  */
 function assertScopesInAuthCatalog(
   auth: { scope_catalog?: readonly { value: string }[] },
   authKey: string,
   scopes: readonly string[] | undefined,
 ): void {
-  const undeclared = scopesNotInAuthCatalog(auth, scopes ?? []);
+  const { undeclared } = partitionScopesByAuthCatalog(auth, scopes);
   if (undeclared.length === 0) return;
   throw validationFailed([
     {
@@ -900,16 +898,17 @@ export function createIntegrationsRouter() {
       // `scopes` are checked HERE, at the mint: `/connect/start` replays our own
       // signed claims, so it re-validates nothing.
       assertScopesInAuthCatalog(auth, authKey, body.scopes);
-      const { connectUrl, expiresAt } = buildConnectUrl({
-        org_id: scope.orgId,
-        space_id: scope.spaceId,
-        ...(actor.type === "user" ? { user_id: actor.id } : { end_user_id: actor.id }),
-        package_id: packageId,
-        auth_key: authKey,
-        ...(body.connection_id ? { connection_id: body.connection_id } : {}),
-        ...(body.scopes ? { scopes: body.scopes } : {}),
-        ...(body.force_account_select ? { force_account_select: true } : {}),
-      });
+      const { connectUrl, expiresAt } = buildConnectUrl(
+        connectClaimsFor({
+          scope,
+          actor,
+          packageId,
+          authKey,
+          ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          ...(body.scopes ? { scopes: body.scopes } : {}),
+          ...(body.force_account_select ? { forceAccountSelect: true } : {}),
+        }),
+      );
       return c.json({ connect_url: connectUrl, expires_at: expiresAt });
     },
   );

@@ -999,24 +999,14 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       headers: dispatchHeaders,
       fetch: dispatchFetch,
       signal,
-      // This is the EXTERNAL MCP surface — a human's own client (an IDE, a
-      // desktop agent) driven by a model that reads the tool result. The chat
-      // does not come through here: it registers its own Pi tool
-      // (`module-chat/src/pi-chat/mcp-tools.ts`) and renders the connect card
-      // itself.
-      //
-      // An agent RUN configured with the Appstrate MCP integration is in scope
-      // too, and there the link does not stop at a model's context: the tool
-      // result is persisted as run events, readable by anyone holding
-      // `runs:read-all` on the space. Opting in is still not a NEW exposure
-      // class — `initiateIntegrationConnect`, on this very path and into those
-      // very run events, already returns a bearer `connect_url` — but it is the
-      // same class, so a change to how these links are scoped or expired has to
-      // account for run logs, not only IDE transcripts.
-      //
-      // What opting in changes is that the link arrives WITH the refusal, so
-      // the model hands it to its human instead of guessing which connect
-      // kickoff to call and with which scopes.
+      // The external MCP surface hands the link to the human driving its
+      // client (see `RUN_CONNECT_OFFERS_HEADER`). One thing that is NOT obvious
+      // from there: an agent run configured with the Appstrate MCP integration
+      // comes through here too, and persists tool results as run events
+      // readable with `runs:read-all`. Not a new exposure class —
+      // `initiateIntegrationConnect` already returns a bearer `connect_url` on
+      // this very path — but any change to how these links are scoped or
+      // expired has to account for run logs, not only IDE transcripts.
       connectOffers: true,
     });
     if (!launched.ok) {

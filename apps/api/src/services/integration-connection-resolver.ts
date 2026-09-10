@@ -484,13 +484,25 @@ function connectTargetAuthKey(args: ResolveOneArgs): string | null {
 /**
  * `key`, but only while the manifest still DECLARES it — else `null`.
  *
- * Every relayed `auth_key` goes through this. A key the manifest dropped (a
- * version bump renaming `primary` → `session`, an auth removed outright) is a
- * connect target that cannot exist: the kickoff 404s on `/auths/{authKey}/…`,
- * and the scopes computed from it are meaningless. Whether the stale key comes
- * from the agent's own pin or from an existing connection row makes no
- * difference to that, so both sites apply it. The item then carries neither
- * `auth_key` nor `required_scopes`, which is the "let the user choose" shape.
+ * A key the manifest dropped (a version bump renaming `primary` → `session`,
+ * an auth removed outright) is a connect target that cannot exist: the kickoff
+ * 404s on `/auths/{authKey}/…`, and the scopes computed from it are
+ * meaningless. The item then carries neither `auth_key` nor `required_scopes`,
+ * which is the "let the user choose" shape.
+ *
+ * Two of the three relay sites apply it, and the asymmetry is deliberate:
+ *
+ *  - {@link connectTargetAuthKey} — load-bearing. The key is the AGENT's pin,
+ *    which nothing filters against the integration manifest.
+ *  - `needs_reconnection` — residual. The key is a connection ROW's, and
+ *    {@link resolveConnections} already drops rows whose auth the manifest no
+ *    longer declares… except when `manifestAuthKeySet` returns `null` (a
+ *    manifest declaring NO auth at all is "no constraint"), which is the one
+ *    shape that still reaches here.
+ *  - `insufficient_scopes` relays `conn.authKey` unguarded, and cannot need
+ *    the guard: `missingScopesForConnection` returns no gap unless the
+ *    manifest declares that auth as `oauth2`, so an undeclared key never
+ *    produces this code.
  */
 function declaredAuthKey(manifest: IntegrationManifest, key: string): string | null {
   return manifest.auths?.[key] ? key : null;
@@ -517,6 +529,14 @@ function checkHealth(
   conn: ConnectionRow,
   source: ResolvedConnection["source"],
 ): ResolveOneResult {
+  // Whose account this row is. Relayed on both connection-bound connect-flow
+  // codes because both remedies re-consent THIS row: the UI offers the repair
+  // only to its owner, and the connect-offer mint refuses to sign claims
+  // against a colleague's credential (`connectOfferTarget`).
+  const ownedByActor =
+    (args.actorUserId !== null && conn.userId === args.actorUserId) ||
+    (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
+
   if (conn.needsReconnection) {
     // A reconnect is a connect flow, so it carries the same relay as the other
     // two — and the same staleness guard: the row's `authKey` is only a valid
@@ -535,6 +555,7 @@ function checkHealth(
       // reconnect → insufficient_scopes → upgrade.
       ...(authKey !== null ? { authKey } : {}),
       ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
+      ownedByActor,
       message: `Connection for ${args.integrationId} needs to be reconnected.`,
     });
   }
@@ -552,9 +573,6 @@ function checkHealth(
     agentScopes: args.agentScopes,
   });
   if (missing.length > 0) {
-    const ownedByActor =
-      (args.actorUserId !== null && conn.userId === args.actorUserId) ||
-      (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
     return errorOf(args, {
       code: "insufficient_scopes",
       connectionId: conn.id,
@@ -805,8 +823,15 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     // Surface the dead connection id on needs_reconnection so the modal's
     // reconnect CTA can UPDATE the existing row in place. Omitting it makes
     // the OAuth callback INSERT a duplicate (single-writer contract in
-    // integration-connections.ts).
-    ...(e.code === "needs_reconnection" && e.connectionId ? { connection_id: e.connectionId } : {}),
+    // integration-connections.ts). `owned_by_actor` rides along for the same
+    // reason it does on insufficient_scopes: repairing the row in place is the
+    // owner's to do, and the connect-offer mint gates on it.
+    ...(e.code === "needs_reconnection"
+      ? {
+          ...(e.connectionId ? { connection_id: e.connectionId } : {}),
+          ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
+        }
+      : {}),
     // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
     // and which auth_keys the actor's existing connections use, so the UI
     // can guide the user to connect via the right auth method.

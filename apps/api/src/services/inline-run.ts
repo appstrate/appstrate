@@ -422,6 +422,9 @@ export async function triggerInlineRun(params: {
       apiKeyId,
       connectionOverrides,
       traceparent,
+      // The preflight's own memo, already seeded with the PINNED integration
+      // manifests — the pipeline must not resolve them a second time.
+      manifestCache: preflight.manifestCache,
     });
   } catch (err) {
     await deleteOrphanShadowPackage(shadowId);

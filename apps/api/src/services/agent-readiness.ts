@@ -58,19 +58,13 @@ interface AgentReadinessParams {
    */
   manifestCache?: IntegrationManifestCache;
   /**
-   * Opt-in relay for the run-kickoff connect link (#1207). Non-null only when
-   * the request carried `RUN_CONNECT_OFFERS_HEADER`; it then decides whether
-   * the 412 items an oauth2 connect flow can clear also carry a ready-to-open
-   * `connect_url`.
+   * Opt-in relay for the run-kickoff connect link (#1207) — see
+   * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    *
-   * Read by the THROWING wrapper only. The one caller that reaches
-   * `collectAgentReadinessErrors` directly is the accumulate branch of
-   * `inline-run-preflight.ts` — `POST /api/runs/inline/validate`, a dry run
-   * that launches nothing — and it passes no policy, so the link-free
-   * guarantee holds AT THAT CALL SITE, not by anything this function does.
-   * (The dashboard's advisory DTO is a different code path entirely:
-   * `resolveAgentConnectionReadiness` in `integration-pins-service.ts`, which
-   * calls the resolver itself and never comes through here.)
+   * Read by the THROWING wrapper only: `collectAgentReadinessErrors` ignores
+   * it, so its one direct caller (the dry-run validator, via the accumulate
+   * branch of `inline-run-preflight.ts`) stays link-free by passing none — not
+   * by anything this function does.
    */
   connectOffers?: ConnectOfferPolicy | null;
 }

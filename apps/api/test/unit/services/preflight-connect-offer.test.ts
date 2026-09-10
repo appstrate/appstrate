@@ -15,15 +15,12 @@
  *
  * Integration manifests are supplied through the caller's `manifestCache` — the
  * same memo the readiness pass threads, so this exercises the production read
- * path with no DB round-trip. The `block_user_connections` gate is the one
- * thing that must be a real row, so its two cases seed org/space/package
- * directly (no `truncateAll` — unique ids per case, nothing shared).
+ * path with no DB round-trip. The one input that cannot be faked that way is
+ * `block_user_connections` (a real `space_packages` row), so those cases live
+ * in `test/integration/services/preflight-connect-offer.test.ts`.
  */
 
 import { describe, it, expect } from "bun:test";
-import { randomUUID } from "node:crypto";
-import { db } from "@appstrate/db/client";
-import { organizations, packages, spaces, spacePackages } from "@appstrate/db/schema";
 import {
   attachConnectOffers,
   connectOfferTarget,
@@ -83,12 +80,15 @@ function notConnected(integrationId = INTEGRATION): ResolutionFieldError {
   };
 }
 
-function underScoped(ownedByActor: boolean): ResolutionFieldError {
+/** The two codes whose remedy re-consents an EXISTING connection in place. */
+const IN_PLACE_CODES = ["insufficient_scopes", "needs_reconnection"] as const;
+
+function inPlace(code: string, ownedByActor: boolean): ResolutionFieldError {
   return {
     field: `integrations.${INTEGRATION}`,
-    code: "insufficient_scopes",
-    title: "Insufficient Permissions",
-    message: "missing scopes",
+    code,
+    title: "Connection Needs Attention",
+    message: "needs a fresh consent",
     auth_key: "primary",
     required_scopes: ["mail.read", "mail.send"],
     connection_id: "conn-9",
@@ -112,32 +112,39 @@ describe("connectOfferTarget", () => {
     });
   });
 
-  it("accepts insufficient_scopes on the actor's OWN connection, as an in-place upgrade", () => {
-    expect(connectOfferTarget(underScoped(true))).toEqual({
-      integrationId: INTEGRATION,
-      authKey: "primary",
-      scopes: ["mail.read", "mail.send"],
-      connectionId: "conn-9",
-    });
+  it("accepts an in-place code on the actor's OWN connection — upgrade or reconnect", () => {
+    // Both codes end at the same consent screen on the same row; ownership is
+    // what makes signing claims against it safe.
+    for (const code of IN_PLACE_CODES) {
+      expect(connectOfferTarget(inPlace(code, true)), code).toEqual({
+        integrationId: INTEGRATION,
+        authKey: "primary",
+        scopes: ["mail.read", "mail.send"],
+        connectionId: "conn-9",
+      });
+    }
   });
 
-  it("refuses insufficient_scopes on a foreign-owned connection", () => {
-    expect(connectOfferTarget(underScoped(false))).toBeNull();
-    // Absent (older relay, or a resolver that could not decide) is not "mine".
-    const unknownOwner = { ...underScoped(true) };
-    delete unknownOwner.owned_by_actor;
-    expect(connectOfferTarget(unknownOwner)).toBeNull();
+  it("refuses an in-place code on a foreign-owned connection", () => {
+    for (const code of IN_PLACE_CODES) {
+      expect(connectOfferTarget(inPlace(code, false)), code).toBeNull();
+      // Absent (a resolver that could not decide) is not "mine".
+      const unknownOwner = { ...inPlace(code, true) };
+      delete unknownOwner.owned_by_actor;
+      expect(connectOfferTarget(unknownOwner), code).toBeNull();
+    }
   });
 
-  it("refuses an owned insufficient_scopes with no connection id to upgrade", () => {
-    const noTarget = { ...underScoped(true) };
-    delete noTarget.connection_id;
-    expect(connectOfferTarget(noTarget)).toBeNull();
+  it("refuses an owned in-place code with no connection id to re-consent", () => {
+    for (const code of IN_PLACE_CODES) {
+      const noTarget = { ...inPlace(code, true) };
+      delete noTarget.connection_id;
+      expect(connectOfferTarget(noTarget), code).toBeNull();
+    }
   });
 
   it("refuses every other resolution code, connect-flow relay or not", () => {
     for (const code of [
-      "needs_reconnection",
       "must_choose_connection",
       "auth_key_mismatch",
       "pinned_connection_unavailable",
@@ -263,28 +270,34 @@ describe("attachConnectOffers", () => {
     expect(item!.connect_url).toStartWith("http");
   });
 
-  it("carries the connection id on an owned insufficient_scopes upgrade", async () => {
-    const [item] = await attachConnectOffers({
-      errors: [underScoped(true)],
-      scope: SCOPE,
-      actor: ACTOR,
-      policy: CONNECT,
-      manifestCache: cache,
-    });
-    expect(claimsOf(item!)).toMatchObject({ connection_id: "conn-9" });
-  });
-
-  it("leaves a foreign-owned insufficient_scopes untouched", async () => {
-    const errors = [underScoped(false)];
-    expect(
-      await attachConnectOffers({
-        errors,
+  it("carries the connection id on an owned in-place re-consent", async () => {
+    for (const code of IN_PLACE_CODES) {
+      const [item] = await attachConnectOffers({
+        errors: [inPlace(code, true)],
         scope: SCOPE,
         actor: ACTOR,
         policy: CONNECT,
         manifestCache: cache,
-      }),
-    ).toEqual(errors);
+      });
+      expect(item!.connect_url, code).toStartWith("http");
+      expect(claimsOf(item!)).toMatchObject({ connection_id: "conn-9" });
+    }
+  });
+
+  it("leaves a foreign-owned in-place item untouched", async () => {
+    for (const code of IN_PLACE_CODES) {
+      const errors = [inPlace(code, false)];
+      expect(
+        await attachConnectOffers({
+          errors,
+          scope: SCOPE,
+          actor: ACTOR,
+          policy: CONNECT,
+          manifestCache: cache,
+        }),
+        code,
+      ).toEqual(errors);
+    }
   });
 
   it("mints for an end-user actor under the end_user claim", async () => {
@@ -350,55 +363,5 @@ describe("attachConnectOffers", () => {
     expect(out[0]!.connect_url).toBeUndefined();
     expect(out[1]!.connect_url).toStartWith("http");
     expect(out[1]!.package_id).toBe(second);
-  });
-
-  describe("block_user_connections", () => {
-    async function seedBlockedInstall(): Promise<{ spaceId: string; integrationId: string }> {
-      const [org] = await db
-        .insert(organizations)
-        .values({ name: "offers", slug: `offers-${randomUUID().slice(0, 8)}` })
-        .returning({ id: organizations.id });
-      const spaceId = `spc_${randomUUID().slice(0, 12)}`;
-      await db.insert(spaces).values({ id: spaceId, orgId: org!.id, name: "default" });
-      const integrationId = `@offers/blocked-${randomUUID().slice(0, 8)}`;
-      await db.insert(packages).values({
-        id: integrationId,
-        orgId: org!.id,
-        type: "integration",
-        source: "local",
-        draftManifest: authManifest("oauth2") as unknown as Record<string, unknown>,
-      });
-      await db
-        .insert(spacePackages)
-        .values({ spaceId, packageId: integrationId, blockUserConnections: true });
-      return { spaceId, integrationId };
-    }
-
-    it("refuses to mint for an actor who may only connect", async () => {
-      const { spaceId, integrationId } = await seedBlockedInstall();
-      const errors = [notConnected(integrationId)];
-      expect(
-        await attachConnectOffers({
-          errors,
-          scope: { orgId: "org-1", spaceId },
-          actor: ACTOR,
-          policy: CONNECT,
-          manifestCache: manifestCache({ [integrationId]: authManifest("oauth2") }),
-        }),
-      ).toEqual(errors);
-    });
-
-    it("mints for an actor holding integrations:configure — the admin carve-out", async () => {
-      const { spaceId, integrationId } = await seedBlockedInstall();
-      const [item] = await attachConnectOffers({
-        errors: [notConnected(integrationId)],
-        scope: { orgId: "org-1", spaceId },
-        actor: ACTOR,
-        policy: { canConnect: true, canConfigure: true },
-        manifestCache: manifestCache({ [integrationId]: authManifest("oauth2") }),
-      });
-      expect(item!.connect_url).toStartWith("http");
-      expect(claimsOf(item!)).toMatchObject({ package_id: integrationId });
-    });
   });
 });

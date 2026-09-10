@@ -57,6 +57,7 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
+import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
 
 const app = getTestApp();
 
@@ -856,12 +857,30 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
 
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.code).toBe("not_connected");
+      expect(err.auth_key).toBe("primary");
+      // The agent selects `search`, whose `required_scopes.primary` is
+      // `search.read` — the relay phase the link is built on.
+      expect(err.required_scopes).toEqual(["search.read"]);
       expect(err.connect_url).toStartWith("http");
       expect(err.package_id).toBe(OAUTH_INTEGRATION);
       expect(err.expires_at).toBeGreaterThan(Date.now());
       // The link targets the hosted dispatcher, not a provider screen — the
       // scope union and the oauth kickoff both happen at redemption.
       expect(new URL(err.connect_url!).pathname).toBe("/api/integrations/connect/start");
+
+      // The claims are the security-relevant output: a URL that opens is
+      // worthless if it asks for the wrong scopes on the wrong auth. `scopes`
+      // must be the agent's own selection verbatim — the union with
+      // `default_scopes` (`base`) happens at redemption, not at the mint.
+      const token = new URL(err.connect_url!).searchParams.get("token");
+      expect(readConnectToken(token!)).toMatchObject({
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        user_id: ctx.user.id,
+        package_id: OAUTH_INTEGRATION,
+        auth_key: "primary",
+        scopes: ["search.read"],
+      });
     });
 
     it("mints nothing without the header — the ordinary 412 is unchanged", async () => {
@@ -945,6 +964,74 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
 
         const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
         expect(err.connect_url).toStartWith("http");
+      });
+    });
+
+    // `needs_reconnection` is minted under the same rule as an under-scoped
+    // connection: the remedy re-consents THAT row, so it is the owner's to run.
+    describe("needs_reconnection", () => {
+      /** A dead oauth2 connection, owned by `userId` and optionally shared. */
+      async function seedDeadConnection(userId: string, sharedWithOrg = false): Promise<string> {
+        const [row] = await db
+          .insert(integrationConnections)
+          .values({
+            integrationId: OAUTH_INTEGRATION,
+            authKey: "primary",
+            accountId: `acct-${userId.slice(0, 6)}`,
+            spaceId: ctx.defaultSpaceId,
+            userId,
+            endUserId: null,
+            credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
+            scopesGranted: ["base", "search.read"],
+            needsReconnection: true,
+            sharedWithOrg,
+          })
+          .returning({ id: integrationConnections.id });
+        return row!.id;
+      }
+
+      it("mints a connect_url when the dead connection belongs to the caller", async () => {
+        await seedOauthIntegration();
+        const connectionId = await seedDeadConnection(ctx.user.id);
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.code).toBe("needs_reconnection");
+        expect(err.owned_by_actor).toBe(true);
+        expect(err.connection_id).toBe(connectionId);
+        expect(err.connect_url).toStartWith("http");
+        // The claims re-consent the SAME row — without `connection_id` the
+        // callback INSERTs a duplicate instead of reviving the dead one.
+        const token = new URL(err.connect_url!).searchParams.get("token");
+        expect(readConnectToken(token!)).toMatchObject({
+          package_id: OAUTH_INTEGRATION,
+          auth_key: "primary",
+          connection_id: connectionId,
+          scopes: ["search.read"],
+        });
+      });
+
+      it("mints nothing when the dead connection is a colleague's shared row", async () => {
+        // Discriminating control for the case above: same code, same header,
+        // same permissions — only the owner differs. Minting here would let the
+        // caller re-consent somebody else's account.
+        await seedOauthIntegration();
+        const colleague = await createTestUser();
+        await addOrgMember(ctx.orgId, colleague.id, "member");
+        await seedSpaceMember({
+          spaceId: ctx.defaultSpaceId,
+          userId: colleague.id,
+          presetRole: "operator",
+          customRoleId: null,
+        });
+        await seedDeadConnection(colleague.id, true);
+
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.code).toBe("needs_reconnection");
+        expect(err.owned_by_actor).toBe(false);
+        expect(err.connect_url).toBeUndefined();
+        expect(err.expires_at).toBeUndefined();
       });
     });
 

@@ -66,22 +66,23 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * (`/auths/{authKey}/connect/...`).
    */
   auth_key?: string;
-  /** `insufficient_scopes` — true when the under-scoped connection belongs to the calling actor. */
+  /**
+   * `insufficient_scopes` / `needs_reconnection` — true when the connection to
+   * repair belongs to the calling actor. Both remedies re-consent that row, so
+   * a foreign-owned one is a read-only error.
+   */
   owned_by_actor?: boolean;
   /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
   /**
-   * Ready-to-open hosted-connect link for THIS item — the remedy carried by the
-   * error itself, so nothing has to be called to obtain it (RFC 6750 pattern).
-   *
-   * Present only on a run-kickoff 412 whose caller opted in
-   * (`RUN_CONNECT_OFFERS_HEADER`, see `@appstrate/core/run-and-wait-client`),
-   * and only on the items an oauth2 connect flow can clear for the calling
-   * actor. Single-use and short-lived (`expires_at`): open it, never store it.
-   * When it is present, do NOT call the connect kickoff — that mints a second
-   * link the user does not need.
+   * Ready-to-open hosted-connect link for THIS item. Present only on a
+   * run-kickoff 412 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
+   * docblock states who may), and only on the items an oauth2 connect flow can
+   * clear for the calling actor. Single-use and short-lived (`expires_at`):
+   * open it — never store it, and never call the connect kickoff as well,
+   * which would mint a second link.
    */
   connect_url?: string;
   /** Absolute expiry (epoch ms) of `connect_url`. */

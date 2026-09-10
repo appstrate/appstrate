@@ -139,28 +139,6 @@ export const CLIENT_SECRET_REQUIRED_MESSAGE =
 export const PUBLIC_CLIENT_WITH_SECRET_MESSAGE =
   "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it";
 
-/**
- * Caller-supplied OAuth scopes this auth's `scope_catalog` (§7.4) does not
- * declare — the connect kickoffs' rejection set, deduped, in caller order.
- *
- * Enforcement is keyed by ONE auth because the kickoff is: a scope advertised
- * by a SIBLING auth of the same integration is still not requestable here.
- * That is the one difference from the agent-manifest side
- * (`validateAgentIntegrationScopes`, core `integration.ts`), which validates a
- * selection that names no auth and so unions the catalogs
- * (`getAvailableScopes`). The rest of the contract is identical: an auth
- * declaring no catalog declares no closed set, so nothing is rejected and the
- * IdP arbitrates at consent time.
- */
-export function scopesNotInAuthCatalog(
-  auth: { scope_catalog?: readonly { value: string }[] },
-  scopes: readonly string[],
-): string[] {
-  if (!auth.scope_catalog || auth.scope_catalog.length === 0) return [];
-  const declared = new Set(auth.scope_catalog.map((entry) => entry.value));
-  return [...new Set(scopes.filter((s) => !declared.has(s)))];
-}
-
 export interface AfpsDeliveryEnvEntry {
   value: string;
   sensitive?: boolean;

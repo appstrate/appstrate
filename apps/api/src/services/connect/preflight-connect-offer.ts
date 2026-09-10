@@ -7,42 +7,30 @@
  * WHICH scopes it must request (`auth_key` + `required_scopes`, relayed by
  * `translateResolutionError`). This module turns that description into the
  * remedy itself: a `connect_url` on the very error item, so a surface that
- * renders connect cards has nothing left to call. The chat is the case that
- * forced it — the model would otherwise have to read the 412, pick the connect
- * kickoff, and get the scopes right, three chances to do nothing at all.
+ * renders connect cards has nothing left to call. Who may ask for one, and why
+ * that is a narrow set, is documented once — on `RUN_CONNECT_OFFERS_HEADER`
+ * (`@appstrate/core/run-and-wait-client`).
  *
- * Minting is free of side effects (`buildConnectUrl` signs claims and returns a
- * URL; the only store write is `consumeJti` at redemption), so there is no
- * reuse cache and no attempt counter here: a link's blast radius is bounded by
- * `CONNECT_SESSION_TTL_MS` and by how fast a human can click.
+ * Minting is pure: `buildConnectUrl` signs claims and returns a URL, and the
+ * only store write is `consumeJti` at redemption. So there is no reuse cache
+ * and no attempt counter here — a link's blast radius is bounded by
+ * `CONNECT_SESSION_TTL_MS`.
  *
- * The claims are the ones `POST …/auths/{authKey}/connect/session` signs — same
- * actor projection, same `scopes` passthrough (the union with the auth's
- * `default_scopes` and what the target connection already granted happens at
- * redemption, in `/connect/start`, for a hand-minted link and this one alike).
- * Three differences from that route are deliberate, and none of them may be
- * read as "the route validates something this does not":
- *
- *  - `force_account_select` is a caller-supplied body field there; it has no
- *    caller here, so the claim is simply absent and the provider decides.
- *  - the manifest comes from `fetchIntegrationManifest` (the readiness pass's
- *    memo) rather than the route's org-scoped `readIntegrationAuth` →
- *    `getIntegration`. Safe because the ONLY ids reaching this function are the
- *    ones readiness just resolved for this org and space: the agent declared
- *    them, `listActiveIntegrationIds` confirmed each is installed and enabled
- *    HERE, and the id is what indexes the memo — an id outside the org never
- *    reaches the mint to be looked up unscoped.
- *  - the scope check is the same one, applied at a different moment: the route
- *    runs `assertScopesInAuthCatalog` on `body.scopes`, and this module runs
- *    `scopesNotInAuthCatalog` on `target.scopes` below. `/connect/start` replays
- *    signed claims and re-validates nothing, so whichever end mints is the end
- *    that must check.
+ * SECURITY INVARIANT — the mint is the validation boundary. `/connect/start`
+ * replays these signed claims and re-validates nothing, so every check the
+ * `POST …/auths/{authKey}/connect/session` route runs on caller input has to
+ * run here too. Two consequences, both load-bearing below: `target.scopes` gets
+ * the same scope-catalog check the route applies to `body.scopes`, and the
+ * unscoped `fetchIntegrationManifest` read is safe ONLY because the ids
+ * reaching this function are the ones readiness just resolved for this org and
+ * space (the agent declared them and `listActiveIntegrationIds` confirmed each
+ * is installed and enabled HERE).
  */
 
-import { buildConnectUrl } from "./connect-session.ts";
+import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "../integration-service.ts";
 import { isUserConnectionCreationBlocked } from "../integration-connection-resolver.ts";
-import { scopesNotInAuthCatalog } from "../integration-manifest-helpers.ts";
+import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -55,7 +43,7 @@ export interface ConnectOfferTarget {
   authKey: string;
   /** Exactly what the item asked for — no union computed at mint time. */
   scopes: string[];
-  /** Present = upgrade the actor's existing connection in place. */
+  /** Present = re-consent the actor's existing connection in place. */
   connectionId?: string;
 }
 
@@ -63,22 +51,25 @@ export interface ConnectOfferTarget {
 const FIELD_PREFIX = "integrations.";
 
 /**
+ * The codes whose remedy is a fresh consent on a connection that already
+ * exists — a scope upgrade, or a dead credential re-granted. Both re-consent
+ * the SAME row (`connection_id` rides the claims), never a duplicate.
+ */
+const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "needs_reconnection"]);
+
+/**
  * Decide whether one 412 item is something the CALLING actor can clear by
  * opening a link, and with which claims. Pure.
  *
- * Two codes qualify, and only two:
+ * `not_connected` qualifies outright (a fresh connect, no `connection_id`).
+ * The two {@link IN_PLACE_CODES} qualify only on a connection the actor OWNS
+ * and only with an id to re-consent: a foreign-owned row is somebody else's
+ * account, and minting against it would let the caller re-consent a
+ * colleague's credential.
  *
- *  - `not_connected` — a fresh connect, no `connection_id`.
- *  - `insufficient_scopes` on a connection the actor OWNS — an upgrade in
- *    place, so the existing row is re-consented rather than duplicated.
- *
- * Everything else is refused deliberately. `needs_reconnection` names a dead
- * credential whose owner may not be the caller and whose repair the
- * MissingConnections modal already drives with the actor's own pick;
- * `must_choose_connection` is a choice, not a missing connection;
- * `auth_key_mismatch` needs the user to change the agent, not to connect; and a
- * foreign-owned under-scoped connection is somebody else's account — minting
- * against it would let the caller re-consent a colleague's credential.
+ * Everything else is refused: `must_choose_connection` is a choice, not a
+ * missing connection, and `auth_key_mismatch` needs the user to change the
+ * agent, not to connect.
  */
 export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget | null {
   if (!e.field.startsWith(FIELD_PREFIX)) return null;
@@ -89,7 +80,7 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
   if (e.code === "not_connected") {
     return { integrationId, authKey: e.auth_key, scopes };
   }
-  if (e.code === "insufficient_scopes" && e.owned_by_actor === true && e.connection_id) {
+  if (IN_PLACE_CODES.has(e.code) && e.owned_by_actor === true && e.connection_id) {
     return { integrationId, authKey: e.auth_key, scopes, connectionId: e.connection_id };
   }
   return null;
@@ -133,16 +124,14 @@ export async function attachConnectOffers(params: {
         const auth = loaded.manifest.auths?.[target.authKey];
         if (auth?.type !== "oauth2") return e;
 
-        // The mint is the security boundary — `/connect/start` replays these
-        // signed claims and re-validates nothing — so it must not trust
-        // `required_scopes`. That value is derived from the agent manifest's own
+        // `required_scopes` is derived from the agent manifest's own
         // `integrations_configuration[id].scopes`, which on the inline-run
-        // surface is caller-supplied; the same catalog check the connect
-        // kickoffs apply to `body.scopes` therefore applies here. A gap means
-        // the selection is wrong upstream (the inline preflight now refuses it
-        // with `scope_not_in_catalog`) — leave the item bare rather than sign a
-        // consent request for scopes this auth never advertised.
-        const undeclared = scopesNotInAuthCatalog(auth, target.scopes);
+        // surface is caller-supplied — so it gets the same catalog check the
+        // connect kickoffs apply to `body.scopes` (see the module note on the
+        // validation boundary). A gap means the selection is wrong upstream;
+        // leave the item bare rather than sign a consent request for scopes
+        // this auth never advertised.
+        const { undeclared } = partitionScopesByAuthCatalog(auth, target.scopes);
         if (undeclared.length > 0) {
           logger.warn("Connect offer refused: scopes outside the auth's catalog", {
             integrationId: target.integrationId,
@@ -161,15 +150,16 @@ export async function attachConnectOffers(params: {
           return e;
         }
 
-        const { connectUrl, expiresAt } = buildConnectUrl({
-          org_id: scope.orgId,
-          space_id: scope.spaceId,
-          ...(actor.type === "user" ? { user_id: actor.id } : { end_user_id: actor.id }),
-          package_id: target.integrationId,
-          auth_key: target.authKey,
-          ...(target.connectionId ? { connection_id: target.connectionId } : {}),
-          ...(target.scopes.length > 0 ? { scopes: target.scopes } : {}),
-        });
+        const { connectUrl, expiresAt } = buildConnectUrl(
+          connectClaimsFor({
+            scope,
+            actor,
+            packageId: target.integrationId,
+            authKey: target.authKey,
+            ...(target.connectionId ? { connectionId: target.connectionId } : {}),
+            scopes: target.scopes,
+          }),
+        );
         return {
           ...e,
           connect_url: connectUrl,

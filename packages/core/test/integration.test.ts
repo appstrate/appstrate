@@ -21,6 +21,7 @@ import {
   getAvailableScopes,
   connectableAuthKeysForAgent,
   requiredScopesForAgent,
+  partitionScopesByAuthCatalog,
   scopesContributedByTools,
   expandScopesGranted,
   missingScopesForConnection,
@@ -1425,17 +1426,28 @@ describe("requiredScopesForAgent — per-auth scope_catalog", () => {
   });
 
   it("leaves tool-contributed scopes alone — they are per-auth already", () => {
-    // `tools_policy.read_tool.required_scopes.a` is `a:read` BY CONSTRUCTION,
-    // so no catalog filter applies to it (here it happens to be in the catalog;
-    // the point is that the tool map is keyed by auth and the selection is not).
+    // A tool scope the target auth's catalog does NOT declare, which is the
+    // only shape that can tell the filter apart: with a catalogued scope the
+    // assertion holds whether or not tool scopes are filtered. The schema
+    // cannot express it (cross-field rule 4 makes `required_scopes[auth]` a
+    // subset of that auth's catalog), so it is written onto the parsed
+    // manifest — the helper's contract is what is under test: the filter is
+    // keyed to the agent's auth-less `scopes` selection, never to the
+    // per-auth tool map.
+    const manifest = twoAuthManifest();
+    (
+      manifest as unknown as {
+        tools_policy: Record<string, { required_scopes: Record<string, string[]> }>;
+      }
+    ).tools_policy.read_tool!.required_scopes.b = ["b:undeclared"];
     expect(
       requiredScopesForAgent({
-        manifest: twoAuthManifest(),
+        manifest,
         authKey: "b",
         agentTools: ["read_tool"],
         agentScopes: undefined,
       }),
-    ).toEqual(["b:read"]);
+    ).toEqual(["b:undeclared"]);
   });
 
   it("missingScopesForConnection inherits the filter", () => {
@@ -1450,6 +1462,63 @@ describe("requiredScopesForAgent — per-auth scope_catalog", () => {
         agentScopes: ["b:write"],
       }),
     ).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// partitionScopesByAuthCatalog — the single definition of catalog membership
+// (moved here from `apps/api/test/unit/services/integration-manifest-helpers.test.ts`
+// when the api-side complement was folded into this helper).
+// ─────────────────────────────────────────────
+
+describe("partitionScopesByAuthCatalog", () => {
+  const auth = { scope_catalog: [{ value: "gmail.readonly" }, { value: "gmail.send" }] };
+
+  it("declares every scope the auth's catalog lists, in caller order", () => {
+    expect(partitionScopesByAuthCatalog(auth, ["gmail.send", "gmail.readonly"])).toEqual({
+      declared: ["gmail.send", "gmail.readonly"],
+      undeclared: [],
+    });
+  });
+
+  it("splits a mixed request, deduping the undeclared half in caller order", () => {
+    expect(
+      partitionScopesByAuthCatalog(auth, [
+        "gmail.send",
+        "drive.file",
+        "gmail.modify",
+        "drive.file",
+      ]),
+    ).toEqual({ declared: ["gmail.send"], undeclared: ["drive.file", "gmail.modify"] });
+  });
+
+  it("declares everything when the auth declares no catalog", () => {
+    // No catalog = no closed set: the IdP arbitrates at consent time, the same
+    // contract `validateAgentIntegrationScopes` applies to an agent selection.
+    for (const none of [{}, { scope_catalog: [] }, undefined]) {
+      expect(partitionScopesByAuthCatalog(none, ["anything.at.all"])).toEqual({
+        declared: ["anything.at.all"],
+        undeclared: [],
+      });
+    }
+  });
+
+  it("is keyed by ONE auth — a sibling auth's catalog does not widen it", () => {
+    // The connect kickoff is keyed by `authKey`, so unlike the agent-manifest
+    // side (`getAvailableScopes`, which unions every auth) a scope advertised
+    // only by a sibling auth stays undeclared here.
+    expect(partitionScopesByAuthCatalog(auth, ["calendar.events"])).toEqual({
+      declared: [],
+      undeclared: ["calendar.events"],
+    });
+  });
+
+  it("accepts an empty request", () => {
+    expect(partitionScopesByAuthCatalog(auth, [])).toEqual({ declared: [], undeclared: [] });
+    expect(partitionScopesByAuthCatalog(auth, undefined)).toEqual({
+      declared: [],
+      undeclared: [],
+    });
   });
 });
 
