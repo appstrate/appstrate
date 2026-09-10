@@ -45,6 +45,7 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
+import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
 
 const app = getTestApp();
 
@@ -289,7 +290,12 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       });
     }
 
-    it("carries a connect_url on the launch route when the caller opts in", async () => {
+    // The offer's full wire shape (`package_id`, `expires_at`, the permission
+    // gate, the non-oauth2 refusal) is the mint's own contract and is pinned
+    // once, on the cataloged-agent route in the sibling suite. What is proven
+    // HERE is only what that suite cannot: that this route reaches the same
+    // mint, with this route's own actor and space in the claims.
+    it("routes the launch through the same mint when the caller opts in", async () => {
       await seedOauthIntegration();
 
       const res = await launch("/api/runs/inline", { [RUN_CONNECT_OFFERS_HEADER]: "1" });
@@ -298,8 +304,20 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.code).toBe("not_connected");
       expect(err.connect_url).toStartWith("http");
-      expect(err.package_id).toBe(OAUTH_INTEGRATION);
-      expect(err.expires_at).toBeGreaterThan(Date.now());
+
+      // A URL that opens is worthless if it asks for the wrong scopes on the
+      // wrong auth in the wrong space — the claims are the security-relevant
+      // output, and the manifest here selects `search`, whose
+      // `required_scopes.primary` is `search.read`.
+      const token = new URL(err.connect_url!).searchParams.get("token");
+      expect(readConnectToken(token!)).toMatchObject({
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        user_id: ctx.user.id,
+        package_id: OAUTH_INTEGRATION,
+        auth_key: "primary",
+        scopes: ["search.read"],
+      });
 
       // Refused before any durable side effect, link or no link.
       expect(await db.select().from(runs)).toHaveLength(0);
@@ -313,8 +331,6 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const body = (await res.json()) as ProblemDetails;
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.connect_url).toBeUndefined();
-      expect(err.expires_at).toBeUndefined();
-      expect(err.package_id).toBeUndefined();
     });
 
     it("never mints on /inline/validate, header or not", async () => {

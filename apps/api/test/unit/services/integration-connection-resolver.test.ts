@@ -1072,6 +1072,19 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.authKey).toBe("oauth");
     expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
     expect(err.missingScopes).toEqual(["user"]);
+    // …and the snake_case projection the 412 envelope carries. `owned_by_actor`
+    // is what the connect-offer mint gates on: a scope upgrade re-consents THIS
+    // row, so minting for a foreign owner would re-consent someone else's
+    // account.
+    expect(translateResolutionError(err)).toMatchObject({
+      field: `integrations.${INTEG}`,
+      code: "insufficient_scopes",
+      connection_id: c.id,
+      auth_key: "oauth",
+      required_scopes: ["repo", "admin:repo", "user"],
+      missing_scopes: ["user"],
+      owned_by_actor: true,
+    });
   });
 
   it("not_connected resolves the auth_key from the agent dep's pin", () => {
@@ -1085,6 +1098,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.code).toBe("not_connected");
     expect(err.authKey).toBe("oauth");
     expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
+    // …and the snake_case projection, on real resolver output rather than a
+    // hand-built error: the wire names are what the 412 consumers parse.
+    expect(translateResolutionError(err)).toMatchObject({
+      field: `integrations.${INTEG}`,
+      code: "not_connected",
+      auth_key: "oauth",
+      required_scopes: ["repo", "admin:repo", "user"],
+    });
   });
 
   it("not_connected falls back to the integration's SINGLE oauth2 auth when nothing is pinned", () => {
@@ -1157,10 +1178,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.authKey).toBe("oauth");
     expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
     expect(translateResolutionError(err)).toMatchObject({
+      field: `integrations.${INTEG}`,
       code: "needs_reconnection",
       connection_id: c.id,
       auth_key: "oauth",
       required_scopes: ["repo", "admin:repo", "user"],
+      // Same gate as insufficient_scopes: repairing the row in place is the
+      // owner's to do, and the connect-offer mint reads this field.
+      owned_by_actor: true,
     });
   });
 
@@ -1239,56 +1264,5 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.code).toBe("not_connected");
     expect(err.authKey).toBe("pat");
     expect(err.requiredScopes).toBeUndefined();
-  });
-});
-
-describe("translateResolutionError — connect-flow relay on the wire", () => {
-  it("emits snake_case auth_key + required_scopes on insufficient_scopes", () => {
-    const field = translateResolutionError({
-      integrationId: INTEG,
-      code: "insufficient_scopes",
-      connectionId: "conn_x",
-      authKey: "oauth",
-      missingScopes: ["user"],
-      requiredScopes: ["repo", "user"],
-      ownedByActor: true,
-      source: "fallback_auto",
-      message: "boom",
-    });
-    expect(field).toMatchObject({
-      field: `integrations.${INTEG}`,
-      code: "insufficient_scopes",
-      connection_id: "conn_x",
-      missing_scopes: ["user"],
-      required_scopes: ["repo", "user"],
-      owned_by_actor: true,
-      auth_key: "oauth",
-    });
-  });
-
-  it("emits snake_case auth_key + required_scopes on not_connected", () => {
-    const field = translateResolutionError({
-      integrationId: INTEG,
-      code: "not_connected",
-      authKey: "oauth",
-      requiredScopes: ["repo"],
-      message: "boom",
-    });
-    expect(field).toMatchObject({
-      field: `integrations.${INTEG}`,
-      code: "not_connected",
-      auth_key: "oauth",
-      required_scopes: ["repo"],
-    });
-  });
-
-  it("omits both fields on a not_connected the resolver could not pin down", () => {
-    const field = translateResolutionError({
-      integrationId: INTEG,
-      code: "not_connected",
-      message: "boom",
-    });
-    expect(field).not.toHaveProperty("auth_key");
-    expect(field).not.toHaveProperty("required_scopes");
   });
 });

@@ -30,7 +30,7 @@
  * inside the run pipeline.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
@@ -58,6 +58,12 @@ import {
 } from "../../helpers/integration-manifests.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
+import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import type {
+  AppstrateModule,
+  ModuleInitContext,
+  RunConnectionMissingParams,
+} from "@appstrate/core/module";
 
 const app = getTestApp();
 
@@ -366,6 +372,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // regression in the override→resolver wiring would re-fire 412 here.
     // (Downstream model-config errors surface as 400, not 412 — fine.)
     expect(retry.status).not.toBe(412);
+    expect(retry.status).toBeLessThan(500);
   });
 
   it("emits 412 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
@@ -653,10 +660,11 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
 
     // Not the 412 envelope — readiness passed. (Downstream model-config
     // errors may still 400; that's a different code path.)
-    if (res.status === 412) {
-      const body = (await res.json()) as ProblemDetails;
-      expect(body.code).not.toBe("missing_integration_connection");
-    }
+    // 412 is reserved for the missing_integration_connection envelope, so
+    // "not 412" is the discriminating assertion; "< 500" keeps a crashed
+    // pipeline from passing as "readiness passed".
+    expect(res.status).not.toBe(412);
+    expect(res.status).toBeLessThan(500);
   });
 
   // ─── Bare `dependencies.integrations` (no integrations_configuration) ─
@@ -795,10 +803,11 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    if (res.status === 412) {
-      const body = (await res.json()) as ProblemDetails;
-      expect(body.code).not.toBe("missing_integration_connection");
-    }
+    // 412 is reserved for the missing_integration_connection envelope, so
+    // "not 412" is the discriminating assertion; "< 500" keeps a crashed
+    // pipeline from passing as "readiness passed".
+    expect(res.status).not.toBe(412);
+    expect(res.status).toBeLessThan(500);
   });
 
   // ─── Connect-offer relay (#1207) ───────────
@@ -907,42 +916,47 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       }
     });
 
+    /** A member of `ctx`'s org holding exactly `permissions` in the space. */
+    async function memberHolding(permissions: string[]): Promise<TestContext> {
+      const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      await seedSpaceMember({
+        spaceId: ctx.defaultSpaceId,
+        userId: member.id,
+        presetRole: null,
+        customRoleId: role.id,
+      });
+      return {
+        ...ctx,
+        user: { id: member.id, email: member.email, name: member.name },
+        cookie: member.cookie,
+      };
+    }
+
+    async function launchAs(actor: TestContext): Promise<ProblemDetails> {
+      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(actor),
+          "Content-Type": "application/json",
+          [RUN_CONNECT_OFFERS_HEADER]: "1",
+        },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(412);
+      return (await res.json()) as ProblemDetails;
+    }
+
+    /** The one relay item this suite's fixtures always produce. */
+    function relayItem(body: ProblemDetails): ValidationFieldError {
+      return body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+    }
+
     // The link is a bearer capability that connects AS the actor, so the actor
     // must be one that could have minted it by hand — i.e. hold
     // `integrations:connect`, the permission guarding the connect routes.
     describe("permission gate at the request boundary", () => {
-      /** A member of `ctx`'s org holding exactly `permissions` in the space. */
-      async function memberHolding(permissions: string[]): Promise<TestContext> {
-        const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
-        const member = await createTestUser();
-        await addOrgMember(ctx.orgId, member.id, "member");
-        await seedSpaceMember({
-          spaceId: ctx.defaultSpaceId,
-          userId: member.id,
-          presetRole: null,
-          customRoleId: role.id,
-        });
-        return {
-          ...ctx,
-          user: { id: member.id, email: member.email, name: member.name },
-          cookie: member.cookie,
-        };
-      }
-
-      async function launchAs(actor: TestContext): Promise<ProblemDetails> {
-        const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
-          method: "POST",
-          headers: {
-            ...authHeaders(actor),
-            "Content-Type": "application/json",
-            [RUN_CONNECT_OFFERS_HEADER]: "1",
-          },
-          body: JSON.stringify({}),
-        });
-        expect(res.status).toBe(412);
-        return (await res.json()) as ProblemDetails;
-      }
-
       it("mints nothing for an actor without integrations:connect", async () => {
         await seedOauthIntegration();
         const body = await launchAs(await memberHolding(["agents:run"]));
@@ -1032,6 +1046,208 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         expect(err.owned_by_actor).toBe(false);
         expect(err.connect_url).toBeUndefined();
         expect(err.expires_at).toBeUndefined();
+      });
+    });
+
+    // `insufficient_scopes` is the third code a connect flow can clear, and its
+    // remedy is an upgrade of an EXISTING row — so the same ownership rule as
+    // `needs_reconnection` decides it, through the same route.
+    describe("insufficient_scopes", () => {
+      /**
+       * A LIVE oauth2 connection granted `base` only — short of the
+       * `search.read` the agent's `search` selection requires — owned by
+       * `userId` and optionally shared with the org.
+       */
+      async function seedUnderScopedConnection(
+        userId: string,
+        sharedWithOrg = false,
+      ): Promise<string> {
+        const [row] = await db
+          .insert(integrationConnections)
+          .values({
+            integrationId: OAUTH_INTEGRATION,
+            authKey: "primary",
+            accountId: `acct-${userId.slice(0, 6)}`,
+            spaceId: ctx.defaultSpaceId,
+            userId,
+            endUserId: null,
+            credentialsEncrypted: encryptCredentialEnvelope({
+              outputs: { access_token: "live-but-narrow" },
+            }),
+            scopesGranted: ["base"],
+            sharedWithOrg,
+          })
+          .returning({ id: integrationConnections.id });
+        return row!.id;
+      }
+
+      it("mints a connect_url upgrading the caller's own under-scoped connection", async () => {
+        await seedOauthIntegration();
+        const connectionId = await seedUnderScopedConnection(ctx.user.id);
+        const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
+
+        expect(err.code).toBe("insufficient_scopes");
+        expect(err.owned_by_actor).toBe(true);
+        expect(err.missing_scopes).toEqual(["search.read"]);
+        expect(err.connect_url).toStartWith("http");
+        // The claims widen the SAME row — without `connection_id` the callback
+        // INSERTs a second account and the narrow one is still what resolves.
+        const token = new URL(err.connect_url!).searchParams.get("token");
+        expect(readConnectToken(token!)).toMatchObject({
+          package_id: OAUTH_INTEGRATION,
+          auth_key: "primary",
+          connection_id: connectionId,
+          scopes: ["search.read"],
+        });
+      });
+
+      it("mints nothing when the under-scoped connection is a colleague's shared row", async () => {
+        // Discriminating control for the case above: same code, same header,
+        // same permissions — only the owner differs. Minting here would let the
+        // caller re-consent (and widen) somebody else's account.
+        await seedOauthIntegration();
+        const colleague = await createTestUser();
+        await addOrgMember(ctx.orgId, colleague.id, "member");
+        await seedSpaceMember({
+          spaceId: ctx.defaultSpaceId,
+          userId: colleague.id,
+          presetRole: "operator",
+          customRoleId: null,
+        });
+        await seedUnderScopedConnection(colleague.id, true);
+
+        const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
+        expect(err.code).toBe("insufficient_scopes");
+        expect(err.owned_by_actor).toBe(false);
+        expect(err.connect_url).toBeUndefined();
+        expect(err.expires_at).toBeUndefined();
+      });
+    });
+
+    // `block_user_connections` funnels a space onto one shared connection, and
+    // the relay must not hand out a link that walks around it. Its one
+    // carve-out is the same as `assertConnectionCreationAllowed`'s: an actor
+    // holding `integrations:configure` is precisely who is expected to create
+    // the shared connection the block exists to force everyone onto.
+    describe("block_user_connections", () => {
+      async function blockUserConnections() {
+        await db
+          .update(spacePackages)
+          .set({ blockUserConnections: true })
+          .where(
+            and(
+              eq(spacePackages.spaceId, ctx.defaultSpaceId),
+              eq(spacePackages.packageId, OAUTH_INTEGRATION),
+            ),
+          );
+      }
+
+      it("mints nothing for a member who may connect but may not configure", async () => {
+        await seedOauthIntegration();
+        await blockUserConnections();
+
+        const body = await launchAs(await memberHolding(["agents:run", "integrations:connect"]));
+        expect(relayItem(body).code).toBe("not_connected");
+        // Not merely absent from the item we look at — absent from the whole
+        // envelope, so no other item smuggles a way around the block in.
+        expect(JSON.stringify(body)).not.toContain("connect/start");
+      });
+
+      it("mints for the same actor once it also holds integrations:configure", async () => {
+        // Discriminating control: the block and the fixtures are identical, so
+        // the difference is the one permission and nothing else.
+        await seedOauthIntegration();
+        await blockUserConnections();
+
+        const body = await launchAs(
+          await memberHolding(["agents:run", "integrations:connect", "integrations:configure"]),
+        );
+        expect(relayItem(body).connect_url).toStartWith("http");
+      });
+    });
+
+    // SECURITY ORDERING — `validateAgentReadiness` emits `onRunConnectionMissing`
+    // BEFORE `attachConnectOffers` runs, and projects only field/code/title/
+    // message into the payload. A webhook delivery leaves the platform, so a
+    // bearer capability that connects AS the actor must never ride it. Proving
+    // that on a 412 that carries NO link proves nothing; this exercises the one
+    // case where the response really does carry one.
+    describe("webhook projection", () => {
+      let events: RunConnectionMissingParams[] = [];
+
+      const recorder: AppstrateModule = {
+        manifest: {
+          id: "test-connection-missing-recorder",
+          name: "Connection missing recorder",
+          version: "1.0.0",
+        },
+        async init() {},
+        events: {
+          onRunConnectionMissing: (params: RunConnectionMissingParams) => {
+            events.push(params);
+          },
+        },
+      };
+
+      function moduleCtx(): ModuleInitContext {
+        return {
+          redisUrl: null,
+          appUrl: "http://localhost:3000",
+          getSendMail: async () => async () => {},
+          getOrgOwnerEmails: async () => [],
+          getOrgMembers: async () => [],
+          getOrgName: async () => null,
+          services: {} as ModuleInitContext["services"],
+        };
+      }
+
+      // `emitEvent` fans out over the module-loader's own registry (`_modules`),
+      // which `getTestApp()` does not populate — so the recorder goes in through
+      // the same entry point the production boot path uses. The trailing
+      // `getTestApp()` calls re-register the RBAC snapshot that `resetModules()`
+      // nulls out, without which every permission-guarded route 403s.
+      beforeAll(async () => {
+        resetModules();
+        await loadModulesFromInstances([recorder], moduleCtx());
+        getTestApp();
+      });
+
+      afterAll(() => {
+        resetModules();
+        getTestApp();
+      });
+
+      beforeEach(() => {
+        events = [];
+      });
+
+      /** The fan-out is fire-and-forget (`void emitEvent`), so poll for it. */
+      async function emittedEvent(): Promise<RunConnectionMissingParams> {
+        for (let attempt = 0; attempt < 200; attempt++) {
+          if (events.length > 0) return events[0]!;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error("onRunConnectionMissing was never emitted");
+      }
+
+      it("keeps the emitted event link-free while the 412 itself carries the link", async () => {
+        await seedOauthIntegration();
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+
+        // Precondition, not decoration: without a minted link on the response
+        // the negative assertion below would hold for the wrong reason.
+        expect(relayItem(body).connect_url).toStartWith("http");
+
+        const event = await emittedEvent();
+        expect(event.packageId).toBe(AGENT);
+        expect(event.actor).toEqual({ type: "user", id: ctx.user.id });
+        const item = event.errors.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(item.code).toBe("not_connected");
+        expect(item).not.toHaveProperty("connect_url");
+        expect(item).not.toHaveProperty("expires_at");
+        expect(item).not.toHaveProperty("package_id");
+        // And nothing anywhere else in the payload either.
+        expect(JSON.stringify(event)).not.toContain("connect/start");
       });
     });
 

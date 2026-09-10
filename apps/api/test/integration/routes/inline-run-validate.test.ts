@@ -353,6 +353,12 @@ describe("POST /api/runs/inline/validate", () => {
     }
 
     it("refuses a tool the integration does not expose, on BOTH routes", async () => {
+      // One code is enough HERE: what this file proves is that the inline
+      // surface runs `validateAgentIntegrationSelections` at all, in both
+      // modes. The gate's per-code verdicts (`scope_not_in_catalog`,
+      // `wildcard_not_authorized`, …) are the function's own contract and are
+      // pinned in `packages/core/test/integration.test.ts` plus the publish
+      // route's `packages.test.ts`.
       await seedIntegration();
       for (const res of [
         await validate(manifestSelecting({ tools: ["exfiltrate"] })),
@@ -367,26 +373,6 @@ describe("POST /api/runs/inline/validate", () => {
         const err = body.errors?.find((e) => e.code === "unknown_tool");
         expect(err?.field).toBe(`integrations_configuration.${INTEGRATION}.tools`);
       }
-    });
-
-    it("refuses a scope outside the integration's scope_catalog", async () => {
-      // The one that matters most: `scopes` is what the readiness 412 relays as
-      // `required_scopes`, and what a minted connect link would ask consent for.
-      await seedIntegration();
-      const res = await validate(manifestSelecting({ tools: ["search"], scopes: ["mail.send"] }));
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { errors?: { field: string; code: string }[] };
-      const err = body.errors?.find((e) => e.code === "scope_not_in_catalog");
-      expect(err?.field).toBe(`integrations_configuration.${INTEGRATION}.scopes`);
-    });
-
-    it("refuses the wildcard when the integration did not authorize it", async () => {
-      await seedIntegration();
-      const res = await validate(manifestSelecting({ tools: "*" }));
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { errors?: { field: string; code: string }[] };
-      const err = body.errors?.find((e) => e.code === "wildcard_not_authorized");
-      expect(err?.field).toBe(`integrations_configuration.${INTEGRATION}.tools`);
     });
 
     it("accumulates alongside the other stages on /validate", async () => {

@@ -200,7 +200,6 @@ describe("attachConnectOffers", () => {
     });
 
     expect(item!.connect_url).toStartWith("http");
-    expect(typeof item!.expires_at).toBe("number");
     expect(item!.expires_at).toBeGreaterThan(Date.now());
     expect(item!.package_id).toBe(INTEGRATION);
 

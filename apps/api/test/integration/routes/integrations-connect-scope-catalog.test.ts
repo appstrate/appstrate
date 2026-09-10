@@ -22,6 +22,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
 
 const app = getTestApp();
 const INTEGRATION = "@myorg/gmail";
@@ -90,6 +91,31 @@ async function kickoff(
   });
 }
 
+/**
+ * What the kickoff actually asked consent for — accepting a scope set is only
+ * half the contract, relaying it verbatim is the other half.
+ *
+ * The two surfaces expose it differently: `session` signs the caller's set into
+ * the capability token's claims and computes no union at all (defaults ∪
+ * already-granted happen later, at `/connect/start` redemption), while `oauth2`
+ * hands the caller a provider URL it will redirect to itself, so its `scope`
+ * query param already carries the union with the auth's `default_scopes`.
+ * `undefined` = the surface asked for no scopes at all.
+ */
+async function requestedScopes(
+  surface: "oauth2" | "session",
+  res: Response,
+): Promise<string[] | undefined> {
+  if (surface === "session") {
+    const { connect_url: connectUrl } = (await res.json()) as { connect_url: string };
+    const token = new URL(connectUrl).searchParams.get("token");
+    return readConnectToken(token!)?.scopes;
+  }
+  const { auth_url: authUrl } = (await res.json()) as { auth_url: string };
+  const scope = new URL(authUrl).searchParams.get("scope");
+  return scope === null ? undefined : scope.split(" ");
+}
+
 interface ProblemBody {
   code: string;
   detail: string;
@@ -113,11 +139,19 @@ describe.each(["oauth2", "session"] as const)("connect/%s — scope catalog", (s
     await registerClient(ctx, "open");
   });
 
-  it("accepts scopes the auth's catalog declares", async () => {
+  it("accepts scopes the auth's catalog declares, and asks consent for them", async () => {
     const res = await kickoff(ctx, surface, "catalogued", {
       scopes: ["gmail.readonly", "gmail.send"],
     });
     expect(res.status).toBe(200);
+    // A 200 that dropped the scopes would send the user through a consent
+    // screen that grants less than the caller asked for, and the very next
+    // resolution would fail on insufficient_scopes.
+    expect(await requestedScopes(surface, res)).toEqual(
+      surface === "session"
+        ? ["gmail.readonly", "gmail.send"]
+        : ["openid", "gmail.readonly", "gmail.send"],
+    );
   });
 
   it("rejects a scope the catalog does not declare, naming it", async () => {
@@ -144,10 +178,19 @@ describe.each(["oauth2", "session"] as const)("connect/%s — scope catalog", (s
     // contract `validateAgentIntegrationScopes` applies to an agent selection.
     const res = await kickoff(ctx, surface, "open", { scopes: ["anything.the.idp.knows"] });
     expect(res.status).toBe(200);
+    expect(await requestedScopes(surface, res)).toEqual(
+      surface === "session" ? ["anything.the.idp.knows"] : ["openid", "anything.the.idp.knows"],
+    );
   });
 
   it("accepts a kickoff that requests no scopes at all", async () => {
     const res = await kickoff(ctx, surface, "catalogued", {});
     expect(res.status).toBe(200);
+    // Nothing invented on the caller's behalf: the token carries no `scopes`
+    // claim at all (omitted, never `[]`), and the redirect asks for the auth's
+    // declared defaults and nothing more.
+    expect(await requestedScopes(surface, res)).toEqual(
+      surface === "session" ? undefined : ["openid"],
+    );
   });
 });

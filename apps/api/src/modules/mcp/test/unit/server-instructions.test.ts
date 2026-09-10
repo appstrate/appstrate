@@ -5,11 +5,12 @@
  * connect bullet, which is the only place an MCP client is told how to act on a
  * readiness failure (#1207).
  *
- * Three things it must state and used to get wrong: the preflight refuses with
- * 412 (not 400); an error item that already carries a `connect_url` is a
- * finished offer, not a reason to call another tool; and the fallback kickoff
- * must relay the error's `required_scopes` / `auth_key` / `connection_id`,
- * without which the consent re-grants the same insufficient scope set.
+ * Prose is not the contract and is not pinned here. Only the tokens a model
+ * branches on are: the STATUS it must recognize (412, never 400), the field it
+ * must read before reaching for a tool (`connect_url`), the operation and the
+ * argument the fallback kickoff must carry (`initiateIntegrationConnect` with
+ * `scopes` = the item's `required_scopes`), and the one thing that differs
+ * between the two client kinds — delivery.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -28,49 +29,47 @@ function connectBullet(contextInjected: boolean): string {
 }
 
 describe("MCP server instructions — connect bullet", () => {
-  it("names the readiness refusal as a 412", () => {
+  it("names the readiness refusal as a 412 and never as a 400", () => {
     // The readiness envelope is `412 missing_integration_connection`
     // (services/agent-readiness.ts); a model told to expect a 400 treats the
     // 412 as an unknown failure and gives up instead of connecting.
-    const bullet = connectBullet(false);
-    expect(bullet).toContain("returns a 412 without consuming credits");
-    expect(bullet).not.toContain("returns a 400 without consuming credits");
-  });
-
-  it("puts the `connect_url` check first, ahead of any tool call", () => {
     for (const contextInjected of [false, true]) {
       const bullet = connectBullet(contextInjected);
-      expect(bullet).toContain("looking FIRST for a `connect_url` on the item");
-      expect(bullet).toContain("do NOT call `initiateIntegrationConnect`");
-      expect(bullet).toContain("do NOT call any other tool");
+      expect(bullet).toMatch(/\b412\b/);
+      expect(bullet).not.toMatch(/\b400\b/);
     }
   });
 
-  it("relays auth_key, required_scopes and connection_id on the fallback kickoff", () => {
-    const bullet = connectBullet(false);
-    expect(bullet).toContain('operation_id: "initiateIntegrationConnect"');
-    expect(bullet).toContain("authKey: \"<the error's auth_key");
-    expect(bullet).toContain("scopes: <the error's required_scopes, verbatim>");
-    expect(bullet).toContain("connection_id: <the error's connection_id");
+  it("points at the item's own `connect_url` before the kickoff tool", () => {
+    // An item that already carries a link is a finished offer; calling the
+    // kickoff anyway mints a second capability and asks for consent twice.
+    for (const contextInjected of [false, true]) {
+      const bullet = connectBullet(contextInjected);
+      expect(bullet).toMatch(/FIRST[^.]*`connect_url`/);
+      expect(bullet.indexOf("connect_url")).toBeLessThan(
+        bullet.indexOf("initiateIntegrationConnect"),
+      );
+    }
   });
 
-  it("tells a chat client the card is rendered for it and must not be restated", () => {
-    const bullet = connectBullet(true);
-    expect(bullet).toContain("The client renders the connect button from this result on its own");
-    expect(bullet).toContain("do NOT paste the link");
-    expect(bullet).toContain("do NOT poll, loop, wait, or run in the same turn");
-    // No card on the other side of the boundary — the chat model must not be
-    // told to hand the URL over.
-    expect(bullet).not.toContain("Give the caller that `connect_url` to open");
+  it("binds the fallback kickoff's `scopes` to the item's `required_scopes`", () => {
+    // Without the relay the consent re-grants the same insufficient set, and
+    // `connection_id` is what keeps a reconnect on the existing row.
+    const bullet = connectBullet(false);
+    expect(bullet).toContain("initiateIntegrationConnect");
+    expect(bullet).toMatch(/scopes: <[^>]*required_scopes/);
+    expect(bullet).toMatch(/connection_id: <[^>]*connection_id/);
   });
 
-  it("tells an external MCP client to hand the connect_url over instead", () => {
-    const bullet = connectBullet(false);
-    expect(bullet).toContain("Give the caller that `connect_url` to open");
-    expect(bullet).toContain("do NOT poll, loop, wait, or run in the same turn");
-    expect(bullet).not.toContain("The client renders the connect button");
-    // The delivery sentence replaced the old parenthetical aimed at
-    // non-interactive clients; keeping both would say it twice.
-    expect(bullet).not.toContain("Non-interactive clients with no button");
+  it("differs between the two client kinds on delivery only", () => {
+    // The chat renders the connect card from the tool result itself, so the
+    // model restating the link duplicates it; an external client has no card,
+    // so there the model must hand the URL over.
+    const chat = connectBullet(true);
+    const external = connectBullet(false);
+    expect(chat).toContain("do NOT paste the link");
+    expect(external).not.toContain("do NOT paste the link");
+    expect(external).toMatch(/Give the caller that `connect_url`/);
+    expect(chat).not.toMatch(/Give the caller that `connect_url`/);
   });
 });
