@@ -110,23 +110,46 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
 }
 
 /**
+ * What a write actually stores: every entry known, each one once.
+ *
  * An unknown permission is a REFUSAL, never a silent drop: a role created with
  * a typo would 403 on the thing its author asked for and say nothing about why.
  * Naming the first offender is enough — the array is authored in a picker.
+ *
+ * The vocabulary is also the array's ceiling, in both directions. Duplicates
+ * are what let a body name three permissions in twenty thousand entries, and
+ * the stored array is re-walked on every request of every holder
+ * (`spacePermissions`, and once per space in `GET /api/spaces`), so they are
+ * collapsed here rather than carried forever; a body longer than the whole
+ * vocabulary can hold nothing but duplicates and is refused before it is
+ * walked. Deriving the bound from `known` rather than picking a number keeps it
+ * exact under any set of loaded modules.
  */
-function assertKnownPermissions(permissions: string[]): void {
-  if (permissions.length === 0) {
-    throw invalidRequest("A role must grant at least one permission", "permissions");
-  }
+function normalizePermissions(permissions: string[]): string[] {
   const known = knownSpaceLevelPermissions();
-  const unknown = permissions.find((p) => !known.has(p));
-  if (unknown !== undefined) {
+  if (permissions.length > known.size) {
     throw invalidRequest(
-      `Unknown space-level permission '${unknown}'. ` +
+      `A role can hold at most ${known.size} permissions — the whole vocabulary — ` +
+        `and this list has ${permissions.length}. ` +
         `See GET /api/roles/vocabulary for the permissions a role can hold.`,
       "permissions",
     );
   }
+  const granted = new Set<string>();
+  for (const permission of permissions) {
+    if (!known.has(permission)) {
+      throw invalidRequest(
+        `Unknown space-level permission '${permission}'. ` +
+          `See GET /api/roles/vocabulary for the permissions a role can hold.`,
+        "permissions",
+      );
+    }
+    granted.add(permission);
+  }
+  if (granted.size === 0) {
+    throw invalidRequest("A role must grant at least one permission", "permissions");
+  }
+  return [...granted];
 }
 
 /** The DB CHECK backs this; a constraint violation would be a 500 naming nothing readable. */
@@ -167,7 +190,7 @@ export async function createSpaceRole(params: {
 }): Promise<SpaceRoleWire> {
   const { orgId, createdBy, input } = params;
   assertNotPresetKey(input.key);
-  assertKnownPermissions(input.permissions);
+  const permissions = normalizePermissions(input.permissions);
   await assertKeyFree(orgId, input.key);
 
   const [row] = await db
@@ -178,7 +201,7 @@ export async function createSpaceRole(params: {
       key: input.key,
       name: input.name,
       description: input.description ?? null,
-      permissions: input.permissions,
+      permissions,
       createdBy,
     })
     .returning()
@@ -197,7 +220,8 @@ export async function updateSpaceRole(params: {
     assertNotPresetKey(patch.key);
     await assertKeyFree(orgId, patch.key, id);
   }
-  if (patch.permissions !== undefined) assertKnownPermissions(patch.permissions);
+  const permissions =
+    patch.permissions !== undefined ? normalizePermissions(patch.permissions) : undefined;
 
   const [row] = await db
     .update(spaceRoles)
@@ -205,7 +229,7 @@ export async function updateSpaceRole(params: {
       ...(patch.key !== undefined ? { key: patch.key } : {}),
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
-      ...(patch.permissions !== undefined ? { permissions: patch.permissions } : {}),
+      ...(permissions !== undefined ? { permissions } : {}),
       updatedAt: new Date(),
     })
     .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))

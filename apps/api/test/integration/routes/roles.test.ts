@@ -209,6 +209,30 @@ describe("custom space roles", () => {
       });
     });
 
+    it("stores each permission once, and refuses a list longer than the vocabulary", async () => {
+      // Duplicates are what let a body name one permission in an unbounded
+      // number of entries, and the stored array is re-walked on every request
+      // of every holder — so the ceiling is the vocabulary, and it is the
+      // vocabulary the route reports, not a number this test restates.
+      const { data } = (await (await req("GET", "/api/roles/vocabulary")).json()) as {
+        data: { permissions: { permission: string }[] }[];
+      };
+      const size = data.flatMap((g) => g.permissions).length;
+
+      const atCeiling = Array.from({ length: size }, () => "agents:read");
+      const created = await post(validBody({ key: "at-ceiling", permissions: atCeiling }));
+      expect(created.status).toBe(201);
+      expect(((await created.json()) as RoleWire).permissions).toEqual(["agents:read"]);
+
+      // One entry more than the whole vocabulary can only be duplicates.
+      const over = await post(
+        validBody({ key: "over-ceiling", permissions: [...atCeiling, "agents:read"] }),
+      );
+      expect((await expectProblem(over, 400, { param: "permissions" })).detail).toContain(
+        String(size),
+      );
+    });
+
     it("refuses every preset key and accepts a free one", async () => {
       // Reserved by the code guard AND by `space_roles_key_not_preset`; a
       // preset the constraint does not list would answer 201 here and shadow
