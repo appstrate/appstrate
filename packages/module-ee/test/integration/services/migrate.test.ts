@@ -104,10 +104,10 @@ describe("migrateEeDb", () => {
     ).resolves.toBeArray();
 
     // Schema is back and usable (table exists, empty).
-    const [{ count }] = await db.execute(
+    const [countRow] = await db.execute<{ count: number }>(
       sql.raw("SELECT count(*)::int AS count FROM ee_billing_accounts"),
     );
-    expect(count).toBe(0);
+    expect(countRow?.count).toBe(0);
   });
 });
 
@@ -154,14 +154,14 @@ describe("migration chain upgrades", () => {
     expect(billedCols.map((c) => c.column_name)).not.toContain("run_id");
 
     // retry queue gone; cursor table present.
-    const [{ pending }] = await db.execute(
+    const [pendingRow] = await db.execute<{ pending: string | null }>(
       sql.raw("SELECT to_regclass('cloud_pending_bills') AS pending"),
     );
-    expect(pending).toBeNull();
-    const [{ cursor }] = await db.execute(
+    expect(pendingRow?.pending).toBeNull();
+    const [cursorRow] = await db.execute<{ cursor: string | null }>(
       sql.raw("SELECT to_regclass('cloud_billing_cursor') AS cursor"),
     );
-    expect(cursor).not.toBeNull();
+    expect(cursorRow?.cursor).not.toBeNull();
   });
 
   it("0001 → 0002 converts cost_usd to numeric without losing a stored value", async () => {
@@ -234,7 +234,7 @@ describe("migration chain upgrades", () => {
         ORDER BY org_id
       `),
     );
-    expect(rows).toEqual([
+    expect([...rows]).toEqual([
       { org_id: canceledOrg, subscription_status: null, credits_used: 0, credit_quota: 0 },
       { org_id: incompleteOrg, subscription_status: null, credits_used: 0, credit_quota: 0 },
       {
@@ -271,10 +271,10 @@ describe("migration chain upgrades", () => {
     await db.execute(sql.raw("DELETE FROM cloud_pending_bills"));
     await applyMigration("0001_cursor_billing");
 
-    const [{ pending }] = await db.execute(
+    const [pendingRow] = await db.execute<{ pending: string | null }>(
       sql.raw("SELECT to_regclass('cloud_pending_bills') AS pending"),
     );
-    expect(pending).toBeNull();
+    expect(pendingRow?.pending).toBeNull();
   });
 
   it("0004 → 0005 renames every table, index and constraint off the cloud_ prefix", async () => {
@@ -310,7 +310,7 @@ describe("migration chain upgrades", () => {
         WHERE connamespace = 'public'::regnamespace AND conname LIKE 'cloud%'
       `),
     );
-    expect(named).toEqual([]);
+    expect([...named]).toEqual([]);
   });
 });
 

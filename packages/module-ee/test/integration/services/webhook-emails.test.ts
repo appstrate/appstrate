@@ -7,6 +7,7 @@ import {
   resetStripeMock,
   generateWebhookEvent,
   setSubscriptionResponse,
+  invoiceEventObject,
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { initBillingEmail } from "../../../src/emails/send.ts";
@@ -105,18 +106,14 @@ describe("webhook billing emails", () => {
         id: "evt_email_invoice_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_email_001",
             customer: "cus_email_inv_001",
-            billing_reason: "subscription_cycle",
-            amount_paid: 2900,
-            hosted_invoice_url: "https://invoice.stripe.com/i/test",
-            parent: {
-              subscription_details: {
-                subscription: "sub_email_inv_001",
-              },
-            },
-          },
+            subscription: "sub_email_inv_001",
+            billingReason: "subscription_cycle",
+            amountPaid: 2900,
+            hostedInvoiceUrl: "https://invoice.stripe.com/i/test",
+          }),
         },
       });
 
@@ -218,13 +215,14 @@ describe("webhook billing emails", () => {
         id: "evt_email_fail_001",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_email_fail_001",
             customer: "cus_email_fail_001",
-            billing_reason: "subscription_cycle",
-            amount_due: 2900,
-            attempt_count: 2,
-          },
+            subscription: null,
+            billingReason: "subscription_cycle",
+            amountDue: 2900,
+            attemptCount: 2,
+          }),
         },
       });
 
@@ -252,14 +250,14 @@ describe("webhook billing emails", () => {
         id: "evt_email_fail_002",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_email_fail_002",
             customer: "cus_email_fail_002",
-            billing_reason: "subscription_cycle",
-            amount_due: 2900,
-            attempt_count: 2,
-            parent: { subscription_details: { subscription: "sub_email_old" } },
-          },
+            subscription: "sub_email_old",
+            billingReason: "subscription_cycle",
+            amountDue: 2900,
+            attemptCount: 2,
+          }),
         },
       });
 
@@ -326,11 +324,12 @@ describe("webhook billing emails", () => {
         id: "evt_email_unknown_001",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_unknown_001",
             customer: "cus_nonexistent",
-            billing_reason: "subscription_cycle",
-          },
+            subscription: null,
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 

@@ -8,6 +8,7 @@ import {
   resetStripeMock,
   generateWebhookEvent,
   setSubscriptionResponse,
+  invoiceEventObject,
   requests,
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
@@ -418,16 +419,12 @@ describe("handleWebhook", () => {
         id: "evt_invoice_cycle_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_cycle_001",
             customer: "cus_invoice_001",
-            billing_reason: "subscription_cycle",
-            parent: {
-              subscription_details: {
-                subscription: "sub_invoice_001",
-              },
-            },
-          },
+            subscription: "sub_invoice_001",
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
@@ -477,16 +474,12 @@ describe("handleWebhook", () => {
         id: "evt_invoice_create_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_create_001",
             customer: "cus_invoice_002",
-            billing_reason: "subscription_create",
-            parent: {
-              subscription_details: {
-                subscription: "sub_invoice_002",
-              },
-            },
-          },
+            subscription: "sub_invoice_002",
+            billingReason: "subscription_create",
+          }),
         },
       });
 
@@ -525,12 +518,12 @@ describe("handleWebhook", () => {
         id: "evt_invoice_dead_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_dead_001",
             customer: "cus_invoice_dead",
-            billing_reason: "subscription_cycle",
-            parent: { subscription_details: { subscription: "sub_invoice_dead" } },
-          },
+            subscription: "sub_invoice_dead",
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
@@ -580,12 +573,12 @@ describe("handleWebhook", () => {
         id: "evt_race_invoice_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_race_001",
             customer: "cus_race_001",
-            billing_reason: "subscription_create",
-            parent: { subscription_details: { subscription: "sub_race_001" } },
-          },
+            subscription: "sub_race_001",
+            billingReason: "subscription_create",
+          }),
         },
       });
 
@@ -635,12 +628,12 @@ describe("handleWebhook", () => {
         id: "evt_portal_invoice_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_portal_001",
             customer: "cus_portal_001",
-            billing_reason: "subscription_update",
-            parent: { subscription_details: { subscription: "sub_portal_001" } },
-          },
+            subscription: "sub_portal_001",
+            billingReason: "subscription_update",
+          }),
         },
       });
 
@@ -857,11 +850,12 @@ describe("handleWebhook", () => {
         id: "evt_payment_failed_001",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_fail_001",
             customer: "cus_fail_001",
-            billing_reason: "subscription_cycle",
-          },
+            subscription: null,
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
@@ -994,12 +988,12 @@ describe("handleWebhook", () => {
         id: "evt_identity_invoice_old",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_identity_old",
             customer: "cus_identity",
-            billing_reason: "subscription_cycle",
-            parent: { subscription_details: { subscription: "sub_old" } },
-          },
+            subscription: "sub_old",
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
