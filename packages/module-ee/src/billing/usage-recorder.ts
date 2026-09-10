@@ -127,6 +127,11 @@ export interface CursorSeedResult {
   lastLlmUsageId: number;
   /** Cutover exclusion bound: written once at seed, no ledger read goes below it. */
   floorId: number;
+  /** When a sweep pass last CONFIRMED this watermark — advanced it, or read the
+   * ledger and found nothing left to advance over. Read by
+   * `assertCursorResumable` as "how long has the sweeper been absent"; see the
+   * caught-up stamp in {@link sweepLedgerBatch}. */
+  updatedAt: Date;
 }
 
 /** First id a ledger read may start from (exclusive `afterId`): the replay window reaches
@@ -169,6 +174,7 @@ export async function ensureCursorSeeded(
   const columns = {
     lastLlmUsageId: billingCursor.lastLlmUsageId,
     floorId: billingCursor.floorId,
+    updatedAt: billingCursor.updatedAt,
   };
   const [existing] = await db.select(columns).from(billingCursor).where(eq(billingCursor.id, true));
   if (existing) return { seeded: false, ...existing };
@@ -619,7 +625,13 @@ export async function sweepLedgerBatch(
   const limit = Math.min(replaySpan + batchSize, LEDGER_LIST_MAX_LIMIT);
   const rows = await services.usage.list({ afterId: scanFromId, limit });
   if (rows.length === 0) {
-    // Caught up, nothing to sweep. Not a stall.
+    // Caught up, nothing to sweep. Not a stall — but still a CONFIRMATION that
+    // the watermark is current, so stamp it. `updated_at` has to mean "the sweep
+    // last looked and the watermark was right", never "the last row was billed":
+    // `assertCursorResumable` reads its age as "how long has the sweeper been
+    // absent", and a deployment quiet enough to read an empty ledger region
+    // would otherwise age into a refusal without a single row behind it.
+    await db.update(billingCursor).set({ updatedAt: new Date() }).where(eq(billingCursor.id, true));
     return noProgress({ cursorFrom: fromId, cursorTo: fromId });
   }
 
