@@ -41,24 +41,6 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
     expect("connectOffers" in result).toBe(false);
   });
 
-  // Issue #1207: a readiness error names every integration still to connect.
-  it("carries one offer per connect link, in walk order", () => {
-    const result = toPiToolResult({
-      error: "integrations_not_ready",
-      integrations: [
-        { package_id: "@appstrate/gmail", connect_url: "https://app.example.com/c/1?t=A" },
-        { package_id: "@appstrate/clickup", connect_url: "https://app.example.com/c/2?t=B" },
-      ],
-    });
-    expect(result.connectOffers).toEqual([
-      { connect_url: "https://app.example.com/c/1?t=A", package_id: "@appstrate/gmail" },
-      { connect_url: "https://app.example.com/c/2?t=B", package_id: "@appstrate/clickup" },
-    ]);
-    const modelText = result.content[0]!.text;
-    expect(modelText).not.toContain("t=A");
-    expect(modelText).not.toContain("t=B");
-  });
-
   // Issue #1207 phase 5: the readiness preflight mints the link itself, so the
   // chat's `run_and_wait` failure step IS the connect card's data source — one
   // offer per actionable integration, `expires_at` and `package_id` included,

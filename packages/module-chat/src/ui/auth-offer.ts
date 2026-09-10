@@ -34,26 +34,17 @@ interface ResumeClaim {
 }
 
 /**
- * One resume append per completion burst, across every card in this tab.
- *
- * A resume append starts a turn (each user turn chains onto the last message,
- * but each assistant turn chains onto its own trigger), so two appends close
- * together fork the conversation into two concurrent turns. Cards fan out along
- * two independent axes, and the claim covers BOTH — a card claims only if
- * neither of its keys is already held:
+ * One resume append per completion burst, across every card in this tab: two
+ * appends close together fork the conversation into two concurrent turns. Cards
+ * fan out on two independent axes, so a card claims only if NEITHER key is held.
  *
  *  - PACKAGE. One completion signal reaches every mounted card, so two cards
- *    awaiting the same package — a retry card issued after an abandoned first
- *    attempt — would both append on the one broadcast.
- *  - TOOL CALL. A run-kickoff 412 lists every integration still to connect and
- *    the chat renders one card each (#1207). Those are different packages, so
- *    the package key does not cover them: the user connects two accounts in a
- *    row and each card appends its own "continue". The first completion of the
- *    burst appends; the rest land in the `connected` phase, and the one resumed
- *    turn re-runs the kickoff, which is what re-checks whether anything is
- *    still missing.
+ *    awaiting the same package (a retry after an abandoned attempt) would both
+ *    append on the one broadcast.
+ *  - TOOL CALL. A run-kickoff 412 renders one card per integration (#1207);
+ *    those are different packages, so only this key covers them.
  *
- * The short TTL only needs to outlive one burst while staying well under any
+ * The TTL only needs to outlive one burst while staying well under any
  * legitimate later reconnect in the same conversation.
  */
 const RESUME_CLAIM_TTL_MS = 30_000;

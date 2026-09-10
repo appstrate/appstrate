@@ -104,20 +104,10 @@ function watchConnectionSse(
 }
 
 /**
- * Browsing-context name for this card's popup — one per integration.
- *
- * A single fixed name is a single popup: a run-kickoff 412 renders one card per
- * integration to connect, and clicking a second card while the first popup is
- * still open NAVIGATES that popup to the second URL, silently abandoning flow 1
- * (its `state` is never redeemed, and the user sees only the second consent).
- * Keyed on `packageId`, each card gets its own window and reclicking the same
- * card still refocuses its own.
- *
- * The id is sanitized to `[A-Za-z0-9_]` because a window name is a target
- * token: `@scope/name` carries characters no browser needs to preserve here,
- * and two ids colliding after sanitization would just share a popup, which is
- * the pre-existing behaviour. No `packageId` (the card is rendered from a bare
- * `initiateIntegrationConnect` frame) falls back to the fixed name.
+ * Browsing-context name for this card's popup — one per integration, because a
+ * fixed name is a single popup: clicking a second card while the first popup is
+ * open NAVIGATES it to the second URL, silently abandoning flow 1. Sanitized to
+ * `[A-Za-z0-9_]`, a window name being a target token.
  */
 function popupName(packageId: string | undefined): string {
   if (!packageId) return "appstrate_oauth";

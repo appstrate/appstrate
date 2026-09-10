@@ -4,28 +4,20 @@
  * Connect-offer redaction + extraction — the single walk the chat engine uses
  * on tool results that may carry a connect/authorize URL.
  *
- * A connect URL must exist in exactly one place per channel:
+ * A connect URL exists in exactly one place per channel: never in the MODEL
+ * channel (every `connect_url`/`auth_url` string is replaced by
+ * {@link REDACTED_CONNECT_LINK}), and for the UI only in the typed
+ * `connectOffers` field the splitters attach to the tool output — the connect
+ * cards read that field, never the payload (issue #906). Redaction and
+ * extraction are the SAME pass (`splitValue`), so the two cannot drift apart.
  *
- *  - MODEL channel — never. Every `connect_url`/`auth_url` string is replaced
- *    by {@link REDACTED_CONNECT_LINK} so the model cannot paste a link it never
- *    receives.
- *  - UI channel — only in the typed `connectOffers` field the splitters attach
- *    to the tool output. The connect cards read that field; they never scrape
- *    the payload (issue #906: the scraper used to grab the placeholder from the
- *    model channel and render it as a relative URL).
+ * A payload may carry SEVERAL connect URLs — a readiness error lists one per
+ * unconnected integration — so the walk captures every one, in walk order,
+ * deduped by normalized URL (issue #1207).
  *
- * Redaction and extraction are the SAME pass (`splitValue`): whatever gets
- * scrubbed from the payload is what surfaces as the offer, so the two can never
- * drift apart.
- *
- * A payload may carry SEVERAL connect URLs — a readiness error listing two
- * unconnected integrations carries one link each — so the walk captures every
- * one of them, in walk order, deduped by normalized URL. Capturing only the
- * first scrubbed the rest for the UI as well as for the model (issue #1207).
- *
- * `ui/auth-offer.ts` (bundled into the SPA) imports the {@link ConnectOffer}
- * type and {@link readConnectOffers} from here, so this module may only pull in
- * client-safe leaf imports — never server-only modules (MCP client, logger).
+ * `ui/auth-offer.ts` (bundled into the SPA) imports from here, so this module
+ * may only pull in client-safe leaf imports — never server-only ones (MCP
+ * client, logger).
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
@@ -51,16 +43,11 @@ export const REDACTED_CONNECT_LINK = "[connect link hidden — the chat renders 
  * `url` or `href`.
  *
  * What pins the spelling is the endpoints themselves, not a casing gate:
- * `bun run check` has no HTTP-response casing check at all — `verify:openapi`
- * performs none, and `lint:manifest-casing` covers AFPS manifests, not HTTP
- * responses. The two spellings above are what `apps/api/src/routes/
- * integrations.ts` returns — `{ auth_url, state }` for Porte B and
- * `{ connect_url, expires_at }` for Porte A — the latter also declared
- * `required: ["connect_url", "expires_at"]` in `apps/api/src/openapi/paths/
- * integrations.ts`. `verify:openapi` asserts that endpoint is documented and
- * that its 2xx response declares a schema; it does NOT diff the declared keys
- * against what the handler emits, so the route and the declaration are the
- * pair to re-read if this set ever looks wrong.
+ * `bun run check` has no HTTP-response casing check at all. The two spellings
+ * above are what `apps/api/src/routes/integrations.ts` returns, and
+ * `verify:openapi` does NOT diff the declared keys against what the handler
+ * emits — so the route and its OpenAPI declaration are the pair to re-read if
+ * this set ever looks wrong.
  */
 const CONNECT_URL_KEYS = new Set(["connect_url", "auth_url"]);
 
@@ -95,46 +82,24 @@ interface SplitResult {
 }
 
 /**
- * Offers collected by one walk, in walk order. `seen` holds the normalized URLs
- * already captured, so the same link appearing twice in a payload (a summary
- * block repeating a detail block) yields one card, not two.
+ * Where one walk pushes its offers, in walk order and undeduped — dedupe lives
+ * in {@link mergeConnectOffers} alone. `null` on the redact-only path, which
+ * then builds no offer at all.
  */
-interface OfferSink {
-  offers: ConnectOffer[];
-  seen: Set<string>;
-}
+type OfferSink = ConnectOffer[] | null;
 
 /**
- * Build an offer from the node whose connect key just got redacted. Siblings
- * are read under their wire spelling only — same reason as
- * {@link CONNECT_URL_KEYS}: `expires_at` is what Porte A returns beside
- * `connect_url`, and nothing on this path emits a camelCase twin.
- *
- * `expires_at` is worth naming explicitly, because the general policy points
- * the other way: `docs/CASING_CONVENTIONS.md` carve-out 4b lists `expiresAt`
- * among the DB-convention fields that stay camelCase everywhere INCLUDING the
- * wire. This endpoint does not follow that carve-out — it emits `expires_at`,
- * as the OpenAPI response schema for `POST …/connect/start` requires and as
- * `routes/integrations.ts` writes — and the same document's internal
- * sidecar↔platform section lists `expires_at` too. A reader follows what the
- * endpoint emits, not the carve-out; the tension is in the policy document,
- * and reconciling it there is out of this module's scope.
+ * Optional offer fields, read under their wire spelling only — same reason as
+ * {@link CONNECT_URL_KEYS}. `expires_at` is worth naming: carve-out 4b of
+ * `docs/CASING_CONVENTIONS.md` keeps `expiresAt` camelCase even on the wire,
+ * but this endpoint emits `expires_at`, as its OpenAPI response schema
+ * requires; a reader follows the endpoint, not the carve-out.
  */
-function captureOffer(sink: OfferSink, obj: Record<string, unknown>, url: string): void {
-  if (sink.seen.has(url)) return;
-  sink.seen.add(url);
-  sink.offers.push(offerFromNode(obj, url));
-}
-
-function offerFromNode(obj: Record<string, unknown>, url: string): ConnectOffer {
-  const state = typeof obj.state === "string" ? obj.state : undefined;
-  const expiresAt = typeof obj.expires_at === "number" ? obj.expires_at : undefined;
-  const packageId = typeof obj.package_id === "string" ? obj.package_id : undefined;
+function pickOfferFields(obj: Record<string, unknown>): Omit<ConnectOffer, "connect_url"> {
   return {
-    connect_url: url,
-    ...(state !== undefined ? { state } : {}),
-    ...(expiresAt !== undefined ? { expires_at: expiresAt } : {}),
-    ...(packageId !== undefined ? { package_id: packageId } : {}),
+    ...(typeof obj.state === "string" ? { state: obj.state } : {}),
+    ...(typeof obj.expires_at === "number" ? { expires_at: obj.expires_at } : {}),
+    ...(typeof obj.package_id === "string" ? { package_id: obj.package_id } : {}),
   };
 }
 
@@ -170,7 +135,7 @@ function splitValue(value: unknown, depth: number, sink: OfferSink): SplitResult
       // placeholder, malformed value or other scheme is scrubbed but never
       // offered. Persist the same normalized href the browser will navigate.
       const connectUrl = normalizeHttpUrl(v);
-      if (connectUrl) captureOffer(sink, obj, connectUrl);
+      if (connectUrl) sink?.push({ connect_url: connectUrl, ...pickOfferFields(obj) });
       continue;
     }
     const r = splitValue(v, depth + 1, sink);
@@ -182,9 +147,9 @@ function splitValue(value: unknown, depth: number, sink: OfferSink): SplitResult
 
 /** One walk with a fresh sink — the shape every exported splitter builds on. */
 function splitWithOffers(value: unknown): SplitResult & { offers: ConnectOffer[] } {
-  const sink: OfferSink = { offers: [], seen: new Set() };
+  const sink: ConnectOffer[] = [];
   const r = splitValue(value, 0, sink);
-  return { ...r, offers: sink.offers };
+  return { ...r, offers: mergeConnectOffers([sink]) };
 }
 
 /**
@@ -201,7 +166,7 @@ export function splitConnectPayload(payload: unknown): {
 
 /** Redact-only view of {@link splitConnectPayload} (model-channel scrubbing). */
 export function redactConnectPayload(payload: unknown): unknown {
-  return splitWithOffers(payload).value;
+  return splitValue(payload, 0, null).value;
 }
 
 /**
@@ -222,8 +187,9 @@ export function splitJsonText(text: string): { text: string; offers: ConnectOffe
 
 /**
  * Concatenate offer lists in order, keeping the first entry per normalized
- * `connect_url`. Each splitter already dedupes within its own payload; this is
- * the cross-source merge `mcpResultToPi` needs across a result's text blocks.
+ * `connect_url`. The ONE dedupe rule: a single walk's offers pass through here
+ * too ({@link splitWithOffers}), and `mcpResultToPi` uses it to merge across a
+ * result's text blocks.
  */
 export function mergeConnectOffers(lists: readonly ConnectOffer[][]): ConnectOffer[] {
   const seen = new Set<string>();
@@ -270,10 +236,5 @@ function asConnectOffer(value: unknown): ConnectOffer | null {
   const o = value as Record<string, unknown>;
   const connectUrl = normalizeHttpUrl(o.connect_url);
   if (!connectUrl) return null;
-  return {
-    connect_url: connectUrl,
-    ...(typeof o.state === "string" ? { state: o.state } : {}),
-    ...(typeof o.expires_at === "number" ? { expires_at: o.expires_at } : {}),
-    ...(typeof o.package_id === "string" ? { package_id: o.package_id } : {}),
-  };
+  return { connect_url: connectUrl, ...pickOfferFields(o) };
 }

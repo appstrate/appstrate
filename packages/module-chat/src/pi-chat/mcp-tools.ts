@@ -323,10 +323,9 @@ function makeRunAndWaitExtension(
           headers: ctx.headers,
           fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
-          // The chat is one of the two surfaces allowed to hold a connect
-          // capability: a 412 item carrying `connect_url` is redacted out of
-          // the model channel by `splitConnectPayload` and rendered as a
-          // connect card the human clicks — the link never reaches the model.
+          // The chat holds the connect capability itself — the link goes to a
+          // card, never to the model. See `RUN_CONNECT_OFFERS_HEADER` in
+          // `@appstrate/core/run-and-wait-client`.
           connectOffers: true,
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,

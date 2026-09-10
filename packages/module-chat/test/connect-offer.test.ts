@@ -11,6 +11,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   mergeConnectOffers,
+  redactConnectPayload,
   REDACTED_CONNECT_LINK,
   splitConnectPayload,
   splitJsonText,
@@ -136,6 +137,22 @@ describe("splitJsonText", () => {
       { connect_url: "https://a.example/one" },
       { connect_url: URL_ },
     ]);
+  });
+});
+
+describe("redactConnectPayload", () => {
+  // The redact-only walk builds no offer at all, so it must still scrub every
+  // link and still hand back the original reference when nothing matched.
+  it("scrubs every connect link and keeps the reference when nothing matched", () => {
+    const redacted = redactConnectPayload({
+      first: { connect_url: URL_ },
+      second: { auth_url: "https://a.example/two" },
+    }) as { first: { connect_url: string }; second: { auth_url: string } };
+    expect(redacted.first.connect_url).toBe(REDACTED_CONNECT_LINK);
+    expect(redacted.second.auth_url).toBe(REDACTED_CONNECT_LINK);
+
+    const untouched = { ok: true, nested: { a: [1, 2] } };
+    expect(redactConnectPayload(untouched)).toBe(untouched);
   });
 });
 

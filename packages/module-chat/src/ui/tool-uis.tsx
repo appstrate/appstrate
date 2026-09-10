@@ -44,7 +44,7 @@ import {
   extractRunStatus,
   isRunLaunchOp,
 } from "./run-events.ts";
-import { extractAuthOffers, type AuthOffer } from "./auth-offer.ts";
+import { extractAuthOffers } from "./auth-offer.ts";
 import {
   asRecord,
   definedEntries,
@@ -317,29 +317,19 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     // place (same geometry). Only the anomalous success-without-offer shape
     // falls through to the generic row.
     if (opId === INITIATE_CONNECT_OP) {
-      const offers = extractAuthOffers(result);
-      if (offers.length > 0 || phase !== "success") {
-        // One card per offer — a result may carry several connect links (one
-        // per integration still to connect). With none yet, a single card in
-        // its preparing/error state holds the geometry.
-        const cards: Array<AuthOffer | null> = offers.length > 0 ? offers : [null];
+      // One card: the route behind this operation mints a single `connect_url`.
+      const offer = extractAuthOffers(result)[0];
+      if (offer || phase !== "success") {
         return (
-          <>
-            {cards.map((offer, i) => (
-              <OAuthConnectCard
-                key={offer?.authUrl ?? i}
-                authUrl={offer?.authUrl}
-                state={offer?.state}
-                packageId={args?.path_params?.packageId}
-                toolCallId={props.toolCallId}
-                errorText={
-                  phase === "error" && !offer
-                    ? extractErrorMessage(unwrapResult(result))
-                    : undefined
-                }
-              />
-            ))}
-          </>
+          <OAuthConnectCard
+            authUrl={offer?.authUrl}
+            state={offer?.state}
+            packageId={offer?.packageId ?? args?.path_params?.packageId}
+            toolCallId={props.toolCallId}
+            errorText={
+              phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
+            }
+          />
         );
       }
     }
