@@ -22,6 +22,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   resolveConnections,
+  translateResolutionError,
   type IntegrationRequirement,
 } from "../../../src/services/integration-connection-resolver.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -940,5 +941,292 @@ describe("resolveConnections — orphaned-auth guard", () => {
     // Single live candidate → auto; the orphan never competes (no must_choose).
     expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]?.connectionId).toBe(live.id);
+  });
+});
+
+// ───────── Connect-flow relay: auth_key + requiredScopes (issue #1207) ────────
+
+/**
+ * A run that needs more scopes than the connection holds — or needs a
+ * connection that doesn't exist yet, or one whose credentials died — can only
+ * be repaired by a connect flow, and the connect kickoff computes no scopes of
+ * its own: `body.scopes` is the only delta it accepts. So the resolution error
+ * has to name BOTH the auth to target and the full scope set that consent must
+ * cover, for the three codes a connect flow can clear (`not_connected`,
+ * `needs_reconnection`, `insufficient_scopes`).
+ */
+describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)", () => {
+  /**
+   * `t1` needs `repo`, `t2` needs `admin:repo` (which implies `repo`), and
+   * `user` is only reachable as an explicitly-selected agent scope.
+   */
+  function scopedManifest(): IntegrationManifest {
+    return {
+      type: "integration",
+      schema_version: "0.1",
+      name: INTEG,
+      version: "1.0.0",
+      display_name: "Test",
+      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorization_endpoint: "https://idp/auth",
+          token_endpoint: "https://idp/token",
+          default_scopes: [],
+          scope_catalog: [
+            { value: "admin:repo", label: "Admin repo", implies: ["repo"] },
+            { value: "repo", label: "Repo" },
+            { value: "user", label: "User" },
+          ],
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+      tools_policy: {
+        t1: { required_scopes: { oauth: ["repo"] } },
+        t2: { required_scopes: { oauth: ["admin:repo"] } },
+      },
+    } as unknown as IntegrationManifest;
+  }
+
+  /** Two oauth2 auths — the resolver must refuse to guess between them. */
+  function twoOauthManifest(): IntegrationManifest {
+    const m = scopedManifest() as unknown as { auths: Record<string, unknown> };
+    m.auths.oauth_alt = structuredClone(m.auths.oauth);
+    return m as unknown as IntegrationManifest;
+  }
+
+  /** No oauth2 auth at all — a connect flow here carries no scopes. */
+  function apiKeyOnlyManifest(): IntegrationManifest {
+    return {
+      type: "integration",
+      schema_version: "0.1",
+      name: INTEG,
+      version: "1.0.0",
+      display_name: "Test",
+      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      auths: {
+        pat: {
+          type: "api_key",
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.api_key}",
+            },
+          },
+        },
+      },
+      tools_policy: { t1: { required_scopes: { pat: ["repo"] } } },
+    } as unknown as IntegrationManifest;
+  }
+
+  function reqPinned(manifest: IntegrationManifest, authKey: string): IntegrationRequirement {
+    return {
+      integrationId: INTEG,
+      manifest,
+      hasSelectedTools: true,
+      agentTools: ["t1", "t2"],
+      agentScopes: ["user"],
+      requiredAuthKey: authKey,
+    };
+  }
+
+  it("insufficient_scopes carries the connection's auth_key and the FULL required set", () => {
+    // `admin:repo` implies `repo`, so only the explicitly-selected `user` is
+    // missing — but the consent must still request everything the run needs.
+    const c = conn({ authKey: "oauth", scopesGranted: ["admin:repo"] });
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), ["t1", "t2"], ["user"])],
+      accessibleConnections: [c],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("insufficient_scopes");
+    expect(err.authKey).toBe("oauth");
+    expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
+    expect(err.missingScopes).toEqual(["user"]);
+  });
+
+  it("not_connected resolves the auth_key from the agent dep's pin", () => {
+    const result = resolveConnections({
+      requirements: [reqPinned(scopedManifest(), "oauth")],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBe("oauth");
+    expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
+  });
+
+  it("not_connected falls back to the integration's SINGLE oauth2 auth when nothing is pinned", () => {
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), ["t1"], [])],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBe("oauth");
+    expect(err.requiredScopes).toEqual(["repo"]);
+  });
+
+  it("not_connected emits neither field with two oauth2 auths and no pin", () => {
+    // Guessing would send the user through the wrong provider's consent.
+    const result = resolveConnections({
+      requirements: [req(twoOauthManifest(), ["t1"], [])],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBeUndefined();
+    expect(err.requiredScopes).toBeUndefined();
+  });
+
+  it("not_connected emits auth_key but omits requiredScopes when the selection needs no scopes", () => {
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), [], [])],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+      includeInert: true,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBe("oauth");
+    expect(err.requiredScopes).toBeUndefined();
+  });
+
+  it("not_connected on an api_key-only integration emits neither field", () => {
+    const result = resolveConnections({
+      requirements: [req(apiKeyOnlyManifest(), ["t1"], [])],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBeUndefined();
+    expect(err.requiredScopes).toBeUndefined();
+  });
+
+  it("needs_reconnection carries the dead connection's auth_key and the full required set", () => {
+    // A reconnect is a connect flow too: one consent that already covers the
+    // selection, instead of reconnect → insufficient_scopes → upgrade.
+    const c = conn({ authKey: "oauth", scopesGranted: ["repo"], needsReconnection: true });
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), ["t1", "t2"], ["user"])],
+      accessibleConnections: [c],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("needs_reconnection");
+    expect(err.connectionId).toBe(c.id);
+    expect(err.authKey).toBe("oauth");
+    expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
+    expect(translateResolutionError(err)).toMatchObject({
+      code: "needs_reconnection",
+      connection_id: c.id,
+      auth_key: "oauth",
+      required_scopes: ["repo", "admin:repo", "user"],
+    });
+  });
+
+  it("needs_reconnection on an api_key auth carries auth_key only", () => {
+    const c = conn({ authKey: "pat", needsReconnection: true });
+    const result = resolveConnections({
+      requirements: [req(apiKeyOnlyManifest(), ["t1"], [])],
+      accessibleConnections: [c],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("needs_reconnection");
+    expect(err.authKey).toBe("pat");
+    expect(err.requiredScopes).toEqual([]);
+    const field = translateResolutionError(err);
+    expect(field).toMatchObject({ code: "needs_reconnection", auth_key: "pat" });
+    expect(field).not.toHaveProperty("required_scopes");
+  });
+
+  it("a pinned non-oauth2 auth names the auth but carries no scopes", () => {
+    const result = resolveConnections({
+      requirements: [reqPinned(apiKeyOnlyManifest(), "pat")],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBe("pat");
+    expect(err.requiredScopes).toBeUndefined();
+  });
+});
+
+describe("translateResolutionError — connect-flow relay on the wire", () => {
+  it("emits snake_case auth_key + required_scopes on insufficient_scopes", () => {
+    const field = translateResolutionError({
+      integrationId: INTEG,
+      code: "insufficient_scopes",
+      connectionId: "conn_x",
+      authKey: "oauth",
+      missingScopes: ["user"],
+      requiredScopes: ["repo", "user"],
+      ownedByActor: true,
+      source: "fallback_auto",
+      message: "boom",
+    });
+    expect(field).toMatchObject({
+      field: `integrations.${INTEG}`,
+      code: "insufficient_scopes",
+      connection_id: "conn_x",
+      missing_scopes: ["user"],
+      required_scopes: ["repo", "user"],
+      owned_by_actor: true,
+      auth_key: "oauth",
+    });
+  });
+
+  it("emits snake_case auth_key + required_scopes on not_connected", () => {
+    const field = translateResolutionError({
+      integrationId: INTEG,
+      code: "not_connected",
+      authKey: "oauth",
+      requiredScopes: ["repo"],
+      message: "boom",
+    });
+    expect(field).toMatchObject({
+      field: `integrations.${INTEG}`,
+      code: "not_connected",
+      auth_key: "oauth",
+      required_scopes: ["repo"],
+    });
+  });
+
+  it("omits both fields on a not_connected the resolver could not pin down", () => {
+    const field = translateResolutionError({
+      integrationId: INTEG,
+      code: "not_connected",
+      message: "boom",
+    });
+    expect(field).not.toHaveProperty("auth_key");
+    expect(field).not.toHaveProperty("required_scopes");
   });
 });

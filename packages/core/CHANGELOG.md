@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ConnectionResolutionError` (`@appstrate/core/integration`) gains two optional
+  members, `authKey` and `requiredScopes`, and `ResolutionFieldError`
+  (`@appstrate/core/api-errors`) gains their wire spellings `auth_key` and
+  `required_scopes`. Both are populated on every code a connect flow can clear
+  — `not_connected`, `needs_reconnection` and `insufficient_scopes`: they name
+  the manifest auth a connect flow must target and the FULL scope set the run's
+  selected tools require on it — not the diff. The connect kickoff computes no
+  scopes of its own (`body.scopes` is its only delta source), so without the
+  relay a fresh connect or a reconnect could only request the auth's
+  `default_scopes` and the very next resolution failed again on the tools that
+  needed more. Additive and optional, so no consumer has to change; a consumer
+  that renders a connect CTA from a 412 should forward them.
+
 - **BREAKING: `ChatAttachmentRequest.permissions` is required**
   (`@appstrate/core/chat-contract`), a `ReadonlySet<string>`: the caller's
   effective permission set in the space, as the platform auth pipeline resolved

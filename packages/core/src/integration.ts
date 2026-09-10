@@ -1150,6 +1150,28 @@ export interface ConnectionResolutionError {
   /** Scopes the agent needs that the connection lacks (insufficient_scopes). */
   missingScopes?: string[];
   /**
+   * The FULL set of oauth scopes the run's selected tools require on
+   * {@link authKey} — not the diff. `insufficient_scopes` also carries
+   * {@link missingScopes} (required minus granted); `not_connected` and
+   * `needs_reconnection` end at a consent that has to stand on its own, so
+   * the full set is the only thing it can be built from. The caller forwards
+   * it as the connect kickoff's `scopes` body field, which unions it with the
+   * auth's `default_scopes` and anything already granted. Omitted when the
+   * auth is not `oauth2`, when the agent's selection requires no scopes, or
+   * when no auth key could be determined.
+   */
+  requiredScopes?: string[];
+  /**
+   * The integration manifest auth the connect flow must target
+   * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
+   * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
+   * connection's own auth) and `not_connected` (the agent dep's pinned
+   * `auth_key`, else the integration's single `oauth2` auth). Omitted on
+   * `not_connected` when the integration declares several oauth2 auths and
+   * the dep pins none — the caller must then let the user choose.
+   */
+  authKey?: string;
+  /**
    * The cascade layer that resolved the (failing) connection, when the error
    * is bound to a specific connection (`insufficient_scopes`). Lets callers
    * derive the pick status directly instead of re-comparing `connectionId`

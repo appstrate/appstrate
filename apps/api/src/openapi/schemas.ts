@@ -87,8 +87,8 @@ export const schemas = {
   // @appstrate/core/api-errors). Extracted into one component so every
   // consumer (ProblemDetail.errors, and any future readiness DTO) shares one
   // shape and can't drift. The base four (`field`/`code`/`message`/`title`)
-  // come from ValidationFieldError; the six snake_case extras are each
-  // populated only for the matching resolution `code` and so are all optional.
+  // come from ValidationFieldError; the eight snake_case extras are each
+  // populated only for the matching resolution `code`(s) and so are all optional.
   ResolutionFieldError: {
     type: "object",
     required: ["field", "code", "message"],
@@ -123,6 +123,17 @@ export const schemas = {
         type: "boolean",
         description:
           "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error).",
+      },
+      required_scopes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.",
+      },
+      auth_key: {
+        type: "string",
+        description:
+          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`).",
       },
       required_auth_key: {
         type: "string",

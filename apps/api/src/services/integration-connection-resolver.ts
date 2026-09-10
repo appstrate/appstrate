@@ -39,6 +39,7 @@ import {
 import {
   resolveEffectiveToolSelection,
   missingScopesForConnection,
+  requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
   type IntegrationManifest,
@@ -283,6 +284,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       connectionIndex: filteredIndex,
       actorUserId: input.actorUserId ?? null,
       actorEndUserId: input.actorEndUserId ?? null,
+      ...(req.requiredAuthKey !== undefined ? { requiredAuthKey: req.requiredAuthKey } : {}),
     });
 
     if (result.kind === "resolved") {
@@ -311,6 +313,13 @@ interface ResolveOneArgs {
   connectionIndex: Map<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
+  /**
+   * AFPS §4.1 `auth_key` from the agent dep — already applied as a candidate
+   * filter by {@link resolveConnections}. Threaded in so the `not_connected`
+   * branch can name the auth the connect flow must target: with nothing
+   * connected there is no row whose `authKey` could answer that.
+   */
+  requiredAuthKey?: string;
 }
 
 type ResolveOneResult =
@@ -408,8 +417,16 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   );
 
   if (candidates.length === 0) {
+    // Nothing connected, so nothing carries an `authKey` — name the auth the
+    // connect flow must target and the scopes that consent has to cover, or
+    // the user connects with `default_scopes` only and the very next
+    // resolution fails with `insufficient_scopes` on the tools that need more.
+    const authKey = connectTargetAuthKey(args);
+    const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
       code: "not_connected",
+      ...(authKey !== null ? { authKey } : {}),
+      ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
       message: `Integration '${args.integrationId}' has no connection accessible to this actor.`,
     });
   }
@@ -444,6 +461,37 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   return checkHealth(args, candidates[0]!, "fallback_auto");
 }
 
+/**
+ * Which manifest auth a fresh connect flow must target when the actor has NO
+ * connection on the integration. In order: the agent dep's pinned `auth_key`
+ * (AFPS §4.1), else the integration's single `oauth2` auth. `null` when the
+ * manifest declares several oauth2 auths (or none) and the dep pins nothing —
+ * the resolver refuses to guess and the caller lets the user choose.
+ */
+function connectTargetAuthKey(args: ResolveOneArgs): string | null {
+  if (args.requiredAuthKey !== undefined) return args.requiredAuthKey;
+  const oauthKeys = Object.entries(args.manifest.auths ?? {})
+    .filter(([, auth]) => auth.type === "oauth2")
+    .map(([key]) => key);
+  return oauthKeys.length === 1 ? oauthKeys[0]! : null;
+}
+
+/**
+ * The scopes the agent's selection requires on `authKey`, short-circuiting to
+ * none for non-oauth2 auths — the same guard `missingScopesForConnection`
+ * applies, since api_key/basic auths grant access wholesale and carry no
+ * scope catalog.
+ */
+function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
+  if (args.manifest.auths?.[authKey]?.type !== "oauth2") return [];
+  return requiredScopesForAgent({
+    manifest: args.manifest,
+    authKey,
+    agentTools: args.agentTools,
+    agentScopes: args.agentScopes,
+  });
+}
+
 function checkHealth(
   args: ResolveOneArgs,
   conn: ConnectionRow,
@@ -458,6 +506,11 @@ function checkHealth(
       // duplicate row (integration-connections.ts:721 "explicit
       // connectionId = update; no id = insert").
       connectionId: conn.id,
+      // A reconnect is a connect flow, so it carries the same relay as the
+      // other two: one consent that already covers the selected tools'
+      // scopes, instead of reconnect → insufficient_scopes → upgrade.
+      authKey: conn.authKey,
+      requiredScopes: oauthScopesForAuth(args, conn.authKey),
       message: `Connection for ${args.integrationId} needs to be reconnected.`,
     });
   }
@@ -481,7 +534,13 @@ function checkHealth(
     return errorOf(args, {
       code: "insufficient_scopes",
       connectionId: conn.id,
+      authKey: conn.authKey,
       missingScopes: missing,
+      // The FULL requirement, not the diff: the connect kickoff unions
+      // `body.scopes` with the already-granted set, and an upgrade consent
+      // that listed only the diff would drop scopes on providers that treat
+      // each authorization as the complete grant.
+      requiredScopes: oauthScopesForAuth(args, conn.authKey),
       ownedByActor,
       source,
       message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
@@ -644,6 +703,17 @@ export async function resolveRunConnectionsOrError(
 }
 
 /**
+ * The resolution codes a connect flow can clear, and so the ones that carry
+ * the `auth_key` + `required_scopes` relay: a first connect, a reconnect in
+ * place, and a scope upgrade all end at the same consent screen.
+ */
+const CONNECT_FLOW_CODES: ReadonlySet<ConnectionResolutionError["code"]> = new Set([
+  "not_connected",
+  "needs_reconnection",
+  "insufficient_scopes",
+]);
+
+/**
  * Map a `ConnectionResolutionError` to the wire-format `ResolutionFieldError`
  * (a `ValidationFieldError` plus the resolution smuggle fields) the upstream
  * 412 envelope expects.
@@ -663,6 +733,23 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     // can render a picker.
     ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
       ? { candidate_connection_ids: e.candidateConnectionIds }
+      : {}),
+    // The connect-flow relay, on every code a connect flow can clear: the
+    // kickoff computes no scopes of its own, so it forwards `required_scopes`
+    // as `body.scopes` on `/auths/{auth_key}/connect/...` and the one consent
+    // covers the tools the run actually selected. Without it a fresh connect
+    // or a reconnect can only request the auth's `default_scopes` and the
+    // very next resolution fails on insufficient_scopes. Both fields are
+    // absent when the auth is not oauth2, when the selection needs no scopes,
+    // or when the resolver could not name a single target auth (several
+    // oauth2 auths, no dep pin).
+    ...(CONNECT_FLOW_CODES.has(e.code)
+      ? {
+          ...(e.authKey ? { auth_key: e.authKey } : {}),
+          ...(e.requiredScopes && e.requiredScopes.length > 0
+            ? { required_scopes: e.requiredScopes }
+            : {}),
+        }
       : {}),
     // Smuggle scope-diff detail on insufficient_scopes so the UI can offer
     // an upgrade (own connection) or a read-only error (foreign owner).

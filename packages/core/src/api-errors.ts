@@ -54,6 +54,18 @@ export interface ResolutionFieldError extends ValidationFieldError {
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
+  /**
+   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — OAuth
+   * scopes the run's selected tools require on `auth_key`. Forward as `scopes`
+   * when starting the connect flow so the consent covers them.
+   */
+  required_scopes?: string[];
+  /**
+   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — auth key
+   * of the integration manifest the connect flow must target
+   * (`/auths/{authKey}/connect/...`).
+   */
+  auth_key?: string;
   /** `insufficient_scopes` — true when the under-scoped connection belongs to the calling actor. */
   owned_by_actor?: boolean;
   /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */

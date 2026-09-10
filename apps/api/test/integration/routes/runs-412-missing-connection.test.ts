@@ -22,7 +22,8 @@
  *         message: <human-readable>,
  *         // optional smuggles:
  *         candidateConnectionIds?: string[],
- *         connection_id?, missing_scopes?, owned_by_actor? }
+ *         connection_id?, missing_scopes?, owned_by_actor?,
+ *         auth_key?, required_scopes? }
  *     ] }
  *
  * Code path: agent-readiness.ts:151-158. Triggered by resolveRunPreflight
@@ -116,6 +117,8 @@ interface ValidationFieldError {
   connection_id?: string;
   missing_scopes?: string[];
   owned_by_actor?: boolean;
+  auth_key?: string;
+  required_scopes?: string[];
 }
 
 interface ProblemDetails {
