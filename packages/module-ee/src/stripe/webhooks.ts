@@ -3,6 +3,7 @@
 import Stripe from "stripe";
 import { z } from "zod";
 import { getStripe } from "./client.ts";
+import { cancelSubscription } from "./cancel.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
 import { and, eq, isNull, notInArray, or, type SQL } from "drizzle-orm";
@@ -131,7 +132,11 @@ function isEndedSubscription(subscription: Stripe.Subscription): boolean {
   return ENDED_SUBSCRIPTION_STATUSES.has(subscription.status);
 }
 
-/** One line for an event on a subscription this org is not on — a replacement's tail. */
+/**
+ * One line for an event on a subscription this org is not on — a replacement's tail. Log
+ * only: a duplicate that is still billing came from a Checkout, and is cancelled by its own
+ * `checkout.session.completed` ({@link reconcileSupersededCheckout}).
+ */
 function logSupersededSubscription(
   event: Stripe.Event,
   orgId: string,
@@ -158,6 +163,55 @@ function logEndedSubscription(
     subscriptionId: subscription.id,
     status: subscription.status,
   });
+}
+
+/**
+ * The subscription the org's account carries right now — null when nothing does, which
+ * after a refused attach means the org has no billing row at all (every other shape
+ * satisfies {@link attachableSubscription}).
+ */
+async function heldSubscriptionId(orgId: string): Promise<string | null> {
+  const [account] = await getEeDb()
+    .select({ stripeSubscriptionId: billingAccounts.stripeSubscriptionId })
+    .from(billingAccounts)
+    .where(eq(billingAccounts.orgId, orgId));
+  return account?.stripeSubscriptionId ?? null;
+}
+
+/**
+ * A paid checkout the org cannot be attached to, because another subscription already holds
+ * the account. `createCheckoutSession` reads state Stripe writes only once a session is
+ * PAID, so two sessions opened before either payment both pass its guard and Stripe bills
+ * both. Only one can be the org's; the loser is cancelled here, because logging it leaves a
+ * live subscription charging a customer that nothing in the product names, indefinitely.
+ *
+ * Cancels only against positive evidence of the winner — on no billing row there is no
+ * duplicate to reconcile, and ending a paid subscription on that much would be guesswork.
+ * A refused cancellation throws: the handler wrote nothing, so the dropped claim lets
+ * Stripe's redelivery retry, and a cancel of an already-gone subscription is a no-op.
+ */
+async function reconcileSupersededCheckout(
+  event: Stripe.Event,
+  orgId: string,
+  subscriptionId: string,
+): Promise<void> {
+  logSupersededSubscription(event, orgId, subscriptionId);
+
+  // No winner to point at: no billing row (nothing to reconcile against), or a row already
+  // on this very subscription (no duplicate at all) — neither justifies ending a paid one.
+  const heldId = await heldSubscriptionId(orgId);
+  if (heldId === null || heldId === subscriptionId) return;
+
+  logger.warn("Duplicate paid subscription — cancelling the one that lost the attach", {
+    eventId: event.id,
+    orgId,
+    subscriptionId,
+    heldSubscriptionId: heldId,
+  });
+
+  if (!(await cancelSubscription(subscriptionId, { orgId, reason: "superseded-checkout" }))) {
+    throw new Error(`Failed to cancel superseded subscription ${subscriptionId} for org ${orgId}`);
+  }
 }
 
 export async function handleWebhook(body: string, signature: string): Promise<void> {
@@ -310,7 +364,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         .returning({ orgId: billingAccounts.orgId });
 
       if (!linked) {
-        logSupersededSubscription(event, orgId, subscriptionId);
+        await reconcileSupersededCheckout(event, orgId, subscriptionId);
         break;
       }
 
