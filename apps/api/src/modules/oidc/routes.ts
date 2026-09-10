@@ -2087,6 +2087,7 @@ export function createOidcRouter() {
     const body = renderConsentPage({
       clientName: ctx.client.name ?? ctx.client.clientId,
       scopes,
+      clientLevel: ctx.client.level,
       action: `/api/oauth/consent${url.search}`,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
@@ -2107,6 +2108,7 @@ export function createOidcRouter() {
       const body = renderConsentPage({
         clientName: ctx.client.name ?? ctx.client.clientId,
         scopes: scope.split(/\s+/).filter(Boolean),
+        clientLevel: ctx.client.level,
         action: `/api/oauth/consent${url.search}`,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,

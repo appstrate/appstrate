@@ -17,6 +17,7 @@
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedSpaceBranding } from "../services/branding.ts";
+import type { OAuthClientLevel } from "../services/oauth-admin.ts";
 
 /**
  * Consent-screen descriptions, French (the hosted OAuth pages are FR-only).
@@ -62,6 +63,11 @@ function describeScope(scope: string): string {
 interface ConsentPageProps {
   clientName: string;
   scopes: string[];
+  /**
+   * Level of the client the user is authorizing. Decides whether the scope
+   * list is described as a limit — see `REACH_NOTICE_FR`.
+   */
+  clientLevel: OAuthClientLevel;
   /** Form action — typically `/api/oauth/consent${queryString}`. */
   action: string;
   /** CSRF token injected into the form + paired cookie. */
@@ -72,8 +78,29 @@ interface ConsentPageProps {
   error?: string;
 }
 
+/**
+ * What an `instance`-level authorization actually grants, in the user's words.
+ *
+ * The scope list above it is NOT a permission ceiling for such a client: its
+ * token carries `actor_type: "user"`, `scopesToPermissions` returns an empty
+ * set for that actor (`auth/claims.ts`) and the pipeline writes no
+ * `scopeCeiling` for it (`lib/auth-pipeline.ts`) — the request is served with
+ * whatever the user's live org role allows. Listing `mcp:invoke` and stopping
+ * there would let the user believe the app is capped at what it enumerated.
+ *
+ * `org` and `space` clients need no such notice: their tokens DO carry the
+ * scope claim as a ceiling (`dashboard_user` intersects it with the live role,
+ * `end_user` gets exactly the claim), so the list is the limit it looks like.
+ */
+const REACH_NOTICE_FR =
+  "Cette application se connecte en votre nom : dans l'organisation qu'elle cible, " +
+  "elle agit avec vos propres droits. La liste ci-dessus décrit l'accès demandé, " +
+  "elle ne le restreint pas.";
+
 export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
+  const reachNotice =
+    props.clientLevel === "instance" ? html`<p class="notice">${REACH_NOTICE_FR}</p>` : "";
   const title = `Autorisation — ${props.branding.name}`;
   const errorBlock = props.error ? html`<div class="error" role="alert">${props.error}</div>` : "";
   const bodyHtml = html`
@@ -87,6 +114,7 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
     <ul class="scopes">
       ${scopeItems}
     </ul>
+    ${reachNotice}
     <div class="actions">
       <form method="POST" action="${props.action}">
         <input type="hidden" name="_csrf" value="${props.csrfToken}" />
