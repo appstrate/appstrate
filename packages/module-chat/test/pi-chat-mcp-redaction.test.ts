@@ -27,7 +27,9 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
     // The persisted payload channels carry the placeholder, never the URL.
     expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
     // The typed offers are the single place the live URL survives.
-    expect(result.connectOffers).toEqual([{ connect_url: OFFER.connect_url }]);
+    expect(result.connectOffers).toEqual([
+      { connect_url: OFFER.connect_url, package_id: OFFER.package_id },
+    ]);
   });
 
   it("leaves payloads without connect links byte-identical, with no offers", () => {
@@ -49,12 +51,71 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
       ],
     });
     expect(result.connectOffers).toEqual([
-      { connect_url: "https://app.example.com/c/1?t=A" },
-      { connect_url: "https://app.example.com/c/2?t=B" },
+      { connect_url: "https://app.example.com/c/1?t=A", package_id: "@appstrate/gmail" },
+      { connect_url: "https://app.example.com/c/2?t=B", package_id: "@appstrate/clickup" },
     ]);
     const modelText = result.content[0]!.text;
     expect(modelText).not.toContain("t=A");
     expect(modelText).not.toContain("t=B");
+  });
+
+  // Issue #1207 phase 5: the readiness preflight mints the link itself, so the
+  // chat's `run_and_wait` failure step IS the connect card's data source — one
+  // offer per actionable integration, `expires_at` and `package_id` included,
+  // and not a byte of any link on the model channel.
+  it("splits a 412 launch failure into a fully redacted step and one offer per item", () => {
+    const result = toPiToolResult({
+      status: 412,
+      body: {
+        code: "missing_integration_connection",
+        errors: [
+          {
+            field: "integrations.@appstrate/gmail",
+            code: "not_connected",
+            message: "not connected",
+            auth_key: "primary",
+            required_scopes: ["mail.read"],
+            connect_url: "https://app.example.com/api/integrations/connect/start?token=AAA",
+            expires_at: 1_900_000_000_000,
+            package_id: "@appstrate/gmail",
+          },
+          {
+            field: "integrations.@appstrate/clickup",
+            code: "insufficient_scopes",
+            message: "missing scopes",
+            auth_key: "primary",
+            connection_id: "conn-9",
+            owned_by_actor: true,
+            connect_url: "https://app.example.com/api/integrations/connect/start?token=BBB",
+            expires_at: 1_900_000_001_000,
+            package_id: "@appstrate/clickup",
+          },
+        ],
+      },
+    });
+
+    expect(result.connectOffers).toEqual([
+      {
+        connect_url: "https://app.example.com/api/integrations/connect/start?token=AAA",
+        expires_at: 1_900_000_000_000,
+        package_id: "@appstrate/gmail",
+      },
+      {
+        connect_url: "https://app.example.com/api/integrations/connect/start?token=BBB",
+        expires_at: 1_900_000_001_000,
+        package_id: "@appstrate/clickup",
+      },
+    ]);
+    // Both tokens are gone from every model-visible channel — the whole point
+    // of minting server-side is that the model never has to handle the link.
+    const modelText = result.content[0]!.text;
+    for (const token of ["token=AAA", "token=BBB"]) {
+      expect(modelText).not.toContain(token);
+      expect(JSON.stringify(result.details)).not.toContain(token);
+    }
+    // The rest of the 412 survives intact: the model still explains WHY.
+    expect(modelText).toContain("missing_integration_connection");
+    expect(modelText).toContain("integrations.@appstrate/gmail");
   });
 });
 
@@ -68,7 +129,9 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
     expect(result.content[0]!.text).toContain("connect link hidden");
     // Details are redacted too — the URL lives only in the typed offers.
     expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
-    expect(result.connectOffers).toEqual([{ connect_url: OFFER.connect_url }]);
+    expect(result.connectOffers).toEqual([
+      { connect_url: OFFER.connect_url, package_id: OFFER.package_id },
+    ]);
   });
 
   it("merges the offers of every text block, deduping a repeated link", () => {
@@ -124,7 +187,9 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
     const result = mcpResultToPi(mcp as never);
     expect(result.details).toEqual({ ...OFFER, connect_url: expect.stringContaining("hidden") });
     expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
-    expect(result.connectOffers).toEqual([{ connect_url: OFFER.connect_url }]);
+    expect(result.connectOffers).toEqual([
+      { connect_url: OFFER.connect_url, package_id: OFFER.package_id },
+    ]);
   });
 
   // structuredContent is canonical: its offers REPLACE the text-derived ones

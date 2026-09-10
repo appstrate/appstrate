@@ -87,7 +87,7 @@ export const schemas = {
   // @appstrate/core/api-errors). Extracted into one component so every
   // consumer (ProblemDetail.errors, and any future readiness DTO) shares one
   // shape and can't drift. The base four (`field`/`code`/`message`/`title`)
-  // come from ValidationFieldError; the eight snake_case extras are each
+  // come from ValidationFieldError; the eleven snake_case extras are each
   // populated only for the matching resolution `code`(s) and so are all optional.
   ResolutionFieldError: {
     type: "object",
@@ -145,6 +145,20 @@ export const schemas = {
         items: { type: "string" },
         description:
           "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
+      },
+      connect_url: {
+        type: "string",
+        format: "uri",
+        description:
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`x-appstrate-connect-offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+      },
+      expires_at: {
+        type: "integer",
+        description: "Absolute expiry of `connect_url`, epoch ms.",
+      },
+      package_id: {
+        type: "string",
+        description: "Integration package id `connect_url` connects (`@scope/name`).",
       },
     },
   },

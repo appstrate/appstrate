@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New export `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`), the request header `x-appstrate-connect-offers`, plus the matching `connectOffers?: boolean` option on `RunAndWaitClientOptions`. Set on the LAUNCH request only (never the poll), it asks the run-kickoff routes to mint a hosted-connect session per actor-actionable item of a `missing_integration_connection` 412 and return it as `connect_url` on that item, so a chat surface renders the connect card straight off the error with no second call. A minted link is a bearer capability to create a connection as the calling actor: only a caller that renders the card itself, or hands the link to the human who is that actor, may opt in — a caller whose payload a model reads must not.
+
 - New action `read-all` on the `runs` resource of `CoreResources` (`@appstrate/core/permissions`), hence the new permission string `runs:read-all`. `runs:read` narrows to the runs the principal launched — its own manual runs and its own schedules' — and `runs:read-all` is the space-wide view over every run, colleagues', end-users' and rows with no actor. A guard written `requireCorePermission("runs", "read")` keeps compiling and now gates the narrower thing; a module that wants the supervision view must ask for `read-all`.
 
 - New space-role preset `runner` in `SPACE_ROLE_PRESETS` (`@appstrate/core/permissions`), between `operator` and `viewer`: launch agents without reading them. Two consequences for a module that names presets. Any exhaustive `Record<SpaceRolePreset, …>` gains a fifth key — a compile error until it does. And the tuple stops being a strength ordering: `runner` and `viewer` are incomparable (a runner launches what it cannot read, a viewer reads what it cannot launch), so `SPACE_ROLE_PRESETS` is a display order and a `permissionsContribution` `presets` list is upward-closed under grant containment, not tuple position — naming `viewer` no longer implies `runner`, and naming `runner` requires `admin`, `builder` and `operator`.
@@ -22,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
 
 ### Changed
+
+- `ResolutionFieldError` (`@appstrate/core/api-errors`) gains three optional
+  members — `connect_url`, `expires_at` and `package_id` — carrying a
+  ready-to-open hosted-connect link for that item. Populated only on a
+  run-kickoff 412 whose caller sent `RUN_CONNECT_OFFERS_HEADER`, and only on
+  the items an oauth2 connect flow can clear for the calling actor. The link is
+  single-use and short-lived; a consumer that sees one should open it (or
+  render it) rather than call the connect kickoff, which would mint a second.
 
 - `ConnectionResolutionError` (`@appstrate/core/integration`) gains two optional
   members, `authKey` and `requiredScopes`, and `ResolutionFieldError`

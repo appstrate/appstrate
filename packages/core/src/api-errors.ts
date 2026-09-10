@@ -72,6 +72,22 @@ export interface ResolutionFieldError extends ValidationFieldError {
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
+  /**
+   * Ready-to-open hosted-connect link for THIS item — the remedy carried by the
+   * error itself, so nothing has to be called to obtain it (RFC 6750 pattern).
+   *
+   * Present only on a run-kickoff 412 whose caller opted in
+   * (`RUN_CONNECT_OFFERS_HEADER`, see `@appstrate/core/run-and-wait-client`),
+   * and only on the items an oauth2 connect flow can clear for the calling
+   * actor. Single-use and short-lived (`expires_at`): open it, never store it.
+   * When it is present, do NOT call the connect kickoff — that mints a second
+   * link the user does not need.
+   */
+  connect_url?: string;
+  /** Absolute expiry (epoch ms) of `connect_url`. */
+  expires_at?: number;
+  /** Integration package id `connect_url` connects (`@scope/name`). */
+  package_id?: string;
 }
 
 // ---------------------------------------------------------------------------

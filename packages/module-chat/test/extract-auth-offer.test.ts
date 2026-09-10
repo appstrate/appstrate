@@ -35,6 +35,22 @@ describe("extractAuthOffers", () => {
     ).toEqual([{ authUrl: "https://app/c/1", state: "st-1" }, { authUrl: "https://app/c/2" }]);
   });
 
+  // Issue #1207 phase 5: a run-kickoff 412 item names the integration it
+  // connects, and the card needs that to show the right icon and name and to
+  // claim the resume append.
+  it("surfaces the offer's package_id as packageId", () => {
+    expect(
+      extractAuthOffers({
+        connectOffers: [
+          { ...OFFER, package_id: "@appstrate/gmail", expires_at: 1_900_000_000_000 },
+        ],
+      }),
+    ).toEqual([{ authUrl: OFFER.connect_url, packageId: "@appstrate/gmail" }]);
+    // Absent, not empty: an offer minted by a surface that names no package
+    // leaves the card on its `packageId`-less path.
+    expect(extractAuthOffers({ connectOffers: [OFFER] })).toEqual([{ authUrl: OFFER.connect_url }]);
+  });
+
   it("drops the invalid entries of a list, keeping the rest (issue #906)", () => {
     expect(
       extractAuthOffers({

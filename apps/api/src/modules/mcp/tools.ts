@@ -999,6 +999,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       headers: dispatchHeaders,
       fetch: dispatchFetch,
       signal,
+      // The MCP client is a human's own client (the chat surface, an IDE): a
+      // `connect_url` on the 412 is the link that human opens to connect their
+      // own account, which is exactly what the tool's failure text tells it to
+      // do rather than calling anything further.
+      connectOffers: true,
     });
     if (!launched.ok) {
       // A launch HTTP failure (payload carries a numeric `status`) reached the

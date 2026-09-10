@@ -52,6 +52,7 @@ import {
 } from "../services/inline-run.ts";
 import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
+import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
@@ -311,6 +312,8 @@ export function createRunsRouter() {
           spaceId: c.get("spaceId"),
           orgId,
           actor,
+          // Opt-in only: absent header ⇒ null ⇒ a 412 with no connect link.
+          connectOffers: connectOfferPolicyFromRequest(c),
           connectionOverrides: connectionOverrides ?? null,
           // Same overrides handed to `prepareAndExecuteRun` below, so the
           // preflight seeds the manifests the kickoff will freeze.
@@ -684,6 +687,7 @@ export function createRunsRouter() {
         spaceId,
         actor,
         body,
+        connectOffers: connectOfferPolicyFromRequest(c),
         authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
       });
 

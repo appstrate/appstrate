@@ -41,6 +41,10 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 
 const app = getTestApp();
 
@@ -53,6 +57,9 @@ interface ValidationFieldError {
   title?: string;
   message: string;
   candidate_connection_ids?: string[];
+  connect_url?: string;
+  expires_at?: number;
+  package_id?: string;
 }
 
 interface ProblemDetails {
@@ -226,6 +233,104 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       );
 
       expect(await db.select().from(runs)).toHaveLength(0);
+    });
+  });
+
+  // ─── Connect-offer relay (#1207) ───────────
+  //
+  // The inline route is the one the chat's `run_and_wait` actually launches
+  // through, so the relay has to reach the fail-fast preflight and not just the
+  // cataloged-agent route. `/inline/validate` is the deliberate exception: it
+  // launches nothing, and a dry run must not burn a single-use capability.
+  describe("connect_url relay", () => {
+    const OAUTH_INTEGRATION = "@inlineconn/oauth-svc";
+
+    function oauthManifest() {
+      return localIntegrationManifest({
+        name: OAUTH_INTEGRATION,
+        serverName: `${OAUTH_INTEGRATION}-server`,
+        version: "1.0.0",
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationEndpoint: "https://provider.example.com/authorize",
+            tokenEndpoint: "https://provider.example.com/token",
+            defaultScopes: ["base"],
+          },
+        },
+        tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+      }) as unknown as Record<string, unknown>;
+    }
+
+    async function seedOauthIntegration() {
+      await seedPackage({
+        id: OAUTH_INTEGRATION,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: oauthManifest(),
+      });
+      await seedPackageVersion({
+        packageId: OAUTH_INTEGRATION,
+        version: "1.0.0",
+        manifest: oauthManifest(),
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
+    }
+
+    async function launch(path: string, headers: Record<string, string>) {
+      return app.request(path, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({
+          manifest: inlineManifest([OAUTH_INTEGRATION]),
+          prompt: "do the thing",
+        }),
+      });
+    }
+
+    it("carries a connect_url on the launch route when the caller opts in", async () => {
+      await seedOauthIntegration();
+
+      const res = await launch("/api/runs/inline", { [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      expect(res.status).toBe(412);
+      const body = (await res.json()) as ProblemDetails;
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.connect_url).toStartWith("http");
+      expect(err.package_id).toBe(OAUTH_INTEGRATION);
+      expect(err.expires_at).toBeGreaterThan(Date.now());
+
+      // Refused before any durable side effect, link or no link.
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
+
+    it("mints nothing on the launch route without the header", async () => {
+      await seedOauthIntegration();
+
+      const res = await launch("/api/runs/inline", {});
+      expect(res.status).toBe(412);
+      const body = (await res.json()) as ProblemDetails;
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.connect_url).toBeUndefined();
+      expect(err.expires_at).toBeUndefined();
+      expect(err.package_id).toBeUndefined();
+    });
+
+    it("never mints on /inline/validate, header or not", async () => {
+      await seedOauthIntegration();
+
+      const headerSets: Record<string, string>[] = [{}, { [RUN_CONNECT_OFFERS_HEADER]: "1" }];
+      for (const headers of headerSets) {
+        const res = await launch("/api/runs/inline/validate", headers);
+        // Accumulate mode answers `validation_failed` (400), not the launch
+        // route's 412 envelope — the readiness entries ride the same `errors[]`.
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as ProblemDetails;
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.code).toBe("not_connected");
+        expect(err.connect_url).toBeUndefined();
+      }
     });
   });
 });

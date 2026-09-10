@@ -80,6 +80,12 @@ export interface ConnectOffer {
   /** Porte B (the headless OAuth2 start) pairs `auth_url` with a correlation `state`. */
   state?: string;
   expires_at?: number;
+  /**
+   * Integration the link connects (`@scope/name`). A run-kickoff 412 item
+   * (#1207) pairs it with `connect_url`; the card uses it for the integration's
+   * icon and display name, and to claim the resume append.
+   */
+  package_id?: string;
 }
 
 interface SplitResult {
@@ -123,10 +129,12 @@ function captureOffer(sink: OfferSink, obj: Record<string, unknown>, url: string
 function offerFromNode(obj: Record<string, unknown>, url: string): ConnectOffer {
   const state = typeof obj.state === "string" ? obj.state : undefined;
   const expiresAt = typeof obj.expires_at === "number" ? obj.expires_at : undefined;
+  const packageId = typeof obj.package_id === "string" ? obj.package_id : undefined;
   return {
     connect_url: url,
     ...(state !== undefined ? { state } : {}),
     ...(expiresAt !== undefined ? { expires_at: expiresAt } : {}),
+    ...(packageId !== undefined ? { package_id: packageId } : {}),
   };
 }
 
@@ -266,5 +274,6 @@ function asConnectOffer(value: unknown): ConnectOffer | null {
     connect_url: connectUrl,
     ...(typeof o.state === "string" ? { state: o.state } : {}),
     ...(typeof o.expires_at === "number" ? { expires_at: o.expires_at } : {}),
+    ...(typeof o.package_id === "string" ? { package_id: o.package_id } : {}),
   };
 }

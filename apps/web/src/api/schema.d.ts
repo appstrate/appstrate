@@ -5705,6 +5705,15 @@ export interface components {
             required_auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
             available_auth_keys?: string[];
+            /**
+             * Format: uri
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`x-appstrate-connect-offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             */
+            connect_url?: string;
+            /** @description Absolute expiry of `connect_url`, epoch ms. */
+            expires_at?: number;
+            /** @description Integration package id `connect_url` connects (`@scope/name`). */
+            package_id?: string;
         };
         /** @description A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle. */
         RoleObject: {
@@ -11524,9 +11533,13 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
-                    /** Format: uuid */
+                    /**
+                     * Format: uuid
+                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
+                     */
                     connection_id?: string;
                 };
             };
@@ -11572,11 +11585,12 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect/upgrade an existing connection in place.
+                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
                      */
                     connection_id?: string;
                 };

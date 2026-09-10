@@ -25,6 +25,7 @@
  * Throws `ApiError` on any failure (same shape the routes already emit).
  */
 import type { Actor } from "../lib/actor.ts";
+import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import type { AgentManifest } from "../types/index.ts";
 import {
   ApiError,
@@ -72,6 +73,14 @@ export async function runInlinePreflight(params: {
   mode?: Mode;
   /** The transport must authorize caller-selected sources before readiness reads their metadata. */
   authorizeDependencies: (manifest: AgentManifest) => Promise<void>;
+  /**
+   * Run-kickoff connect-link relay (#1207). Honoured on the fail-fast branch
+   * only: that is the one that throws the 412 a caller acts on. Accumulate mode
+   * serves `POST /api/runs/inline/validate`, a dry run that launches nothing —
+   * minting a single-use capability for a report nobody connects from would
+   * burn TTL and hand out a link the caller never asked to open.
+   */
+  connectOffers?: ConnectOfferPolicy | null;
 }): Promise<InlineRunPreflightResult> {
   const { orgId, spaceId, actor, body, mode = "fail-fast" } = params;
 
@@ -181,6 +190,7 @@ export async function runInlinePreflight(params: {
         spaceId,
         actor,
         ...(runOverrides ? { runOverrides } : {}),
+        ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
       });
     } else {
       push(

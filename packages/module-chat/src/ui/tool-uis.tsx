@@ -412,7 +412,27 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // emits the run id as a preliminary result; the progress panel is mounted for
 // the call's whole life (launch failures render inside it) — no generic-card
 // fallback swap.
+//
+// A launch refused for a missing connection (412) carries a ready-to-open
+// `connect_url` per actionable integration (#1207), so the connect cards render
+// UNDER the run panel and the user clicks straight through — the model is never
+// asked to kick a connect flow off, and never sees the link. Zero offers (every
+// other outcome, including a successful run) adds nothing: unlike the
+// invoke_operation connect branch there is no placeholder card here, because the
+// run panel already holds the block's geometry.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
-  render: (props: AnyToolProps) => <RunLaunchCard {...props} />,
+  render: (props: AnyToolProps) => (
+    <>
+      <RunLaunchCard {...props} />
+      {extractAuthOffers(props.result).map((offer) => (
+        <OAuthConnectCard
+          key={offer.authUrl}
+          authUrl={offer.authUrl}
+          state={offer.state}
+          packageId={offer.packageId}
+        />
+      ))}
+    </>
+  ),
 });

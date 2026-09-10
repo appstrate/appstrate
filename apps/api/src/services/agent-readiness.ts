@@ -22,6 +22,8 @@ import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
+import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
+import { attachConnectOffers } from "./connect/preflight-connect-offer.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface AgentReadinessParams {
@@ -55,6 +57,15 @@ interface AgentReadinessParams {
    * and the spawn resolver dedupe the SELECT + Zod parse per integration.
    */
   manifestCache?: IntegrationManifestCache;
+  /**
+   * Opt-in relay for the run-kickoff connect link (#1207). Non-null only when
+   * the request carried `RUN_CONNECT_OFFERS_HEADER`; it then decides whether
+   * the 412 items an oauth2 connect flow can clear also carry a ready-to-open
+   * `connect_url`. Read by the THROWING wrapper only —
+   * `collectAgentReadinessErrors` is the dashboard's advisory DTO source and
+   * stays link-free.
+   */
+  connectOffers?: ConnectOfferPolicy | null;
 }
 
 /**
@@ -266,12 +277,25 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
         })),
       });
     }
+    // Mint the connect links LAST — strictly after the webhook projection
+    // above, which must never carry a bearer capability off-platform, and only
+    // for a caller that opted in and holds `integrations:connect`.
+    const responseErrors =
+      params.connectOffers && params.actor
+        ? await attachConnectOffers({
+            errors: integrationErrors,
+            scope: { orgId: params.orgId, spaceId: params.spaceId },
+            actor: params.actor,
+            policy: params.connectOffers,
+            ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+          })
+        : integrationErrors;
     throw new ApiError({
       status: 412,
       code: "missing_integration_connection",
       title: "Missing Integration Connection",
       detail: first.message,
-      errors: integrationErrors,
+      errors: responseErrors,
     });
   }
 

@@ -43,6 +43,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 
 const app = getTestApp();
 
@@ -119,6 +120,9 @@ interface ValidationFieldError {
   owned_by_actor?: boolean;
   auth_key?: string;
   required_scopes?: string[];
+  connect_url?: string;
+  expires_at?: number;
+  package_id?: string;
 }
 
 interface ProblemDetails {
@@ -738,5 +742,101 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       const body = (await res.json()) as ProblemDetails;
       expect(body.code).not.toBe("missing_integration_connection");
     }
+  });
+
+  // ─── Connect-offer relay (#1207) ───────────
+  //
+  // The preflight mints the hosted-connect session itself and hands it back on
+  // the error item, so a chat surface renders the connect card straight off the
+  // 412 with zero model action. Strictly opt-in: the header is what separates a
+  // caller that renders the card from one whose payload a model reads.
+  describe("connect_url relay", () => {
+    const OAUTH_INTEGRATION = "@runorg/oauth-svc";
+
+    async function seedOauthIntegration() {
+      await seedPackage({
+        id: OAUTH_INTEGRATION,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest({
+          name: OAUTH_INTEGRATION,
+          serverName: MCP_SERVER,
+          version: "1.0.0",
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://provider.example.com/authorize",
+              tokenEndpoint: "https://provider.example.com/token",
+              defaultScopes: ["base"],
+            },
+          },
+          tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+        }) as unknown as Record<string, unknown>,
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: buildAgentManifest([OAUTH_INTEGRATION]),
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    }
+
+    async function launch(headers: Record<string, string>): Promise<ProblemDetails> {
+      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(412);
+      return (await res.json()) as ProblemDetails;
+    }
+
+    it("carries a ready-to-open connect_url on not_connected when the caller opts in", async () => {
+      await seedOauthIntegration();
+      const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.connect_url).toStartWith("http");
+      expect(err.package_id).toBe(OAUTH_INTEGRATION);
+      expect(err.expires_at).toBeGreaterThan(Date.now());
+      // The link targets the hosted dispatcher, not a provider screen — the
+      // scope union and the oauth kickoff both happen at redemption.
+      expect(new URL(err.connect_url!).pathname).toBe("/api/integrations/connect/start");
+    });
+
+    it("mints nothing without the header — the ordinary 412 is unchanged", async () => {
+      await seedOauthIntegration();
+      const body = await launch({});
+
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.connect_url).toBeUndefined();
+      expect(err.expires_at).toBeUndefined();
+      expect(err.package_id).toBeUndefined();
+      // The relay phase 1 shipped is untouched either way.
+      expect(err.auth_key).toBe("primary");
+    });
+
+    it("mints nothing for a non-oauth2 auth even with the header", async () => {
+      // The hosted form needs a human to type a secret; a link that opens a
+      // blank form is not something the card can present as the remedy.
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: buildAgentManifest([INTEGRATION]),
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+      await seedIntegration(INTEGRATION);
+
+      const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.connect_url).toBeUndefined();
+    });
   });
 });

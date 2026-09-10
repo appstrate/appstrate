@@ -19,6 +19,8 @@ import { readConnectOffers } from "../connect-offer.ts";
 export interface AuthOffer {
   authUrl: string;
   state?: string;
+  /** Integration the link connects — drives the card's icon, name and resume claim. */
+  packageId?: string;
 }
 
 /** Payload the connect surfaces broadcast — defined in `@appstrate/core`. */
@@ -98,5 +100,6 @@ export function extractAuthOffers(result: unknown): AuthOffer[] {
   return readConnectOffers(result).map((offer) => ({
     authUrl: offer.connect_url,
     ...(offer.state ? { state: offer.state } : {}),
+    ...(offer.package_id ? { packageId: offer.package_id } : {}),
   }));
 }

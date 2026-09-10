@@ -323,6 +323,11 @@ function makeRunAndWaitExtension(
           headers: ctx.headers,
           fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
+          // The chat is one of the two surfaces allowed to hold a connect
+          // capability: a 412 item carrying `connect_url` is redacted out of
+          // the model channel by `splitConnectPayload` and rendered as a
+          // connect card the human clicks — the link never reaches the model.
+          connectOffers: true,
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,
             chatSessionId: ctx.turnBudget.chatSessionId,
