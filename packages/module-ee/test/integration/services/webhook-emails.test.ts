@@ -7,6 +7,7 @@ import {
   resetStripeMock,
   generateWebhookEvent,
   setSubscriptionResponse,
+  invoiceEventObject,
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { initBillingEmail } from "../../../src/emails/send.ts";
@@ -24,7 +25,7 @@ const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
  */
 describe("webhook billing emails", () => {
   const orgId = "00000000-0000-4000-a000-000000000050";
-  const sentEmails: Array<{ to: string; subject: string }> = [];
+  const sentEmails: Array<{ to: string; subject: string; html: string }> = [];
 
   beforeEach(async () => {
     await truncateEeTables();
@@ -32,8 +33,8 @@ describe("webhook billing emails", () => {
     sentEmails.length = 0;
 
     initBillingEmail({
-      sendMail: async (to, subject) => {
-        sentEmails.push({ to, subject });
+      sendMail: async (to, subject, html) => {
+        sentEmails.push({ to, subject, html });
       },
       getRecipients: async () => ["billing@test.com"],
       getOrgName: async () => null,
@@ -105,18 +106,14 @@ describe("webhook billing emails", () => {
         id: "evt_email_invoice_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_email_001",
             customer: "cus_email_inv_001",
-            billing_reason: "subscription_cycle",
-            amount_paid: 2900,
-            hosted_invoice_url: "https://invoice.stripe.com/i/test",
-            parent: {
-              subscription_details: {
-                subscription: "sub_email_inv_001",
-              },
-            },
-          },
+            subscription: "sub_email_inv_001",
+            billingReason: "subscription_cycle",
+            amountPaid: 2900,
+            hostedInvoiceUrl: "https://invoice.stripe.com/i/test",
+          }),
         },
       });
 
@@ -218,13 +215,14 @@ describe("webhook billing emails", () => {
         id: "evt_email_fail_001",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_email_fail_001",
             customer: "cus_email_fail_001",
-            billing_reason: "subscription_cycle",
-            amount_due: 2900,
-            attempt_count: 2,
-          },
+            subscription: null,
+            billingReason: "subscription_cycle",
+            amountDue: 2900,
+            attemptCount: 2,
+          }),
         },
       });
 
@@ -252,13 +250,63 @@ describe("webhook billing emails", () => {
         id: "evt_email_fail_002",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_email_fail_002",
             customer: "cus_email_fail_002",
-            billing_reason: "subscription_cycle",
-            amount_due: 2900,
-            attempt_count: 2,
-            parent: { subscription_details: { subscription: "sub_email_old" } },
+            subscription: "sub_email_old",
+            billingReason: "subscription_cycle",
+            amountDue: 2900,
+            attemptCount: 2,
+          }),
+        },
+      });
+
+      await handleWebhook(body, signature);
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(sentEmails).toHaveLength(0);
+    });
+  });
+
+  describe("customer.source.expiring", () => {
+    it("renders the real expiry when the source is a card", async () => {
+      await seedBillingAccount({ orgId, stripeCustomerId: "cus_expiring_001" });
+
+      const { body, signature } = signedEvent({
+        id: "evt_email_expiring_001",
+        type: "customer.source.expiring",
+        data: {
+          object: {
+            id: "card_expiring_001",
+            object: "card",
+            customer: "cus_expiring_001",
+            last4: "4242",
+            exp_month: 3,
+            exp_year: 2027,
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(sentEmails).toHaveLength(1);
+      expect(sentEmails[0]?.html).toContain("03/27");
+      expect(sentEmails[0]?.html).not.toContain("undefined");
+    });
+
+    it("sends nothing for a non-card source, which carries no expiry", async () => {
+      await seedBillingAccount({ orgId, stripeCustomerId: "cus_expiring_002" });
+
+      const { body, signature } = signedEvent({
+        id: "evt_email_expiring_002",
+        type: "customer.source.expiring",
+        data: {
+          object: {
+            id: "src_expiring_002",
+            object: "source",
+            customer: "cus_expiring_002",
+            type: "card",
           },
         },
       });
@@ -276,11 +324,12 @@ describe("webhook billing emails", () => {
         id: "evt_email_unknown_001",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_unknown_001",
             customer: "cus_nonexistent",
-            billing_reason: "subscription_cycle",
-          },
+            subscription: null,
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
@@ -294,8 +343,8 @@ describe("webhook billing emails", () => {
   describe("sends to every billing recipient", () => {
     it("sends one email per recipient", async () => {
       initBillingEmail({
-        sendMail: async (to, subject) => {
-          sentEmails.push({ to, subject });
+        sendMail: async (to, subject, html) => {
+          sentEmails.push({ to, subject, html });
         },
         getRecipients: async () => ["billing@test.com", "cfo@test.com"],
         getOrgName: async () => null,

@@ -3,6 +3,7 @@
 import Stripe from "stripe";
 import { z } from "zod";
 import { getStripe } from "./client.ts";
+import { cancelSubscription } from "./cancel.ts";
 import { getEeDb } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
 import { and, eq, isNull, notInArray, or, type SQL } from "drizzle-orm";
@@ -10,6 +11,7 @@ import { logger } from "../logger.ts";
 import {
   getPlans,
   isPlanId,
+  ENDED_SUBSCRIPTION_STATUSES,
   HELD_SUBSCRIPTION_STATUSES,
   type Plans,
   type PlanDefinition,
@@ -108,6 +110,10 @@ function unattachedAccount(orgId: string): SQL {
 /**
  * The predicate for `checkout.session.completed` and `invoice.paid`: they carry
  * AUTHORITATIVE data and also write the account already carrying that subscription.
+ *
+ * `noHeldSubscription()` deliberately matches a cancelled account, so this predicate alone
+ * does NOT prove the subscription is alive — callers MUST first gate on the live object
+ * from Stripe ({@link isEndedSubscription}), or a late event re-attaches a dead id.
  */
 function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   return and(
@@ -116,7 +122,21 @@ function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   )!;
 }
 
-/** One line for an event on a subscription this org is not on — a replacement's tail. */
+/**
+ * A subscription Stripe will never bill again. The event payload cannot decide this — it
+ * freezes at emission and Stripe guarantees no delivery order, so a `checkout.session.completed`
+ * delivered after the cancellation still describes a live subscription. Only the retrieved
+ * object does, which is why both attach paths retrieve before granting entitlements.
+ */
+function isEndedSubscription(subscription: Stripe.Subscription): boolean {
+  return ENDED_SUBSCRIPTION_STATUSES.has(subscription.status);
+}
+
+/**
+ * One line for an event on a subscription this org is not on — a replacement's tail. Log
+ * only: a duplicate that is still billing came from a Checkout, and is cancelled by its own
+ * `checkout.session.completed` ({@link reconcileSupersededCheckout}).
+ */
 function logSupersededSubscription(
   event: Stripe.Event,
   orgId: string,
@@ -128,6 +148,70 @@ function logSupersededSubscription(
     orgId,
     subscriptionId,
   });
+}
+
+/** One line for an attach refused because Stripe no longer holds the subscription. */
+function logEndedSubscription(
+  event: Stripe.Event,
+  orgId: string,
+  subscription: Stripe.Subscription,
+): void {
+  logger.warn("Stripe event skipped — subscription has ended, no entitlement granted", {
+    eventId: event.id,
+    type: event.type,
+    orgId,
+    subscriptionId: subscription.id,
+    status: subscription.status,
+  });
+}
+
+/**
+ * The subscription the org's account carries right now — null when nothing does, which
+ * after a refused attach means the org has no billing row at all (every other shape
+ * satisfies {@link attachableSubscription}).
+ */
+async function heldSubscriptionId(orgId: string): Promise<string | null> {
+  const [account] = await getEeDb()
+    .select({ stripeSubscriptionId: billingAccounts.stripeSubscriptionId })
+    .from(billingAccounts)
+    .where(eq(billingAccounts.orgId, orgId));
+  return account?.stripeSubscriptionId ?? null;
+}
+
+/**
+ * A paid checkout the org cannot be attached to, because another subscription already holds
+ * the account. `createCheckoutSession` reads state Stripe writes only once a session is
+ * PAID, so two sessions opened before either payment both pass its guard and Stripe bills
+ * both. Only one can be the org's; the loser is cancelled here, because logging it leaves a
+ * live subscription charging a customer that nothing in the product names, indefinitely.
+ *
+ * Cancels only against positive evidence of the winner — on no billing row there is no
+ * duplicate to reconcile, and ending a paid subscription on that much would be guesswork.
+ * A refused cancellation throws: the handler wrote nothing, so the dropped claim lets
+ * Stripe's redelivery retry, and a cancel of an already-gone subscription is a no-op.
+ */
+async function reconcileSupersededCheckout(
+  event: Stripe.Event,
+  orgId: string,
+  subscriptionId: string,
+): Promise<void> {
+  logSupersededSubscription(event, orgId, subscriptionId);
+
+  // No winner to point at: no billing row (nothing to reconcile against), or a row already
+  // on this very subscription (no duplicate at all) — neither justifies ending a paid one.
+  const heldId = await heldSubscriptionId(orgId);
+  if (heldId === null || heldId === subscriptionId) return;
+
+  logger.warn("Duplicate paid subscription — cancelling the one that lost the attach", {
+    eventId: event.id,
+    orgId,
+    subscriptionId,
+    heldSubscriptionId: heldId,
+  });
+
+  if (!(await cancelSubscription(subscriptionId, { orgId, reason: "superseded-checkout" }))) {
+    throw new Error(`Failed to cancel superseded subscription ${subscriptionId} for org ${orgId}`);
+  }
 }
 
 export async function handleWebhook(body: string, signature: string): Promise<void> {
@@ -243,6 +327,27 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
 
+      // The session froze at completion; Stripe may have cancelled the subscription since
+      // (deliveries are unordered). Retrieve the live object BEFORE granting: throwing on
+      // failure deletes the claim so Stripe retries, as on the invoice.paid path — the
+      // grant is billing-critical and must not proceed on unverified state.
+      let checkoutSubscription: Stripe.Subscription;
+      try {
+        checkoutSubscription = await getStripe().subscriptions.retrieve(subscriptionId);
+      } catch (err) {
+        logger.error("Failed to retrieve subscription for checkout attach", {
+          eventId: event.id,
+          subscriptionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+
+      if (isEndedSubscription(checkoutSubscription)) {
+        logEndedSubscription(event, orgId, checkoutSubscription);
+        break;
+      }
+
       const [linked] = await db
         .update(billingAccounts)
         .set({
@@ -250,14 +355,16 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           creditQuota: plan.creditQuota,
           stripeCustomerId: customerId,
           stripeSubscriptionId: subscriptionId,
-          subscriptionStatus: "active",
+          // The live status, not a hardcoded "active": a checkout that opens a trial is
+          // `trialing`, and the row must not claim a state Stripe does not hold.
+          subscriptionStatus: checkoutSubscription.status,
           updatedAt: new Date(),
         })
         .where(attachableSubscription(orgId, subscriptionId))
         .returning({ orgId: billingAccounts.orgId });
 
       if (!linked) {
-        logSupersededSubscription(event, orgId, subscriptionId);
+        await reconcileSupersededCheckout(event, orgId, subscriptionId);
         break;
       }
 
@@ -271,19 +378,10 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // the periodic resync repairs a miss).
       await syncOrgStorageEntitlement(orgId);
 
-      // Email: subscription confirmation — retrieve real period end from Stripe
-      let checkoutPeriodEnd: Date | null = null;
-      try {
-        const sub = await getStripe().subscriptions.retrieve(subscriptionId);
-        checkoutPeriodEnd = subscriptionPeriodEnd(sub);
-      } catch {
-        // Best-effort — send email without precise date if Stripe call fails
-      }
-
       sendBillingEmail(orgId, "subscription-confirmed", {
         planName: plan.name,
         price: plan.monthlyPrice,
-        periodEnd: (checkoutPeriodEnd ?? new Date()).toISOString(),
+        periodEnd: (subscriptionPeriodEnd(checkoutSubscription) ?? new Date()).toISOString(),
         locale: "fr",
       });
       break;
@@ -393,6 +491,13 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       }
       const { orgId } = metadata;
 
+      // Same guard as the checkout attach: an invoice settled after the cancellation must
+      // not re-attach the dead subscription with a fresh quota.
+      if (isEndedSubscription(subscription)) {
+        logEndedSubscription(event, orgId, subscription);
+        break;
+      }
+
       const plan = planForSubscription(subscription, plans);
       if (!plan) {
         logger.warn("No plan matches subscription price, skipping budget allocation", {
@@ -467,8 +572,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       }
       const { orgId } = subMetadata;
 
-      const previousAttributes = (event.data as { previous_attributes?: Record<string, unknown> })
-        .previous_attributes;
+      const previousAttributes = event.data.previous_attributes;
       const itemPeriodEnd = subscriptionPeriodEnd(subscription);
       const newPlan = planForSubscription(subscription, plans);
 
@@ -479,7 +583,19 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         updatedAt: new Date(),
       };
       if (itemPeriodEnd) updates.periodEnd = itemPeriodEnd;
-      if (newPlan) updates.planId = newPlan.id;
+      if (newPlan) {
+        updates.planId = newPlan.id;
+        // The plan and its ceiling are ONE fact: `changeSubscriptionPlan` deliberately
+        // writes neither, and `create_prorations` bills on the next cycle, so no
+        // `invoice.paid` follows a plan switch to repair a stale quota.
+        //
+        // `creditsUsed` is deliberately left alone — consumption already billed is never
+        // erased by a plan move (same rule as invoice.paid outside `subscription_cycle`).
+        // An upgrade therefore frees exactly the added headroom, and a downgrade below
+        // current consumption leaves the account over its ceiling until the renewal
+        // invoice resets the counter.
+        updates.creditQuota = newPlan.creditQuota;
+      }
 
       // Org from metadata (ordering-independent), written only if the org is still ON this
       // subscription. Nothing here ATTACHES one, so an `updated` naming another is a tail.
@@ -527,9 +643,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         "items" in previousAttributes &&
         !subscription.cancel_at_period_end
       ) {
-        const previousPriceId = (
-          previousAttributes.items as { data?: Array<{ price?: { id?: string } }> }
-        )?.data?.[0]?.price?.id;
+        const previousPriceId = previousAttributes.items?.data[0]?.price.id;
         const oldPlan = Object.values(plans).find((p) => p?.stripePriceId === previousPriceId);
 
         if (oldPlan && oldPlan.id !== newPlan.id) {
@@ -656,8 +770,18 @@ async function processEvent(event: Stripe.Event): Promise<void> {
     }
 
     case "customer.source.expiring": {
-      // Pre-dunning: card expiring soon (sent ~30 days before expiry by Stripe)
-      const source = event.data.object as Stripe.Card;
+      // Pre-dunning: card expiring soon (sent ~30 days before expiry by Stripe).
+      // The payload is a `CustomerSource` — `Account | BankAccount | Card | Source`.
+      // Only a `Card` carries `exp_month` / `exp_year`; the other members have no
+      // expiry to announce, so there is nothing to send.
+      const source = event.data.object;
+      if (source.object !== "card") {
+        logger.debug("Source expiring is not a card — no email", {
+          eventId: event.id,
+          sourceObject: source.object,
+        });
+        break;
+      }
       const expiringCustomerId = refId(source.customer);
 
       if (expiringCustomerId) {
@@ -668,7 +792,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
 
         if (expiringAccount) {
           sendBillingEmail(expiringAccount.orgId, "card-expiring", {
-            cardLast4: source.last4 ?? "????",
+            cardLast4: source.last4,
             expiryMonth: `${String(source.exp_month).padStart(2, "0")}/${String(source.exp_year).slice(-2)}`,
             updateUrl: billingSettingsUrl(getAppUrl()),
             locale: "fr",

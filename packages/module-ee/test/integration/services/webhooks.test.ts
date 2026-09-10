@@ -8,6 +8,8 @@ import {
   resetStripeMock,
   generateWebhookEvent,
   setSubscriptionResponse,
+  invoiceEventObject,
+  requests,
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { billingAccounts, stripeEvents } from "../../../drizzle/schema.ts";
@@ -59,6 +61,164 @@ describe("handleWebhook", () => {
       expect(account!.subscriptionStatus).toBe("active");
       // Quota allocated immediately at checkout (no wait for invoice.paid).
       expect(account!.creditQuota).toBe(20000);
+    });
+
+    it("refuses to attach a subscription Stripe has already cancelled", async () => {
+      // Post-`customer.subscription.deleted` state: free, no held subscription, 0 credits.
+      await seedBillingAccount({
+        orgId,
+        planId: "free",
+        stripeCustomerId: "cus_dead_001",
+        stripeSubscriptionId: null,
+        subscriptionStatus: null,
+        creditQuota: 0,
+      });
+
+      // The session froze before the cancellation; Stripe's live object says otherwise.
+      setSubscriptionResponse({
+        id: "sub_dead_001",
+        object: "subscription",
+        status: "canceled",
+        metadata: { orgId, planId: "starter" },
+        items: { object: "list", data: [{ id: "si_dead", price: { id: "price_starter_test" } }] },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_checkout_dead_001",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            customer: "cus_dead_001",
+            subscription: "sub_dead_001",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.planId).toBe("free");
+      expect(account!.stripeSubscriptionId).toBeNull();
+      expect(account!.subscriptionStatus).toBeNull();
+      expect(account!.creditQuota).toBe(0);
+    });
+
+    it("records the live subscription status, not a hardcoded active", async () => {
+      await seedBillingAccount({ orgId, creditQuota: 0 });
+
+      setSubscriptionResponse({
+        id: "sub_trial_001",
+        object: "subscription",
+        status: "trialing",
+        metadata: { orgId, planId: "starter" },
+        items: { object: "list", data: [{ id: "si_trial", price: { id: "price_starter_test" } }] },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_checkout_trial_001",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            customer: "cus_trial_checkout_001",
+            subscription: "sub_trial_001",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.subscriptionStatus).toBe("trialing");
+      expect(account!.stripeSubscriptionId).toBe("sub_trial_001");
+      expect(account!.creditQuota).toBe(20000);
+    });
+
+    it("cancels a duplicate paid subscription the account cannot be attached to", async () => {
+      // Two Checkout sessions opened before either was paid; the first one paid won the row.
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_dup_001",
+        stripeSubscriptionId: "sub_dup_winner",
+        subscriptionStatus: "active",
+        creditQuota: 20000,
+      });
+
+      setSubscriptionResponse({
+        id: "sub_dup_loser",
+        object: "subscription",
+        status: "active",
+        metadata: { orgId, planId: "starter" },
+        items: { object: "list", data: [{ id: "si_dup", price: { id: "price_starter_test" } }] },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_checkout_dup_001",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            customer: "cus_dup_001",
+            subscription: "sub_dup_loser",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      // The winner keeps the account untouched...
+      expect(account!.stripeSubscriptionId).toBe("sub_dup_winner");
+      expect(account!.subscriptionStatus).toBe("active");
+      // ...and the loser is no longer billing the customer.
+      expect(requests).toContainEqual({
+        method: "DELETE",
+        path: "/v1/subscriptions/sub_dup_loser",
+        body: null,
+      });
+    });
+
+    it("does not cancel when the refusal names no winner — the org has no billing row", async () => {
+      setSubscriptionResponse({
+        id: "sub_orphan_001",
+        object: "subscription",
+        status: "active",
+        metadata: { orgId, planId: "starter" },
+        items: { object: "list", data: [{ id: "si_orphan", price: { id: "price_starter_test" } }] },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_checkout_orphan_001",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            customer: "cus_orphan_001",
+            subscription: "sub_orphan_001",
+            metadata: { orgId, planId: "starter" },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      expect(requests.filter((r) => r.method === "DELETE")).toEqual([]);
     });
   });
 
@@ -259,16 +419,12 @@ describe("handleWebhook", () => {
         id: "evt_invoice_cycle_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_cycle_001",
             customer: "cus_invoice_001",
-            billing_reason: "subscription_cycle",
-            parent: {
-              subscription_details: {
-                subscription: "sub_invoice_001",
-              },
-            },
-          },
+            subscription: "sub_invoice_001",
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
@@ -318,16 +474,12 @@ describe("handleWebhook", () => {
         id: "evt_invoice_create_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_create_001",
             customer: "cus_invoice_002",
-            billing_reason: "subscription_create",
-            parent: {
-              subscription_details: {
-                subscription: "sub_invoice_002",
-              },
-            },
-          },
+            subscription: "sub_invoice_002",
+            billingReason: "subscription_create",
+          }),
         },
       });
 
@@ -341,6 +493,51 @@ describe("handleWebhook", () => {
 
       expect(account!.creditsUsed).toBe(500);
       expect(account!.creditQuota).toBe(20000);
+    });
+
+    it("grants nothing when the paid invoice belongs to a cancelled subscription", async () => {
+      await seedBillingAccount({
+        orgId,
+        planId: "free",
+        stripeCustomerId: "cus_invoice_dead",
+        stripeSubscriptionId: null,
+        subscriptionStatus: null,
+        creditsUsed: 0,
+        creditQuota: 0,
+      });
+
+      setSubscriptionResponse({
+        id: "sub_invoice_dead",
+        object: "subscription",
+        status: "canceled",
+        metadata: { orgId, planId: "starter" },
+        items: { object: "list", data: [{ id: "si_dead", price: { id: "price_starter_test" } }] },
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_invoice_dead_001",
+        type: "invoice.paid",
+        data: {
+          object: invoiceEventObject({
+            id: "in_dead_001",
+            customer: "cus_invoice_dead",
+            subscription: "sub_invoice_dead",
+            billingReason: "subscription_cycle",
+          }),
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.planId).toBe("free");
+      expect(account!.stripeSubscriptionId).toBeNull();
+      expect(account!.creditQuota).toBe(0);
     });
   });
 
@@ -376,12 +573,12 @@ describe("handleWebhook", () => {
         id: "evt_race_invoice_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_race_001",
             customer: "cus_race_001",
-            billing_reason: "subscription_create",
-            parent: { subscription_details: { subscription: "sub_race_001" } },
-          },
+            subscription: "sub_race_001",
+            billingReason: "subscription_create",
+          }),
         },
       });
 
@@ -431,12 +628,12 @@ describe("handleWebhook", () => {
         id: "evt_portal_invoice_001",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_portal_001",
             customer: "cus_portal_001",
-            billing_reason: "subscription_update",
-            parent: { subscription_details: { subscription: "sub_portal_001" } },
-          },
+            subscription: "sub_portal_001",
+            billingReason: "subscription_update",
+          }),
         },
       });
 
@@ -496,6 +693,102 @@ describe("handleWebhook", () => {
       expect(account!.planId).toBe("pro");
       expect(account!.subscriptionStatus).toBe("past_due");
       expect(account!.cancelAtPeriodEnd).toBe(true);
+    });
+
+    it("raises the credit quota on an upgrade, freeing the added headroom", async () => {
+      await seedBillingAccount({
+        orgId,
+        planId: "starter",
+        stripeCustomerId: "cus_update_002",
+        stripeSubscriptionId: "sub_update_002",
+        subscriptionStatus: "active",
+        creditsUsed: 20000,
+        creditQuota: 20000,
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_sub_updated_upgrade",
+        type: "customer.subscription.updated",
+        data: {
+          object: {
+            id: "sub_update_002",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { orgId, planId: "pro" },
+            items: {
+              data: [
+                {
+                  id: "si_upd_002",
+                  price: { id: "price_pro_test" },
+                  current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 3600,
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.planId).toBe("pro");
+      expect(account!.creditQuota).toBe(80000);
+      // Consumption already billed survives the move — the upgrade buys headroom,
+      // it does not erase the Starter spend.
+      expect(account!.creditsUsed).toBe(20000);
+    });
+
+    it("lowers the credit quota on a downgrade without erasing consumption", async () => {
+      await seedBillingAccount({
+        orgId,
+        planId: "pro",
+        stripeCustomerId: "cus_update_003",
+        stripeSubscriptionId: "sub_update_003",
+        subscriptionStatus: "active",
+        creditsUsed: 60000,
+        creditQuota: 80000,
+      });
+
+      const { body, signature } = signedEvent({
+        id: "evt_sub_updated_downgrade",
+        type: "customer.subscription.updated",
+        data: {
+          object: {
+            id: "sub_update_003",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { orgId, planId: "starter" },
+            items: {
+              data: [
+                {
+                  id: "si_upd_003",
+                  price: { id: "price_starter_test" },
+                  current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 3600,
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      await handleWebhook(body, signature);
+
+      const db = getEeDb();
+      const [account] = await db
+        .select()
+        .from(billingAccounts)
+        .where(eq(billingAccounts.orgId, orgId));
+
+      expect(account!.planId).toBe("starter");
+      expect(account!.creditQuota).toBe(20000);
+      // Over the new ceiling on purpose: the renewal invoice resets the counter,
+      // a plan move never grants credits back.
+      expect(account!.creditsUsed).toBe(60000);
     });
   });
 
@@ -557,11 +850,12 @@ describe("handleWebhook", () => {
         id: "evt_payment_failed_001",
         type: "invoice.payment_failed",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_fail_001",
             customer: "cus_fail_001",
-            billing_reason: "subscription_cycle",
-          },
+            subscription: null,
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
@@ -694,12 +988,12 @@ describe("handleWebhook", () => {
         id: "evt_identity_invoice_old",
         type: "invoice.paid",
         data: {
-          object: {
+          object: invoiceEventObject({
             id: "in_identity_old",
             customer: "cus_identity",
-            billing_reason: "subscription_cycle",
-            parent: { subscription_details: { subscription: "sub_old" } },
-          },
+            subscription: "sub_old",
+            billingReason: "subscription_cycle",
+          }),
         },
       });
 
