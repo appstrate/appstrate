@@ -129,23 +129,23 @@ describe("PiChatUiStreamMapper", () => {
     // reads). Forwarding both persisted and re-uploaded every tool output at
     // twice its size. Everything BUT `details` must survive untouched.
     const content = [{ type: "text", text: JSON.stringify({ id: "run_1", status: "success" }) }];
-    const connectOffer = { connect_url: "https://app/api/integrations/connect/start?token=t" };
+    const connectOffers = [{ connect_url: "https://app/api/integrations/connect/start?token=t" }];
     const { chunks } = run([
       {
         type: "tool_execution_end",
         toolCallId: "call_3",
         toolName: "invoke_operation",
-        result: { content, details: { id: "run_1", status: "success" }, connectOffer },
+        result: { content, details: { id: "run_1", status: "success" }, connectOffers },
         isError: false,
       },
     ]);
 
     expect(chunks).toEqual([
-      { type: "tool-output-available", toolCallId: "call_3", output: { content, connectOffer } },
+      { type: "tool-output-available", toolCallId: "call_3", output: { content, connectOffers } },
     ]);
     // Negative control, stated explicitly: the key is absent, not `undefined`.
     const output = (chunks[0] as { output: Record<string, unknown> }).output;
-    expect(Object.keys(output)).toEqual(["content", "connectOffer"]);
+    expect(Object.keys(output)).toEqual(["content", "connectOffers"]);
     expect("details" in output).toBe(false);
   });
 

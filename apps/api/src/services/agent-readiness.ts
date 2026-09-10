@@ -22,6 +22,8 @@ import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
+import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
+import { attachConnectOffers } from "./connect/preflight-connect-offer.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface AgentReadinessParams {
@@ -55,6 +57,16 @@ interface AgentReadinessParams {
    * and the spawn resolver dedupe the SELECT + Zod parse per integration.
    */
   manifestCache?: IntegrationManifestCache;
+  /**
+   * Opt-in relay for the run-kickoff connect link (#1207) — see
+   * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
+   *
+   * Read by the THROWING wrapper only: `collectAgentReadinessErrors` ignores
+   * it, so its one direct caller (the dry-run validator, via the accumulate
+   * branch of `inline-run-preflight.ts`) stays link-free by passing none — not
+   * by anything this function does.
+   */
+  connectOffers?: ConnectOfferPolicy | null;
 }
 
 /**
@@ -150,6 +162,10 @@ export async function collectAgentReadinessErrors(
   // Batched: one SELECT over `space_packages` for every declared
   // integration instead of N serial single-row queries (run-kickoff hot path).
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
+  // Integrations this gate has already refused, and which the connection
+  // resolution below must therefore not look at a second time — see the
+  // `skipIntegrationIds` note on `resolveConnectionsForRun`.
+  const refusedIntegrations = new Set<string>();
   if (declaredIntegrations.length > 0) {
     // Integration manifest-health gate (#737) — mirrors the manifest drop
     // conditions in `resolveOne` (integration-spawn-resolver.ts): a declared
@@ -186,6 +202,13 @@ export async function collectAgentReadinessErrors(
     // downstream `not_connected`. Integrations already flagged for a manifest
     // failure are skipped here — a missing package is necessarily inactive too,
     // and the manifest error is the more precise cause (no double-report).
+    //
+    // "Fails fast rather than a downstream `not_connected`" is enforced, not
+    // merely ordered: each id flagged here is added to `refusedIntegrations`,
+    // which the resolution below excludes. The resolver applies no active
+    // filter of its own, so without that the same integration produced BOTH
+    // errors — and, for a caller opted into the connect-offer relay, a live
+    // connect link for an integration nobody can use in this space.
     const activeIds = await listActiveIntegrationIds(
       declaredIntegrations.map((entry) => entry.id),
       spaceId,
@@ -193,6 +216,7 @@ export async function collectAgentReadinessErrors(
     for (const entry of declaredIntegrations) {
       if (manifestUnhealthy.has(entry.id)) continue;
       if (!activeIds.has(entry.id)) {
+        refusedIntegrations.add(entry.id);
         errors.push({
           field: `integrations.${entry.id}`,
           code: "integration_not_active",
@@ -213,8 +237,12 @@ export async function collectAgentReadinessErrors(
   // picks a candidate, the modal POSTs `connection_overrides`, readiness
   // honours the pick instead of re-firing must_choose on the same N>1
   // candidate set. run-pipeline.ts re-runs the resolver after readiness
-  // (with the same overrides) to produce the persisted snapshot — both
-  // passes see the same inputs so they cannot disagree.
+  // (with the same overrides) to produce the persisted snapshot. The two
+  // passes cannot disagree even though only this one passes
+  // `skipIntegrationIds`: a non-empty set means an error was pushed above, and
+  // the throwing wrapper raises it, so the snapshot pass never runs on an
+  // agent whose integrations this pass refused. When the set IS empty the two
+  // calls are identical.
   if (actor) {
     const resolution = await resolveConnectionsForRun({
       agentManifest: manifest as Record<string, unknown>,
@@ -224,6 +252,7 @@ export async function collectAgentReadinessErrors(
       ...(runOverrides ? { runOverrides } : {}),
       ...(scheduleOverrides ? { scheduleOverrides } : {}),
       ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+      ...(refusedIntegrations.size > 0 ? { skipIntegrationIds: refusedIntegrations } : {}),
     });
     for (const e of resolution.errors) {
       errors.push(translateResolutionError(e));
@@ -266,12 +295,25 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
         })),
       });
     }
+    // Mint the connect links LAST — strictly after the webhook projection
+    // above, which must never carry a bearer capability off-platform, and only
+    // for a caller that opted in and holds `integrations:connect`.
+    const responseErrors =
+      params.connectOffers && params.actor
+        ? await attachConnectOffers({
+            errors: integrationErrors,
+            scope: { orgId: params.orgId, spaceId: params.spaceId },
+            actor: params.actor,
+            policy: params.connectOffers,
+            ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+          })
+        : integrationErrors;
     throw new ApiError({
       status: 412,
       code: "missing_integration_connection",
       title: "Missing Integration Connection",
       detail: first.message,
-      errors: integrationErrors,
+      errors: responseErrors,
     });
   }
 

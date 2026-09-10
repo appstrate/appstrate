@@ -39,9 +39,12 @@ inachevé.
   (`src/pi-chat/mcp-tools.ts`), les deux canaux de payload sont redactés — le
   canal `content` (seul sérialisé vers le modèle par pi-ai) comme `details`
   (vue JSON de l'UI, mais persistée). L'URL vivante ne survit qu'à un seul
-  endroit : le champ typé `connectOffer`, que la carte de connexion lit via
-  `readConnectOffer` (`src/ui/auth-offer.ts`) — jamais en scrapant le payload,
-  qui ne contient plus que le placeholder (issue #906). La redaction s'applique
+  endroit : le champ typé `connectOffers`, que les cartes de connexion lisent
+  via `readConnectOffers` (`src/connect-offer.ts`, exposé à l'UI par
+  `extractAuthOffers` dans `src/ui/auth-offer.ts`) — jamais en scrapant le
+  payload, qui ne contient plus que le placeholder (issue #906). Un payload peut
+  porter plusieurs liens — un 412 de lancement en liste un par intégration à
+  connecter (issue #1207) — et l'UI monte une carte par offre. La redaction s'applique
   aussi au replay de l'historique persisté
   (`src/pi-chat/structured-session.ts`).
 - **Politique d'index d'opérations** : `applyOperationIndexPolicy`
