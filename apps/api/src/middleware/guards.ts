@@ -94,18 +94,27 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   return next();
 }
 
-/** Middleware: for API key callers, reject with 403 when the `:id`/`:spaceId`
- *  route param does not match the key's bound space. Sessions are
- *  passed through unchanged — any member can manage any space in their org.
+/** Middleware: reject with 403 when the `:id`/`:spaceId` route param names a
+ *  space other than the one the CREDENTIAL is pinned to. Callers that pin no
+ *  space (sessions, OIDC instance tokens) pass through unchanged — any member
+ *  reaches any space in their org, subject to the per-space permission gates.
  *
- *  Why: `/api/spaces` is org-scoped, not space-scoped, so the
- *  same orgId-only filtering pattern that lets a key escape its org also
- *  lets it escape its space within the same org. */
-export async function apiKeySpaceScopeGuard(c: Context<AppEnv>, next: Next) {
-  if (c.get("authMethod") !== "api_key") return next();
+ *  Why: `/api/spaces` is org-scoped, not space-scoped, so `requireSpaceContext`
+ *  never runs on it and the same orgId-only filtering that lets a credential
+ *  escape its org also lets it escape its space within the same org.
+ *
+ *  Keyed on the pinned space, NOT on `authMethod === "api_key"`: an OIDC
+ *  end-user token pins a space too, and carries no `orgRole`, so
+ *  `applySpacePermissions` returns early for it (RBAC spec §7.2) and nothing
+ *  downstream compares the path space to the pinned one — an end-user of space
+ *  A read space B's `run-config`, private spaces included (issue #1313). Both
+ *  pinned kinds are confined here, once, instead of per route. */
+export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
+  const pinnedSpaceId = c.get("spaceId");
+  if (!pinnedSpaceId) return next();
   const paramSpaceId = c.req.param("id") ?? c.req.param("spaceId");
-  if (paramSpaceId && paramSpaceId !== c.get("spaceId")) {
-    throw forbidden("API key scope does not include this space");
+  if (paramSpaceId && paramSpaceId !== pinnedSpaceId) {
+    throw forbidden("Credential scope does not include this space");
   }
   return next();
 }

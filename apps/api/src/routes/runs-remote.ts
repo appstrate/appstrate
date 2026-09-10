@@ -202,7 +202,7 @@ export function createRunsRemoteRouter() {
       // the space-scope boundary for this write. The org-scope assertion below
       // only proves space∈org, so without this check a credential pinned to space
       // A could name a sibling space B in the body and escape its space scope (the
-      // path-param `apiKeySpaceScopeGuard` doesn't cover the body). Enforced for
+      // path-param `pinnedSpaceScopeGuard` doesn't cover the body). Enforced for
       // EVERY auth method — gating on `authMethod === "api_key"` would leave
       // the same escape open to any module strategy that pins a space
       // (e.g. oauth2-end-user bearers).
