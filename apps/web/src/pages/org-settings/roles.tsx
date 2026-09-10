@@ -31,7 +31,6 @@ import {
   useUpdateRole,
   type RoleObject,
 } from "../../hooks/use-roles";
-import { unavailablePermissions } from "../../lib/role-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Modal } from "../../components/modal";
 import { ViewAsDialog } from "../../components/view-as-dialog";
@@ -249,16 +248,8 @@ function RoleCard({
   );
 }
 
-/** The unavailable half of the picker: named, explained, and removable. */
-export function UnavailablePermissions({
-  permissions,
-  onRemove,
-  disabled,
-}: {
-  permissions: readonly string[];
-  onRemove: (permission: string) => void;
-  disabled: boolean;
-}) {
+/** The unavailable half of the picker: what the row spells and this deployment cannot grant. */
+export function UnavailablePermissions({ permissions }: { permissions: readonly string[] }) {
   const { t } = useTranslation(["settings", "common"]);
   if (permissions.length === 0) return null;
   return (
@@ -267,18 +258,8 @@ export function UnavailablePermissions({
       <p className="text-muted-foreground mb-2 text-xs">{t("roles.unavailableHint")}</p>
       <ul className="flex flex-col gap-2">
         {permissions.map((permission) => (
-          <li key={permission} className="flex items-center justify-between gap-2">
-            <span className="font-mono text-xs">{permission}</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={disabled}
-              aria-label={t("roles.unavailableRemove", { permission })}
-              onClick={() => onRemove(permission)}
-            >
-              {t("btn.remove", { ns: "common" })}
-            </Button>
+          <li key={permission} className="font-mono text-xs">
+            {permission}
           </li>
         ))}
       </ul>
@@ -351,13 +332,11 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       ),
     }))
     .filter((group) => group.permissions.length > 0);
-  // Only meaningful once the vocabulary answered: before that, everything is
-  // unknown for the wrong reason.
-  const unavailable = vocabulary
-    ? unavailablePermissions(selected, vocabulary).filter((permission) =>
-        permission.toLowerCase().includes(query),
-      )
-    : [];
+  // Named by the server against its own vocabulary — the client re-deriving it
+  // from the picker would be a second answer to the same question.
+  const unavailable = (role?.unavailable_permissions ?? []).filter((permission) =>
+    permission.toLowerCase().includes(query),
+  );
 
   return (
     <Modal
@@ -467,11 +446,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
             </div>
           ) : (
             <>
-              <UnavailablePermissions
-                permissions={unavailable}
-                onRemove={toggle}
-                disabled={isPending}
-              />
+              <UnavailablePermissions permissions={unavailable} />
               {groups.map((group) => (
                 <div key={group.resource} className="border-border rounded-lg border p-3">
                   <p className="mb-2 font-mono text-xs font-semibold">{group.resource}</p>
