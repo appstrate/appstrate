@@ -116,6 +116,7 @@ describe("inline run launched from the chat with an attached file", () => {
       userId: ctx.user.id,
       chatSessionId: sessionId,
       uri: `upload://${uploadId}`,
+      permissions: new Set(),
     });
     return { uri: resolved.uri, fileId: parseFileUri(resolved.uri)! };
   }

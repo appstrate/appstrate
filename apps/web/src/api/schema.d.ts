@@ -208,7 +208,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth.
+         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -288,7 +288,7 @@ export interface paths {
         };
         /**
          * Get agent model configuration
-         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).
+         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults). Readable with `agents:read` or `agents:run`: the launch form resolves the model a run will use from it, and the body carries no manifest and no prompt.
          */
         get: operations["getAgentModel"];
         /**
@@ -427,7 +427,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all runs for an agent
-         * @description Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).
+         * @description Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).
          */
         delete: operations["deleteAgentRuns"];
         options?: never;
@@ -2839,7 +2839,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations).
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
          */
         get: operations["getAgentPackage"];
         /**
@@ -3674,6 +3674,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamAgentRuns"];
         put?: never;
@@ -3702,6 +3704,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamAllRuns"];
         put?: never;
@@ -3728,6 +3732,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamRun"];
         put?: never;
@@ -3815,7 +3821,7 @@ export interface paths {
         };
         /**
          * List runs across the space (global view)
-         * @description Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).
+         * @description Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.
          */
         get: operations["listRuns"];
         put?: never;
@@ -4853,9 +4859,10 @@ export interface components {
                 property_order?: string[];
             };
             dependencies: {
-                skills: components["schemas"]["AgentSkillRef"][];
-                /** @description AFPS §4.1 mcp_servers dependency group */
-                mcp_servers: {
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
+                skills?: components["schemas"]["AgentSkillRef"][];
+                /** @description AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`). */
+                mcp_servers?: {
                     id: string;
                     version: string;
                 }[];
@@ -4880,7 +4887,7 @@ export interface components {
             /** @description Number of published versions (0 for built-in agents) */
             version_count?: number;
             /** @description Source package ID if forked */
-            forked_from: string | null;
+            forked_from?: string | null;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
@@ -4915,13 +4922,15 @@ export interface components {
             type: "agent" | "skill" | "mcp-server" | "integration";
             running_runs: number;
             dependencies: {
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
                     [key: string]: string;
                 };
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 mcp_servers?: {
                     [key: string]: string;
                 };
-                integrations?: {
+                integrations: {
                     [key: string]: string;
                 };
             };
@@ -5959,7 +5968,7 @@ export interface components {
         SpaceAssignment: {
             space_id: string;
             /** @enum {string} */
-            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
             custom_role_id?: string;
         } & (unknown | unknown);
         SpaceMemberAssignment: {
@@ -5967,7 +5976,7 @@ export interface components {
             object: "space_member";
             userId: string;
             /** @enum {string} */
-            preset_role?: "admin" | "builder" | "operator" | "viewer";
+            preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
             custom_role_id?: string;
         };
         SpaceMemberObject: {
@@ -6029,7 +6038,7 @@ export interface components {
              * @description Preset the implicit members of an `open` space hold
              * @enum {string}
              */
-            default_role: "admin" | "builder" | "operator" | "viewer";
+            default_role: "admin" | "builder" | "operator" | "runner" | "viewer";
             /**
              * @description Whether the caller may enter this space
              * @enum {string}
@@ -18764,7 +18773,7 @@ export interface operations {
     listRuns: {
         parameters: {
             query?: {
-                /** @description Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. */
@@ -20558,7 +20567,7 @@ export interface operations {
                      * @description Preset the implicit members of an `open` space hold
                      * @enum {string}
                      */
-                    default_role?: "admin" | "builder" | "operator" | "viewer";
+                    default_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
                 };
             };
         };
@@ -20656,7 +20665,7 @@ export interface operations {
                     /** Format: email */
                     email?: string;
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
                     custom_role_id?: string;
                 } & ((unknown | unknown) & (unknown | unknown));
             };
@@ -20736,7 +20745,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "viewer";
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
                     custom_role_id?: string;
                 } & (unknown | unknown);
             };

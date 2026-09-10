@@ -93,6 +93,9 @@ function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, 
       userId,
       chatSessionId: sessionId,
       uri,
+      // These cases materialize the session owner's own uploads; the container
+      // ACL never widens, so the narrowest set is the honest one to hand it.
+      permissions: new Set(),
     });
 }
 

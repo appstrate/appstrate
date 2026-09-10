@@ -72,6 +72,8 @@ function fakeCtx(ctx: {
   spaceId: string;
   endUser?: { id: string };
   user?: { id: string };
+  /** The caller's resolved grants — `runs:read-all` is what widens a run container. */
+  permissions?: ReadonlySet<string>;
 }): Context {
   const user = ctx.endUser ? undefined : (ctx.user ?? { id: "usr_input_parser_test" });
   return {
@@ -84,14 +86,23 @@ function fakeCtx(ctx: {
             ? ctx.endUser
             : key === "user"
               ? user
-              : undefined,
+              : key === "permissions"
+                ? ctx.permissions
+                : undefined,
   } as unknown as Context;
 }
 
-/** Insert a minimal prior-run row the rerun_from path can resolve. */
+/** A caller that reads every run in the space (space `admin`/`builder`). */
+const READS_EVERY_RUN: ReadonlySet<string> = new Set(["runs:read-all"]);
+
+/**
+ * Insert a minimal prior-run row the rerun_from path can resolve. `userId` is
+ * the principal that launched it: replaying a run is a run READ, so only its
+ * launcher (or a `runs:read-all` holder) gets its input back.
+ */
 async function seedRun(
   scope: { orgId: string; spaceId: string },
-  opts: { id: string; input: Record<string, unknown> | null },
+  opts: { id: string; input: Record<string, unknown> | null; userId?: string },
 ): Promise<void> {
   await db.insert(runs).values({
     id: opts.id,
@@ -100,6 +111,7 @@ async function seedRun(
     packageId: null,
     status: "cancelled",
     input: opts.input,
+    userId: opts.userId ?? null,
   });
 }
 
@@ -238,6 +250,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
   async function seedRunningRun(
     scope: { orgId: string; spaceId: string },
     id: string,
+    userId: string,
   ): Promise<void> {
     await db.insert(runs).values({
       id,
@@ -245,6 +258,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
       spaceId: scope.spaceId,
       packageId: null,
       status: "running",
+      userId,
     });
   }
 
@@ -256,14 +270,14 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
 
     // Member A (ctx.user) materializes a run-contained user_upload.
     const runId = `run_${crypto.randomUUID()}`;
-    await seedRunningRun(scope, runId);
+    await seedRunningRun(scope, runId, ctx.user.id);
     await seedUpload(scope, { id: "upl_s2_up", bytes: PDF_BYTES });
     const docA = await createFileFromUpload(scope, { type: "user", id: ctx.user.id }, "upl_s2_up", {
       runId,
     });
 
-    // Member B references A's private upload — org-wide run visibility resolves
-    // the container, but the creator-only gate rejects it as not-found.
+    // Member B references A's private upload — the run is A's, so the container
+    // ACL already answers not-found, and the creator-only gate would too.
     const newRunId = `run_${crypto.randomUUID()}`;
     await expect(
       parseRequestInput(
@@ -279,7 +293,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
     const ctx = await createTestContext({ orgSlug: "org-s2-own" });
     const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
-    await seedRunningRun(scope, runId);
+    await seedRunningRun(scope, runId, ctx.user.id);
     await seedUpload(scope, { id: "upl_s2_own", bytes: PDF_BYTES });
     const docA = await createFileFromUpload(
       scope,
@@ -305,7 +319,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
     await addOrgMember(ctx.orgId, memberB.id, "member");
 
     const runId = `run_${crypto.randomUUID()}`;
-    await seedRunningRun(scope, runId);
+    await seedRunningRun(scope, runId, ctx.user.id);
     const { row: agentDoc } = await createFileFromStream(
       scope,
       runId,
@@ -316,7 +330,9 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ ...scope, user: { id: memberB.id } }),
+      // The output hangs off A's run: B chains it by reading that run, which is
+      // `runs:read-all`. The output itself is freely chainable from there (D6).
+      fakeCtx({ ...scope, user: { id: memberB.id }, permissions: READS_EVERY_RUN }),
       { input: { doc: `appfile://${agentDoc.id}` } },
       newRunId,
       fileSchema,
@@ -339,11 +355,11 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // A prior run persisted an upload:// input (legacy / pre-materialization);
     // the upload stays re-consumable within its reuse window.
     const priorRunId = `run_${crypto.randomUUID()}`;
-    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` } });
+    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` }, userId: ctx.user.id });
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx(scope),
+      fakeCtx({ ...scope, user: ctx.user }),
       { rerun_from: priorRunId },
       newRunId,
       fileSchema,
@@ -382,6 +398,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       orgId: scope.orgId,
       spaceId: scope.spaceId,
       status: "running",
+      userId: ctx.user.id,
     });
     const doc = await createFileFromUpload(scope, actor, id, { runId });
 
@@ -476,7 +493,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const priorRunId = `run_${crypto.randomUUID()}`;
     await seedRun(
       { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
-      { id: priorRunId, input: { doc: "upload://upl_whatever1" } },
+      { id: priorRunId, input: { doc: "upload://upl_whatever1" }, userId: owner.user.id },
     );
 
     await expect(
@@ -494,11 +511,11 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
     // seedRun stamps packageId NULL — any concrete agent id mismatches.
-    await seedRun(scope, { id: priorRunId, input: {} });
+    await seedRun(scope, { id: priorRunId, input: {}, userId: ctx.user.id });
 
     await expect(
       parseRequestInput(
-        fakeCtx(scope),
+        fakeCtx({ ...scope, user: ctx.user }),
         { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
@@ -532,7 +549,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const id = "upl_rerun_gone_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
     const priorRunId = `run_${crypto.randomUUID()}`;
-    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` } });
+    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` }, userId: ctx.user.id });
     // The upload was consumed long ago — past the 24h reuse window.
     await db
       .update(uploads)
@@ -541,7 +558,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx(scope),
+        fakeCtx({ ...scope, user: ctx.user }),
         { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
@@ -561,11 +578,12 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await seedRun(scope, {
       id: priorRunId,
       input: { doc: "data:application/pdf;name=report.pdf;base64," },
+      userId: ctx.user.id,
     });
 
     await expect(
       parseRequestInput(
-        fakeCtx(scope),
+        fakeCtx({ ...scope, user: ctx.user }),
         { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
@@ -593,10 +611,10 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-null" });
     const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
-    await seedRun(scope, { id: priorRunId, input: null });
+    await seedRun(scope, { id: priorRunId, input: null, userId: ctx.user.id });
 
     const result = await parseRequestInput(
-      fakeCtx(scope),
+      fakeCtx({ ...scope, user: ctx.user }),
       { rerun_from: priorRunId },
       `run_${crypto.randomUUID()}`,
       // No file fields required — empty input passes an empty schema.
@@ -641,6 +659,7 @@ describe("parseRequestInput — colliding file names (workspace-name hardening)"
       orgId: scope.orgId,
       spaceId: scope.spaceId,
       status: "running",
+      userId: ctx.user.id,
     });
     const { row: doc } = await createFileFromStream(
       scope,

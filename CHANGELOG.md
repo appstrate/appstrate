@@ -25,6 +25,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   consumed with the role and assignments current at its atomic claim, and a
   space grant serializes with the removal or promotion of the same member.
 
+- **A fifth space-role preset — `runner`, for people who launch without
+  reading.** It holds `agents:run`, its own runs (`runs:read`, `runs:cancel`),
+  `files:read`, `persistence:read` and its own integration connections
+  (`integrations:read/connect/disconnect`), plus chat and MCP so the friendly
+  surfaces work. It does **not** hold `agents:read`, `skills:read`,
+  `mcp-servers:read`, `schedules:read`, `end-users:*`, `runs:read-all` or any
+  `:write`: a runner starts what someone else built, sees what its own runs
+  produced, and never reads the agent's content, its skills or anyone else's
+  runs. What makes that usable is that `agents:run` carries a **summary read**
+  of the agent: the list, the detail and the resolved model answer a runner with
+  what the launch form needs — the parameter schema with its stored values and
+  locked fields, the output shape, the enforced timeout, the caller's own run
+  counters, and the integrations the agent talks to, which a runner is the one
+  who connects — and omit the manifest, the prompt, the authoring history, and
+  the skills and MCP servers the agent is built from. Every other agent route,
+  and every skill or MCP-server route, still answers 403. It is a preset and not a custom role on purpose —
+  custom roles need the `custom_roles` feature, and this reach has to exist on
+  the open-source build as a code constant. Assign it wherever the other four
+  are offered, including as a space's default role. In the dashboard, the
+  sidebar entries and the routes ask for the permission their page needs — so
+  the agent and skill editors now refuse a caller without `agents:write` /
+  `skills:write` up front, instead of opening a form whose save would answer 403. The presets stop being a
+  single ladder here: `runner` and `viewer` grant things the other does not, so
+  neither is "above" the other. Migration **0060** widens the three space-role
+  CHECK constraints; it is applied automatically at boot, with no operator step.
+  One thing to check before deploying: an organization that defined a **custom
+  role keyed `runner`** must rename it first — the migration refuses rather than
+  let a bundle shadow the preset, and says so by name.
+
+  **API consumers**: `dependencies.skills`, `dependencies.mcp_servers` and
+  `forked_from` are optional on the agent DTOs from now on — a summary read
+  omits a withheld group rather than emptying it, and `skills: []` would say the
+  agent declares none, which is false rather than unknown. A loosening like this
+  is not a breaking change and `detect:breaking` does not classify it, so it is
+  written out here.
+
 - **Role preview — see the product as a role before you assign it.** An owner or
   administrator can have every request answered as a lesser persona (an org role,
   optionally with a role in one space) from Org settings → Roles or Space
@@ -133,6 +169,38 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   green).
 
 ### Changed
+
+- **`runs:read` now means the runs you launched, and nothing else.** Your manual
+  runs and the runs of your own schedules — not a colleague's, not an
+  end-user's. The space-wide view is a permission of its own, **`runs:read-all`**,
+  held by the `admin` and `builder` presets and grantable to a custom role or an
+  API key; the `operator` and `viewer` presets do not hold it, so **an existing
+  operator stops seeing other members' runs**. It narrows every surface a run
+  reaches — the run list, an agent's run list, run detail, logs, cancel, the
+  in-flight counts and `last_run` on the agents pages, a schedule's run list,
+  `rerun_from` (replaying a run returns its input), the run outputs in the file
+  gallery, and the realtime streams (`run_update`, `run_log` and `run_metric`
+  carry only your runs, and the single-run stream refuses one you may not read)
+  — and a run you may not read answers `404`, never `403`. Bulk-deleting an
+  agent's runs takes `runs:read-all` alongside `runs:delete`: it spans the whole
+  space. The three realtime channels now answer one uniform rule: the `run_log`
+  and `run_metric` payloads carry the run's actor, which the log channel had no
+  way to read before and so could not gate on at all.
+  `GET /api/runs?user=me` is now strictly your own runs for every caller,
+  end-user and actor-less runs included, whether or not you hold `read-all`,
+  and composes with the other filters (`kind`, `status`, dates,
+  `chat_session_id`) instead of ignoring them.
+  Attaching a file to a chat reads as wide as the gallery you picked it from:
+  `ChatAttachmentRequest.permissions` (`@appstrate/core/chat-contract`) carries
+  the caller's set, so a `runs:read-all` holder attaches a colleague's run
+  output and everyone else attaches only their own.
+
+  **OPERATOR ACTIONS.** The `run_log` gate lives in a trigger body the API
+  installs at boot (`createNotifyTriggers`), not in a migration, so a replica
+  still running the previous version re-installs the actor-less body and the new
+  replicas then drop every `run_log` frame for a subscriber without
+  `runs:read-all` — silently, and fail-closed. Deploy every API replica in one
+  step; a single-replica deployment is unaffected.
 
 - **The commercial module stores its tables in the platform database.**
   `@appstrate/module-ee` does not run a PostgreSQL database of its own: it reads

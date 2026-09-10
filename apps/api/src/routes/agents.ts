@@ -30,6 +30,7 @@ import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
@@ -48,7 +49,12 @@ import {
   buildBundleFromAgentDraft,
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
-import { assertCatalogPackageAccess, packageAccessSpaces } from "../lib/package-access.ts";
+import {
+  agentReadIsSummary,
+  assertCatalogPackageAccess,
+  packageAccessSpaces,
+  requireAgentRead,
+} from "../lib/package-access.ts";
 import {
   writeBundleToBuffer,
   parsePackageIdentity,
@@ -182,13 +188,14 @@ export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/agents — list agents accessible to the current space
-  router.get("/", requirePermission("agents", "read"), async (c) => {
+  router.get("/", requireAgentRead, async (c) => {
     const scope = getSpaceScope(c);
+    const summaryOnly = agentReadIsSummary(c);
 
     // Single query: system packages + installed packages via LEFT JOIN
     const [rows, runningCounts] = await Promise.all([
       listAccessiblePackages(scope, "agent"),
-      getRunningRunCounts(scope),
+      getRunningRunCounts(scope, runVisibilityFilter(c)),
     ]);
 
     const agentList = rows.map((row) => {
@@ -201,9 +208,18 @@ export function createAgentsRouter() {
         schema_version: manifest.schema_version,
         author: manifest.author,
         keywords: manifest.keywords ?? [],
+        // `skills` and `mcp_servers` say what the agent is BUILT FROM — the
+        // one thing in this list a summary read withholds. `integrations` says
+        // which SaaS it talks to, which is what a launcher connects, so it
+        // answers every caller. Everything else is how the launcher names and
+        // picks an agent, which `agents:run` is entitled to.
         dependencies: {
-          skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-          mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
+          ...(summaryOnly
+            ? {}
+            : {
+                skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
+                mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
+              }),
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
         running_runs: runningCounts[row.id] ?? 0,
@@ -369,19 +385,16 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/model — get agent model configuration.
-  // Permission-first, same reason as `…/proxy` above.
-  router.get(
-    `/${SCOPED_PACKAGE_ROUTE}/model`,
-    requirePermission("agents", "read"),
-    requireAgent(),
-    async (c) => {
-      const agent = c.get("package");
-      const spaceId = c.get("spaceId");
-      const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
+  // Permission-first, same reason as `…/proxy` above. `agents:run` opens it
+  // too: this is where the launch form reads the model a run will resolve to,
+  // and the body carries no manifest and no prompt.
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgentRead, requireAgent(), async (c) => {
+    const agent = c.get("package");
+    const spaceId = c.get("spaceId");
+    const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
 
-      return c.json({ modelId, generation: generationConfig });
-    },
-  );
+    return c.json({ modelId, generation: generationConfig });
+  });
 
   // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
   router.put(

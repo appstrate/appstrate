@@ -14,7 +14,6 @@ import {
   RUN_LOG_LEVELS,
   GLOBAL_RUN_KINDS,
 } from "../services/state/runs.ts";
-import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { getInstalledPackageSettings } from "../services/space-packages.ts";
@@ -24,6 +23,12 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
+import {
+  runVisibilityFilter,
+  ownRunsFilter,
+  assertRunVisible,
+  requireRunsRead,
+} from "../lib/run-visibility.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
@@ -390,25 +395,19 @@ export function createRunsRouter() {
   );
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
-  router.get(
-    `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
-    requirePermission("runs", "read"),
-    requireAgent(),
-    async (c) => {
-      const agent = c.get("package");
-      const scope = getSpaceScope(c);
-      const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
-      const endUser = c.get("endUser");
-      const result = await listPackageRuns(scope, agent.id, {
-        limit,
-        offset,
-        endUserId: endUser?.id,
-        actor: getActor(c),
-      });
-      setOffsetLinkHeader({ c, limit, offset, total: result.total });
-      return c.json(result);
-    },
-  );
+  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), async (c) => {
+    const agent = c.get("package");
+    const scope = getSpaceScope(c);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+    const result = await listPackageRuns(scope, agent.id, {
+      limit,
+      offset,
+      actor: getActor(c),
+      visibility: runVisibilityFilter(c),
+    });
+    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    return c.json(result);
+  });
 
   // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
@@ -420,23 +419,21 @@ export function createRunsRouter() {
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
-  router.get("/runs", requirePermission("runs", "read"), async (c) => {
+  router.get("/runs", requireRunsRead, async (c) => {
     const actor = getActor(c);
     const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
-    // `user` is a closed set of one: `me`. Validated BEFORE the end-user branch
-    // below so the param means the same thing for every caller, instead of a
-    // typo surviving in an end-user integration until it runs under an org
-    // session.
+    // `user` is a closed set of one: `me`. The param means the same thing for
+    // every caller, so a typo is a 400 rather than something that survives in
+    // an end-user integration until it runs under an org session.
     const userFilter = closedSetQuery(c, "user", USER_FILTERS);
-    const endUser = c.get("endUser");
-
-    // End-users always see only their own runs — same semantic as before.
-    if (userFilter === "me" || endUser) {
-      const result = await listUserRuns(scope, actor, { limit, offset });
-      setOffsetLinkHeader({ c, limit, offset, total: result.total });
-      return c.json(result);
-    }
+    // `?user=me` narrows to the caller's own runs even when `runs:read-all`
+    // would have widened the list; without it the caller reads whatever their
+    // permission allows. An end-user needs no branch of its own: `read-all` is
+    // not grantable to them, so `runVisibilityFilter` already yields exactly
+    // their own runs — and either way the list composes with every filter
+    // below, instead of a self-view that quietly drops them.
+    const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
     const status = closedSetQuery(c, "status", runStatusValues);
@@ -461,6 +458,7 @@ export function createRunsRouter() {
       endDate,
       chatSessionId,
       actor,
+      visibility,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
@@ -476,19 +474,16 @@ export function createRunsRouter() {
   // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
   // services/run-wait.ts. Auth/scoping is identical to the plain call:
   // ownership is verified BEFORE any waiting starts.
-  router.get("/runs/:id", requirePermission("runs", "read"), async (c) => {
+  router.get("/runs/:id", requireRunsRead, async (c) => {
     const runId = c.req.param("id")!;
     const scope = getSpaceScope(c);
     // Validate the wait param before touching the DB so a malformed value
     // 400s even for runs the caller could not read.
     const waitMs = parseWaitQuery(c.req.query("wait"));
 
-    const row = await getRunFull(scope, runId, getActor(c));
+    const visibility = runVisibilityFilter(c);
+    const row = await getRunFull(scope, runId, getActor(c), visibility);
     if (!row) {
-      throw notFound("Run not found");
-    }
-    const endUser = c.get("endUser");
-    if (endUser && row.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
 
@@ -508,7 +503,7 @@ export function createRunsRouter() {
         // timers/subscriptions for a response nobody will read.
         signal: c.req.raw.signal,
       });
-      const fresh = await getRunFull(scope, runId, getActor(c));
+      const fresh = await getRunFull(scope, runId, getActor(c), visibility);
       // The run can be deleted mid-wait (e.g. DELETE agent runs) — surface
       // the same 404 the initial read would have.
       if (!fresh) {
@@ -546,17 +541,14 @@ export function createRunsRouter() {
   // Rate limited at 120/min per identity (same budget as the inbound MCP
   // server) — the log history can be large and the CLI tail polls it in a
   // loop, so an unmetered caller could turn this read into a DB hammer.
-  router.get("/runs/:id/logs", requirePermission("runs", "read"), rateLimit(120), async (c) => {
+  router.get("/runs/:id/logs", requireRunsRead, rateLimit(120), async (c) => {
     const runId = c.req.param("id")!;
     const scope = getSpaceScope(c);
     const exec = await getRun(scope, runId);
     if (!exec) {
       throw notFound("Run not found");
     }
-    const endUser = c.get("endUser");
-    if (endUser && exec.endUserId !== endUser.id) {
-      throw notFound("Run not found");
-    }
+    assertRunVisible(c, exec);
 
     const sinceParam = c.req.query("since");
     let sinceId: number | undefined;
@@ -573,7 +565,7 @@ export function createRunsRouter() {
     // `undefined` an absent `?limit=` produces.
     const { limit } = parseListPagination(c, { defaultLimit: 1000, maxLimit: 1000 });
 
-    // Ownership was just verified via getRun(scope) above — we can hand
+    // Visibility was just verified via `assertRunVisible` above — we can hand
     // off to the org-scoped log reader safely. Over-fetch by one row so
     // `hasMore` is known without a COUNT round-trip.
     const rows = await listRunLogs({
@@ -612,14 +604,11 @@ export function createRunsRouter() {
       throw notFound("Run not found");
     }
 
-    // End-user boundary: `runs:cancel` is an OIDC-grantable end-user scope, but
-    // an end-user must only cancel their OWN runs — mirror the ownership guard
-    // the read paths (`GET /runs/:id`, `/logs`) apply. Scope alone (org+space) is
-    // not enough here.
-    const endUser = c.get("endUser");
-    if (endUser && run.endUserId !== endUser.id) {
-      throw notFound("Run not found");
-    }
+    // `runs:cancel` gates the ACTION; visibility gates WHICH rows. A caller
+    // without `runs:read-all` — an end-user holding the OIDC-granted scope, an
+    // operator — cancels only what it may read, and a run it may not read 404s
+    // rather than 403s. Scope alone (org+space) is not enough here.
+    assertRunVisible(c, run);
 
     // Verify cancellable
     if (run.status !== "pending" && run.status !== "running") {
@@ -835,6 +824,11 @@ export function createRunsRouter() {
     `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
     requireAgent(),
     requirePermission("runs", "delete"),
+    // The only run mutation that is not per-row: it spans every run of the
+    // agent in the space, so `assertRunVisible` has no row to apply and the
+    // space-wide read is what authorizes the span. Without it a principal
+    // scoped `runs:delete` alone would delete runs it cannot read.
+    requirePermission("runs", "read-all"),
     async (c) => {
       const agent = c.get("package");
       const scope = getSpaceScope(c);

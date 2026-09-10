@@ -53,10 +53,15 @@ function inlineManifest(): AgentManifest {
   } as unknown as AgentManifest;
 }
 
-/** A sibling run's published deliverable: an `agent_output` file. */
+/**
+ * A sibling run's published deliverable: an `agent_output` file. `userId` is
+ * the principal that launched the sibling run — a run-contained file inherits
+ * its run's read-ACL, so only that principal (or a `runs:read-all` holder)
+ * reaches it.
+ */
 async function seedRunFile(
   scope: Scope,
-  opts: { name: string; mime: string; content: string },
+  opts: { name: string; mime: string; content: string; userId: string },
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID()}`;
   await db.insert(runs).values({
@@ -65,11 +70,12 @@ async function seedRunFile(
     spaceId: scope.spaceId,
     packageId: null,
     status: "success",
+    userId: opts.userId,
   });
   const { row } = await createFileFromStream(
     scope,
     runId,
-    { userId: null, endUserId: null },
+    { userId: opts.userId, endUserId: null },
     null,
     {
       name: opts.name,
@@ -92,11 +98,13 @@ describe("parseRequestInput — reserved context-files field", () => {
       name: "research.json",
       mime: "application/json",
       content: '{"finding":"x"}',
+      userId: ctx.user.id,
     });
     const mdId = await seedRunFile(scope, {
       name: "report.md",
       mime: "text/markdown",
       content: "# Report",
+      userId: ctx.user.id,
     });
 
     const { manifest, inputPatch } = injectContextFiles(inlineManifest(), [
@@ -153,6 +161,7 @@ describe("parseRequestInput — reserved context-files field", () => {
           name: `doc-${i}.txt`,
           mime: "text/plain",
           content: `content-${i}`,
+          userId: ctx.user.id,
         }),
       );
     }
@@ -195,7 +204,7 @@ describe("parseRequestInput — reserved context-files field", () => {
     const other = await createTestContext({ orgSlug: "ctxdocs-other" });
     const foreignId = await seedRunFile(
       { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
-      { name: "secret.md", mime: "text/markdown", content: "classified" },
+      { name: "secret.md", mime: "text/markdown", content: "classified", userId: owner.user.id },
     );
 
     const { manifest, inputPatch } = injectContextFiles(inlineManifest(), [fileUri(foreignId)]);

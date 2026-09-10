@@ -58,6 +58,24 @@ test.describe("Space management in UI", () => {
     await context.close();
   });
 
+  test("Default-role picker offers every preset, the runner included", async ({
+    authedPage: page,
+  }) => {
+    // The picker derives its options from `SPACE_ROLE_PRESETS`, so a preset that
+    // never reached the label file renders as its raw key.
+    await page.goto("/org-settings/space/general");
+    await page.locator("#space-default-role").click();
+    for (const label of [
+      /^(Administrateur de l'espace|Space admin)$/,
+      /^(Créateur|Builder)$/,
+      /^(Opérateur|Operator)$/,
+      /^(Exécutant|Runner)$/,
+      /^(Lecteur|Viewer)$/,
+    ]) {
+      await expect(page.getByRole("option", { name: label })).toBeVisible();
+    }
+  });
+
   test("Cannot delete default space via API @critical", async ({ orgOnlyClient, browserCtx }) => {
     const res = await orgOnlyClient.delete(`/spaces/${browserCtx.org.defaultSpaceId}`);
     // 400 exactly — the default-space rule (`invalidRequest`), not RBAC. See

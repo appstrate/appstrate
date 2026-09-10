@@ -84,6 +84,13 @@ async function stageUpload(
   return up.id;
 }
 
+/**
+ * The member every seeded run — and every file published from it — is
+ * attributed to. A run-contained file inherits its run's read-ACL, so an
+ * actor-less fixture run would be unreadable by the member driving these cases.
+ */
+let runOwner: string;
+
 /** Seed a `running` run with a sink secret so `finalizeRun` can converge it. */
 async function seedRunRow(scope: Scope, extra: { input?: Record<string, unknown> } = {}) {
   const id = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -92,6 +99,7 @@ async function seedRunRow(scope: Scope, extra: { input?: Record<string, unknown>
     orgId: scope.orgId,
     spaceId: scope.spaceId,
     status: "running",
+    userId: runOwner,
     input: extra.input ?? null,
     runOrigin: "platform",
     sinkSecretEncrypted: "test-sink-secret",
@@ -113,12 +121,15 @@ async function orgBytesUsed(orgId: string): Promise<number> {
 
 /** Publish an `agent_output` from a run's streaming channel. */
 function publishStream(scope: Scope, runId: string, name: string, content: string) {
-  return createFileFromStream(scope, runId, { userId: null, endUserId: null }, null, {
+  return createFileFromStream(scope, runId, { userId: runOwner, endUserId: null }, null, {
     name,
     mime: "text/plain",
     body: new Blob([new TextEncoder().encode(content)]).stream(),
   });
 }
+
+/** A member holding no grant beyond the resource itself — reads its own runs. */
+const NO_GRANTS: ReadonlySet<string> = new Set();
 
 describe("files hardening — cross-phase interactions", () => {
   let ctx: TestContext;
@@ -130,6 +141,7 @@ describe("files hardening — cross-phase interactions", () => {
     ctx = await createTestContext({ orgSlug: "hardening" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     userActor = { type: "user", id: ctx.user.id };
+    runOwner = ctx.user.id;
   });
 
   // ── a. quota hit during artifact ingestion + partial summary (phase 2 × 5) ──
@@ -204,9 +216,9 @@ describe("files hardening — cross-phase interactions", () => {
     const [doc1] = await db.select().from(files).where(eq(files.name, "keep-1.txt"));
 
     // Existing content stays fully readable (list, resolve, download) over-limit.
-    const listed = await listFilesForActor(scope, userActor, { runId });
+    const listed = await listFilesForActor(scope, userActor, { runId }, NO_GRANTS);
     expect(listed.data).toHaveLength(2);
-    const resolved = await getFileForActor(scope, userActor, doc1!.id);
+    const resolved = await getFileForActor(scope, userActor, doc1!.id, NO_GRANTS);
     expect(resolved?.capabilities.download).toBe(true);
     const stream = await streamFileContent(doc1!.storageKey);
     expect(stream).not.toBeNull();

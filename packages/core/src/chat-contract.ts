@@ -89,6 +89,14 @@ export interface ChatAttachmentRequest {
    * `upload://upl_x` (materialize) or `appfile://file_x` (validate access).
    */
   uri: string;
+  /**
+   * The caller's effective permission set in the space, as the platform auth
+   * pipeline resolved it. It decides how wide a container ACL reads: with
+   * `runs:read-all` an `appfile://` anchored to a colleague's run resolves,
+   * which is what the file gallery the user picked it from already shows;
+   * without it only the session owner's own runs.
+   */
+  permissions: ReadonlySet<string>;
 }
 
 /**

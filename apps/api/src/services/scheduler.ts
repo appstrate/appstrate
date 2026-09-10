@@ -4,6 +4,7 @@ import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   schedules,
@@ -336,7 +337,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     // Update schedule timestamps. `enabled` is re-read here because the
     // trigger may have just disabled the schedule (invalid actor) — a
     // disabled schedule must not get a fresh nextRunAt re-armed onto it.
-    const schedule = await getSchedule(scheduleId, { orgId, spaceId });
+    const schedule = await loadSchedule(scheduleId, { orgId, spaceId });
     const nextRun = schedule?.enabled
       ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
       : null;
@@ -703,19 +704,21 @@ export async function triggerScheduledRun(
 export async function listSchedules(
   scope: SpaceScope,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(schedules)
     .where(scopedWhere(schedules, { orgId: scope.orgId, spaceId: scope.spaceId }))
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
 }
 
 export async function listPackageSchedules(
   scope: SpaceScope,
   packageId: string,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
@@ -728,28 +731,34 @@ export async function listPackageSchedules(
       }),
     )
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
 }
 
-export async function getSchedule(
-  id: string,
-  scope?: SpaceScope,
-  viewer: Actor | null = null,
-): Promise<EnrichedSchedule | null> {
+/** The bare schedule row, before any enrichment — what a write path reads to diff against. */
+async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
   const rows = await db
     .select()
     .from(schedules)
     .where(
       scopedWhere(schedules, {
-        orgId: scope?.orgId,
-        spaceId: scope?.spaceId,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )
     .limit(1);
-  if (!rows[0]) return null;
-  const schedule = toSchedule(rows[0]);
-  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer);
+  return rows[0] ? toSchedule(rows[0]) : null;
+}
+
+export async function getSchedule(
+  id: string,
+  scope: SpaceScope,
+  viewer: Actor | null,
+  visibility: SQL | undefined,
+): Promise<EnrichedSchedule | null> {
+  const schedule = await loadSchedule(id, scope);
+  if (!schedule) return null;
+  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer, visibility);
   return enriched ?? null;
 }
 
@@ -797,11 +806,17 @@ const UNENRICHED_SCHEDULE_FIELDS = {
  *    `unreadForActor` applies to run lists, so a member and an end-user never
  *    observe each other's read state. A null viewer (no actor context) reports
  *    0: unread is a recipient-side concept.
+ *
+ * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
+ * the counters span exactly the runs the caller may open from the card. Without
+ * it a member without `runs:read-all` would read "3 running" off a colleague's
+ * schedule and find an empty run list behind it.
  */
 async function loadScheduleRunStats(
   scheduleIds: string[],
   orgId: string,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<Map<string, ScheduleRunStats>> {
   if (scheduleIds.length === 0) return new Map();
 
@@ -829,7 +844,7 @@ async function loadScheduleRunStats(
     .from(runs)
     // `scheduleId` is already unique per org, but the org filter keeps the read
     // tenant-scoped by construction rather than by trusting the id list.
-    .where(and(eq(runs.orgId, orgId), inArray(runs.scheduleId, scheduleIds)))
+    .where(and(eq(runs.orgId, orgId), inArray(runs.scheduleId, scheduleIds), visibility))
     .groupBy(runs.scheduleId);
 
   // postgres.js returns count()/max() as numeric STRINGS — coerce here so the
@@ -855,11 +870,14 @@ async function loadScheduleRunStats(
  *
  * @param viewer Actor the response is being rendered for — scopes
  *   `unread_count` only. Null when there is no actor context.
+ * @param visibility Caller's run-read predicate — scopes `running_runs` and
+ *   `last_run_number` (see {@link loadScheduleRunStats}).
  */
 async function enrichSchedules(
   schedules: ScheduleWireDto[],
   orgId: string,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
@@ -883,6 +901,7 @@ async function enrichSchedules(
       schedules.map((s) => s.id),
       orgId,
       viewer,
+      visibility,
     ),
   ]);
   const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
@@ -966,9 +985,9 @@ export async function createSchedule(
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // create response matches the GET detail shape (actor_name/actor_type).
-  // A viewer is not needed here: the schedule was just created, so it has no
-  // runs and every run counter is zero for ANY viewer.
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, null);
+  // Neither a viewer nor a visibility predicate is needed here: the schedule
+  // was just created, so it has no runs and every counter is zero for anyone.
+  const [enriched] = await enrichSchedules([schedule], scope.orgId, null, undefined);
   return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
 }
 
@@ -994,9 +1013,11 @@ export async function updateSchedule(
     actor?: Actor;
   },
   /** Actor the response is rendered for — scopes `unread_count` only. */
-  viewer: Actor | null = null,
+  viewer: Actor | null,
+  /** Caller's run-read predicate — scopes the run counters of the echoed row. */
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule | null> {
-  const existing = await getSchedule(id, scope);
+  const existing = await loadSchedule(id, scope);
   if (!existing) return null;
 
   const cronExpr = data.cronExpression ?? existing.cron_expression;
@@ -1055,7 +1076,7 @@ export async function updateSchedule(
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // update response matches the GET detail shape (actor/run counters).
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer);
+  const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer, visibility);
   return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
 }
 
@@ -1112,7 +1133,9 @@ export async function dropLockedFieldsFromSchedules(
     // Only touch a schedule that actually answers a locked field — every other
     // schedule keeps its row, its `updatedAt` and its queue job untouched.
     if (Object.keys(stripped).length === Object.keys(input).length) continue;
-    await updateSchedule(scope, row.id, { input: stripped });
+    // No viewer and no run predicate: this rewrite is a repair, and the
+    // enriched row it returns is discarded.
+    await updateSchedule(scope, row.id, { input: stripped }, null, undefined);
     rewritten.push(row.id);
   }
   return rewritten;

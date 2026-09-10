@@ -64,8 +64,8 @@ export function assertCustomRolesFeature(): void {
     title: "Feature Unavailable",
     detail:
       "Defining custom space roles requires the `custom_roles` feature, provided by the " +
-      "Appstrate Cloud plan (the `@appstrate/module-ee` module). The four built-in presets " +
-      "(admin, builder, operator, viewer) are always available.",
+      "Appstrate Cloud plan (the `@appstrate/module-ee` module). The built-in presets " +
+      `(${SPACE_ROLE_PRESETS.join(", ")}) are always available.`,
   });
 }
 

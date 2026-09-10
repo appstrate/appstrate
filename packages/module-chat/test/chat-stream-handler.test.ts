@@ -36,6 +36,7 @@ import { handleChatStream, type ChatEngine, type ChatEnv } from "../src/chat-str
 import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
+import type { ChatAttachmentRequest } from "@appstrate/core/chat-contract";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
@@ -198,7 +199,11 @@ describe("handleChatStream", () => {
   });
 
   /** A `Hono<ChatEnv>` app mirroring what the platform auth pipeline sets. */
-  function buildApp(deps: ReturnType<typeof buildChatPlatformDeps>, engine?: ChatEngine) {
+  function buildApp(
+    deps: ReturnType<typeof buildChatPlatformDeps>,
+    engine?: ChatEngine,
+    permissions: Set<string> = new Set<string>(),
+  ) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
     // asserted at the HTTP contract, not as an uncaught handler exception.
@@ -212,7 +217,7 @@ describe("handleChatStream", () => {
       c.set("orgRole", "owner");
       c.set("orgName", ctx.org.name);
       c.set("orgSlug", ctx.org.slug);
-      c.set("permissions", new Set<string>());
+      c.set("permissions", permissions);
       return handleChatStream(c, deps, engine);
     });
     return app;
@@ -231,6 +236,12 @@ describe("handleChatStream", () => {
       context?: () => Response;
       /** Replace the whole scripted dispatch (to observe request timing). */
       dispatch?: (req: Request) => Promise<Response>;
+      /** Stand in for the platform's composer-attachment resolution. */
+      resolveChatAttachment?: ChatPlatformDeps["resolveChatAttachment"];
+      /** The caller's resolved RBAC set, as the auth pipeline would write it. */
+      permissions?: Set<string>;
+      /** Replace the single user message (to carry a composer attachment). */
+      parts?: unknown[];
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -239,8 +250,11 @@ describe("handleChatStream", () => {
       ...buildChatPlatformDeps(buildModuleInitContext()),
       dispatch: overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.context),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
+      ...(overrides?.resolveChatAttachment
+        ? { resolveChatAttachment: overrides.resolveChatAttachment }
+        : {}),
     };
-    const app = buildApp(deps, engine);
+    const app = buildApp(deps, engine, overrides?.permissions);
     const res = await app.request("/api/chat", {
       method: "POST",
       headers: {
@@ -250,12 +264,52 @@ describe("handleChatStream", () => {
       },
       body: JSON.stringify({
         id: sessionId,
-        messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "dis bonjour" }] }],
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            parts: overrides?.parts ?? [{ type: "text", text: "dis bonjour" }],
+          },
+        ],
         ...(generation ? { generation } : {}),
       }),
     });
     return res;
   }
+
+  it("hands the composer attachment the caller's own permission set", async () => {
+    // The gallery the user picks an `appfile://` from is filtered by
+    // `runs:read-all`; the platform resolves the attachment against the same
+    // set, so the handler has to carry it. Forwarding nothing would 404 a file
+    // the picker had just offered.
+    const sessionId = mintSessionId();
+    const { engine } = scriptedEngine();
+    const requests: ChatAttachmentRequest[] = [];
+    const permissions = new Set(["runs:read-all"]);
+
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions,
+      parts: [
+        { type: "text", text: "résume ce fichier" },
+        {
+          type: "file",
+          url: "appfile://file_abcdefgh",
+          mediaType: "text/plain",
+          filename: "r.txt",
+        },
+      ],
+      resolveChatAttachment: async (request) => {
+        requests.push(request);
+        return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+      },
+    });
+
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(requests).toHaveLength(1);
+    expect([...requests[0]!.permissions]).toEqual(["runs:read-all"]);
+    await waitForAssistantPersist(sessionId);
+  });
 
   it("rejects generation settings unsupported by the selected model", async () => {
     const { engine, calls } = scriptedEngine();

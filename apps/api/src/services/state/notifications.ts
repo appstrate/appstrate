@@ -4,8 +4,7 @@ import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-or
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers, packages } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
-import { actorMatch, actorScopeFilter, type Actor } from "../../lib/actor.ts";
-import { listRunsWithFilter } from "./runs.ts";
+import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 
 // --- Notifications ---
@@ -52,10 +51,10 @@ interface NotificationListResult {
  *  - actor-less run (owner-less org / system schedule, where the scheduler
  *    copied a null userId+endUserId onto the run) → org admins/owners only.
  *    Owned schedules carry the owner's userId onto the run, so they hit the
- *    first branch (one notification, no fan-out). Restricting the actor-less
- *    case to admins bounds row growth and avoids bell-spamming every member
- *    for a schedule nobody personally owns; plain members still see the run
- *    in the runs list.
+ *    first branch (one notification, no fan-out). An actor-less row is readable
+ *    only with `runs:read-all` (RBAC spec §3.4) — nobody else would find the
+ *    run behind the bell — which is why the fan-out targets org admins, and it
+ *    bounds row growth at the same time.
  *
  * Best-effort by contract: the caller wraps this in try/catch — the run is
  * already terminal, a notification write must never fail the run.
@@ -321,30 +320,4 @@ export async function listNotifications(
     })),
     has_more: hasMore,
   };
-}
-
-// --- Run list (GET /api/runs?user=me) ---
-//
-// Unrelated to notifications, but the handler shares this module. The
-// "my runs" view keeps the original actor-or-org-visible semantics.
-
-export async function listUserRuns(
-  scope: SpaceScope,
-  actor: Actor,
-  options: { limit?: number; offset?: number } = {},
-) {
-  const { limit = 20, offset = 0 } = options;
-  return listRunsWithFilter(
-    scopedWhere(runs, {
-      orgId: scope.orgId,
-      spaceId: scope.spaceId,
-      // Dashboard members see own + org-visible (schedule/system) runs;
-      // end-users see ONLY their own — see actorScopeFilter. Previously an
-      // unconditional isNull(userId) branch leaked every end-user's runs.
-      extra: [actorScopeFilter(actor, { userId: runs.userId, endUserId: runs.endUserId })],
-    })!,
-    limit,
-    offset,
-    actor,
-  );
 }

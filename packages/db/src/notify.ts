@@ -24,6 +24,15 @@ export interface RunMetricNotifyPayload {
   org_id: string;
   /** Owning space (cross-space isolation gate). */
   space_id: string;
+  /**
+   * The run's actor — the run-read gate on the SSE fan-out
+   * (`services/realtime.ts`): a subscriber without `runs:read-all` receives a
+   * metric frame only for the runs it launched. Exactly one of the two is set:
+   * no live launch path writes a row with both NULL, and such a row reaches
+   * `runs:read-all` subscribers alone.
+   */
+  user_id: string | null;
+  end_user_id: string | null;
   /** Agent id, used by the per-agent runs SSE stream filter. */
   package_id: string;
   /** Cumulative token usage as last reported by the runner. */
@@ -100,20 +109,34 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     RETURNS TRIGGER AS $$
     DECLARE
       _space_id text;
+      _user_id text;
+      _end_user_id text;
     BEGIN
-      SELECT space_id INTO _space_id FROM runs WHERE id = NEW.run_id;
+      -- The run actor rides along with its space: the SSE fan-out gates each
+      -- log frame on runs:read-all OR ownership, and run_logs itself carries
+      -- no actor column to decide that from.
+      SELECT space_id, user_id, end_user_id
+        INTO _space_id, _user_id, _end_user_id
+        FROM runs WHERE id = NEW.run_id;
       PERFORM pg_notify('run_log_insert', json_build_object(
         'id', NEW.id,
         'run_id', NEW.run_id,
         'org_id', NEW.org_id,
         'space_id', _space_id,
+        'user_id', _user_id,
+        'end_user_id', _end_user_id,
         'type', NEW.type,
         'level', NEW.level,
         'event', NEW.event,
+        -- Payload budget: pg_notify raises above 8 000 bytes, and it raises
+        -- INSIDE this trigger, so an over-long frame aborts the run_logs INSERT
+        -- rather than merely losing a frame. The two caps below (2 000 for the
+        -- message, 5 000 for the data) plus the fixed keys, the two ids and the
+        -- two actor columns stay under that ceiling with room to spare.
         'message', LEFT(NEW.message, 2000),
         'data', CASE
           WHEN NEW.data IS NULL THEN NULL
-          WHEN octet_length(NEW.data::text) <= 6000 THEN NEW.data
+          WHEN octet_length(NEW.data::text) <= 5000 THEN NEW.data
           ELSE '"[payload too large]"'::jsonb
         END,
         'created_at', to_char(NEW.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')

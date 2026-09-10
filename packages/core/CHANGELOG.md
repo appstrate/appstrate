@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New action `read-all` on the `runs` resource of `CoreResources` (`@appstrate/core/permissions`), hence the new permission string `runs:read-all`. `runs:read` narrows to the runs the principal launched — its own manual runs and its own schedules' — and `runs:read-all` is the space-wide view over every run, colleagues', end-users' and rows with no actor. A guard written `requireCorePermission("runs", "read")` keeps compiling and now gates the narrower thing; a module that wants the supervision view must ask for `read-all`.
+
+- New space-role preset `runner` in `SPACE_ROLE_PRESETS` (`@appstrate/core/permissions`), between `operator` and `viewer`: launch agents without reading them. Two consequences for a module that names presets. Any exhaustive `Record<SpaceRolePreset, …>` gains a fifth key — a compile error until it does. And the tuple stops being a strength ordering: `runner` and `viewer` are incomparable (a runner launches what it cannot read, a viewer reads what it cannot launch), so `SPACE_ROLE_PRESETS` is a display order and a `permissionsContribution` `presets` list is upward-closed under grant containment, not tuple position — naming `viewer` no longer implies `runner`, and naming `runner` requires `admin`, `builder` and `operator`.
+
 - New subpath `@appstrate/core/request-body` — `readJsonBody(c, schema, opts?)` and the type `ReadJsonBodyOptions`. The canonical JSON body reader: it catches an unparseable body as a 400 instead of letting the `SyntaxError` become a 500, then runs the schema through `parseBody` so a wrong-shape body answers RFC-9457 `errors[]` naming each offending field. `{ allowEmpty: true }` treats a missing or whitespace-only body as `{}` while still refusing malformed JSON. It moved here from `apps/api/src/lib/request-body.ts`, which a module cannot import: without it every module route re-derives the malformed/invalid split by hand, and each copy phrases its own 400. Hono stays an optional peer dependency — only its `Context` type is touched.
 
 - New exports `ORG_ROLES_WITH_FULL_ACCESS` (`["owner", "admin"]`) and its type `OrgRoleWithFullAccess` (`@appstrate/core/permissions`): the org roles that hold every org-level permission in every space without a `space_members` row. One name for a fact four call sites spelled out on their own. `VIEW_AS_ORG_ROLES` is now DERIVED as its complement (same value, `["member", "guest"]`, and the same `ViewAsOrgRole` union) — "a preview only removes" is exactly the statement that the previewable roles are the roles that do not already hold everything, so the two can no longer drift apart. Its declared type is `readonly [ViewAsOrgRole, ...ViewAsOrgRole[]]` rather than a literal `as const` tuple; `z.enum()` and array reads are unaffected, indexing a fixed position is not.
@@ -18,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
 
 ### Changed
+
+- **BREAKING: `ChatAttachmentRequest.permissions` is required**
+  (`@appstrate/core/chat-contract`), a `ReadonlySet<string>`: the caller's
+  effective permission set in the space, as the platform auth pipeline resolved
+  it. It decides how wide the container ACL of an `appfile://` attachment
+  reads — with `runs:read-all` a file anchored to a colleague's run resolves,
+  which is the same set the file gallery the user picked it from answers, and
+  without it only the session owner's own runs. There is no default: a module
+  resolving attachments through `ctx.services.resolveChatAttachment` forwards
+  `c.get("permissions")` or fails to compile, instead of silently answering a
+  narrower ACL than the picker that offered the file.
 
 - **BREAKING: `invalidatePrincipalPermissions(orgId, userId)` requires
   `userId`.** The org-wide clear is removed: a call names exactly one principal

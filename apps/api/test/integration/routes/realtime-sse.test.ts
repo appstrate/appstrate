@@ -19,6 +19,7 @@ import {
   createTestUser,
   addOrgMember,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
@@ -77,6 +78,9 @@ describe("realtime SSE routes (integration)", () => {
       packageId: agentPkg.id,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
+      // The run channels are gated on `runs:read-all` OR ownership, so the
+      // fixture run belongs to the context driving these streams.
+      userId: ctx.user.id,
     });
   });
 
@@ -253,6 +257,9 @@ describe("realtime SSE routes (integration)", () => {
         packageId: agentPkg.id,
         orgId: ctx.orgId,
         spaceId: closed.id,
+        // The custom role holds `runs:read` and not `read-all`, so the control
+        // below reads this run by owning it.
+        userId: member.id,
       });
 
       const denied = await app.request(
@@ -788,6 +795,7 @@ describe("realtime SSE routes (integration)", () => {
         org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
         run_id: run.id,
+        user_id: ctx.user.id,
         level: "debug",
         message: "debug-secret",
       });
@@ -798,6 +806,7 @@ describe("realtime SSE routes (integration)", () => {
         org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
         run_id: run.id,
+        user_id: ctx.user.id,
         level: "info",
         message: "info-visible",
       });
@@ -828,6 +837,7 @@ describe("realtime SSE routes (integration)", () => {
         org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
         run_id: run.id,
+        user_id: ctx.user.id,
         level: "debug",
         message: "debug-for-admin",
       });
@@ -1031,6 +1041,98 @@ describe("realtime SSE routes (integration)", () => {
 
       expect(activeSubscriberCount()).toBe(before + 1);
       await res.body!.cancel();
+    });
+  });
+
+  // ── Run visibility on the wire ──────────────────────────────
+  //
+  // `runs:read` is ownership on this transport too: an operator's streams
+  // carry the runs it launched, and the single-run stream refuses one it may
+  // not read with the same 404 `GET /api/runs/{id}` answers.
+
+  describe("run visibility (runs:read vs runs:read-all)", () => {
+    let operator: TestContext;
+    let ownRun: Awaited<ReturnType<typeof seedRun>>;
+
+    beforeEach(async () => {
+      operator = await memberContext(ctx, "member", "operator");
+      ownRun = await seedRun({
+        packageId: agentPkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: operator.user.id,
+      });
+    });
+
+    /**
+     * Fire a colleague's frame then the operator's own on `channel`, and
+     * report what the org-wide stream delivered. Ordering is what makes the
+     * absence provable: the second frame arriving alone means the first was
+     * dropped, not merely late.
+     */
+    async function ownAndColleagueFrames(
+      channel: "run_update" | "run_log_insert" | "run_metric",
+    ): Promise<string[]> {
+      const res = await sseRequest("/api/realtime/runs", operator);
+      expect(res.status).toBe(200);
+      await wait();
+
+      for (const [label, runId, userId] of [
+        ["colleague", run.id, ctx.user.id],
+        ["mine", ownRun.id, operator.user.id],
+      ] as const) {
+        const common = { org_id: ctx.orgId, space_id: ctx.defaultSpaceId, user_id: userId };
+        if (channel === "run_update") {
+          await pgNotify("run_update", { ...common, id: runId, status: "running", error: label });
+        } else if (channel === "run_log_insert") {
+          await pgNotify("run_log_insert", {
+            ...common,
+            run_id: runId,
+            level: "info",
+            message: label,
+          });
+        } else {
+          await pgNotify("run_metric", {
+            ...common,
+            run_id: runId,
+            package_id: agentPkg.id,
+            token_usage: null,
+            cost_so_far: 0,
+          });
+        }
+      }
+
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      return events.map((e) => {
+        const data = JSON.parse(e.data) as { error?: string; message?: string; runId?: string };
+        return data.error ?? data.message ?? data.runId ?? "";
+      });
+    }
+
+    it("delivers the operator's own run_update and drops a colleague's", async () => {
+      expect(await ownAndColleagueFrames("run_update")).toEqual(["mine"]);
+    });
+
+    it("delivers no run_log or run_metric for a colleague's run", async () => {
+      expect(await ownAndColleagueFrames("run_log_insert")).toEqual(["mine"]);
+      expect(await ownAndColleagueFrames("run_metric")).toEqual([ownRun.id]);
+    });
+
+    it("refuses the per-run stream of a run the operator may not read", async () => {
+      const denied = await sseRequest(`/api/realtime/runs/${run.id}`, operator);
+      expect(denied.status).toBe(404);
+
+      // Two controls: the same caller on its OWN run, and an admin on the
+      // refused one — so the 404 is the run's visibility and nothing else.
+      const own = await sseRequest(`/api/realtime/runs/${ownRun.id}`, operator);
+      expect(own.status).toBe(200);
+      await own.body?.cancel();
+      const asAdmin = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(asAdmin.status).toBe(200);
+      await asAdmin.body?.cancel();
     });
   });
 

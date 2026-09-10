@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { OrgRole } from "@appstrate/core/permissions";
+import {
+  SPACE_LEVEL_PERMISSIONS,
+  type OrgRole,
+  type SpaceLevelPermission,
+} from "@appstrate/core/permissions";
 import { describe, it, expect } from "bun:test";
 import {
   effectivePermissions,
@@ -8,6 +12,7 @@ import {
   presetPermissions,
   validateScopes,
   API_KEY_ALLOWED_SCOPES,
+  type Permission,
 } from "../../src/lib/permissions.ts";
 import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts";
 
@@ -167,7 +172,7 @@ describe("effectivePermissions", () => {
 });
 
 describe("presetPermissions", () => {
-  it("orders the four presets viewer ⊂ operator ⊂ builder ⊂ admin", () => {
+  it("nests the read chain viewer ⊂ operator ⊂ builder ⊂ admin", () => {
     const [viewer, operator, builder, admin] = (
       ["viewer", "operator", "builder", "admin"] as const
     ).map((p) => presetPermissions(p));
@@ -179,6 +184,112 @@ describe("presetPermissions", () => {
       for (const perm of narrow!) expect(wide!.has(perm)).toBe(true);
       expect(wide!.size).toBeGreaterThan(narrow!.size);
     }
+  });
+});
+
+describe("the `runner` preset", () => {
+  /**
+   * Spelled out rather than derived: a runner launches agents it may not read,
+   * so its set is the one preset that cannot be filtered out of a neighbour.
+   * The list is asserted whole, so widening it anywhere is a diff in this file.
+   *
+   * `presetPermissions` answers the MERGED matrix — core plus whatever the
+   * loaded modules contributed to `runner` — so each assertion here is scoped
+   * to `SPACE_LEVEL_PERMISSIONS`, the core space vocabulary. The module half is
+   * NOT assertable from here: the contribution snapshot is a process-wide
+   * singleton that any test file may reset (`setModulePermissionsProvider`), so
+   * what this file observes of it is the file ordering of the run, not policy.
+   * Each module pins what it contributes in its own suite, next to the
+   * declaration — `packages/module-chat/test/rbac-contribution.test.ts` and the
+   * `rbac-contribution` tests under `src/modules/{mcp,webhooks}/test/unit/`.
+   */
+  const RUNNER_GRANTS: Permission[] = [
+    "agents:run",
+    "files:read",
+    "integrations:connect",
+    "integrations:disconnect",
+    "integrations:read",
+    "persistence:read",
+    "runs:cancel",
+    "runs:read",
+  ];
+
+  /** The half of a preset's set that core defines, module contributions removed. */
+  function coreGrants(preset: Parameters<typeof presetPermissions>[0]): Permission[] {
+    return [...presetPermissions(preset)]
+      .filter((p) => SPACE_LEVEL_PERMISSIONS.has(p as SpaceLevelPermission))
+      .sort();
+  }
+
+  it("holds exactly the eight core space-level grants it is defined by", () => {
+    expect(coreGrants("runner")).toEqual(RUNNER_GRANTS);
+  });
+
+  it("withholds every read that would expose what it launches", () => {
+    const runner = presetPermissions("runner");
+    // The point of the preset (RBAC spec §3.3): the agent's content, the
+    // packages it is built from, who else runs what, and any mutation at all.
+    const withheldGrants: Permission[] = [
+      "agents:read",
+      "skills:read",
+      "mcp-servers:read",
+      "schedules:read",
+      "end-users:read",
+      "end-users:write",
+      "runs:read-all",
+    ];
+    for (const withheld of withheldGrants) {
+      expect(runner.has(withheld), `runner holds ${withheld}`).toBe(false);
+    }
+    // No core mutation at all: a runner starts what someone else authored.
+    expect(coreGrants("runner").filter((p) => p.endsWith(":write"))).toEqual([]);
+  });
+
+  it("is what an explicit member holding it reaches, org half included", () => {
+    // Through the resolver, not the matrix: an org `member` added as `runner`
+    // in a closed space keeps the org reads and gains nothing else.
+    const ref = resolveSpaceRole(
+      "member",
+      { id: "spc_test", visibility: "closed", defaultRole: "operator" },
+      { ref: { kind: "preset", preset: "runner" } },
+    );
+    const effective = effectivePermissions({
+      orgPermissions: orgPermissions("member"),
+      spacePermissions: spacePermissions(ref),
+    });
+    expect(effective.has("agents:run")).toBe(true);
+    expect(effective.has("agents:read")).toBe(false);
+    expect(effective.has("org:read")).toBe(true);
+  });
+});
+describe("runs:read-all", () => {
+  it("is held by builder and admin, and by neither operator nor viewer", () => {
+    // `read` is the runs the principal launched; `read-all` is the space-wide
+    // supervision view. `admin`/`builder` derive it from the catalog — the
+    // point of asserting it here is that the derivation reaches them and the
+    // two narrower presets, which enumerate their grants by hand, stay out.
+    for (const preset of ["admin", "builder"] as const) {
+      expect(presetPermissions(preset).has("runs:read-all"), preset).toBe(true);
+    }
+    for (const preset of ["operator", "viewer"] as const) {
+      expect(presetPermissions(preset).has("runs:read-all"), preset).toBe(false);
+      // …while plain `runs:read` is unchanged for the operator.
+      expect(presetPermissions(preset).has("runs:read"), preset).toBe(true);
+    }
+  });
+
+  it("is API-key grantable, and only to a creator who holds it", () => {
+    expect(API_KEY_ALLOWED_SCOPES.has("runs:read-all")).toBe(true);
+    // An org admin holds the `admin` preset in the default space.
+    expect(validateScopes(["runs:read", "runs:read-all"], inDefaultSpace("admin"))).toEqual([
+      "runs:read",
+      "runs:read-all",
+    ]);
+    // A plain member holds `operator` there: the wider scope narrows away
+    // silently, exactly like any other grant above the creator.
+    expect(validateScopes(["runs:read", "runs:read-all"], inDefaultSpace("member"))).toEqual([
+      "runs:read",
+    ]);
   });
 });
 

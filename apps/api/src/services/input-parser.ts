@@ -27,6 +27,7 @@
  */
 
 import type { Context } from "hono";
+import type { AppEnv } from "../types/index.ts";
 import { fileTypeStream, fileTypeFromBuffer } from "file-type";
 import type { FileReference } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
@@ -59,6 +60,8 @@ import {
 } from "./files.ts";
 import { isUploadUri, isFileUri, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getActor } from "../lib/actor.ts";
+import { callerPermissions } from "../lib/permissions.ts";
+import { assertRunVisible } from "../lib/run-visibility.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
@@ -463,14 +466,16 @@ const DOC_STREAM_CONCURRENCY = 4;
  *
  * Access control mirrors `GET /api/runs/:id`: the lookup is scoped to the
  * caller's org + space (cross-tenant ids surface as the same not-found
- * as a missing run), end-users can only replay their own runs, and the prior
- * run must belong to the agent being triggered (its input schema is the one
- * the replayed input was validated against). The returned input flows through
+ * as a missing run), the prior run must be one the caller may READ — replaying
+ * a run hands back its input, so `runs:read-all` gates a colleague's run here
+ * exactly as it gates the detail route — and it must belong to the agent being
+ * triggered (its input schema is the one the replayed input was validated
+ * against). The returned input flows through
  * the exact same consume + validation pipeline as a fresh request and the JSON
  * is re-validated against the current schema.
  */
 async function resolveRerunInput(
-  c: Context,
+  c: Context<AppEnv>,
   rerunFrom: string,
   agentPackageId: string | undefined,
 ): Promise<Record<string, unknown>> {
@@ -481,10 +486,7 @@ async function resolveRerunInput(
   if (!prior) {
     throw notFound(`Run '${rerunFrom}' not found`);
   }
-  const endUser = c.get("endUser");
-  if (endUser && prior.endUserId !== endUser.id) {
-    throw notFound(`Run '${rerunFrom}' not found`);
-  }
+  assertRunVisible(c, prior);
   if (agentPackageId !== undefined && prior.packageId !== agentPackageId) {
     throw conflict(
       "rerun_agent_mismatch",
@@ -514,7 +516,7 @@ async function resolveRerunInput(
  * refuse; a single schema owned here could only be right for one of them.
  */
 export async function parseRequestInput(
-  c: Context,
+  c: Context<AppEnv>,
   body: RunRequestBody,
   runId: string,
   inputSchema?: JSONSchemaObject,
@@ -681,14 +683,23 @@ export async function parseRequestInput(
           fileRefs.length > 0
             ? await Promise.all(
                 fileRefs.map(async ({ ref, id }) => {
-                  const doc = await getFileForActor({ orgId, spaceId }, actor, id);
-                  // Cross-actor ACL (S2): resolving a run is org-wide-visible to
-                  // members, but a `user_upload` is creator-only content — a
-                  // member must not deliver another member's private upload into
-                  // their own run. The `download` capability is always true for
-                  // an `agent_output` (freely chainable, D6) but only for the
-                  // creator of an upload. A rejected ref is indistinguishable from
-                  // missing (404), matching the not-found shape above.
+                  const doc = await getFileForActor(
+                    { orgId, spaceId },
+                    actor,
+                    id,
+                    callerPermissions(c),
+                  );
+                  // Cross-actor ACL (S2): the container ACL is the outer gate
+                  // and narrows a run-contained output to the runs the caller
+                  // may read (`runs:read-all`, else its own); the `download`
+                  // capability adds the per-file rule on top — a `user_upload`
+                  // is creator-only content, so a member must not deliver
+                  // another member's private upload into their own run.
+                  // `download` is always true for an `agent_output` — chainable
+                  // within the container the outer gate already granted (D6) —
+                  // and true for an upload only for its creator. A rejected ref
+                  // is indistinguishable from missing (404), matching the
+                  // not-found shape above.
                   if (!doc || !doc.capabilities.download) throw notFound(`File '${id}' not found`);
                   return { ref, doc: doc.row };
                 }),

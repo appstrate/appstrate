@@ -75,7 +75,13 @@ export interface CoreResources {
   // manifest (MCPB vocabulary lifted to the root), authored externally and
   // imported as a `.afps`).
   "mcp-servers": "read" | "write" | "delete";
-  runs: "read" | "cancel" | "delete";
+  // `read` = the runs the principal launched (its own manual runs, and the
+  // runs of its own schedules). `read-all` = every run in the space, whoever
+  // launched it: other members', end-users', and rows with no actor at all
+  // (both columns NULL — no live launch path writes one). `read-all` IMPLIES
+  // `read` — it is the wider of the two, so it opens every run read surface on
+  // its own and a role holding it alone is not a role that reads nothing.
+  runs: "read" | "read-all" | "cancel" | "delete";
   // Durable file store. `read` gates the family the same way `runs:read`
   // gates runs — it answers "may this principal touch files at all",
   // NOT "may it touch THIS file" (the per-file container ACL, derived
@@ -134,7 +140,7 @@ export const CORE_RESOURCE_ACTIONS = {
   agents: ["read", "write", "configure", "delete", "run"],
   skills: ["read", "write", "delete"],
   "mcp-servers": ["read", "write", "delete"],
-  runs: ["read", "cancel", "delete"],
+  runs: ["read", "read-all", "cancel", "delete"],
   files: ["read", "delete"],
   schedules: ["read", "write", "delete"],
   persistence: ["read", "delete"],
@@ -288,11 +294,16 @@ export type OrgRole = (typeof ORG_ROLES)[number];
  * Space-role presets (RBAC spec §3.3). Constants, not rows. In core so modules can name
  * them in `ModulePermissionContribution.presets`; the preset → permission mapping is
  * policy and stays in `apps/api/src/lib/permissions.ts`.
- * Ordered strongest first — `assertPresetsUpwardClosed` reads the tuple in order.
+ *
+ * Ordered widest-reach first, which is the order every preset picker renders. It is NOT
+ * a strength ordering: `runner` launches agents it cannot read and `viewer` reads agents
+ * it cannot launch, so the two are incomparable and the presets form a lattice, not a
+ * chain. Whatever needs "stronger than" reads the permission matrix
+ * (`presetsStrictlyStrongerThan`), never a position in this tuple.
  */
-export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "viewer"] as const;
+export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "runner", "viewer"] as const;
 
-/** Space-role preset union — `"admin" | "builder" | "operator" | "viewer"`. */
+/** Space-role preset union — `"admin" | "builder" | "operator" | "runner" | "viewer"`. */
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
 
 /** Org roles holding every org-level permission in every space, without a `space_members` row. */
@@ -412,6 +423,7 @@ const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
     admin: new Set(),
     builder: new Set(),
     operator: new Set(),
+    runner: new Set(),
     viewer: new Set(),
   },
   apiKeyAllowed: new Set(),

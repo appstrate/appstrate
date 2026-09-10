@@ -388,6 +388,11 @@ export async function handleChatStream(
         userId: user.id,
         chatSessionId: sessionId,
         uri,
+        // The container ACL reads as wide as the caller does: an `appfile://`
+        // the user picked from the gallery — which `runs:read-all` widens to
+        // the whole space's run outputs — must still resolve when they attach
+        // it. Picker and attach answer the same set.
+        permissions: c.get("permissions"),
       }),
     );
     messages[messages.length - 1] = lastMessage;
@@ -570,7 +575,7 @@ export async function handleChatStream(
       name: user.name,
       orgId,
       orgRole,
-      permissions: [...(c.get("permissions") ?? [])],
+      permissions: [...c.get("permissions")],
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,

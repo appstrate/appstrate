@@ -739,8 +739,8 @@ describe("Runs API", () => {
       expect(explicitBody.data.map((r) => r.id)).toEqual([ownRun.id]);
     });
 
-    // The param is validated before the end-user branch, so a bad value 400s
-    // for every caller rather than being swallowed by the implicit
+    // The param goes through the same closed-set validation for every caller,
+    // so a bad value 400s rather than being swallowed by an end-user's implicit
     // self-restriction — the same URL means the same thing for everyone.
     it("still rejects an unknown ?user value for an end-user caller", async () => {
       const endUser = await seedEndUser({

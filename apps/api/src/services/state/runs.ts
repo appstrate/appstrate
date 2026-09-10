@@ -1138,15 +1138,22 @@ export async function listRecentForActor(
   );
 }
 
-export async function getLastRun(scope: SpaceScope, packageId: string, actor: Actor | null) {
+/**
+ * The most recent run of `packageId`. `visibility` is the caller's run-read
+ * predicate (`lib/run-visibility.ts`) — without `runs:read-all` the "last run"
+ * an agent reports must be the caller's own, not whatever a colleague fired.
+ */
+export async function getLastRun(
+  scope: SpaceScope,
+  packageId: string,
+  visibility: SQL | undefined,
+) {
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
-  if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
-  }
+  if (visibility) conditions.push(visibility);
 
   const [row] = await db
     .select({
@@ -1282,12 +1289,16 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
  * reads with the base client (its own snapshot, no locks), while
  * {@link deletePackageRuns} passes its open transaction so the count is taken
  * under the run-admission advisory lock and sees what that lock is holding back.
+ *
+ * `visibility` narrows the count to what a caller may read; the mutation
+ * guards pass none, because "is this agent busy" is about the agent, not about
+ * who is watching.
  */
 async function countActiveRunsForPackage(
   handle: Db | DbTx,
   scope: SpaceScope,
   packageId: string,
-  actor?: Actor,
+  visibility?: SQL,
 ): Promise<number> {
   const conditions = [
     eq(runs.packageId, packageId),
@@ -1296,9 +1307,7 @@ async function countActiveRunsForPackage(
     eq(runs.spaceId, scope.spaceId),
   ];
 
-  if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
-  }
+  if (visibility) conditions.push(visibility);
 
   const [row] = await handle
     .select({ count: count() })
@@ -1310,9 +1319,9 @@ async function countActiveRunsForPackage(
 export async function getRunningRunsForPackage(
   scope: SpaceScope,
   packageId: string,
-  actor?: Actor,
+  visibility?: SQL,
 ): Promise<number> {
-  return countActiveRunsForPackage(db, scope, packageId, actor);
+  return countActiveRunsForPackage(db, scope, packageId, visibility);
 }
 
 /**
@@ -1334,7 +1343,15 @@ export async function getRunningRunCountForOrg(scope: OrgScope): Promise<number>
   return row?.count ?? 0;
 }
 
-export async function getRunningRunCounts(scope: SpaceScope): Promise<Record<string, number>> {
+/**
+ * Active runs per package in the space. `visibility` is the caller's run-read
+ * predicate — without it the count answers "someone else is running this",
+ * which is exactly what `runs:read-all` gates.
+ */
+export async function getRunningRunCounts(
+  scope: SpaceScope,
+  visibility?: SQL,
+): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
@@ -1342,7 +1359,10 @@ export async function getRunningRunCounts(scope: SpaceScope): Promise<Record<str
       scopedWhere(runs, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [inArray(runs.status, [...activeRunStatusValues])],
+        extra: [
+          inArray(runs.status, [...activeRunStatusValues]),
+          ...(visibility ? [visibility] : []),
+        ],
       }),
     )
     .groupBy(runs.packageId);
@@ -1485,11 +1505,17 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 
 type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
-export async function listRunsWithFilter(
+/**
+ * The enriched page + total behind the two list surfaces in this module
+ * (`listPackageRuns`, `listScheduleRuns`). Module-private: a caller outside
+ * builds its WHERE by hand, and a hand-built `runs` predicate is what the
+ * `runs:read` visibility rule exists to keep out of the query.
+ */
+async function listRunsWithFilter(
   filter: SQL,
   limit: number,
-  offset = 0,
-  actor: Actor | null = null,
+  offset: number,
+  actor: Actor | null,
 ): Promise<RunListPage> {
   // The `total` count and the page share the same filter but are independent
   // reads — issued concurrently so the endpoint costs one round trip instead
@@ -1525,19 +1551,18 @@ export async function listPackageRuns(
   options: {
     limit?: number;
     offset?: number;
-    endUserId?: string | null;
     actor?: Actor | null;
+    /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
+    visibility?: SQL;
   } = {},
 ) {
-  const { limit = 50, offset = 0, endUserId, actor = null } = options;
+  const { limit = 50, offset = 0, actor = null, visibility } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
-  if (endUserId) {
-    conditions.push(eq(runs.endUserId, endUserId));
-  }
+  if (visibility) conditions.push(visibility);
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor);
 }
 
@@ -1568,9 +1593,10 @@ interface ListGlobalRunsOptions {
   status?: RunStatus;
   startDate?: Date;
   endDate?: Date;
-  endUserId?: string | null;
   chatSessionId?: string;
   actor?: Actor | null;
+  /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
+  visibility?: SQL;
 }
 
 export async function listGlobalRuns(
@@ -1584,16 +1610,16 @@ export async function listGlobalRuns(
     status,
     startDate,
     endDate,
-    endUserId,
     chatSessionId,
     actor = null,
+    visibility,
   } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
+  if (visibility) conditions.push(visibility);
   if (status) conditions.push(eq(runs.status, status));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
-  if (endUserId) conditions.push(eq(runs.endUserId, endUserId));
   if (chatSessionId) {
     conditions.push(eq(runs.chatSessionId, chatSessionId));
     conditions.push(
@@ -1663,14 +1689,14 @@ export async function listGlobalRuns(
 export async function listScheduleRuns(
   scope: SpaceScope,
   scheduleId: string,
-  options: { limit?: number; offset?: number; actor?: Actor | null } = {},
+  options: { limit?: number; offset?: number; actor?: Actor | null; visibility?: SQL } = {},
 ) {
-  const { limit = 20, offset = 0, actor = null } = options;
+  const { limit = 20, offset = 0, actor = null, visibility } = options;
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
       spaceId: scope.spaceId,
-      extra: [eq(runs.scheduleId, scheduleId)],
+      extra: [eq(runs.scheduleId, scheduleId), ...(visibility ? [visibility] : [])],
     })!,
     limit,
     offset,
@@ -1678,12 +1704,23 @@ export async function listScheduleRuns(
   );
 }
 
-export async function getRunFull(scope: SpaceScope, id: string, actor: Actor | null = null) {
+/**
+ * One run, enriched. `visibility` is the caller's run-read predicate
+ * (`lib/run-visibility.ts`): a run the caller may not read simply misses, so
+ * the handler's existing `notFound` covers it — hidden is 404, never 403.
+ */
+export async function getRunFull(
+  scope: SpaceScope,
+  id: string,
+  actor: Actor | null = null,
+  visibility?: SQL,
+) {
   const conditions = [
     eq(runs.id, id),
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
+  if (visibility) conditions.push(visibility);
 
   // `packages.draftManifest` + `draftContent` (the agent's full prompt) are
   // consumed ONLY by the inline branch below, so they are deliberately NOT in

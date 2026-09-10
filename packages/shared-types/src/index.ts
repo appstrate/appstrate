@@ -513,9 +513,11 @@ export interface AgentListItem extends BasePackageListItem {
   author?: string;
   keywords: string[];
   dependencies: {
+    /** Withheld from a summary read — `agents:run` without `agents:read`. */
     skills?: Record<string, string>;
+    /** Withheld from a summary read — `agents:run` without `agents:read`. */
     mcp_servers?: Record<string, string>;
-    integrations?: Record<string, string>;
+    integrations: Record<string, string>;
   };
   running_runs: number;
   type: PackageType;
@@ -530,18 +532,27 @@ export interface AgentDetail {
   description?: string;
   source: "system" | "local";
   dependencies: {
-    // `version`/`name`/`description` are emitted only when present on the
-    // manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
-    skills: { id: string; version?: string; name?: string; description?: string }[];
-    /** AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry). */
-    mcp_servers: { id: string; version: string }[];
+    /**
+     * The agent's composition — withheld from a summary read (`agents:run`
+     * without `agents:read`, RBAC spec §3.4) like `manifest` and `prompt`.
+     *
+     * `version`/`name`/`description` are emitted only when present on the
+     * manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
+     */
+    skills?: { id: string; version?: string; name?: string; description?: string }[];
+    /**
+     * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
+     * Composition too: withheld from a summary read, with `skills`.
+     */
+    mcp_servers?: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
-     * Always populated (system + user
-     * agents), so the dashboard's Connexions tab can render the
-     * integration-connection status without depending on the optional
-     * `manifest` field below.
+     * Always populated (system + user agents, full read + summary read), so the
+     * dashboard's Connexions tab can render the integration-connection status
+     * without depending on the optional `manifest` field below — and so a
+     * runner, who holds `integrations:connect` and no `agents:read`, can see
+     * which accounts the agent it launches needs.
      */
     integrations: AgentIntegrationEntry[];
   };
@@ -576,7 +587,8 @@ export interface AgentDetail {
   callback_url?: string;
   version_count?: number;
   has_unarchived_changes?: boolean;
-  forked_from: string | null;
+  /** Authoring history: withheld from a summary read, with `version_count`. */
+  forked_from?: string | null;
   /**
    * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
    * platform default when it declares none) clamped to this deployment's

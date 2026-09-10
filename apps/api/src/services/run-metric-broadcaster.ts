@@ -241,6 +241,10 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
     .select({
       orgId: runs.orgId,
       spaceId: runs.spaceId,
+      // The run's actor: the SSE fan-out gates each metric frame on
+      // `runs:read-all` OR ownership, exactly as it gates `run_update`.
+      userId: runs.userId,
+      endUserId: runs.endUserId,
       packageId: runs.packageId,
       tokenUsage: runs.tokenUsage,
     })
@@ -271,6 +275,8 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
     run_id: runId,
     org_id: runRow.orgId,
     space_id: runRow.spaceId,
+    user_id: runRow.userId,
+    end_user_id: runRow.endUserId,
     package_id: runRow.packageId,
     token_usage: (runRow.tokenUsage as RunMetricNotifyPayload["token_usage"]) ?? null,
     cost_so_far: costUsd,

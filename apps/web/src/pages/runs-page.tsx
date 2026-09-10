@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
+import { usePermissions } from "../hooks/use-permissions";
 import { PageHeader } from "../components/page-header";
 import { RunList } from "../components/run-list";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
@@ -15,6 +16,10 @@ export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { data: unreadCount } = useUnreadCount();
   const markAllRead = useMarkAllRead();
+  const { can } = usePermissions();
+  // Without `runs:read-all` the list is already "mine" — the two tabs would
+  // answer the same set, so the choice is not offered.
+  const canSeeEveryRun = can("runs:read-all");
   const [userTab, setUserTab] = useState<UserTab>("all");
   const [kindTab, setKindTab] = useState<RunKindFilter>("all");
 
@@ -38,12 +43,14 @@ export function RunsPage() {
         }
       >
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <Tabs value={userTab} onValueChange={(v) => setUserTab(v as UserTab)}>
-            <TabsList>
-              <TabsTrigger value="all">{t("runs.filterAll")}</TabsTrigger>
-              <TabsTrigger value="me">{t("runs.filterMine")}</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          {canSeeEveryRun && (
+            <Tabs value={userTab} onValueChange={(v) => setUserTab(v as UserTab)}>
+              <TabsList>
+                <TabsTrigger value="all">{t("runs.filterAll")}</TabsTrigger>
+                <TabsTrigger value="me">{t("runs.filterMine")}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
           <Tabs value={kindTab} onValueChange={(v) => setKindTab(v as RunKindFilter)}>
             <TabsList>
               <TabsTrigger value="all">{t("runs.filterKindAll")}</TabsTrigger>

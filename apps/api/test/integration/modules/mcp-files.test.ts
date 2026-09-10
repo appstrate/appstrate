@@ -84,13 +84,25 @@ async function apiKeyHeaders(
   return { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
 }
 
-async function seedRun(scope: { orgId: string; spaceId: string }): Promise<string> {
+/**
+ * The member every seeded run — and every file published from it — is
+ * attributed to. Every live launch path carries an actor, and a run-contained
+ * file inherits its run's read-ACL, so an actor-less fixture would be
+ * unreadable by the very caller these cases drive.
+ */
+let runOwner: string;
+
+async function seedRun(
+  scope: { orgId: string; spaceId: string },
+  userId: string = runOwner,
+): Promise<string> {
   const id = `run_${crypto.randomUUID()}`;
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
     spaceId: scope.spaceId,
     status: "running",
+    userId,
   });
   return id;
 }
@@ -102,15 +114,14 @@ async function publishDoc(
   name: string,
   mime: string,
   content: string | Uint8Array,
+  userId: string = runOwner,
 ): Promise<string> {
   const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
-  const { row } = await createFileFromStream(
-    scope,
-    runId,
-    { userId: null, endUserId: null },
-    null,
-    { name, mime, body: new Blob([bytes]).stream() },
-  );
+  const { row } = await createFileFromStream(scope, runId, { userId, endUserId: null }, null, {
+    name,
+    mime,
+    body: new Blob([bytes]).stream(),
+  });
   return row.id;
 }
 
@@ -149,6 +160,7 @@ describe("mcp list_files", () => {
     resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpdocs" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    runOwner = ctx.user.id;
     headers = await apiKeyHeaders(ctx);
   });
 
@@ -202,13 +214,17 @@ describe("mcp list_files", () => {
     await publishDoc(scope, runA, "shared.txt", "text/plain", "visible");
 
     const foreign = await createTestContext({ orgSlug: "foreignorg" });
-    const foreignRun = await seedRun({ orgId: foreign.orgId, spaceId: foreign.defaultSpaceId });
+    const foreignRun = await seedRun(
+      { orgId: foreign.orgId, spaceId: foreign.defaultSpaceId },
+      foreign.user.id,
+    );
     await publishDoc(
       { orgId: foreign.orgId, spaceId: foreign.defaultSpaceId },
       foreignRun,
       "foreign.txt",
       "text/plain",
       "secret",
+      foreign.user.id,
     );
 
     const { envelope } = await rpc(headers, {
@@ -223,8 +239,8 @@ describe("mcp list_files", () => {
 
   it("does not leak another member's private chat-session file", async () => {
     // Member B owns a chat session with an attached user_upload. That file is
-    // private to B's session — the caller (the API-key's user) must not see it in
-    // list_files, even though a run-contained file IS org-visible.
+    // private to B's session — the caller (the API-key's user) must not see it
+    // in list_files, even though the files of the caller's own run are listed.
     const memberB = await createTestUser({ email: "mcpchat@docs.test" });
     await addOrgMember(ctx.orgId, memberB.id, "member");
     const sessionId = `chs_${crypto.randomUUID()}`;
@@ -271,6 +287,7 @@ describe("mcp resources/read (appfile://)", () => {
     resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpres" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    runOwner = ctx.user.id;
     headers = await apiKeyHeaders(ctx);
   });
 
@@ -518,6 +535,7 @@ describe("mcp file-backed package workflow", () => {
     resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    runOwner = ctx.user.id;
     headers = await apiKeyHeaders(ctx, ["mcp-servers:write"]);
   });
 

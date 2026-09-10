@@ -146,6 +146,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
   const { can } = usePermissions();
+  // Whether this page is looking at the whole resource. Only an agent has a
+  // narrower read; every other type reaches this route on its own `<type>:read`.
+  const fullRead = type !== "agent" || can("agents:read");
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
@@ -207,18 +210,21 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } | null>(null);
 
   // ── State ──
+  // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
+  // falls back to the default tab for a hash naming anything outside the list
+  // and the panels below key on its answer. The tab bar renders a subset of it.
+  // Withheld from an `agents:run` caller without `agents:read`: each of the
+  // four is fed by a field the summary read omits (manifest, prompt, authoring
+  // history) or by a route — versions, files — that answers them 403.
   const allValidTabs: DetailTab[] = [
-    "overview",
     "connections",
     "runs",
     "configuration",
-    "schedules",
     "memory",
     "api",
-    "versions",
-    "diff",
-    "content",
     "usedBy",
+    ...(can("schedules:read") ? (["schedules"] as const) : []),
+    ...(fullRead ? (["overview", "content", "versions", "diff"] as const) : []),
   ];
   const hasModelsAvailable = !!orgModels && orgModels.length > 0;
   const hasProxiesAvailable = !!orgProxies && orgProxies.length > 0;
@@ -317,11 +323,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
-    { id: "schedules", label: t("detail.tabSchedules") },
+    ...(can("schedules:read")
+      ? [{ id: "schedules" as DetailTab, label: t("detail.tabSchedules") }]
+      : []),
     { id: "memory", label: t("detail.tabMemory") },
     { id: "api", label: t("detail.tabApi") },
-    overviewTab,
-    filesTab,
+    ...(fullRead ? [overviewTab, filesTab] : []),
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
@@ -332,8 +339,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Shared tabs appended to all package types
   const sharedTabs: Array<{ id: DetailTab; label: string }> = [
-    ...(!isBuiltIn ? [{ id: "versions" as DetailTab, label: t("version.archives") }] : []),
-    ...(hasArchivableChanges && !isVersionView
+    ...(!isBuiltIn && fullRead
+      ? [{ id: "versions" as DetailTab, label: t("version.archives") }]
+      : []),
+    ...(hasArchivableChanges && !isVersionView && fullRead
       ? [{ id: "diff" as DetailTab, label: t("version.diff") }]
       : []),
   ];

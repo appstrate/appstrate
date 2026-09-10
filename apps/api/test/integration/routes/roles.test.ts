@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp, setFeatureFlag } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import {
   addOrgMember,
   authHeaders,
@@ -104,16 +105,19 @@ describe("custom space roles", () => {
     });
 
   describe("GET /api/roles", () => {
-    it("lists the four presets with their permissions, then the org's own bundles", async () => {
+    it("lists every preset with its permissions, then the org's own bundles", async () => {
       const custom = await seedSpaceRole({ orgId: owner.orgId, key: "support", name: "Support" });
       const res = await req("GET", "/api/roles");
       expect(res.status).toBe(200);
       const { data } = (await res.json()) as { data: RoleWire[] };
 
+      // The literal list, in order: comparing against the constant the route
+      // reads would pass on any list the constant happens to hold.
       expect(data.filter((r) => r.kind === "preset").map((r) => r.key)).toEqual([
         "admin",
         "builder",
         "operator",
+        "runner",
         "viewer",
       ]);
       // Presets carry their permission list and no id — they are not rows.
@@ -205,11 +209,16 @@ describe("custom space roles", () => {
       });
     });
 
-    it("refuses a preset key and accepts a free one", async () => {
-      const problem = await expectProblem(await post(validBody({ key: "builder" })), 400, {
-        param: "key",
-      });
-      expect(problem.detail).toContain("builder");
+    it("refuses every preset key and accepts a free one", async () => {
+      // Reserved by the code guard AND by `space_roles_key_not_preset`; a
+      // preset the constraint does not list would answer 201 here and shadow
+      // the built-in in the role catalog.
+      for (const preset of SPACE_ROLE_PRESETS) {
+        const problem = await expectProblem(await post(validBody({ key: preset })), 400, {
+          param: "key",
+        });
+        expect(problem.detail).toContain(preset);
+      }
 
       expect((await post(validBody({ key: "builders" }))).status).toBe(201);
     });

@@ -591,17 +591,21 @@ export function App() {
             <Route
               path="/agents/new"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
+                <RequirePermission permission="agents:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="agent" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/agents/:scope/:name/edit"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
+                <RequirePermission permission="agents:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="agent" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -647,41 +651,51 @@ export function App() {
             <Route
               path="/schedules"
               element={
-                <LazyRoute>
-                  <SchedulesListPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:read">
+                  <LazyRoute>
+                    <SchedulesListPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/new"
               element={
-                <LazyRoute>
-                  <ScheduleCreatePage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:write">
+                  <LazyRoute>
+                    <ScheduleCreatePage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/:id"
               element={
-                <LazyRoute>
-                  <ScheduleDetailPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:read">
+                  <LazyRoute>
+                    <ScheduleDetailPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/:id/edit"
               element={
-                <LazyRoute>
-                  <ScheduleEditPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:write">
+                  <LazyRoute>
+                    <ScheduleEditPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills"
               element={
-                <LazyRoute>
-                  <SkillsPage />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <SkillsPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -719,57 +733,71 @@ export function App() {
             <Route
               path="/skills/new"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name/edit"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name/:version"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/mcp-servers"
               element={
-                <LazyRoute>
-                  <McpServersPage />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <McpServersPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/mcp-servers/:scope/:name"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="mcp-server" />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/mcp-servers/:scope/:name/:version"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="mcp-server" />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route

@@ -280,6 +280,9 @@ export async function waitForRunTerminal(opts: {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
         isAdmin: true,
+        // Subscribes on behalf of a route that already checked the caller may
+        // read this run, so the run gate has nothing left to decide here.
+        readAll: true,
         // This in-process subscriber only ever acts on `run_update` (see the
         // `send` handler below); declaring it keeps the run's log and metric
         // frames from being serialized for a consumer that discards them.

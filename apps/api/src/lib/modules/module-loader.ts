@@ -32,7 +32,7 @@ import {
   setPrincipalPermissionsProviders,
   type RegisteredPrincipalPermissions,
 } from "@appstrate/core/principal-permissions";
-import { getApiKeyAllowedScopes } from "../permissions.ts";
+import { getApiKeyAllowedScopes, presetsStrictlyStrongerThan } from "../permissions.ts";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
@@ -415,6 +415,7 @@ export function collectModulePermissions(
     admin: new Set(),
     builder: new Set(),
     operator: new Set(),
+    runner: new Set(),
     viewer: new Set(),
   };
   const apiKeyAllowed = new Set<string>();
@@ -591,12 +592,17 @@ function validateContribution(
 }
 
 /**
- * Presets are nested (`viewer ⊂ operator ⊂ builder ⊂ admin`), so `presets` must
- * be upward-closed: `builder` without `admin` would give a space admin LESS than
- * a builder. Boot error, not a warning: the wrong answer is a 403 nobody looks for.
+ * Presets nest by grant — `viewer ⊂ operator ⊂ builder ⊂ admin` and
+ * `runner ⊂ operator` — so `presets` must be upward-closed under that
+ * containment: `builder` without `admin` would give a space admin LESS than a
+ * builder for this one resource. Boot error, not a warning: the wrong answer is
+ * a 403 nobody looks for.
  *
- * Read the order from `SPACE_ROLE_PRESETS` (strongest-first), never a local copy:
- * a reorder in core must move this check with it.
+ * "Stronger" is read from the preset matrix ({@link presetsStrictlyStrongerThan}),
+ * never from a position in `SPACE_ROLE_PRESETS`. `runner` and `viewer` are
+ * incomparable — a runner launches what it cannot read, a viewer reads what it
+ * cannot launch — so the tuple is a display order and answers nothing here. A
+ * module that grants a read resource to `viewer` is free to leave `runner` out.
  */
 function assertPresetsUpwardClosed(
   presets: readonly SpaceRolePreset[],
@@ -604,17 +610,23 @@ function assertPresetsUpwardClosed(
   resource: string,
 ): void {
   const declared = new Set<SpaceRolePreset>(presets);
-  const weakest = SPACE_ROLE_PRESETS.findLast((preset) => declared.has(preset));
-  if (weakest === undefined) return;
-  const missing = SPACE_ROLE_PRESETS.slice(0, SPACE_ROLE_PRESETS.indexOf(weakest)).filter(
-    (preset) => !declared.has(preset),
-  );
-  if (missing.length === 0) return;
+  const missing = new Set<SpaceRolePreset>();
+  for (const preset of declared) {
+    for (const stronger of presetsStrictlyStrongerThan(preset)) {
+      if (!declared.has(stronger)) missing.add(stronger);
+    }
+  }
+  if (missing.size === 0) return;
+  const quoted = (subset: ReadonlySet<SpaceRolePreset>) =>
+    SPACE_ROLE_PRESETS.filter((preset) => subset.has(preset))
+      .map((preset) => JSON.stringify(preset))
+      .join(", ");
   throw new Error(
     `Module "${moduleId}" declared resource ${JSON.stringify(resource)} for preset ` +
-      `${JSON.stringify(weakest)} but not ${missing.map((p) => JSON.stringify(p)).join(", ")}. ` +
-      `Presets are nested (viewer \u2282 operator \u2282 builder \u2282 admin), so granting a weaker ` +
-      `preset requires granting every stronger one.`,
+      `${quoted(declared)} but not ${quoted(missing)}. ` +
+      `Presets nest by grant (viewer \u2282 operator \u2282 builder \u2282 admin, ` +
+      `runner \u2282 operator), so granting a preset requires granting every preset ` +
+      `that already grants a superset of it.`,
   );
 }
 

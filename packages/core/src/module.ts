@@ -261,6 +261,9 @@ export interface AppstrateModule {
    *     or any other module's resource
    *   - every entry for one resource declares the SAME `level`
    *   - `grantTo` names a known org role; `presets` a known space preset
+   *   - `presets` is upward-closed: naming a preset also names every preset
+   *     that already grants a superset of it. `runner` and `viewer` are
+   *     incomparable, so neither implies the other.
    *
    * No-op on platforms that don't load this module — neither the type
    * augmentation nor the runtime grants reach core, preserving the
@@ -1485,9 +1488,9 @@ export interface PlatformServices {
    * Resolve a chat composer file attachment to a durable `appfile://` URI:
    * materialize an `upload://` staged upload into a chat-session-scoped file
    * (purpose `user_upload`), or validate that an existing `appfile://` is
-   * readable by the session owner. The chat module has
-   * no DB access, so materialization + the container-inherited ACL check cross
-   * through here.
+   * readable by the session owner under the permissions the request carries.
+   * The chat module has no DB access, so materialization + the
+   * container-inherited ACL check cross through here.
    * Rejections (over-cap, over-limit, not-found/foreign file) are thrown as
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */

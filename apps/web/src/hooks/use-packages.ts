@@ -256,7 +256,7 @@ export function useAgents() {
         version: a.version ?? null,
         forked_from: null,
         running_runs: a.running_runs ?? 0,
-        dependencies: a.dependencies ?? {},
+        dependencies: a.dependencies,
       }));
     },
     enabled: !!orgId && !!spaceId,
