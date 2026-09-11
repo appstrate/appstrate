@@ -21,6 +21,7 @@ import { loadTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts"
 import { getProfile } from "../src/lib/config.ts";
 import { logoutCommand } from "../src/commands/logout.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
+import { ExitError } from "./helpers/process-exit.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
@@ -168,6 +169,12 @@ it("removes credentials even when the synchronization lock cannot be opened", as
  * organization's skills: the local sign-out has happened either way, so
  * `cleanupProfileSkills` must run and the command must reach its outro
  * (issue #1321).
+ *
+ * It IS a reason to fail: a token the store would not release is still a
+ * usable credential, so the command ends non-zero (`io.exit(1)`, surfacing
+ * here as `ExitError`) once the cleanup and the report are done. The opt-in
+ * case is the control — `deleteTokens` does not throw there, so that logout
+ * is a completed one and exits 0.
  */
 describe("logout (keyring refuses the delete)", () => {
   const KEYRING_LOCKED = "Couldn't access platform storage: the keychain is locked";
@@ -216,6 +223,8 @@ describe("logout (keyring refuses the delete)", () => {
     process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = "1";
     const { io, stdout, stderr } = createMemoryIO();
 
+    // Resolving is the assertion: a non-zero exit would reach here as an
+    // `ExitError` thrown by the sink's `io.exit`.
     await logoutCommand({ profile: "default" }, io);
 
     expect(stderr()).not.toContain("could not be removed");
@@ -226,14 +235,20 @@ describe("logout (keyring refuses the delete)", () => {
     expect((await readSyncState()).state.targets).toEqual({});
   });
 
-  it("names the keyring as the failure and still cleans up without the opt-in", async () => {
+  it("fails the command and still cleans up without the opt-in", async () => {
     // Negative control for the case above: without the env var the refusal is
     // real, and it must be reported as itself rather than as a skills-cleanup
-    // fault — with the cleanup and the outro happening all the same.
+    // fault — with the cleanup and the outro happening all the same, and the
+    // command ending non-zero so a script chaining on it can tell.
     const { io, stdout, stderr } = createMemoryIO();
 
-    await logoutCommand({ profile: "default" }, io);
+    const failure = await logoutCommand({ profile: "default" }, io).then(
+      () => null,
+      (err: unknown) => err,
+    );
 
+    expect(failure).toBeInstanceOf(ExitError);
+    expect((failure as ExitError).code).toBe(1);
     expect(stderr()).toContain("the OS keyring entry could not be removed");
     expect(stderr()).toContain(KEYRING_LOCKED);
     expect(stderr()).not.toContain("could not complete skills cleanup");

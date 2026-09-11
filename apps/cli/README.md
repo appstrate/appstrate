@@ -202,7 +202,7 @@ appstrate logout --profile prod
 | ----------------- | ------ | ------------------------------------------------------------------------------------------------------ |
 | `-p`, `--profile` | name   | Profile to log out from (resolved through the usual flag, environment and default-profile precedence). |
 
-If the instance is unreachable, local credentials are still wiped (with a warning on stderr). Skill-cleanup failures do not skip credential removal either.
+If the instance is unreachable, local credentials are still wiped (with a warning on stderr). Skill-cleanup failures do not skip credential removal either. An OS keyring that refuses to release its copy does not skip them either, but it is the one failure that changes the exit code: the profile, the credentials file and the skills are cleaned up all the same, and the command then ends non-zero — a token the store still holds is a usable credential, so a script chaining on `appstrate logout` must be able to tell that logout from a completed one. `APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1` is the exception: that profile never had a keyring entry to remove, so the refusal is not a failure and the command exits 0.
 
 Logout also cleans the skill installations recorded as belonging to that profile: the generated Claude plugin becomes the setup plugin, without business skills or `.mcp.json`, and managed skills in shared targets are removed. Logging out another profile leaves the current installation alone. Cleanup also runs when credentials are already absent; failed deletions remain recorded so repeating `appstrate logout --profile <name>` can retry them. Unmanaged files and targets recorded under a different home directory are preserved.
 

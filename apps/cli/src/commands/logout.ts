@@ -40,6 +40,11 @@ export async function logoutCommand(
 
   let hadTokens = false;
   let credentialsCleared = false;
+  // A keyring that kept its copy is remembered, never swallowed: every cleanup
+  // step below still runs, and the command ends non-zero. A logout that leaves
+  // a usable token in the store is not a completed logout, and a script
+  // chaining on `appstrate logout` has to be able to tell the difference.
+  let keyringRefusal: unknown;
   // Marked cleared once the profile is gone, keyring throw or not: the local
   // sign-out has happened, and a second attempt would only throw again.
   const clearCredentials = async (): Promise<void> => {
@@ -76,6 +81,7 @@ export async function logoutCommand(
           try {
             await clearCredentials();
           } catch (err) {
+            keyringRefusal = err;
             io.stderr.write(`warning: ${formatError(err)}\n`);
           }
         }
@@ -101,4 +107,9 @@ export async function logoutCommand(
     if (!credentialsCleared) await clearCredentials();
   }
   outro(hadTokens ? `Signed out of "${profileName}".` : "Already signed out.", io);
+  // Reported already, above, on its own terms — so this is the `io.exit` shape
+  // `skills.ts` and `whoami.ts` use rather than a throw: the whole report stays
+  // on screen and the process still ends non-zero. Rethrowing would render the
+  // same multi-line remediation a second time through `exitWithError`.
+  if (keyringRefusal !== undefined) io.exit(1);
 }
