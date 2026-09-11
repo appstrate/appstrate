@@ -186,8 +186,8 @@ const DYNAMIC_KEY_PREFIXES = [
   "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()
   "permissions.resource.", // lib/permission-labels.ts — permissionResourceLabel()
-  "orgRolesGuide.can.", // components/org-roles-guide.tsx — one key per capability row
-  "orgRolesGuide.access.", // components/org-roles-guide.tsx — space reach per org role
+  "orgRolesGuide.can.", // pages/org-settings/org-roles.tsx — one key per capability row
+  "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
   "run.triggerType.", // components/run-detail/{run-header-summary,run-snapshot-inspector}.tsx

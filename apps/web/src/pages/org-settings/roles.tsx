@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Eye, Plus, ShieldCheck } from "lucide-react";
+import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
@@ -42,6 +42,8 @@ import { Spinner } from "../../components/spinner";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
 import { DetailTabsList, DetailTabsTrigger } from "../../components/agent-detail/agent-local-tabs";
+import { ViewToggle } from "../../components/view-toggle";
+import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
 import {
   groupPermissionsByResource,
   permissionLabel,
@@ -50,6 +52,7 @@ import {
 import { rolesPageDeeds } from "./rbac-deeds";
 
 type RoleView = "list" | "matrix";
+type RoleTab = "org" | "space";
 
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -62,16 +65,18 @@ export function OrgSettingsRolesPage() {
   // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
   const roleParam = useModalParam("role");
   const viewAsParam = useModalParam("view-as");
-  // The view is a place too: `?view=matrix` opens the comparison directly,
-  // and Back returns to the list.
+  // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
+  // and Back undoes a switch. Each defaults to its first option, which is
+  // then left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams();
+  const tab: RoleTab = searchParams.get("tab") === "space" ? "space" : "org";
   const view: RoleView = searchParams.get("view") === "matrix" ? "matrix" : "list";
-  const setView = (next: RoleView) =>
+  const setParam = (name: "tab" | "view", value: string, fallback: string) =>
     setSearchParams(
       (prev) => {
         const out = new URLSearchParams(prev);
-        if (next === "matrix") out.set("view", "matrix");
-        else out.delete("view");
+        if (value === fallback) out.delete(name);
+        else out.set(name, value);
         return out;
       },
       { state: location.state },
@@ -139,7 +144,12 @@ export function OrgSettingsRolesPage() {
   // The row opens the role: to edit it when it is yours to edit, to read it
   // otherwise. A preset's permissions used to hide behind a disclosure on its
   // card; they are one click away now, on the same gesture as every row.
-  const roleHref = (role: RoleObject) => `?role=${encodeURIComponent(role.key)}`;
+  // Keeps the tab and view in the address, so closing the role lands back on them.
+  const roleHref = (role: RoleObject) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("role", role.key);
+    return `?${params.toString()}`;
+  };
   const requested = roleParam.value;
   const target =
     requested && requested !== "new" ? roles?.find((role) => role.key === requested) : undefined;
@@ -179,65 +189,81 @@ export function OrgSettingsRolesPage() {
         </SettingsPageActions>
       )}
 
-      {/* The page is named for what it lists: roles granted inside a space.
-          The org role is the other axis, and lives with the people. */}
+      {/* Two axes side by side, because keeping them apart is what made
+          them hard to tell apart: the org role (fixed, set in Users) and the
+          space role (granted per space, from its Members page). */}
       <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
         {t("roles.pageIntro")}
       </p>
 
-      {!customRolesEnabled && (
-        <Alert className="mb-6">
-          <AlertDescription>{t("roles.customUnavailable")}</AlertDescription>
-        </Alert>
-      )}
-
-      <Tabs value={view} onValueChange={(next) => setView(next as RoleView)}>
-        <DetailTabsList className="mb-6" aria-label={t("roles.viewsLabel")}>
-          <DetailTabsTrigger value="list">{t("roles.viewList")}</DetailTabsTrigger>
-          <DetailTabsTrigger value="matrix">{t("roles.viewMatrix")}</DetailTabsTrigger>
-        </DetailTabsList>
-        <TabsContent value="list" className="mt-0">
-          <SettingsGroup title={t("roles.presetsSection")}>
-            <DataTable
-              label={t("roles.presetsSection")}
-              columns={presetColumns}
-              rows={presets}
-              rowKey={(role) => role.key}
-              rowHref={roleHref}
-              rowState={() => location.state}
-              rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
-              {...tableState}
-            />
-          </SettingsGroup>
-
-          <SettingsGroup title={t("roles.customSection")}>
-            <DataTable
-              label={t("roles.customSection")}
-              columns={customColumns}
-              rows={custom}
-              rowKey={(role) => role.id ?? role.key}
-              rowHref={roleHref}
-              rowState={() => location.state}
-              rowLabel={(role) => role.name}
-              {...tableState}
-              empty={
-                <EmptyState
-                  message={t("roles.empty")}
-                  hint={t("roles.emptyHint")}
-                  icon={ShieldCheck}
-                  compact
-                />
-              }
-            />
-          </SettingsGroup>
+      <Tabs value={tab} onValueChange={(next) => setParam("tab", next, "org")}>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <DetailTabsList aria-label={t("roles.tabTitle")}>
+            <DetailTabsTrigger value="org">{t("roles.tabOrg")}</DetailTabsTrigger>
+            <DetailTabsTrigger value="space">{t("roles.tabSpace")}</DetailTabsTrigger>
+          </DetailTabsList>
+          <ViewToggle
+            value={view}
+            onChange={(next) => setParam("view", next, "list")}
+            options={[
+              { id: "list", icon: Rows3, label: t("roles.viewList") },
+              { id: "matrix", icon: Grid3x3, label: t("roles.viewMatrix") },
+            ]}
+          />
+        </div>
+        <TabsContent value="org" className="mt-0">
+          {view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList />}
         </TabsContent>
-        <TabsContent value="matrix" className="mt-0">
-          {isLoading ? (
-            <LoadingState />
-          ) : error ? (
-            <ErrorState message={getErrorMessage(error)} />
+        <TabsContent value="space" className="mt-0">
+          {!customRolesEnabled && (
+            <Alert className="mb-6">
+              <AlertDescription>{t("roles.customUnavailable")}</AlertDescription>
+            </Alert>
+          )}
+          {view === "matrix" ? (
+            isLoading ? (
+              <LoadingState />
+            ) : error ? (
+              <ErrorState message={getErrorMessage(error)} />
+            ) : (
+              <RoleMatrix roles={roles ?? []} />
+            )
           ) : (
-            <RoleMatrix roles={roles ?? []} />
+            <>
+              <SettingsGroup title={t("roles.presetsSection")}>
+                <DataTable
+                  label={t("roles.presetsSection")}
+                  columns={presetColumns}
+                  rows={presets}
+                  rowKey={(role) => role.key}
+                  rowHref={roleHref}
+                  rowState={() => location.state}
+                  rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
+                  {...tableState}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup title={t("roles.customSection")}>
+                <DataTable
+                  label={t("roles.customSection")}
+                  columns={customColumns}
+                  rows={custom}
+                  rowKey={(role) => role.id ?? role.key}
+                  rowHref={roleHref}
+                  rowState={() => location.state}
+                  rowLabel={(role) => role.name}
+                  {...tableState}
+                  empty={
+                    <EmptyState
+                      message={t("roles.empty")}
+                      hint={t("roles.emptyHint")}
+                      icon={ShieldCheck}
+                      compact
+                    />
+                  }
+                />
+              </SettingsGroup>
+            </>
           )}
         </TabsContent>
       </Tabs>

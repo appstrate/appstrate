@@ -80,6 +80,7 @@ import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
 import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
+import { ViewToggle } from "./view-toggle";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -310,36 +311,23 @@ function ColumnsMenu({
  * slot at this end of the row holds column visibility; ours holds the same
  * kind of thing — how the list is drawn, not what it contains.
  */
-function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListView) => void }) {
+function ListViewToggle({
+  view,
+  onChange,
+}: {
+  view: ListView;
+  onChange: (view: ListView) => void;
+}) {
   const { t } = useTranslation("common");
-  const options: Array<{ id: ListView; icon: typeof Rows3; label: string }> = [
-    { id: "table", icon: Rows3, label: t("toolbar.viewTable") },
-    { id: "cards", icon: LayoutGrid, label: t("toolbar.viewCards") },
-  ];
-
   return (
-    // A grey track with a white chip on the chosen one — the same segmented
-    // control the shell uses for its products, and no colour: the bar has none
-    // anywhere else, and a blue fill here read as a state rather than a choice.
-    <div className="bg-accent inline-flex shrink-0 gap-0.5 rounded-md p-0.5">
-      {options.map(({ id, icon: Icon, label }) => (
-        <button
-          key={id}
-          type="button"
-          onClick={() => onChange(id)}
-          aria-label={label}
-          aria-pressed={view === id}
-          className={cn(
-            "grid size-7 place-items-center rounded-sm p-0 transition-colors",
-            view === id
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <Icon className="size-4" />
-        </button>
-      ))}
-    </div>
+    <ViewToggle
+      value={view}
+      onChange={onChange}
+      options={[
+        { id: "table", icon: Rows3, label: t("toolbar.viewTable") },
+        { id: "cards", icon: LayoutGrid, label: t("toolbar.viewCards") },
+      ]}
+    />
   );
 }
 
@@ -448,7 +436,7 @@ export function ListToolbar({
             )}
             {columns && <ColumnsMenu columns={columns} />}
             {actions}
-            {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+            {view && onViewChange && <ListViewToggle view={view} onChange={onViewChange} />}
           </div>
         </div>
 
@@ -527,7 +515,7 @@ export function ListToolbar({
         {(actions || (view && onViewChange)) && (
           <div className="flex items-center gap-2 justify-self-end sm:ml-auto">
             {actions}
-            {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+            {view && onViewChange && <ListViewToggle view={view} onChange={onViewChange} />}
           </div>
         )}
       </div>

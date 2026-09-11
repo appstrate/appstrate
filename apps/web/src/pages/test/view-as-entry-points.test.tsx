@@ -86,6 +86,8 @@ function preset(key: string): components["schemas"]["RoleObject"] {
 interface SeedOptions {
   /** Added to the four every case holds. */
   orgPermissions?: string[];
+  /** The address rendered, for a page whose tab lives in the URL. */
+  path?: string;
   customRoles?: components["schemas"]["RoleObject"][];
 }
 
@@ -156,7 +158,10 @@ function renderAs(
     id: SPACE_ID,
   });
   try {
-    return render(node, { queryClient: seed(orgRole, options) });
+    return render(node, {
+      queryClient: seed(orgRole, options),
+      initialEntries: options.path ? [options.path] : undefined,
+    });
   } finally {
     orgSnapshot.mockRestore();
     spaceSnapshot.mockRestore();
@@ -256,6 +261,7 @@ describe("custom-role gating on the roles page", () => {
       renderAs("admin", <OrgSettingsRolesPage />, {
         orgPermissions: ["roles:write", "roles:delete"],
         customRoles: [custom],
+        path: "/org-settings/roles?tab=space",
       }),
     );
     expect(html).toContain("data-page-actions-trigger");
@@ -272,6 +278,7 @@ describe("custom-role gating on the roles page", () => {
       renderAs("owner", <OrgSettingsRolesPage />, {
         orgPermissions: ["roles:write", "roles:delete"],
         customRoles: [custom],
+        path: "/org-settings/roles?tab=space",
       }),
     );
     expect(html).toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
@@ -283,7 +290,10 @@ describe("custom-role gating on the roles page", () => {
 
   it("hides the create action from a reader while the feature is on", () => {
     const html = withCustomRoles(true, () =>
-      renderAs("admin", <OrgSettingsRolesPage />, { customRoles: [custom] }),
+      renderAs("admin", <OrgSettingsRolesPage />, {
+        customRoles: [custom],
+        path: "/org-settings/roles?tab=space",
+      }),
     );
     expect(html).toContain("Responsable assistance");
     expect(html).not.toContain("Plus d’actions pour Responsable assistance");
