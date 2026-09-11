@@ -348,7 +348,7 @@
   "oauthClients.firstPartyDisabled": "Client retiré du mode first-party",
   "oauthClients.allowSignupLabel": "Autoriser l'inscription de nouveaux utilisateurs",
   "oauthClients.allowSignupHint": "Quand activé, les utilisateurs qui se connectent pour la première fois via ce client sont provisionnés à la volée (création du compte et, pour les clients de niveau org, auto-rattachement avec le rôle ci-dessous ; création de l'utilisateur final pour les clients de niveau espace). Quand désactivé, seuls les utilisateurs déjà existants peuvent se connecter ; les inconnus sont rejetés avec un message explicite.",
-  "oauthClients.signupSpacesHint": "Affectations appliquées quand un utilisateur rejoint l’organisation via ce client. Les invités ont besoin d’au moins un espace ; les administrateurs ont déjà accès à tous les espaces.",
+  "oauthClients.signupSpacesHint": "Affectations appliquées quand un utilisateur rejoint l’organisation via ce client. Facultatif : un invité dispose déjà de son propre espace ; les administrateurs ont déjà accès à tous les espaces.",
   "oauthClients.signupRoleLabel": "Rôle attribué à l'auto-inscription",
   "oauthClients.signupRoleHint": "Le rôle propriétaire n’est pas disponible pour l’inscription automatique.",
   "oauthClients.signupRoleOption.member": "Utilisateur standard",

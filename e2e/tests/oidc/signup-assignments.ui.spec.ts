@@ -25,12 +25,6 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
     .getByPlaceholder("https://example.com/oauth/callback")
     .fill("https://example.com/callback");
   await dialog.locator("#oauth-client-signup-role").selectOption("guest");
-  // The signup policy is valid even while signup is disabled, so preparing a
-  // guest configuration still requires a space before it can be persisted.
-  await dialog.getByRole("button", { name: /Nouveau client|New client/i }).click();
-  await expect(
-    dialog.getByText(/pick at least one space|au moins un espace/i).last(),
-  ).toBeVisible();
   await dialog
     .getByRole("combobox", {
       name: /Sélectionner un espace|Select a space/i,
