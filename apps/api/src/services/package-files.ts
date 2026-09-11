@@ -642,17 +642,34 @@ export async function mutatePackageDraftFiles(
       mutated[PACKAGE_MANIFEST_FILE] = new TextEncoder().encode(
         JSON.stringify(input.manifest, null, 2),
       );
+    const entry = PACKAGE_CONTENT_ENTRY[target.type];
+    const contentBytes = entry ? mutated[entry.path] : undefined;
+    let content: string;
+    try {
+      // Content columns are text. Authoring must never replace malformed bytes
+      // with U+FFFD when the next read overlays the DB copy onto the archive.
+      content = contentBytes
+        ? new TextDecoder("utf-8", {
+            ignoreBOM: true,
+            fatal: !("imported" in input.precondition),
+          }).decode(contentBytes)
+        : entry
+          ? ""
+          : (row.draftContent ?? "");
+    } catch {
+      throw new PackageFileWriteError(
+        "invalid_bundle",
+        entry?.path ?? null,
+        "Package content must be valid UTF-8 text",
+      );
+    }
     if (!("imported" in input.precondition)) {
       assertArchiveContentConforms(target.type, mutated, "file");
       assertTreeSize(mutated);
-      const requiredEntry = PACKAGE_CONTENT_ENTRY[target.type];
-      if (
-        requiredEntry?.required &&
-        !decodeSkillMarkdown(mutated[requiredEntry.path] ?? new Uint8Array()).trim()
-      ) {
+      if (entry?.required && !content.trim()) {
         throw new PackageFileWriteError(
           "content_entry_immovable",
-          requiredEntry.path,
+          entry.path,
           "Required content cannot be empty",
         );
       }
@@ -667,11 +684,7 @@ export async function mutatePackageDraftFiles(
       }
     }
 
-    const entry = PACKAGE_CONTENT_ENTRY[target.type];
-    const contentBytes = entry ? mutated[entry.path] : undefined;
-    const draftContent =
-      input.draftContent ??
-      (contentBytes ? decodeSkillMarkdown(contentBytes) : entry ? "" : (row.draftContent ?? ""));
+    const draftContent = input.draftContent ?? content;
 
     const updated = await updateOrgItem(
       target.orgId,

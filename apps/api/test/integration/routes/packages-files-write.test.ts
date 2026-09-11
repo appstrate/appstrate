@@ -283,6 +283,17 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
     });
   });
 
+  it("rejects invalid UTF-8 in the content file without silently replacing its bytes", async () => {
+    const before = await packageRow();
+    const bytes = new Uint8Array([...encoder.encode(SKILL_MD), 255]);
+    const response = await saveFiles([
+      { op: "write", path: "SKILL.md", bytes_base64: base64(bytes) },
+    ]);
+    expect(response.status).toBe(400);
+    expect(await packageRow()).toEqual(before);
+    expect(await fileBytes("SKILL.md")).toEqual(encoder.encode(SKILL_MD));
+  });
+
   it("can repair invalid existing content through a file operation", async () => {
     await db
       .update(packages)
