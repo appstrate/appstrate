@@ -22,8 +22,10 @@ import { getTestApp } from "../../helpers/app.ts";
 import { isAgentLookup, requireAgent } from "../../../src/middleware/guards.ts";
 import {
   isPermissionGuard,
+  requireAnyPermission,
   requirePermission,
 } from "../../../src/middleware/require-permission.ts";
+import { requireCorePermission, requireModulePermission } from "@appstrate/core/permissions";
 
 /**
  * Every registered route, as `"METHOD /path" -> handlers in mount order`.
@@ -70,6 +72,20 @@ describe("agent lookup never precedes the permission guard", () => {
     const chains = [...routeChains().values()];
     expect(chains.filter((chain) => chain.some(isAgentLookup)).length).toBeGreaterThan(0);
     expect(chains.filter((chain) => chain.some(isPermissionGuard)).length).toBeGreaterThan(0);
+  });
+
+  it("recognises every permission-guard factory, not just the apps/api one", () => {
+    // `requirePermission`, `requireCorePermission` and `requireModulePermission`
+    // all return `makePermissionGuard`'s guard, which is where the marker is
+    // stamped; `requireAnyPermission` decides its own denial and stamps its own.
+    // A factory that stopped carrying it would leave `offendingRoutes()` blind
+    // to the routes it gates.
+    expect(isPermissionGuard(requirePermission("agents", "read"))).toBe(true);
+    expect(isPermissionGuard(requireCorePermission("agents", "read"))).toBe(true);
+    expect(isPermissionGuard(requireModulePermission("mcp", "read"))).toBe(true);
+    expect(isPermissionGuard(requireAnyPermission(["agents:read", "agents:write"]))).toBe(true);
+    // Negative control: an ordinary middleware carries no marker.
+    expect(isPermissionGuard((_c: unknown, next: () => unknown) => next())).toBe(false);
   });
 
   it("detects a lookup mounted ahead of its guard", () => {

@@ -671,7 +671,7 @@ export function setPermissionDenialHandler(handler: PermissionDenialHandler | nu
 export function makePermissionGuard(
   required: string,
 ): (c: HonoContextLike, next: HonoNextLike) => Promise<unknown> {
-  return async (c, next) => {
+  const guard = async (c: HonoContextLike, next: HonoNextLike) => {
     const perms = c.get("permissions") as ReadonlySet<string> | undefined;
     const granted = !!perms && typeof perms.has === "function" && perms.has(required);
     if (!granted) {
@@ -680,6 +680,12 @@ export function makePermissionGuard(
     }
     return next();
   };
+  // Stamped here so EVERY factory built on this runtime path carries it — the
+  // platform reads it back off Hono's route table to prove a route gates before
+  // it resolves a row (`apps/api/src/middleware/handler-marker.ts`). A registry
+  // symbol, so neither side imports the other.
+  Object.defineProperty(guard, Symbol.for("appstrate.permissionGuard"), { value: true });
+  return guard;
 }
 
 /**
