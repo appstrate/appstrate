@@ -23,9 +23,6 @@
  * DELETE/keep deliberately stay ungated at layer 1: they are authorized by
  * `capabilities.delete` / `capabilities.keep`, which grant the file's own
  * creator (an end-user cleaning up its own upload holds no org permission).
- * That creator arm is an OWNERSHIP right, so no permission set narrows it —
- * {@link fileLifecycleCeiling} does, with the credential's own scope ceiling,
- * so a key minted without `files:delete` never inherits its creator's files.
  */
 
 import { Hono, type Context } from "hono";
@@ -35,7 +32,7 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { callerPermissions, credentialAdmits } from "../lib/permissions.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
@@ -67,17 +64,16 @@ import {
 } from "../services/file-preview.ts";
 
 /**
- * The lifecycle half of the file ACL for THIS request: may the credential it
- * arrived on exercise a creator's own `keep` / `delete` right at all?
- *
- * A cookie session is unbounded and keeps the ownership right; an API key or a
- * token keeps it only when its scopes name `files:delete` — the ceiling that
- * `permissions` cannot apply, because ownership is not a role grant (RBAC spec
- * §7.1). Every file resolution in this router passes it, so the DTO's
- * `capabilities` and the two enforcement points below can never disagree.
+ * The lifecycle half of the file ACL for THIS request. Every file resolution in
+ * this router passes it, so the DTO's `capabilities` and the two enforcement
+ * points below can never disagree.
  */
 function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
-  return { creatorCanManage: credentialAdmits(c, "files:delete") };
+  // Ownership is not a role grant, so `permissions` cannot cap it — the
+  // credential's own scope ceiling does (RBAC spec §7.1). A cookie session
+  // carries no ceiling and keeps the right.
+  const ceiling = c.get("scopeCeiling");
+  return { creatorCanManage: ceiling === undefined || ceiling.has("files:delete") };
 }
 
 export function createFilesRouter() {

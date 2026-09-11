@@ -26,17 +26,8 @@ import { forbidden } from "../lib/errors.ts";
 import type { Resource, Action } from "../lib/permissions.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 
-/**
- * Marker carried by every route-level permission guard.
- *
- * `makePermissionGuard` stamps it in core, so `requirePermission`,
- * `requireCorePermission` and `requireModulePermission` all carry it;
- * {@link requireAnyPermission} decides its own denial and stamps its own.
- *
- * Read by the conformance test that proves no route resolves an agent (and so
- * 404s on an unreachable one) before it has proven the caller may ask — see
- * `test/integration/middleware/agent-lookup-permission-order.test.ts`.
- */
+/** Stamped by every route-level permission guard (core's `makePermissionGuard`
+ *  stamps it too). Read by the agent-lookup ordering conformance test. */
 const PERMISSION_GUARD = Symbol.for("appstrate.permissionGuard");
 
 /** True when `handler` is a route-level permission guard, i.e. it 403s a

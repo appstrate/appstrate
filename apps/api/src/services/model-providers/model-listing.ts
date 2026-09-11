@@ -8,14 +8,9 @@
  * `architecture` / `supported_parameters`, LM Studio `max_context_length`)
  * are read from the entry in hand as hints.
  *
- * A listing that declares a next page is followed to its end: Anthropic's
- * `/v1/models` answers 20 entries with `has_more` / `last_id`, so reading one
- * page would hand the operator a silently short list. Following stops at
- * {@link MAX_LISTING_PAGES} pages or {@link MAX_SERVED_MODELS} models, and a
- * result cut by either cap says so (`truncated`) instead of passing for a
- * complete listing. Each page's body is read under a byte budget
- * ({@link MAX_LISTING_BODY_BYTES}) — the endpoint is operator-supplied, so a
- * body that streams past it is refused rather than buffered.
+ * A listing that declares a next page is followed to its end, under a page cap,
+ * a model cap and a per-page byte budget; a result cut by any of them is
+ * returned `truncated` rather than as a complete listing.
  */
 
 import { fetchModelListing } from "../org-models.ts";
@@ -29,11 +24,8 @@ const MAX_LISTING_PAGES = 10;
 
 /**
  * Upper bound on one page's response body. The endpoint is operator-supplied
- * (`POST /discover` takes an arbitrary `base_url_override`), so it is
- * untrusted: `res.json()` buffers whatever it streams, and the request timeout
- * alone bounds the duration, not the bytes. A page carrying
- * {@link MAX_SERVED_MODELS} entries with full metadata sits an order of
- * magnitude under this.
+ * (`POST /discover` takes an arbitrary `base_url_override`): buffering whatever
+ * it streams is bounded by the request timeout in duration, not in bytes.
  */
 const MAX_LISTING_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -285,10 +277,8 @@ async function fetchListingPage(
 
 /**
  * Read a response body as JSON under {@link MAX_LISTING_BODY_BYTES}, cancelling
- * the stream the moment it crosses. Refuses rather than truncates: half a JSON
- * document parses to nothing, and a listing that large is not one the platform
- * would serve anyway. The budget is spent on the stream, not on a declared
- * `content-length` — an untrusted endpoint's header is not a bound.
+ * the stream the moment it crosses. The budget is spent on the stream, not on a
+ * declared `content-length` — an untrusted endpoint's header is not a bound.
  */
 async function readBoundedJson(
   res: Response,
@@ -315,14 +305,8 @@ async function readBoundedJson(
     return { ok: false, message: "Model listing request failed" };
   }
 
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   try {
-    return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) };
+    return { ok: true, body: await new Response(new Blob(chunks)).json() };
   } catch {
     return { ok: false, message: "Model listing is not JSON" };
   }

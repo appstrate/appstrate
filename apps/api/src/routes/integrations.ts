@@ -924,14 +924,10 @@ export function createIntegrationsRouter() {
   // capability token, consumes its jti (single-use), pins a page cookie, then
   // redirects: oauth2 → provider screen; else → the hosted SPA form at /connect.
   //
-  // Rate-limited per IP because the route carries no session: the signed token
-  // is its only credential, and every refusal that hands the jti back (below)
-  // leaves the link replayable for its whole 10-minute TTL. One click is a
-  // manifest load plus client lookups, so an unlimited public entry point turns
-  // a single link into an unbounded amplifier (issue #1344). 60/min is far
-  // above what a human clicking a popup ever needs. A 429 is the platform's
-  // standard problem+json — this limit answers abuse, not a flow failure, so it
-  // deliberately does not spend a popup page on it.
+  // Rate-limited per IP: no session, the signed token is the only credential,
+  // and a refusal that hands the jti back leaves the link replayable for its
+  // 10-minute TTL (issue #1344). The 429 is the platform's standard
+  // problem+json, not a popup page: it answers abuse, not a flow failure.
   router.get("/connect/start", rateLimitByIp(60), async (c) => {
     // The single-use capability token rides this request's query string. Strip
     // the Referer entirely so the token can never leak to the provider (oauth2
@@ -945,16 +941,10 @@ export function createIntegrationsRouter() {
     if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
-    // From here on the claims name the integration this link was minted for, so
-    // every completion this handler emits must carry it (issue #1346). A
-    // completion that identifies NOTHING is for everyone by contract
-    // (`completionMatches` — the permissive tail exists for the two pages above,
-    // which resolved neither a package nor a state), and both carriers fan out,
-    // so a context-less error from a failing Gmail link drove an unrelated
-    // ClickUp card into an error naming Gmail. `packageId` is also the only
-    // identifier a hosted-connect surface holds — the OAuth `state` is minted
-    // later, past the redirect — so it is what makes these pages reach the card
-    // that opened them and nothing else.
+    // Every completion this handler emits must name the integration (issue
+    // #1346): a completion identifying nothing matches every card by contract
+    // (`completionMatches`), and `packageId` is the only identifier a
+    // hosted-connect page holds — the OAuth `state` is minted later.
     const completionDetail = { packageId: claims.package_id };
     // Resolve the integration BEFORE consuming the jti — if the auth no longer
     // exists, the capability token stays unburned so the caller can retry once
@@ -1025,23 +1015,13 @@ export function createIntegrationsRouter() {
         );
       }
       // `begin` throws for two different reasons, and the popup must tell them
-      // apart (issue #1263). Without a guard at all the throw escapes to the
-      // global error handler, which renders raw `application/problem+json`
-      // inside the popup instead of the friendly popupHtmlError page every
-      // other failure path here returns.
+      // apart (issue #1263).
       //
-      //  1. A client-side `ApiError` (4xx): the space has no OAuth client for
-      //     this auth, auto-DCR against the provider was refused, the manifest
-      //     declares no issuer/endpoints. Permanent until someone acts — say
-      //     so, with its own status, so the popup does not invite a pointless
-      //     retry. Say it GENERICALLY though (issue #1345): this route carries
-      //     no session and its link is handed to end users outside the org,
-      //     while the `detail` that names the action names it in operator
-      //     terms — a client row id, `CONNECTION_ENCRYPTION_KEY`, an upstream
-      //     AS's own prose. That half stays on the log line above, exactly as
-      //     the callback keeps a provider's `error_description` there
-      //     (`oauth-error-diagnostic.ts`). Whether the jti comes back depends
-      //     on what the refusal cost upstream — see the guard in the handler.
+      //  1. A client-side `ApiError` (4xx): permanent until an admin acts.
+      //     Render it with its own status, but GENERICALLY (issue #1345) —
+      //     the `ApiError` detail names operator artefacts (a client row id,
+      //     `CONNECTION_ENCRYPTION_KEY`, an upstream AS's prose) and this
+      //     route has no session. The detail stays on the log line above.
       //  2. Anything else (provider discovery error, network, an unexpected
       //     throw): transient or unknown. Keep the generic wording, keep the
       //     502, keep the jti burned — an unknown failure may have gone half
@@ -1069,30 +1049,13 @@ export function createIntegrationsRouter() {
             authKey: claims.auth_key,
           });
           // Hand the jti back only when the refusal PROVABLY precedes any
-          // egress — the same criterion the scope-resolution guard above
-          // applies to itself.
-          //
-          // For a classic auth that holds: `begin` resolves its client from
-          // OUR database (`ensureIntegrationOAuthClient` early-returns a plain
-          // row lookup) and every 4xx it can raise is thrown before
-          // `initiateIntegrationOAuth`, the first line that talks to anyone.
-          // Nothing left the process, so the very same link works once an
-          // administrator registers the client — no re-mint.
-          //
-          // An auto-provisioned (DCR/CIMD) auth is the exact opposite. Its
-          // client is acquired AT the third-party authorization server:
-          // discovery probes, then an RFC 7591 registration POST — and the
-          // refusal that lands here is raised precisely when that registration
-          // came back unusable, leaving an orphan client behind ("The upstream
-          // registration is abandoned unused", `ensureIntegrationOAuthClient`).
-          // Releasing the jti would let one 10-minute link replay that
-          // registration on every click of an unauthenticated route: a client
-          // spam amplifier attributable to this deployment (issue #1344). Burn
-          // it. The refusal is permanent anyway, so the retry this forbids was
-          // never going to succeed.
-          //
-          // The advice follows the same fork: a burned link answers 410 on the
-          // next click, so telling that caller to reopen it is a dead end.
+          // egress. A classic auth resolves its client from OUR database, so
+          // nothing left the process and the same link works once an admin
+          // registers it. An auto-provisioned (DCR/CIMD) auth already POSTed an
+          // RFC 7591 registration upstream by the time it refuses — releasing the
+          // jti would let one link replay that registration on every click (issue
+          // #1344). Burn it, and tell the user to re-mint rather than reopen a
+          // link that now 410s.
           const reusable = !usesAutoProvisionedClient(manifest, auth);
           if (reusable) await releaseJti(claims.jti);
           const retry = reusable ? "open this link again" : "request a new connection link";

@@ -74,15 +74,10 @@ const ACT_DETAIL: Record<CustomRoleAct, string> = {
 };
 
 /**
- * {@link hasCustomRoles} as a refusal.
- *
- * The licence covers both halves of a bundle's life — DEFINING one and
- * GRANTING one — because either half alone is the feature: an org that keeps
- * assigning bundles it authored under licence keeps the whole of what it paid
- * for. REMOVING one never asks. A deployment that loses the feature therefore
- * keeps exactly the verbs that SHRINK what leftover bundles reach, which is
- * what makes an EE → OSS downgrade a state one can leave rather than a state
- * that freezes with bundles nobody can grant and nobody can delete.
+ * {@link hasCustomRoles} as a refusal. Covers DEFINING and GRANTING a bundle —
+ * either half alone is the feature. REMOVING one never asks, so a deployment
+ * that loses the feature keeps exactly the verbs that shrink what leftover
+ * bundles reach.
  */
 export function assertCustomRolesFeature(act: CustomRoleAct): void {
   if (hasCustomRoles()) return;
@@ -157,14 +152,11 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
  * a typo would 403 on the thing its author asked for and say nothing about why.
  * Naming the first offender is enough — the array is authored in a picker.
  *
- * The vocabulary is also the array's ceiling, in both directions. Duplicates
- * are what let a body name three permissions in twenty thousand entries, and
- * the stored array is re-walked on every request of every holder
- * (`spacePermissions`, and once per space in `GET /api/spaces`), so they are
- * collapsed here rather than carried forever; a body longer than the whole
- * vocabulary can hold nothing but duplicates and is refused before it is
- * walked. Deriving the bound from `known` rather than picking a number keeps it
- * exact under any set of loaded modules.
+ * The vocabulary is also the array's ceiling, in both directions. The stored
+ * array is re-walked on every request of every holder (`spacePermissions`, and
+ * once per space in `GET /api/spaces`), so duplicates are collapsed here rather
+ * than carried forever; a body longer than the whole vocabulary can hold
+ * nothing but duplicates and is refused before it is walked.
  */
 function normalizePermissions(permissions: string[]): string[] {
   const known = knownSpaceLevelPermissions();

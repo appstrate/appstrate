@@ -54,26 +54,15 @@ end
  */
 const RENEWALS_PER_LEASE = 3;
 
-/**
- * Polling grace past the moment a holder's lease is guaranteed gone
- * (`maxHoldSeconds + ttlSeconds`), so a waiter ACQUIRES the reclaimed lock
- * instead of giving up one poll short of it.
- */
+/** Grace past `maxHoldSeconds + ttlSeconds` so a waiter acquires the reclaimed
+ *  lock rather than giving up one poll short. */
 const ACQUIRE_GRACE_MS = 5_000;
 
 interface RedisLockOptions {
-  /**
-   * Lease length. Renewed by a watchdog while `fn` runs, so this is not a cap
-   * on the critical section — it is how long a CRASHED holder's lock lingers
-   * before another instance can reclaim it.
-   */
+  /** Lease length; renewed while `fn` runs — see {@link withRedisLock}. */
   ttlSeconds: number;
-  /**
-   * Hard cap on how long the watchdog keeps renewing. Past it the holder is
-   * not slow, it is wedged: renewal stops and the lease lapses within
-   * `ttlSeconds`, so a hung `fn` can never own the key forever. Sized by the
-   * caller from its critical section's worst legitimate duration.
-   */
+  /** Hard cap on renewal: past it a holder is wedged, not slow. Sized by the
+   *  caller from its critical section's worst legitimate duration. */
   maxHoldSeconds: number;
   /** Optional label for the lock's log lines. */
   label?: string;
@@ -86,11 +75,6 @@ interface RedisLockOptions {
  * plus a DB read under pressure — silently loses its lock to a waiter and the
  * two run concurrently, which for a rotating `refresh_token` means both spend
  * it and the loser writes a dead one.
- *
- * Renewal is capped (`maxHoldSeconds`) rather than unbounded: a hung holder
- * renewing forever would deadlock the key for every other instance.
- *
- * Returns the stop function; calling it is mandatory (the `finally` below).
  */
 function startLeaseWatchdog(
   renew: () => Promise<boolean>,

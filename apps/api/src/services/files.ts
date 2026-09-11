@@ -1221,11 +1221,8 @@ const fileSelect = {
  * `keep` / `delete` capabilities, and the `runs:read-all` grant that widens a
  * run container beyond the caller's own runs.
  *
- * `opts.creatorCanManage` is the other half of the lifecycle answer: the
- * creator's ownership right is not a role grant, so `permissions` cannot
- * narrow it and the CREDENTIAL must (see `credentialAdmits`). It defaults to
- * FALSE — a caller that does not state its credential's reach grants no
- * ownership override.
+ * `opts.creatorCanManage` is the credential ceiling on the creator's own
+ * lifecycle right — see {@link getFileCapabilities}. Defaults to FALSE.
  */
 export async function getFileForActor(
   scope: SpaceScope,
@@ -1464,9 +1461,8 @@ async function chatContextFileFilter(
  * Keyset pagination on `(createdAt, id)` DESC — the same stable tuple cursor as
  * the end-users list.
  *
- * `opts.creatorCanManage` carries the same credential ceiling on the creator's
- * own `keep` / `delete` right as {@link getFileForActor}, so a list row's
- * `capabilities` and the enforcement on that row agree.
+ * `opts.creatorCanManage` is the same credential ceiling {@link getFileForActor}
+ * applies, so a list row's `capabilities` and its enforcement agree.
  */
 export async function listFilesForActor(
   scope: SpaceScope,
