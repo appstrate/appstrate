@@ -1,12 +1,26 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import { describe, expect, it } from "bun:test";
-import { describeEnvIssues, getEeEnv, _resetEeEnvForTests } from "../../src/env.ts";
+import {
+  LEDGER_LIST_MAX_LIMIT,
+  describeEnvIssues,
+  getEeEnv,
+  _resetEeEnvForTests,
+} from "../../src/env.ts";
 import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
 
 applyEeFixtureEnv();
 
 describe("env", () => {
+  it("pins the platform's usage.list ceiling", () => {
+    // The platform clamps `usage.list` at this many rows
+    // (`LLM_USAGE_LIST_MAX_LIMIT` in apps/api, pinned by its own
+    // `test/unit/llm-usage-list-cap.test.ts`). Neither side may import the
+    // other's constant across the licence boundary, so both pin the contract
+    // value: a change on one side fails a test on that side.
+    expect(LEDGER_LIST_MAX_LIMIT).toBe(1000);
+  });
+
   describe("getEeEnv()", () => {
     it("returns a valid EeEnv object with all required fields", () => {
       const env = getEeEnv();

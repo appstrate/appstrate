@@ -1896,11 +1896,12 @@ export async function listOrphanRunIds(): Promise<string[]> {
 const LLM_USAGE_LIST_DEFAULT_LIMIT = 500;
 /**
  * The ceiling {@link listLlmUsage} clamps to, and the number the `usage.list`
- * module service therefore honours. Exported because `@appstrate/module-ee`
- * sizes its reconciliation knobs against it (`LEDGER_LIST_MAX_LIMIT`) and
- * refuses to boot above it; `test/unit/ledger-list-cap-parity.test.ts` holds
- * the two to the same value so a change here cannot silently truncate the
- * module's forward slice.
+ * module service therefore honours. It is a module-contract value:
+ * `@appstrate/module-ee` sizes its reconciliation knobs against the same
+ * number (`LEDGER_LIST_MAX_LIMIT`) and refuses to boot above it. The licence
+ * boundary forbids either side importing the other's constant, so each pins
+ * the number in its own unit tests (`test/unit/llm-usage-list-cap.test.ts`
+ * here) — moving one without the other fails a test on that side.
  */
 export const LLM_USAGE_LIST_MAX_LIMIT = 1000;
 
