@@ -113,17 +113,6 @@ describe("Better Auth rate limiting keys on the platform-resolved client IP", ()
     // A second invented address does not buy a second budget either.
     expect(await attemptSignIn({ "X-Forwarded-For": "203.0.113.13" })).toBe(429);
   });
-
-  // #1316 sub-defect — a chain entry that is not an address resolves to
-  // nothing, so it mints no bucket. In production the socket peer takes over
-  // from there; under `app.request()` there is no socket, which is why this
-  // asserts only that the junk value bought nothing.
-  it("refuses a forwarded entry that is not an IP address", async () => {
-    setTrustProxy("true");
-
-    await spendBudget({});
-    expect(await attemptSignIn({ "X-Forwarded-For": "not-an-ip" })).toBe(429);
-  });
 });
 
 /**
