@@ -17,13 +17,13 @@
  */
 
 import { describe, it, beforeAll, afterAll, beforeEach, expect } from "bun:test";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { listenClient } from "@appstrate/db/client";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, runs } from "@appstrate/db/schema";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedRunLog, seedPackage } from "../../helpers/seed.ts";
 import {
@@ -312,9 +312,35 @@ describe("NOTIFY triggers (regression)", () => {
       status: "running",
     });
 
+    const received: Array<Record<string, unknown>> = [];
+    await listenClient.listen("run_update", (raw) => {
+      try {
+        const payload = JSON.parse(raw) as Record<string, unknown>;
+        if (payload.id === run.id) received.push(payload);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // 2 000 × 4 bytes = 8 000 bytes — over the whole NOTIFY ceiling by itself.
     await db.execute(
       sql`UPDATE runs SET status = 'failed', error = ${"😀".repeat(2_000)}, completed_at = now() WHERE id = ${run.id}`,
     );
+    for (let i = 0; i < 40 && received.length < 1; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    // A raise inside the trigger rolls the finalize back, so the row itself is
+    // the first half of the assertion.
+    const [row] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id));
+    expect(row?.status).toBe("failed");
+
+    expect(received).toHaveLength(1);
+    const trimmed = received[0]!.error as string;
+    const bytes = new TextEncoder().encode(trimmed).length;
+    expect(bytes).toBeLessThanOrEqual(2_000);
+    expect(bytes).toBeGreaterThan(1_900);
+    expect(trimmed).toBe("😀".repeat(bytes / 4));
   });
 
   // Drives the live "Reconnection required" badge end-to-end: trigger →
