@@ -1,33 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `packages/module-ee/` is the one source-available directory in an otherwise
- * Apache-2.0 tree, and its README documents removing it from a redistribution.
- * That recipe is the only artifact in the repo that states which Apache-2.0
- * files are coupled to the commercial one — and prose rots the moment someone
- * adds a coupling, silently, with every gate green: the module is opt-in at
- * RUNTIME (`MODULES`), so a new build-time reference to it costs nothing until
- * a redistributor actually deletes the directory and discovers the list was
- * short. That is exactly what happened: the recipe named four files and the
- * real removal touched roughly forty.
+ * `packages/module-ee/` is the one source-available directory in an otherwise Apache-2.0 tree, and
+ * its README documents removing it from a redistribution. That recipe is the only artifact stating
+ * which Apache-2.0 files are coupled to the commercial one, and prose rots silently with every gate
+ * green: the module is opt-in at RUNTIME (`MODULES`), so a new build-time reference costs nothing
+ * until a redistributor deletes the directory and discovers the list was short.
  *
- * So the list is derived from the code rather than trusted. Two mechanical
- * sets, both cheap and both false-positive-free over the current tree:
+ * So the list is derived from the code rather than trusted. Two mechanical sets:
  *
- *   1. the SPA files that name the commercial WIRE CONTRACT — an `/api/billing`
- *      path or an `Ee*` schema identifier. This is the coupling the recipe
- *      missed, and the one a new billing screen recreates;
- *   2. every tracked `.ts`/`.tsx`/`.json` file outside the module that carries a
- *      quoted `packages/module-ee` PATH — the gate scripts that scan the
- *      directory (one of them exits `ENOENT` without it) and the gate
- *      self-tests that assert it is present.
+ *   1. the SPA files that name the commercial WIRE CONTRACT — an `/api/billing` path or an `Ee*`
+ *      schema identifier, the coupling a new billing screen recreates;
+ *   2. every tracked `.ts`/`.tsx`/`.json` file outside the module carrying a quoted
+ *      `packages/module-ee` PATH.
  *
- * Each derived path must appear verbatim in the recipe. The section says more
- * than the sets derive — i18n keys, the SPA files that reach the module through
- * a helper, the dead `@appstrate/emails` re-exports — because no cheap grep
- * finds those; this gate is the floor under the recipe, not its ceiling. It
- * deliberately does not check what the section SAYS about a file: naming it is
- * what forces an author to look.
+ * Each derived path must appear verbatim in the recipe. The recipe says more than these sets derive
+ * — this gate is its floor, not its ceiling — and deliberately does not check what the section SAYS
+ * about a file: naming it is what forces an author to look.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -61,16 +50,9 @@ function recipeSection(): string {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
-/** Tracked files matching `pattern`, restricted to those under `prefix`. */
-function filesMatching(
-  globs: readonly string[],
-  what: string,
-  pattern: RegExp,
-  prefix = "",
-): string[] {
-  return trackedIndexFiles(globs, what)
-    .filter((f) => f.startsWith(prefix))
-    .filter((f) => pattern.test(read(f)));
+/** Tracked files matching `pattern`. */
+function filesMatching(globs: readonly string[], what: string, pattern: RegExp): string[] {
+  return trackedIndexFiles(globs, what).filter((f) => pattern.test(read(f)));
 }
 
 describe("the module-ee removal recipe names every file coupled to the module", () => {
@@ -80,7 +62,6 @@ describe("the module-ee removal recipe names every file coupled to the module", 
     ["apps/web/src/*.ts", "apps/web/src/*.tsx"],
     "SPA sources",
     WIRE_CONTRACT,
-    "apps/web/src/",
   );
 
   const pathCoupled = filesMatching(

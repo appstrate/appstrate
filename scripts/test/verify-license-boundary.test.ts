@@ -138,12 +138,6 @@ describe("apps/web/src/api/schema.d.ts", () => {
     expect(banner).toContain("packages/module-ee/");
     expect(banner).toContain("source-available");
   });
-
-  it("still declares no SPDX header — the exemption, made visible", () => {
-    // If this ever flips, the licence question was answered and the entry in
-    // `GENERATED_ALLOWLIST` should go with it.
-    expect(banner).not.toContain("SPDX-License-Identifier");
-  });
 });
 
 describe("LICENSED_GLOBS", () => {

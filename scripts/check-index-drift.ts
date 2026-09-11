@@ -41,24 +41,8 @@
  * owns, read from that module's own drizzle snapshot (`scripts/lib/drizzle-snapshots.ts`), never
  * from a prefix.
  *
- * ═══ WHY COLUMNS ARE HERE TOO (issue #1349) ═══
- *
- * A MISSING COLUMN on a live database is the same squash-shaped hole as a
- * missing index, and it is louder: the index case degrades a query plan, the
- * column case is a Postgres 42703 on the first statement that names it. The
- * Better Auth drizzle adapter looks like it guards this and does not — its
- * `findDrizzleSchemaProblems` diffs the plugin's expectations against the
- * DRIZZLE TS OBJECT, and every finding it can emit (`missing-table`,
- * `missing-column`, `unexpected-required-column`) is computed from TypeScript.
- * It never reads `information_schema`, so a database missing a column the
- * schema declares boots perfectly clean and fails on the first `/oauth2/token`.
- *
- * `apps/api/test/unit/migration-schema-parity.test.ts` closes the other link of
- * that chain in CI — it replays the whole journal into a throwaway PGlite and
- * diffs the catalog against `packages/db/src/schema/`, columns included — so a
- * migration that misses a declared column cannot reach main. What a replay
- * structurally cannot see is a database that never ran the squash. That is
- * PRODUCTION, and this script is the only thing pointed at it.
+ * Why columns and not only indexes, and why none of this runs at boot:
+ * `packages/db/README.md` § "Schema drift".
  *
  * SCOPE — indexes are compared by NAME ONLY. An index that exists under the
  * expected name with a different definition (other columns, a lost partial
@@ -68,25 +52,13 @@
  * scope: rendering snapshot entries into comparable DDL is fiddly and
  * false-positive-prone. Every message the script prints says so.
  *
- * Columns are compared by name and by NULLABILITY. Their TYPE is not compared,
- * for the same reason: `timestamp with time zone` vs. drizzle's rendering, an
- * `int4` widened to `int8`, a domain — the normalisation needed to make that
- * comparison honest is where the false positives live. A declared table with no
- * column row at all is skipped, not reported: `information_schema.columns` is
- * privilege-filtered, so its silence about a table is not evidence the table is
- * absent. Whether the journal builds every declared TABLE is the replay test's
- * question, and it reads a database it built itself.
+ * Columns are compared by name and by NULLABILITY, never by TYPE — the
+ * normalisation a type comparison needs is where the false positives live.
  *
  * Exit 1 iff a declared index is absent, a declared column is absent, a column
  * disagrees on NOT NULL, or the check could not run at all. Undeclared indexes
  * and undeclared columns never fail the run — they are reported for an operator
  * to act on, because pre-squash production legitimately carries some.
- *
- * NOTHING HERE RUNS AT BOOT, and that is deliberate: production is known to
- * predate `0000_init.sql` (issue #1182 found two indexes missing there), so a
- * boot-time gate on the same comparison would refuse to start the platform over
- * drift that has been live for months. This is an operator check, run against a
- * connection string, and its exit code is a decision a human makes.
  */
 
 import {
@@ -116,10 +88,6 @@ export const PUBLIC_INDEXES_QUERY =
  * a boolean in SQL so the comparison here is against the same `notNull` the
  * snapshot writes, with no string convention crossing the boundary. Aliased to
  * unprefixed names so a row reads like a `pg_indexes` one.
- *
- * Not exported, unlike `PUBLIC_INDEXES_QUERY`: no replay test runs this one —
- * `migration-schema-parity.test.ts` asks `information_schema` its own question,
- * against the TS schema rather than a snapshot.
  */
 const PUBLIC_COLUMNS_QUERY = `
   SELECT table_name AS tablename, column_name AS columnname, (is_nullable = 'NO') AS notnull
@@ -268,16 +236,8 @@ export function declaredColumns(snapshot: DrizzleSnapshot): Map<string, Map<stri
  * Three-way difference between the columns a snapshot declares and the ones a
  * database has, restricted to the tables the snapshot declares.
  *
- * A table the snapshot does not declare is skipped outright: it is already
- * reported as an undeclared table, and listing every one of its columns as
- * "undeclared" on top of that would bury the signal.
- *
- * `absent` is the 42703 case and the reason the column half exists.
- * `nullability` is the quieter one: a column that IS there while the NOT NULL
- * the schema declares is not — a pre-squash database that never ran the `SET
- * NOT NULL`, or an `ALTER … DROP NOT NULL` applied by hand. Every write path
- * types the column as required, so nothing fails until a row without it exists.
- * `undeclared` is pre-squash residue, reported and never fatal.
+ * `absent` is the 42703 case; `nullability` is a column present while its declared NOT NULL is
+ * not; `undeclared` is pre-squash residue, never fatal.
  */
 export function diffColumns(
   declared: Map<string, Map<string, boolean>>,
@@ -288,14 +248,9 @@ export function diffColumns(
   const undeclared: string[] = [];
   for (const [table, columns] of declared) {
     const found = actual.get(table);
-    // A declared table with NO column row is skipped rather than reported as
-    // forty missing columns — and, deliberately, rather than reported as a
-    // missing table. `information_schema.columns` is PRIVILEGE-FILTERED: a
-    // table the connecting role cannot see returns nothing, which is
-    // indistinguishable from a table that does not exist. Absence here is
-    // therefore not evidence, and the table-level question belongs to
-    // `apps/api/test/unit/migration-schema-parity.test.ts`, which owns a
-    // database it built itself and can read `pg_tables` without that caveat.
+    // `information_schema.columns` is PRIVILEGE-FILTERED: silence about a table is not evidence
+    // it is absent, so a declared table with no column row is skipped. The table-level question
+    // belongs to `apps/api/test/unit/migration-schema-parity.test.ts`.
     if (!found) continue;
     for (const [column, notNull] of columns) {
       const actualNotNull = found.get(column);

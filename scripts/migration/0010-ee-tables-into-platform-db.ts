@@ -21,11 +21,8 @@
  * declares copies nothing, and a column only the SOURCE has is refused — that
  * one would lose data.
  *
- * The LEVEL is read too, from the source's own journal, and a source below
- * `0003` is refused: see {@link REQUIRED_SOURCE_TAG}. A copy cannot repair rows
- * a migration should have rewritten, because every DML the module ever shipped
- * names the pre-rename `cloud_*` tables and can never run again once the target
- * is at `0005`.
+ * The LEVEL is read from the source's own journal; a source below
+ * {@link REQUIRED_SOURCE_TAG} is refused.
  *
  * Why the move: the module used to open a second URL and auto-create the
  * database it named. Two pools, two backups, no shared transaction — and a
@@ -121,13 +118,8 @@ const PAGE = 500;
 /**
  * The last migration in the module's history that REWRITES rows — `0001` derives
  * `cost_usd` from `cost_credits`, `0003` normalizes the free-plan subscription
- * status. A source below it is refused rather than copied, because nothing can
- * repair it afterwards: every DML the module ever shipped names the pre-rename
- * `cloud_*` tables, so once the target is at `0005` those statements have no
- * table left to touch. Copying a pre-`0003` source would land
- * `subscription_status = 'canceled'` on free-plan orgs, and
- * `packages/module-ee/src/billing/quota-check.ts` answers `402
- * subscription_blocked` for every one of them.
+ * status. A source below it is refused: every DML the module ever shipped names
+ * the pre-rename `cloud_*` tables, so nothing can repair it after the move.
  */
 const REQUIRED_SOURCE_TAG = "0003_normalize_free_subscription_status";
 

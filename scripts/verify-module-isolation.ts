@@ -260,22 +260,9 @@ const COMMERCIAL_MODULE_SPEC = "@appstrate/module-ee";
  * scan feeds it every tracked source file outside `packages/module-ee/`, the
  * tests feed it synthetic ones.
  *
- * Why this is a direction of its own rather than a wider `platformRoots` list.
- * The core→module rule above is about modules being OPT-IN, and it is narrowed
- * twice on purpose: `apps/web` imports a module's UI by design, and the other
- * roots' tests drive a module on purpose (`apps/api/test/unit/services/
- * model-selection.test.ts` asserts `@appstrate/module-claude-code`'s own
- * provider definition, which is legitimate and must stay). Widening that rule to
- * the test trees would therefore need a grandfather list — the shape this gate's
- * own acceptance list exists to warn about.
- *
- * The LICENCE rule needs no such narrowing, because it has no legitimate case at
- * all: `packages/module-ee/` is source-available under a different licence and
- * `packages/module-ee/README.md` documents removing it from a redistribution, so
- * an Apache-2.0 file that statically names it is both a licence leak and a file
- * that stops compiling the moment the directory is deleted. A test tree and the
- * SPA break a redistribution exactly as thoroughly as `apps/api/src` does, so
- * this direction reads every tracked source file with no exemption to keep
+ * A direction of its own rather than a wider `platformRoots` list: the core→module rule is
+ * narrowed for legitimate cases (`apps/web` imports module UI, tests drive modules), and the
+ * licence rule has none — so it reads every tracked source file with no exemption list to keep
  * current.
  *
  * The module's own files are excluded by the caller, not here: reaching into
@@ -457,22 +444,15 @@ if (import.meta.main) {
   problems.push(...reviewPlatformModuleImports(platformImports));
 
   // ─── Apache-2.0 → commercial ────────────────────────────────────────
-  // Every tracked source file in the repository, the commercial tree itself
-  // excepted. The population comes from the git INDEX — the same one
-  // `verify-license-boundary.ts` reads — rather than from a roster of scan
-  // roots, so a new directory is covered the day its first file is committed
-  // and there is no list to keep in step. A file already read by the
-  // platform→module pass above can report twice; both lines are true and both
-  // are fatal, and under-reporting is the failure that matters here.
+  // Every tracked source file, the commercial tree excepted. Population from the git INDEX, so a
+  // new directory is covered the day its first file is committed. A file the platform→module pass
+  // above already read can report twice: both lines are true and both are fatal.
   const commercialImports: PlatformImport[] = [];
   const licensedFiles = trackedFiles(SOURCE_GLOBS, "source file", "skip").filter(
     (file) => !file.startsWith(COMMERCIAL_MODULE_PREFIX),
   );
-  // Read in bounded batches. This pass is an order of magnitude wider than the
-  // other two, and one `await` per file spends the whole run waiting on I/O at
-  // ~20% CPU — enough to push the gate past its own test's timeout. The batch
-  // is bounded rather than one `Promise.all` over everything so the open-file
-  // count stays well under any `ulimit -n`.
+  // Bounded batches: one `await` per file is I/O-bound enough to blow this gate's own test
+  // timeout, and one `Promise.all` over everything would blow `ulimit -n`.
   const BATCH = 512;
   for (let i = 0; i < licensedFiles.length; i += BATCH) {
     const batch = licensedFiles.slice(i, i + BATCH);
@@ -489,7 +469,6 @@ if (import.meta.main) {
       }
     });
   }
-  const licensedFilesScanned = licensedFiles.length;
   problems.push(...reviewCommercialDependencies(commercialImports));
 
   // Deduplicated: the commercial pass re-reads files the platform pass already
@@ -504,7 +483,7 @@ if (import.meta.main) {
     console.log(
       `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules, ` +
         `${platformFilesScanned} platform files with no static module import, ` +
-        `${licensedFilesScanned} tracked files with no static import of ${COMMERCIAL_MODULE_PREFIX}` +
+        `${licensedFiles.length} tracked files with no static import of ${COMMERCIAL_MODULE_PREFIX}` +
         `${accepted > 0 ? `, ${accepted} accepted cross-module import(s)` : ", no cross-module imports"}.`,
     );
     for (const e of ACCEPTED_CROSS_MODULE_IMPORTS) {

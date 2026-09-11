@@ -365,19 +365,9 @@ function formatCoverageSummary(rows: readonly CoverageRow[]): string {
 /**
  * One ALREADY-VENDORED model whose rates move — or vanish — in this refresh.
  *
- * Catalog-backed `org_models` rows store `cost = NULL` on purpose
- * (`seedOrgModelsForCredential`) and resolve the rate live on every call
- * (`resolveCatalogDefaults` → `computeCostUsd` → `llm_usage.cost_usd` → the EE
- * credit debit), so merging a refresh changes what EXISTING customers pay from
- * the next release on, with no per-org pin and no notification. That is the
- * intended design — the catalog is meant to track upstream — but it makes the
- * price half of the diff a money decision, not a data bump, and the raw JSON
- * diff buries it among metadata churn (`contextWindow`, `capabilities`,
- * `generation`). {@link formatPriceChangeSummary} is what puts it in front of
- * the reviewer.
- *
- * Newly ADDED ids are deliberately excluded: no row can be tracking a price
- * that did not exist last week, so they change nobody's bill.
+ * Newly ADDED ids are excluded: nothing can be tracking a price that did not
+ * exist last week. The consequence of a move is stated by
+ * {@link formatPriceChangeSummary}, which prints it into the PR body.
  */
 interface PriceChange {
   provider: string;

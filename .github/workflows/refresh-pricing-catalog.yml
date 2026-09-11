@@ -232,10 +232,7 @@ jobs:
             against the vendor's own price page
             (https://openai.com/api/pricing / https://www.anthropic.com/pricing / …).
             That section is the complete list of models an org can already be
-            billed on whose rate this PR changes or deletes — catalog-backed
-            `org_models` rows resolve their price live, so merging re-prices
-            existing customers, and a dropped model bills at zero. It is not a
-            spot-check: if a row looks wrong, this PR must not merge as-is.
+            billed on whose rate this PR changes or deletes — not a spot-check.
           - Read the cache-rate coverage table below. `cacheRead` coverage is
             inherited from LiteLLM, so it drifts on its own, and a model with no
             `cacheRead` prices its cached input tokens at zero.
