@@ -127,7 +127,7 @@ describe("submitModelForm — single model", () => {
       onSuccess: h.onSuccess,
     })(oneWithTypedKey);
 
-    expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [] });
+    expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [], credentialId: "cred_1" });
     expect(h.created).toEqual([{ modelId: "gpt-6", credentialId: "cred_1" }]);
     expect(h.successes).toBe(1);
   });

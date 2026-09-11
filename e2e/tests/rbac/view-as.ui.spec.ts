@@ -274,7 +274,7 @@ test.describe("View as role", () => {
     });
 
     await page.goto("/agents");
-    await expect(page.getByText(/Prévisualisation arrêtée|Preview stopped/)).toBeVisible();
+    await expect(page.getByText(/Prévisualisation indisponible|Preview unavailable/)).toBeVisible();
     await expect(banner(page)).toHaveCount(0);
   });
 
@@ -308,7 +308,9 @@ test.describe("View as role", () => {
       });
       await page.goto("/agents");
 
-      await expect(page.getByText(/Prévisualisation arrêtée|Preview stopped/)).toBeVisible();
+      await expect(
+        page.getByText(/Prévisualisation indisponible|Preview unavailable/),
+      ).toBeVisible();
       await expect(banner(page)).toHaveCount(0);
     } finally {
       await context.close();
