@@ -1243,16 +1243,20 @@ async function snapshot(root: string): Promise<Record<string, string>> {
  * therefore not be a skill source. */
 const MEMBER = { access: "member" as const, permissions: ["skills:read"] };
 
-/**
- * Answer `GET /api/spaces` with a problem detail, serving everything else — the
- * shape the platform sends when it refuses the listing outright.
- */
-function failSpaceListing(status: number): void {
+/** Answer `GET /api/spaces` with `respond()`, serving every other path as before. */
+function interceptSpaceListing(respond: () => Response): void {
   const serve = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     new URL(String(input)).pathname === "/api/spaces"
-      ? Response.json({ status, title: "Forbidden", code: "forbidden" }, { status })
+      ? respond()
       : serve(input, init)) as unknown as typeof fetch;
+}
+
+/** The problem detail the platform sends when it refuses the listing outright. */
+function failSpaceListing(status: number): void {
+  interceptSpaceListing(() =>
+    Response.json({ status, title: "Forbidden", code: "forbidden" }, { status }),
+  );
 }
 
 describe("skills sync — multiple spaces", () => {
@@ -1279,11 +1283,9 @@ describe("skills sync — multiple spaces", () => {
     // removal of every installed skill (issue #1320).
     createSkillServer(ONE_SKILL).install();
     await skillsSyncCommand({}, createMemoryIO().io);
-    const serve = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-      new URL(String(input)).pathname === "/api/spaces"
-        ? Response.json({ data: [{ id: "spc_1", name: "Active", isDefault: true }] })
-        : serve(input, init)) as unknown as typeof fetch;
+    interceptSpaceListing(() =>
+      Response.json({ data: [{ id: "spc_1", name: "Active", isDefault: true }] }),
+    );
     const { io, stderr } = createMemoryIO();
 
     await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
