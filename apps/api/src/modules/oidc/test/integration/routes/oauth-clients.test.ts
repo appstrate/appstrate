@@ -114,7 +114,8 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       ),
     });
     expect(absent.status).toBe(response.status);
-    expect((await absent.json()).detail).toBe((await response.json()).detail);
+    expect(await absent.json()).toMatchObject({ detail: "Space not found" });
+    expect(await response.json()).toMatchObject({ detail: "Space not found" });
   });
 
   it("POST creates a dashboard client pinned to the current org", async () => {

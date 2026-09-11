@@ -21,6 +21,7 @@
  * which exists because `share` protects the link and not the content.
  */
 
+import { asRecord } from "@appstrate/core/safe-json";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import {
@@ -199,7 +200,7 @@ async function library(headers: Headers): Promise<{
 /** Publish a version and move the `latest` dist-tag onto it. */
 async function publish(packageId: string, version: string): Promise<number> {
   const pkg = await getDbRow(packages, eq(packages.id, packageId));
-  const manifest = { ...pkg.draftManifest, name: packageId, version, type: pkg.type };
+  const manifest = { ...asRecord(pkg.draftManifest), name: packageId, version, type: pkg.type };
   const zip = buildMinimalZip(
     manifest,
     pkg.draftContent ?? "",
@@ -576,7 +577,7 @@ describe("offered is not activated", () => {
       .update(packages)
       .set({
         draftManifest: {
-          ...row.draftManifest,
+          ...asRecord(row.draftManifest),
           input: { schema: { type: "object", properties: { accepted: { type: "string" } } } },
         },
       })

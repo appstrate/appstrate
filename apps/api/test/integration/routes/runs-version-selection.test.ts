@@ -15,6 +15,7 @@
  * opt-in via `version=draft` only).
  */
 
+import { asRecord } from "@appstrate/core/safe-json";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -146,7 +147,7 @@ describe("POST /api/agents/:scope/:name/run — published deps diverged from the
     await uploadPackageZip(
       DRIFTED,
       "1.0.0",
-      buildMinimalZip(version.manifest, "Published prompt.", "prompt.md"),
+      buildMinimalZip(asRecord(version.manifest), "Published prompt.", "prompt.md"),
     );
     await db
       .insert(packageDistTags)

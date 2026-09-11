@@ -26,6 +26,7 @@
  * input, report the drop on read.
  */
 
+import { asRecord } from "@appstrate/core/safe-json";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
 import { getTestApp } from "../../helpers/app.ts";
@@ -209,7 +210,7 @@ describe("publish_file across every launch path", () => {
     await uploadPackageZip(
       "@compatorg/scheduled",
       "1.0.0",
-      buildMinimalZip(published.manifest, "Published prompt.", "prompt.md"),
+      buildMinimalZip(asRecord(published.manifest), "Published prompt.", "prompt.md"),
     );
 
     const draftAgent = await getPackage("@compatorg/scheduled", ctx.orgId);
