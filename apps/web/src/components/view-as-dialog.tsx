@@ -22,6 +22,7 @@ import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space"
 import { useSpaces } from "../hooks/use-spaces";
 import { useSpaceRoleOptions } from "../hooks/use-roles";
 import { enterViewAs, toViewAsPersona } from "../stores/view-as-store";
+import { viewAsRefusalCode } from "../lib/view-as-refusal";
 
 /** "No space" option. Not the empty string — Radix refuses an empty item value. */
 const NO_SPACE = "none";
@@ -87,9 +88,12 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
       // the admin exactly where they were rather than under a persona wearing
       // their own authority.
       enterViewAs(persona, await fetchOrgsAs(persona));
-    } catch {
+    } catch (err) {
       setEntering(false);
-      toast.error(t("viewAs.enterFailed"));
+      // Three of the four refusals are permanent; "try again" is only ever true
+      // of a failure the server named nothing for.
+      const code = viewAsRefusalCode(err);
+      toast.error(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
       return;
     }
     // Land where the persona's role applies. Elsewhere the persona is only its

@@ -39,7 +39,9 @@ const { spaceStore } = await import("../space-store.ts");
 const { queryClient } = await import("../../lib/query-client.ts");
 const { $api } = await import("../../api/client.ts");
 const { buildScopingHeaders, withViewAsParam } = await import("../../lib/scoping-headers.ts");
-const { endPreviewIfRefused, noteViewAsRefusal } = await import("../../lib/view-as-refusal.ts");
+const { endPreviewIfRefused, noteViewAsRefusal, viewAsRefusalCode } =
+  await import("../../lib/view-as-refusal.ts");
+const { ApiError } = await import("../../api/errors.ts");
 const { ViewAsBanner } = await import("../../components/view-as-banner.tsx");
 const { render } = await import("../../test/render.tsx");
 const { i18nReady } = await import("../../i18n.ts");
@@ -297,6 +299,36 @@ describe("exit on refusal", () => {
     enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(await endPreviewIfRefused(new Response("{}", { status: 403 }))).toBe(false);
     expect(viewAsStore.getState().persona).toEqual(PERSONA);
+  });
+});
+
+/**
+ * Entering has no response to read — the org listing THROWS — so the dialog
+ * names the refusal off the thrown error instead. Three of the four codes are
+ * permanent, and "try again" is a lie for all three.
+ */
+describe("naming a refused entry", () => {
+  it("names every code the server refuses the persona with", () => {
+    for (const code of [
+      "invalid_view_as",
+      "view_as_unsupported",
+      "view_as_forbidden",
+      "view_as_not_found",
+    ])
+      expect(viewAsRefusalCode(new ApiError(code, "refused", 403))).toBe(code);
+  });
+
+  it("names nothing for a denial the persona earned, nor for a transport failure", () => {
+    expect(viewAsRefusalCode(new ApiError("forbidden", "denied", 403))).toBeNull();
+    expect(viewAsRefusalCode(new TypeError("fetch failed"))).toBeNull();
+  });
+
+  it("has copy for every code it names", async () => {
+    const { default: i18n } = await import("../../i18n.ts");
+    for (const code of ["invalid_view_as", "view_as_forbidden"]) {
+      const key = `viewAs.stopped.${viewAsRefusalCode(new ApiError(code, "refused", 403))}`;
+      expect(i18n.t(key, { ns: "common" })).not.toBe(key);
+    }
   });
 });
 
