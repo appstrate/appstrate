@@ -1017,6 +1017,8 @@ export function createIntegrationsRouter() {
         );
       }
       if (!strategy.begin) {
+        // Same criterion as the guard above: a pure in-memory check, no egress.
+        await releaseJti(claims.jti);
         return c.html(
           popupHtmlError("This integration cannot be connected.", completionDetail),
           500,

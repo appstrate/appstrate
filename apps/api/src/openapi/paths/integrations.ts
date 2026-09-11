@@ -1020,7 +1020,8 @@ export const integrationsPaths = {
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
-          description: "Integration cannot be connected / unexpected failure (HTML error page).",
+          description:
+            "Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable.",
         },
         "502": {
           description:

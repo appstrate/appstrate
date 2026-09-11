@@ -11041,7 +11041,7 @@ export interface operations {
                 content?: never;
             };
             429: components["responses"]["RateLimited"];
-            /** @description Integration cannot be connected / unexpected failure (HTML error page). */
+            /** @description Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable. */
             500: {
                 headers: {
                     [name: string]: unknown;
