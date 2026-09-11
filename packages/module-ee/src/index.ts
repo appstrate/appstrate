@@ -149,10 +149,8 @@ const eeModule: AppstrateModule = {
     // Billing sweeper — the EE metering consumer. Sweeps the platform's
     // append-only `llm_usage` ledger by serial-`id` cursor, claims the
     // platform-provided rows into `ee_billed_llm_usage`, and debits credits.
-    // A failed pass advances nothing and the next tick retries. Its tick also
-    // starts (without awaiting) the throttled storage-entitlement reconcile and
-    // retries pending Stripe cancellations. `EE_RECONCILIATION_INTERVAL_SECONDS=0`
-    // pauses the sweep only — that maintenance half keeps running.
+    // A failed pass advances nothing and the next tick retries. INTERVAL=0
+    // pauses the sweep only — the maintenance half keeps running.
     startBillingSweeper();
   },
 

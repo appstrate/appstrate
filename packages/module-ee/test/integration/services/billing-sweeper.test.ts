@@ -249,12 +249,8 @@ describe("billing sweep — cursor consumer", () => {
   });
 
   it("keeps sweeping when a context's cumulative credits exceed the int4 ceiling", async () => {
-    // The durable `unattributed` bucket never resets, so its cumulative
-    // `cost_credits` grows for the lifetime of the deployment. Past 2 147 483 647
-    // credits (~$2.15M) an `integer` column — and the `round(...)::int` casts
-    // that wrote it — raised "integer out of range" INSIDE the sweep
-    // transaction, rolling back the whole pass: no row claimed, no watermark
-    // advanced, billing dead for EVERY tenant until someone found the row.
+    // The `unattributed` bucket never resets; past the int4 ceiling the write used
+    // to throw INSIDE the sweep transaction, killing the pass for every tenant.
     await seedBillingCursor(0);
     const beyondInt4 = 3_000_000_000; // credits, i.e. $3M cumulative
     await seedUsageRecord({

@@ -42,11 +42,8 @@
  * `STRIPE_SECRET_KEY` — a developer `.env` holding a working key must never
  * make `bun test` start creating objects in an account nobody aimed at.
  *
- * Because "no key" is the common case, the checks that do NOT need one live
- * elsewhere and run everywhere: `Fixture<T>` (test/helpers/stripe.ts) types
- * every fixture against the SDK, so a bump that RELOCATES a field fails `tsc`;
- * and `test/unit/stripe-fixtures.test.ts` asserts the fixtures carry every path
- * production reads, which the all-optional `Fixture<T>` cannot.
+ * The checks that need no key are `test/unit/stripe-fixtures.test.ts` and the
+ * `Fixture<T>` typing in `test/helpers/stripe.ts`.
  *
  * Run it with:
  *

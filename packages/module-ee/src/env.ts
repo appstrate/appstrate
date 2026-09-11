@@ -6,10 +6,6 @@ import { z } from "zod";
  * The platform's `usage.list` hard ceiling (`LLM_USAGE_LIST_MAX_LIMIT`). A read
  * asking for more is capped server-side, so the sweep clamps here explicitly
  * rather than requesting a limit it will not get.
- *
- * Lives here rather than next to the sweep because it is what bounds the two
- * reconciliation knobs below — one budget shared by the replay window and the
- * forward batch, enforced by the cross-field rule under the schema.
  */
 export const LEDGER_LIST_MAX_LIMIT = 1000;
 
@@ -37,14 +33,9 @@ export const eeEnvSchema = z
     // INTERVAL is the sweep cadence, BATCH_SIZE the max rows per tick. Defaults
     // tuned for a small deployment: 5-min cadence, 100 rows per tick.
     //
-    // INTERVAL=0 pauses METERING and nothing else. The tick's other half is not
-    // metering — it retries the Stripe cancellations `onOrgDelete` could not
-    // confirm — and keeps its own timer, because a paused sweep that also stopped
-    // those retries would keep charging customers for deleted organizations.
+    // INTERVAL=0 pauses METERING only; the tick's maintenance half keeps its own
+    // timer (see `runMaintenance` in billing/billing-sweeper.ts).
     EE_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
-    // Upper-bounded by the cross-field rule under this object, not here: the
-    // batch shares {@link LEDGER_LIST_MAX_LIMIT} with the replay window, which is
-    // read on top of it.
     EE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).default(100),
 
     // How far BELOW the watermark every sweep pass re-reads the ledger.
@@ -82,38 +73,26 @@ export const eeEnvSchema = z
     // replay region instead and this value would have to exceed the ledger appends
     // of the LONGEST run — unbounded, and unknowable.
     //
-    // MAX 500 keeps at least half the platform's read budget for forward progress
-    // however the other knob is set. It is a floor, not the whole guarantee: the
-    // window and the batch SHARE {@link LEDGER_LIST_MAX_LIMIT}, and what makes
-    // forward capacity exactly BATCH_SIZE is the cross-field rule under this
-    // object.
+    // MAX 500 floors forward capacity at half the read budget however the other
+    // knob is set; the cross-field rule below makes it exactly BATCH_SIZE.
     //
     // 0 disables replay, restoring the pre-fix cursor AND its silent-loss window.
     // That is an emergency escape hatch, not a tuning knob.
     EE_RECONCILIATION_REPLAY_WINDOW: z.coerce.number().int().min(0).max(500).default(200),
 
-    // How long the sweep may have been ABSENT before it refuses to resume over
-    // the gap it left. Resuming would bill a whole disabled window against
-    // TODAY's quotas, so the module refuses to boot and names both operator
-    // paths — forgive the gap, or bill it. What the refusal actually tests, and
-    // why it takes two measurements rather than one, is on
-    // `assertCursorResumable` in `billing/billing-sweeper.ts`.
+    // How long the sweep may have been ABSENT before it refuses to resume over the
+    // gap it left. The predicate is on `assertCursorResumable` in
+    // `billing/billing-sweeper.ts`.
     //
     // DEFAULT 86400 (a day). A sweep that has not confirmed the watermark in 24
     // hours on a platform that kept metering was not running. 0 disables the
     // check and resumes over any gap — the "bill it, whatever its size" answer.
     EE_RECONCILIATION_MAX_GAP_SECONDS: z.coerce.number().int().min(0).default(86400),
   })
-  // The two knobs SHARE one read budget. A pass asks the platform for
-  // `replayWindow + batchSize` rows and is capped at LEDGER_LIST_MAX_LIMIT, so a
-  // sum above the ceiling does not enlarge the read — it shrinks the FORWARD
-  // slice below `batchSize`, and everything downstream is written against
-  // "a full pass processes `batchSize` new rows": the sweeper's within-tick
-  // drain loop (`processed >= batchSize`) stops after one pass, so raising the
-  // batch to clear a backlog makes throughput FALL, and the "drain cap reached"
-  // warning that would have said so can never fire either. Rejected at boot
-  // rather than clamped, because a silently clamped batch is exactly the
-  // undiagnosable version of that.
+  // The two knobs SHARE one read budget (a pass reads replay ON TOP of batch and
+  // is capped at LEDGER_LIST_MAX_LIMIT). Rejected at boot rather than clamped: a
+  // silently clamped batch makes the drain loop's `processed >= batchSize` gate
+  // unreachable and its own warning dead with it.
   .refine(
     (env) =>
       env.EE_RECONCILIATION_REPLAY_WINDOW + env.EE_RECONCILIATION_BATCH_SIZE <=
