@@ -2792,7 +2792,28 @@ export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
       joinedAt: ago(3_000),
     },
   ],
-  invitations: [],
+  // Two pending invitations, one per shape: a guest who will reach a single
+  // space on the role picked for them, and a plain member with no space seat.
+  invitations: [
+    {
+      id: "inv_lab_guest",
+      email: "marc@studio-lefort.fr",
+      role: "guest",
+      space_assignments: [{ space_id: "app_lab_default", preset_role: "operator" }],
+      token: "lab-invitation-guest",
+      expiresAt: ago(-10_080),
+      createdAt: ago(1_440),
+    },
+    {
+      id: "inv_lab_member",
+      email: "sophie@tractr.net",
+      role: "member",
+      space_assignments: [],
+      token: "lab-invitation-member",
+      expiresAt: ago(-4_320),
+      createdAt: ago(4_320),
+    },
+  ],
 };
 
 export const orgSettings: Json200<"/api/orgs/{orgId}/settings", "get"> = {

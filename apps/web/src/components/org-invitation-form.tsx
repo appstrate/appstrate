@@ -219,7 +219,11 @@ export function OrgInvitationForm({
             {t("common:btn.cancel")}
           </Button>
         )}
-        <Button type="submit" disabled={isPending} className={invitation ? "" : "sm:mr-auto"}>
+        <Button
+          type="submit"
+          disabled={isPending}
+          className={invitation || onCancel ? "" : "sm:mr-auto"}
+        >
           {isPending && <Spinner />}
           {t(invitation ? "common:btn.save" : "onboarding.invite")}
         </Button>

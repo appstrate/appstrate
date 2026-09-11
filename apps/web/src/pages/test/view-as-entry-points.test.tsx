@@ -34,6 +34,7 @@ installFakeStorage({
 const { $api } = await import("../../api/client.ts");
 const { OrgSettingsRolesPage } = await import("../org-settings/roles.tsx");
 const { OrgSettingsSpaceMembersPage } = await import("../org-settings/space/members.tsx");
+const { rolesPageDeeds, spaceMembersPageDeeds } = await import("../org-settings/rbac-deeds.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { toViewAsPersona } = await import("../../stores/view-as-store.ts");
@@ -166,28 +167,27 @@ describe("trigger visibility", () => {
   // Eligibility is the server's rule (`validateViewAs`): owner or admin, and a
   // role rather than a permission, because "a preview only removes" holds only
   // while the previewer outranks every persona.
+  // Without roles:write the preview is the roles page's only deed, so the
+  // Actions trigger is there exactly when the preview is.
   it.each(["owner", "admin"] as const)("offers the roles-page trigger to an %s", (orgRole) => {
-    const html = renderAs(orgRole, <OrgSettingsRolesPage />);
-    expect(html).toContain('data-testid="view-as-button"');
-    expect(html).toContain("Prévisualiser un rôle");
+    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).toContain("data-page-actions-trigger");
   });
 
   it.each(["member", "guest"] as const)("hides the roles-page trigger from a %s", (orgRole) => {
-    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).not.toContain(
-      'data-testid="view-as-button"',
-    );
+    expect(renderAs(orgRole, <OrgSettingsRolesPage />)).not.toContain("data-page-actions-trigger");
   });
 
-  it("offers the space-members trigger to an owner and hides it from a member", () => {
-    const asOwner = renderAs("owner", <OrgSettingsSpaceMembersPage />);
-    expect(asOwner).toContain('data-testid="view-as-space-button"');
-    expect(asOwner).toContain("Prévisualiser un rôle");
-    // The "Ajouter un membre" action is unaffected — the two live side by side.
-    expect(asOwner).toContain('data-testid="add-space-member-button"');
-
-    expect(renderAs("member", <OrgSettingsSpaceMembersPage />)).not.toContain(
-      'data-testid="view-as-space-button"',
+  it("lists the preview beside the add action, and only for a previewer", () => {
+    expect(renderAs("owner", <OrgSettingsSpaceMembersPage />)).toContain(
+      "data-page-actions-trigger",
     );
+    // The two live side by side in one menu; adding is unaffected by preview.
+    expect(spaceMembersPageDeeds({ canInvite: true, canPreview: true })).toEqual([
+      "add",
+      "view-as",
+    ]);
+    expect(spaceMembersPageDeeds({ canInvite: true, canPreview: false })).toEqual(["add"]);
+    expect(spaceMembersPageDeeds({ canInvite: false, canPreview: false })).toEqual([]);
   });
 });
 
@@ -258,10 +258,12 @@ describe("custom-role gating on the roles page", () => {
         customRoles: [custom],
       }),
     );
-    expect(html).toContain('data-testid="create-role-button"');
+    expect(html).toContain("data-page-actions-trigger");
+    expect(rolesPageDeeds({ canWrite: true, canPreview: true })).toEqual(["create", "view-as"]);
     expect(html).toContain("Responsable assistance");
-    expect(html).toContain("Modifier");
-    expect(html).toContain("Supprimer");
+    // The row opens the role (editable for this caller), and deleting is in its menu.
+    expect(html).toContain("role=support");
+    expect(html).toContain("Plus d’actions pour Responsable assistance");
     expect(html).not.toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
   });
 
@@ -273,9 +275,8 @@ describe("custom-role gating on the roles page", () => {
       }),
     );
     expect(html).toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
-    expect(html).not.toContain('data-testid="create-role-button"');
-    expect(html).not.toContain("Modifier");
-    expect(html).not.toContain("Supprimer");
+    expect(rolesPageDeeds({ canWrite: false, canPreview: true })).toEqual(["view-as"]);
+    expect(html).not.toContain("Plus d’actions pour Responsable assistance");
     // The four presets stay listed and usable — the feature gates authoring.
     expect(html).toContain("Rôles intégrés");
   });
@@ -285,7 +286,6 @@ describe("custom-role gating on the roles page", () => {
       renderAs("admin", <OrgSettingsRolesPage />, { customRoles: [custom] }),
     );
     expect(html).toContain("Responsable assistance");
-    expect(html).not.toContain('data-testid="create-role-button"');
-    expect(html).not.toContain("Modifier");
+    expect(html).not.toContain("Plus d’actions pour Responsable assistance");
   });
 });

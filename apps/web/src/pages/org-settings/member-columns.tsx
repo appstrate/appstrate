@@ -79,7 +79,7 @@ export function useMemberColumns({
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
-      width: "100px",
+      width: "minmax(100px,1fr)",
       tier: 2,
       cell: (member) => {
         const roles = assignableRoles(member);

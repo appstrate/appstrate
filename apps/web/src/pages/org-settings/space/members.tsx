@@ -4,12 +4,12 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { AppWindow, Users } from "lucide-react";
+import { AppWindow, Eye, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
@@ -23,23 +23,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@appstrate/ui/components/table";
 import { $api, ApiError } from "../../../api/client";
 import { useOrg } from "../../../hooks/use-org";
-import { roleI18nKey, useCanPreviewRole, usePermissions } from "../../../hooks/use-permissions";
+import { useCanPreviewRole, usePermissions } from "../../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
+import { useModalParam } from "../../../hooks/use-modal-param";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
   memberRoleValue,
   spaceRoleAssignment,
-  spaceRoleLabel,
   spaceRoleDescription,
   useSpaceRoleOptions,
 } from "../../../hooks/use-roles";
@@ -53,13 +45,18 @@ import {
 import { useSpace } from "../../../hooks/use-spaces";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { CopyLinkButton } from "../../../components/copy-link-button";
+import { DataTable } from "../../../components/data-table";
+import { InvitationsTable } from "../../../components/invitations-table";
 import { Modal } from "../../../components/modal";
+import { PageActionsMenu } from "../../../components/page-actions-menu";
 import { RoleCatalogState } from "../../../components/role-catalog-state";
+import { SettingsPageActions } from "../../../components/settings/settings-page-actions";
 import { SpaceRoleSelect } from "../../../components/space-role-select";
 import { ViewAsDialog } from "../../../components/view-as-dialog";
-import { OrgInvitationsList } from "../../../components/org-invitations-list";
-import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
+import { ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
+import { useSpaceMemberColumns } from "./space-member-columns";
+import { spaceMemberRemoval, spaceMembersPageDeeds } from "../rbac-deeds";
 
 /** Owners and admins reach every space by role; a space-member row adds nothing. */
 const FULL_ACCESS_ORG_ROLES: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
@@ -94,8 +91,9 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   } = useSpaceRoleOptions(spaceId);
   const { data: space, error: spaceError, refetch: refetchSpace } = useSpace(spaceId);
   const [memberToRemove, setMemberToRemove] = useState<SpaceMemberObject | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
+  // Both modals have an address: `?add-member` and `?view-as`.
+  const addParam = useModalParam("add-member");
+  const viewAsParam = useModalParam("view-as");
   const canPreview = useCanPreviewRole();
 
   const addMember = useAddSpaceMember();
@@ -167,20 +165,66 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     );
   };
 
-  if (canRead && isLoading) return <LoadingState />;
-  if (canRead && error) return <ErrorState message={getErrorMessage(error)} />;
+  // Owners and admins reach every space through their org role; `space_members`
+  // never holds them, so there is nothing to edit. For everyone else the
+  // control writes through two routes with two guards: an explicit row is
+  // PATCHed (`change-role`), an implicit member gets a row created (`invite`).
+  const rolesReady = rolesKnown && !rolesError && !rolesLoading && roleOptions.length > 0;
+  const columns = useSpaceMemberColumns({
+    editable: (member) =>
+      member.source !== "org_role" &&
+      rolesReady &&
+      (member.source === "explicit" ? canChangeRole : canInvite),
+    roleValue: (member) => memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`,
+    roleOptions,
+    isChangingRole: updateMember.isPending || addMember.isPending,
+    onChangeRole: changeRole,
+    removal: (member) => spaceMemberRemoval(member, { canRemove, visibility: space?.visibility }),
+    isRemoving: removeMember.isPending,
+    removeDisabled: removeMember.isPending || !space || !!spaceError,
+    onRemove: setMemberToRemove,
+  });
 
   const explicitUserIds = new Set(
     (members ?? []).filter((m) => m.source === "explicit").map((m) => m.userId),
   );
-
   const removalRestoresDefault =
     memberToRemove?.org_role === "member" && space?.visibility === "open";
   const canManageRoles = canInvite || canChangeRole;
+  const deeds = spaceMembersPageDeeds({ canInvite, canPreview });
 
   return (
     <>
-      <p className="text-muted-foreground mb-4 text-sm">{t("spaceMembers.accessHint")}</p>
+      {deeds.length > 0 && (
+        <SettingsPageActions>
+          <PageActionsMenu>
+            {deeds.includes("add") && (
+              <DropdownMenuItem
+                data-page-action="add"
+                data-testid="add-space-member-button"
+                onSelect={() => addParam.open()}
+              >
+                <Plus />
+                {t("spaceMembers.add")}
+              </DropdownMenuItem>
+            )}
+            {deeds.includes("view-as") && (
+              <DropdownMenuItem
+                data-page-action="view-as"
+                data-testid="view-as-space-button"
+                onSelect={() => viewAsParam.open()}
+              >
+                <Eye />
+                {t("viewAs.trigger")}
+              </DropdownMenuItem>
+            )}
+          </PageActionsMenu>
+        </SettingsPageActions>
+      )}
+
+      <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
+        {t("spaceMembers.accessHint")}
+      </p>
       {canManageRoles && (
         <RoleCatalogState
           className="mb-4"
@@ -201,129 +245,38 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           </AlertDescription>
         </Alert>
       )}
-      {(canInvite || canPreview) && (
-        <div className="mb-4 flex justify-end gap-2">
-          {canPreview && (
-            <Button
-              variant="outline"
-              data-testid="view-as-space-button"
-              onClick={() => setPreviewing(true)}
-            >
-              {t("viewAs.trigger")}
-            </Button>
-          )}
-          {canInvite && (
-            <Button data-testid="add-space-member-button" onClick={() => setAddOpen(true)}>
-              {t("spaceMembers.add")}
-            </Button>
-          )}
-        </div>
-      )}
-      {previewing && <ViewAsDialog spaceId={spaceId} onClose={() => setPreviewing(false)} />}
 
-      {canRead &&
-        (!members || members.length === 0 ? (
-          <EmptyState
-            message={t("spaceMembers.empty")}
-            hint={t("spaceMembers.emptyHint")}
-            icon={Users}
-          />
-        ) : (
-          <Table className="block md:table">
-            <TableHeader className="hidden md:table-header-group">
-              <TableRow>
-                <TableHead>{t("spaceMembers.colMember")}</TableHead>
-                <TableHead>{t("spaceMembers.colSource")}</TableHead>
-                <TableHead>{t("spaceMembers.colRole")}</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody className="grid gap-3 md:table-row-group [&_tr:last-child]:border md:[&_tr:last-child]:border-0">
-              {members.map((member) => {
-                // Owners and admins reach every space through their org role;
-                // `space_members` never holds them, so there is nothing to edit.
-                // For everyone else the control writes through two routes with
-                // two guards: an explicit row is PATCHed (`change-role`), an
-                // implicit member gets a row created (`invite`).
-                const currentValue =
-                  memberRoleValue(member.role, roles) ?? `current:${member.role?.key}`;
-                const editable =
-                  member.source !== "org_role" &&
-                  rolesKnown &&
-                  !rolesError &&
-                  !rolesLoading &&
-                  roleOptions.length > 0 &&
-                  (member.source === "explicit" ? canChangeRole : canInvite);
-                return (
-                  <TableRow
-                    key={member.userId}
-                    className="grid gap-3 rounded-md border p-3 md:table-row md:rounded-none md:border-x-0 md:border-t-0 md:p-0"
-                  >
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
-                      <span className="font-medium wrap-anywhere">{memberLabel(member)}</span>
-                      {member.email && member.email !== memberLabel(member) && (
-                        <span className="text-muted-foreground block text-xs wrap-anywhere">
-                          {member.email}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
-                      <Badge variant="outline">{t(`spaceMembers.source.${member.source}`)}</Badge>
-                    </TableCell>
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
-                      <span className="text-muted-foreground mb-1 block text-xs md:hidden">
-                        {t("spaceMembers.colRole")}
-                      </span>
-                      {editable ? (
-                        <SpaceRoleSelect
-                          value={currentValue}
-                          options={roleOptions}
-                          fallbackLabel={spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
-                          placeholder={t("spaceMembers.noRole")}
-                          className="w-full md:w-[180px]"
-                          ariaLabel={t("spaceMembers.roleAriaLabel", { name: memberLabel(member) })}
-                          disabled={updateMember.isPending || addMember.isPending}
-                          onValueChange={(v) => changeRole(member, v)}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground text-sm">
-                          {member.source === "org_role"
-                            ? t("spaceMembers.orgRoleOf", {
-                                role: t(roleI18nKey(member.org_role)),
-                              })
-                            : (spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole"))}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
-                      {member.source === "explicit" && canRemove && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full md:w-auto"
-                          onClick={() => setMemberToRemove(member)}
-                          disabled={removeMember.isPending || !space || !!spaceError}
-                        >
-                          {member.org_role === "member" && space?.visibility === "open"
-                            ? t("spaceMembers.resetRole")
-                            : t("spaceMembers.removeAccess")}
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        ))}
+      {canRead && (
+        <DataTable
+          label={t("spaceMembers.tabTitle")}
+          columns={columns}
+          rows={members ?? []}
+          rowKey={(member) => member.userId}
+          isLoading={isLoading}
+          isError={Boolean(error)}
+          error={<ErrorState message={getErrorMessage(error)} compact />}
+          empty={
+            <EmptyState
+              message={t("spaceMembers.empty")}
+              hint={t("spaceMembers.emptyHint")}
+              icon={Users}
+              compact
+            />
+          }
+        />
+      )}
 
       {canSeeInvitations && currentOrg && (
-        <OrgInvitationsList
+        <InvitationsTable
           key={`${currentOrg.id}:${spaceId}`}
           orgId={currentOrg.id}
           spaceId={spaceId}
           invitations={orgDetail?.invitations ?? []}
         />
+      )}
+
+      {viewAsParam.value !== null && canPreview && (
+        <ViewAsDialog spaceId={spaceId} onClose={viewAsParam.close} />
       )}
 
       <ConfirmModal
@@ -354,9 +307,9 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       />
 
       <AddSpaceMemberModal
-        key={`${spaceId}:${addOpen}`}
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
+        key={`${spaceId}:${addParam.value}`}
+        open={canInvite && addParam.value !== null}
+        onClose={addParam.close}
         spaceId={spaceId}
         orgId={currentOrg?.id}
         excludedUserIds={explicitUserIds}

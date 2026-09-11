@@ -17,10 +17,22 @@ import {
 } from "@appstrate/ui/components/command";
 import { cn } from "@appstrate/ui/cn";
 
+/** What the picker calls the things it picks. API keys say "scopes", roles say "permissions". */
+interface ScopeMultiSelectLabels {
+  all: string;
+  none: string;
+  count: (count: number) => string;
+  search: string;
+  empty: string;
+}
+
 interface ScopeMultiSelectProps {
   available: string[];
   selected: string[];
   onChange: (scopes: string[]) => void;
+  labels?: ScopeMultiSelectLabels;
+  /** A note under an entry, such as a permission that cannot be delegated. */
+  hint?: (scope: string) => string | null;
 }
 
 interface ResourceGroup {
@@ -52,7 +64,13 @@ function buildGroups(available: string[], selected: string[]): ResourceGroup[] {
   }));
 }
 
-export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSelectProps) {
+export function ScopeMultiSelect({
+  available,
+  selected,
+  onChange,
+  labels,
+  hint,
+}: ScopeMultiSelectProps) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   const groups = useMemo(() => buildGroups(available, selected), [available, selected]);
@@ -76,11 +94,14 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
     onChange(allSelected ? [] : [...available]);
   };
 
-  const label = allSelected
-    ? t("apiKeys.allScopes")
-    : noneSelected
-      ? t("apiKeys.scopes")
-      : t("apiKeys.scopeCount", { count: selected.length });
+  const text = labels ?? {
+    all: t("apiKeys.allScopes"),
+    none: t("apiKeys.scopes"),
+    count: (count: number) => t("apiKeys.scopeCount", { count }),
+    search: t("apiKeys.searchScopes"),
+    empty: t("apiKeys.noScopes"),
+  };
+  const label = allSelected ? text.all : noneSelected ? text.none : text.count(selected.length);
 
   return (
     <div className="space-y-2">
@@ -93,9 +114,9 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="start">
           <Command>
-            <CommandInput placeholder={t("apiKeys.searchScopes")} />
+            <CommandInput placeholder={text.search} />
             <CommandList>
-              <CommandEmpty>{t("apiKeys.noScopes")}</CommandEmpty>
+              <CommandEmpty>{text.empty}</CommandEmpty>
               <CommandGroup>
                 <CommandItem onSelect={toggleAll}>
                   <Check
@@ -110,12 +131,16 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
                   {scopes.map((scope) => {
                     const action = scope.split(":")[1]!;
                     const isSelected = selected.includes(scope);
+                    const note = hint?.(scope);
                     return (
                       <CommandItem key={scope} value={scope} onSelect={() => toggle(scope)}>
                         <Check
                           className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")}
                         />
-                        {action}
+                        <span className="flex min-w-0 flex-col">
+                          <span>{action}</span>
+                          {note && <span className="text-muted-foreground text-xs">{note}</span>}
+                        </span>
                       </CommandItem>
                     );
                   })}

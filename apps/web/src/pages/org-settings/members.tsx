@@ -1,39 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
 import { Plus, Users } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import { Badge } from "@appstrate/ui/components/badge";
-import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
 import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { toast } from "sonner";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
-import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
+import { usePermissions } from "../../hooks/use-permissions";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { CopyLinkButton } from "../../components/copy-link-button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
+import { InvitationsTable } from "../../components/invitations-table";
+import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { useMemberColumns } from "./member-columns";
-import { Spinner } from "../../components/spinner";
-import { toast } from "sonner";
+import { useState } from "react";
 import {
-  ASSIGNABLE_ORG_ROLES,
   assignableRolesForMember,
   canRemoveMember,
   type AssignableOrgRole,
@@ -47,16 +35,11 @@ export function OrgSettingsMembersPage() {
   const { can, orgRole } = usePermissions();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
+  const invite = useModalParam("invite");
 
-  const [inviteOpen, setInviteOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
   const canChangeRole = can("members:change-role");
-
-  const inviteForm = useForm<{ email: string; role: AssignableOrgRole }>({
-    defaultValues: { email: "", role: "member" },
-  });
-  const inviteRole = useWatch({ control: inviteForm.control, name: "role" });
 
   const {
     data: orgData,
@@ -75,37 +58,6 @@ export function OrgSettingsMembersPage() {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
   };
 
-  // Polymorphic bare resource: the created member (has `userId`) or the
-  // created invitation (has `id` + `token`).
-  const addMemberMutation = $api.useMutation("post", "/api/orgs/{orgId}/members", {
-    onSuccess: () => {
-      invalidateOrg();
-      inviteForm.reset();
-      setInviteOpen(false);
-    },
-    onError: (err) => {
-      inviteForm.setError("root", { message: getErrorMessage(err) });
-    },
-  });
-
-  const cancelInvitationMutation = $api.useMutation(
-    "delete",
-    "/api/orgs/{orgId}/invitations/{invitationId}",
-    {
-      onSuccess: invalidateOrg,
-      onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
-    },
-  );
-
-  const changeInvitationRoleMutation = $api.useMutation(
-    "put",
-    "/api/orgs/{orgId}/invitations/{invitationId}",
-    {
-      onSuccess: invalidateOrg,
-      onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
-    },
-  );
-
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
     onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
@@ -115,21 +67,6 @@ export function OrgSettingsMembersPage() {
     onSuccess: invalidateOrg,
     onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
   });
-
-  const handleInvite = (data: { email: string; role: AssignableOrgRole }) => {
-    const trimmed = data.email.trim();
-    if (!trimmed || !orgId) return;
-    addMemberMutation.mutate({
-      params: { path: { orgId } },
-      body: { email: trimmed, role: data.role },
-    });
-  };
-
-  const handleInviteClose = () => {
-    inviteForm.reset();
-    addMemberMutation.reset();
-    setInviteOpen(false);
-  };
 
   const handleRemove = (member: OrgMember) => {
     const label = member.displayName || member.email || member.userId;
@@ -177,7 +114,7 @@ export function OrgSettingsMembersPage() {
       {canInvite && (
         <SettingsPageActions>
           <PageActionsMenu>
-            <DropdownMenuItem data-page-action="invite" onSelect={() => setInviteOpen(true)}>
+            <DropdownMenuItem data-page-action="invite" onSelect={() => invite.open()}>
               <Plus />
               {t("orgSettings.inviteMember")}
             </DropdownMenuItem>
@@ -185,63 +122,23 @@ export function OrgSettingsMembersPage() {
         </SettingsPageActions>
       )}
 
-      {canInvite && (
+      {/* The invitation is one form wherever it is made: the org role, then the
+          spaces it opens and the role in each — which is what a guest needs,
+          having no implicit access anywhere. */}
+      {canInvite && orgId && (
         <Modal
-          open={inviteOpen}
-          onClose={handleInviteClose}
+          open={invite.value !== null}
+          onClose={invite.close}
           title={t("orgSettings.inviteMember")}
-          actions={
-            <>
-              <Button type="button" variant="outline" onClick={handleInviteClose}>
-                {t("btn.cancel", { ns: "common" })}
-              </Button>
-              <Button
-                type="submit"
-                form="invite-member-form"
-                disabled={addMemberMutation.isPending}
-              >
-                {addMemberMutation.isPending ? <Spinner /> : t("orgSettings.invite")}
-              </Button>
-            </>
-          }
+          className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
         >
-          <form
-            id="invite-member-form"
-            onSubmit={inviteForm.handleSubmit(handleInvite)}
-            className="space-y-4"
-          >
-            <div className="space-y-2">
-              <Label htmlFor="invite-member-email">{t("invite.emailLabel")}</Label>
-              <Input
-                id="invite-member-email"
-                type="email"
-                {...inviteForm.register("email", { required: true })}
-                placeholder="email@example.com"
-                autoFocus
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-member-role">{t("invite.roleLabel")}</Label>
-              <Select
-                value={inviteRole}
-                onValueChange={(v) => inviteForm.setValue("role", v as AssignableOrgRole)}
-              >
-                <SelectTrigger id="invite-member-role" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ASSIGNABLE_ORG_ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {t(roleI18nKey(r))}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {inviteForm.formState.errors.root && (
-              <p className="text-destructive text-sm">{inviteForm.formState.errors.root.message}</p>
-            )}
-          </form>
+          <OrgInvitationForm
+            key={`${orgId}:${invite.value}`}
+            orgId={orgId}
+            allowGuest
+            onSuccess={invite.close}
+            onCancel={invite.close}
+          />
         </Modal>
       )}
 
@@ -259,69 +156,7 @@ export function OrgSettingsMembersPage() {
         error={<ErrorState message={getErrorMessage(error)} compact />}
       />
 
-      {invitations.length > 0 && (
-        <>
-          <div className="text-muted-foreground mt-6 mb-4 text-sm font-medium">
-            {t("orgSettings.pendingInvitations")}
-          </div>
-          <div className="flex flex-col gap-3">
-            {invitations.map((inv) => (
-              <div key={inv.id} className="border-border bg-card rounded-lg border p-5">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <h3 className="text-sm font-semibold">{inv.email}</h3>
-                    <span className="text-muted-foreground text-sm">
-                      {t(roleI18nKey(inv.role))}
-                    </span>
-                  </div>
-                  <Badge variant="pending">{t("orgSettings.invited")}</Badge>
-                </div>
-                <div className="border-border mt-3 flex gap-2 border-t pt-3">
-                  {canChangeRole && (
-                    <Select
-                      value={inv.role}
-                      onValueChange={(v) =>
-                        changeInvitationRoleMutation.mutate({
-                          params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
-                          body: { role: v as AssignableOrgRole },
-                        })
-                      }
-                      disabled={changeInvitationRoleMutation.isPending}
-                    >
-                      <SelectTrigger className="w-[140px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ASSIGNABLE_ORG_ROLES.map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {t(roleI18nKey(r))}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <CopyLinkButton token={inv.token} />
-                  {canChangeRole && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="ml-auto"
-                      onClick={() =>
-                        cancelInvitationMutation.mutate({
-                          params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
-                        })
-                      }
-                      disabled={cancelInvitationMutation.isPending}
-                    >
-                      {t("btn.cancel")}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+      {orgId && <InvitationsTable orgId={orgId} invitations={invitations} />}
 
       {members.length === 0 && invitations.length === 0 && (
         <EmptyState

@@ -5,6 +5,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
 import { RequirePermission } from "../../components/require-permission.tsx";
 import { OrgSettingsSpaceMembersPage } from "../org-settings/space/members.tsx";
+import { spaceMemberRemoval } from "../org-settings/rbac-deeds.ts";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
@@ -144,7 +145,7 @@ function pageFor(
 describe("invite-only space member access", () => {
   it("opens the add action but disables member fetching and hides previously cached rows", () => {
     const result = pageFor(["space-members:invite"]);
-    expect(result.html).toContain('data-testid="add-space-member-button"');
+    expect(result.html).toContain("data-page-actions-trigger");
     expect(result.queryEnabled).toBe(false);
     expect(result.html).not.toContain("Private cached member");
     expect(result.html).not.toContain("private@example.com");
@@ -153,7 +154,7 @@ describe("invite-only space member access", () => {
 
   it("does not block the invite action behind a member loading or empty state", () => {
     const result = pageFor(["space-members:invite"], false);
-    expect(result.html).toContain('data-testid="add-space-member-button"');
+    expect(result.html).toContain("data-page-actions-trigger");
     expect(result.queryEnabled).toBe(false);
     expect(result.html).not.toContain("<table");
   });
@@ -163,29 +164,35 @@ describe("invite-only space member access", () => {
     expect(result.html).toContain("Private cached member");
     expect(result.html).toContain("Attribué");
     expect(result.queryEnabled).toBe(true);
-    expect(result.html).not.toContain('data-testid="add-space-member-button"');
+    expect(result.html).not.toContain("data-page-actions-trigger");
   });
 
   it("refuses a caller holding neither permission before mounting the member page", () => {
     const result = pageFor([], false);
-    expect(result.html).not.toContain('data-testid="add-space-member-button"');
+    expect(result.html).not.toContain("data-page-actions-trigger");
     expect(result.html).not.toContain("Private cached member");
     expect(result.queryEnabled).toBeUndefined();
   });
 
   it("labels removal as restoring the default only for standard users in an open space", () => {
+    // The deed sits in the row's menu, which a static render leaves closed:
+    // the menu is proven on the page, what it says by the decision itself.
     const permissions = ["space-members:read", "space-members:remove"];
-    const standard = pageFor(permissions, true, { memberOrgRole: "member" }).html;
-    expect(standard).toContain("Rétablir le rôle par défaut");
-    expect(standard).not.toContain("Retirer l'accès");
-    const guest = pageFor(permissions).html;
-    expect(guest).toContain("Retirer l'accès");
-    expect(guest).not.toContain("Rétablir le rôle par défaut");
-    const closed = pageFor(permissions, true, {
-      memberOrgRole: "member",
-      visibility: "closed",
-    }).html;
-    expect(closed).toContain("Retirer l'accès");
+    expect(pageFor(permissions).html).toContain("Plus d’actions pour Private cached member");
+    const seat = { source: "explicit" as const };
+    const open = { canRemove: true, visibility: "open" as const };
+    expect(spaceMemberRemoval({ ...seat, org_role: "member" }, open)).toBe("reset");
+    expect(spaceMemberRemoval({ ...seat, org_role: "guest" }, open)).toBe("remove");
+    expect(
+      spaceMemberRemoval(
+        { ...seat, org_role: "member" },
+        { canRemove: true, visibility: "closed" },
+      ),
+    ).toBe("remove");
+    expect(
+      spaceMemberRemoval({ ...seat, org_role: "member" }, { canRemove: false, visibility: "open" }),
+    ).toBeNull();
+    expect(spaceMemberRemoval({ source: "open_space", org_role: "member" }, open)).toBeNull();
   });
 
   it("names an organization role's reach without borrowing the space admin preset label", () => {
