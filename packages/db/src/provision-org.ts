@@ -25,8 +25,7 @@ import { prefixedId } from "./ids.ts";
 import { organizations, organizationMembers } from "./schema/organizations.ts";
 import { spaces } from "./schema/spaces.ts";
 
-/** Accepts either the base client or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type SpaceRow = InferSelectModel<typeof spaces>;
 
@@ -62,10 +61,21 @@ export const DEFAULT_SPACE_NAME = "Default";
  * commit together, so a half-provisioned member cannot exist.
  */
 export async function ensurePersonalSpace(
-  tx: DbOrTx,
+  tx: Tx,
   orgId: string,
   userId: string,
-): Promise<SpaceRow> {
+): Promise<SpaceRow | null> {
+  // Removal deletes this row before orphaning the space. Hold its key until
+  // commit so neither a stale authenticated request nor a concurrent
+  // idempotent provision can revive a member who has already left.
+  const [member] = await tx
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .limit(1)
+    .for("key share");
+  if (!member) return null;
+
   const [live] = await tx
     .select()
     .from(spaces)
@@ -118,7 +128,7 @@ export async function ensurePersonalSpace(
  * (a claimed slug, a locked invitation).
  */
 export async function provisionOrg(
-  tx: DbOrTx,
+  tx: Tx,
   params: {
     name: string;
     slug: string;
@@ -161,5 +171,6 @@ export async function provisionOrg(
   if (!defaultSpace) throw new Error("provisionOrg: default space insert returned no row");
 
   const personalSpace = await ensurePersonalSpace(tx, org.id, params.ownerUserId);
+  if (!personalSpace) throw new Error("provisionOrg: owner membership disappeared");
   return { org, defaultSpace, personalSpace };
 }

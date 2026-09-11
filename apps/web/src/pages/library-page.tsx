@@ -27,6 +27,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { useAcceptPackageShare } from "../hooks/use-package-shares";
+import { useSpaceSwitcher } from "../hooks/use-current-space";
 
 const TABS = ["agents", "skills", "integrations"] as const;
 type Tab = (typeof TABS)[number];
@@ -97,6 +98,7 @@ function SharedWithMe({
 }) {
   const { t } = useTranslation();
   const accept = useAcceptPackageShare();
+  const { switchSpace } = useSpaceSwitcher();
   const install = useTogglePackageInstall();
   const { data: accessibleSpaces } = useSpaces();
   if (shared.length === 0) return null;
@@ -117,6 +119,7 @@ function SharedWithMe({
             <div className="min-w-0 flex-1">
               <Link
                 to={packageDetailPath(offer.type, offer.id)}
+                onClick={() => switchSpace(offer.space_id)}
                 className="text-sm font-medium hover:underline"
               >
                 {offer.name}

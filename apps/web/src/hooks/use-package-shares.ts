@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { useInvalidatePackageInstallation } from "./use-library";
 
 export type PackageShare = components["schemas"]["PackageShare"];
 
@@ -36,9 +37,10 @@ export function usePackageShares(packageId: string, enabled: boolean) {
  */
 function useInvalidateShares() {
   const qc = useQueryClient();
+  const invalidateInstallation = useInvalidatePackageInstallation();
   return () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/shares"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+    invalidateInstallation();
   };
 }
 

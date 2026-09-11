@@ -656,7 +656,8 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     // Mutating endpoints echo the full Agent detail (same serializer as the
     // GET). `requireAccess: false` — the caller just wrote this agent in their
     // org, so the space-install gate must not 404 a successful write.
-    detailDto: (c, itemId) => buildAgentDetailDto(c, { itemId, requireAccess: false }),
+    detailDto: (c, itemId) =>
+      buildAgentDetailDto(c, { itemId, requireAccess: false, version: "draft" }),
   },
   // Integrations are authored via a JSON-body manifest editor (parity with
   // agents/skills). The stored `manifest.json` content mirrors the DB

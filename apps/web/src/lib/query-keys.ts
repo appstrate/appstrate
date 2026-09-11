@@ -104,7 +104,7 @@ export const packageKeys = {
   familyInOrg: (path: string, orgId: Id) => ["packages", path, orgId] as const,
   list: (path: string, orgId: Id, spaceId: Id, filter: string) =>
     ["packages", path, orgId, spaceId, filter] as const,
-  detail: (path: string, orgId: Id, spaceId: Id, id: string, version: string = "draft") =>
+  detail: (path: string, orgId: Id, spaceId: Id, id: string, version: string | null = null) =>
     ["packages", path, orgId, spaceId, id, version] as const,
 };
 

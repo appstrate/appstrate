@@ -35,6 +35,7 @@ import { seedPackage, seedPackageVersion, seedInstalledPackage } from "../../hel
 import { seedDefaultOrgModel } from "../../helpers/run-connection-fixtures.ts";
 import { resolveRegistryAgent } from "../../../src/services/registry-run-resolver.ts";
 import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { buildRunContext } from "../../../src/services/run-context-builder.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { validateInlineManifest } from "../../../src/services/inline-manifest-validation.ts";
@@ -191,7 +192,7 @@ describe("publish_file across every launch path", () => {
       draftContent: "Do the thing.",
     });
     await seedInstalledPackage(ctx.defaultSpaceId, "@compatorg/scheduled");
-    await seedPackageVersion({
+    const published = await seedPackageVersion({
       packageId: "@compatorg/scheduled",
       version: "1.0.0",
       manifest: {
@@ -205,8 +206,17 @@ describe("publish_file across every launch path", () => {
       },
     });
 
+    await uploadPackageZip(
+      "@compatorg/scheduled",
+      "1.0.0",
+      buildMinimalZip(published.manifest, "Published prompt.", "prompt.md"),
+    );
+
     const draftAgent = await getPackage("@compatorg/scheduled", ctx.orgId);
-    const resolved = await resolveAgentRunVersion(draftAgent!, "1.0.0");
+    const resolved = await resolveAgentRunVersion(draftAgent!, "1.0.0", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     await assertPublishToolSurvivesLaunch(resolved.agent, resolved.overrideVersionLabel);
   });

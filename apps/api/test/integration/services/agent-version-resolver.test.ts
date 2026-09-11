@@ -81,7 +81,10 @@ describe("resolveAgentRunVersion", () => {
   it("default (selector omitted) executes the latest published version, not the dirty draft", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, undefined);
+    const resolved = await resolveAgentRunVersion(agent, undefined, {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -90,7 +93,10 @@ describe("resolveAgentRunVersion", () => {
   it("treats an empty selector like an omitted one", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "");
+    const resolved = await resolveAgentRunVersion(agent, "", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -99,7 +105,10 @@ describe("resolveAgentRunVersion", () => {
   it("'draft' executes the live draft (no version label override)", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "draft");
+    const resolved = await resolveAgentRunVersion(agent, "draft", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBeUndefined();
     expect(resolved.agent.prompt).toBe(DIRTY_PROMPT);
@@ -108,7 +117,10 @@ describe("resolveAgentRunVersion", () => {
   it("'published' executes the latest published version", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "published");
+    const resolved = await resolveAgentRunVersion(agent, "published", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -117,7 +129,10 @@ describe("resolveAgentRunVersion", () => {
   it("an exact version spec resolves that version", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "1.0.0");
+    const resolved = await resolveAgentRunVersion(agent, "1.0.0", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -126,7 +141,10 @@ describe("resolveAgentRunVersion", () => {
   it("a semver range resolves through the 3-step resolution", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "^1.0.0");
+    const resolved = await resolveAgentRunVersion(agent, "^1.0.0", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -135,9 +153,14 @@ describe("resolveAgentRunVersion", () => {
   it("an unresolvable spec throws 404 — never a silent draft fallback", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    expect(resolveAgentRunVersion(agent, "9.9.9")).rejects.toThrow(ApiError);
+    expect(
+      resolveAgentRunVersion(agent, "9.9.9", { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }),
+    ).rejects.toThrow(ApiError);
     try {
-      await resolveAgentRunVersion(agent, "9.9.9");
+      await resolveAgentRunVersion(agent, "9.9.9", {
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+      });
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -159,7 +182,10 @@ describe("resolveAgentRunVersion", () => {
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
     try {
-      await resolveAgentRunVersion(agent!, undefined);
+      await resolveAgentRunVersion(agent!, undefined, {
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+      });
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -177,7 +203,9 @@ describe("resolveAgentRunVersion", () => {
     });
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
-    expect(resolveAgentRunVersion(agent!, "")).rejects.toThrow(ApiError);
+    expect(
+      resolveAgentRunVersion(agent!, "", { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }),
+    ).rejects.toThrow(ApiError);
   });
 
   it("'published' on a never-published agent throws 404 no_published_version", async () => {
@@ -189,7 +217,10 @@ describe("resolveAgentRunVersion", () => {
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
     try {
-      await resolveAgentRunVersion(agent!, "published");
+      await resolveAgentRunVersion(agent!, "published", {
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+      });
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -227,7 +258,10 @@ describe("resolveAgentRunVersion", () => {
     expect(agent).not.toBeNull();
 
     try {
-      await resolveAgentRunVersion(agent!, undefined);
+      await resolveAgentRunVersion(agent!, undefined, {
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+      });
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -235,7 +269,10 @@ describe("resolveAgentRunVersion", () => {
       expect((err as ApiError).code).toBe("no_published_version");
     }
 
-    const exact = await resolveAgentRunVersion(agent!, "1.0.0-beta.1");
+    const exact = await resolveAgentRunVersion(agent!, "1.0.0-beta.1", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
     expect(exact.overrideVersionLabel).toBe("1.0.0-beta.1");
     expect(exact.agent.prompt).toBe(PUBLISHED_PROMPT);
   });
@@ -249,7 +286,10 @@ describe("resolveAgentRunVersion", () => {
     });
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
-    const resolved = await resolveAgentRunVersion(agent!, "draft");
+    const resolved = await resolveAgentRunVersion(agent!, "draft", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBeUndefined();
     expect(resolved.agent.prompt).toBe(DIRTY_PROMPT);
@@ -259,7 +299,10 @@ describe("resolveAgentRunVersion", () => {
     const agent = await seedPublishedDirtyAgent();
     const systemAgent: LoadedPackage = { ...agent, source: "system" };
 
-    const resolved = await resolveAgentRunVersion(systemAgent, "published");
+    const resolved = await resolveAgentRunVersion(systemAgent, "published", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(resolved.overrideVersionLabel).toBeUndefined();
     expect(resolved.agent).toBe(systemAgent);

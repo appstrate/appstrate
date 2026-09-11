@@ -81,7 +81,12 @@ FROM org_members m
 WHERE NOT EXISTS (
   SELECT 1 FROM spaces s
   WHERE s.org_id = m.org_id AND s.owner_user_id = m.user_id
-);
+)
+-- This optional backfill runs while the platform serves traffic. Hold the
+-- membership until commit, just like ensurePersonalSpace, and let a concurrent
+-- lazy repair win the unique key without aborting the batch.
+FOR KEY SHARE OF m
+ON CONFLICT (org_id, owner_user_id) WHERE owner_user_id IS NOT NULL DO NOTHING;
 
 -- ═══ VERIFY (after) — must print 0 ═══
 SELECT

@@ -4967,6 +4967,8 @@ export interface components {
             scope: string | null;
             /** @description Version from manifest */
             version: string | null;
+            /** @description Installed version in the current space. The default launch uses this pin when present. */
+            version_pin: string | null;
             /** @description Full manifest object (user agents only) */
             manifest?: components["schemas"]["AgentManifest"];
             /** @description Agent prompt markdown (user agents only) */
@@ -6380,6 +6382,26 @@ export interface components {
         };
     };
     responses: {
+        /** @description The version is pinned by an installation (`version_in_use`). Update or uninstall it before deletion. */
+        VersionInUse: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted. */
+        VersionArtifactUnavailable: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Missing or invalid authentication */
         Unauthorized: {
             headers: {
@@ -7188,7 +7210,7 @@ export interface operations {
     getAgentConnectionReadiness: {
         parameters: {
             query?: {
-                /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents. */
+                /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the installed version pin, else draft, matching the launch button. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -7221,6 +7243,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["VersionArtifactUnavailable"];
         };
     };
     saveAgentInputSettings: {
@@ -7623,7 +7646,7 @@ export interface operations {
     runAgent: {
         parameters: {
             query?: {
-                /** @description Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents. */
+                /** @description Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, then the latest published version; returns `404 no_published_version` when neither exists. An explicit selector deliberately overrides the installation. The run object's `version_ref` states which definition executed. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -15079,6 +15102,13 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
+            /** @description The referenced space does not exist or is inaccessible. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description `referencedSpaceId` names a personal space (`personal_space_takes_no_oauth_clients`). */
             409: {
                 headers: {
@@ -16065,7 +16095,7 @@ export interface operations {
     getAgentPackage: {
         parameters: {
             query?: {
-                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
+                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, else the draft. Explicit `draft` always reads the working copy. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -16098,6 +16128,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["VersionArtifactUnavailable"];
         };
     };
     updateAgent: {
@@ -16388,7 +16419,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`. */
+            /** @description Agent has runs in progress (`agent_in_use`) or the version is pinned by an installation (`version_in_use`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -17060,6 +17091,8 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The version is pinned by an installation (version_in_use). */
+            409: components["responses"]["VersionInUse"];
         };
     };
     restoreIntegrationPackageVersion: {
@@ -17506,6 +17539,8 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The version is pinned by an installation (version_in_use). */
+            409: components["responses"]["VersionInUse"];
         };
     };
     restoreMcpServerPackageVersion: {
@@ -17978,6 +18013,8 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The version is pinned by an installation (version_in_use). */
+            409: components["responses"]["VersionInUse"];
         };
     };
     restoreSkillVersion: {
@@ -20696,7 +20733,7 @@ export interface operations {
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"] | null;
                     model_id_override?: string | null;
                     proxy_id_override?: string | null;
-                    /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only). */
+                    /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (inherits the installed version pin, then latest published; the working copy is opt-in via `draft` only). */
                     version_override?: string | null;
                     /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. Values must be non-empty — same rule as on create. */
                     connection_overrides?: {

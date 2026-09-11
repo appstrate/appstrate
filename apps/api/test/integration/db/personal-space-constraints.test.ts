@@ -115,20 +115,20 @@ describe("spaces — personal-space constraints", () => {
   });
 
   it("ensurePersonalSpace is idempotent and clears an orphan stamp", async () => {
-    const first = await ensurePersonalSpace(db, ctx.orgId, ctx.user.id);
-    const again = await ensurePersonalSpace(db, ctx.orgId, ctx.user.id);
-    expect(again.id).toBe(first.id);
+    const first = await db.transaction((tx) => ensurePersonalSpace(tx, ctx.orgId, ctx.user.id));
+    const again = await db.transaction((tx) => ensurePersonalSpace(tx, ctx.orgId, ctx.user.id));
+    expect(again!.id).toBe(first!.id);
 
-    await db.update(spaces).set({ orphanedAt: new Date() }).where(eq(spaces.id, first.id));
-    const rejoined = await ensurePersonalSpace(db, ctx.orgId, ctx.user.id);
-    expect(rejoined.id).toBe(first.id);
-    expect(rejoined.orphanedAt).toBeNull();
+    await db.update(spaces).set({ orphanedAt: new Date() }).where(eq(spaces.id, first!.id));
+    const rejoined = await db.transaction((tx) => ensurePersonalSpace(tx, ctx.orgId, ctx.user.id));
+    expect(rejoined!.id).toBe(first!.id);
+    expect(rejoined!.orphanedAt).toBeNull();
   });
 
   it("keeps a user that owns a space undeletable (ON DELETE RESTRICT)", async () => {
     // The offboarding sweeper is the path out; a cascade here would drop
     // somebody's private drafts as a side effect of an account deletion.
-    await ensurePersonalSpace(db, ctx.orgId, ctx.user.id);
+    await db.transaction((tx) => ensurePersonalSpace(tx, ctx.orgId, ctx.user.id));
     await expectDbViolation(
       db.execute(sql`DELETE FROM "user" WHERE id = ${ctx.user.id}`),
       /spaces_owner_user_id_user_id_fk|foreign key/i,

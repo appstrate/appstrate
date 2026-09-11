@@ -109,7 +109,10 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
   it("reports nothing for a published run whose declared skill is installed", async () => {
     const agent = await seedDriftedAgent();
-    const { agent: published } = await resolveAgentRunVersion(agent, "published");
+    const { agent: published } = await resolveAgentRunVersion(agent, "published", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     // The published manifest declares skill-x; the draft no longer does.
     expect(Object.keys(published.manifest.dependencies?.skills ?? {})).toEqual([SKILL_X]);
@@ -118,7 +121,10 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
   it("reports nothing for the draft run whose declared skill is installed", async () => {
     const agent = await seedDriftedAgent();
-    const { agent: draft } = await resolveAgentRunVersion(agent, "draft");
+    const { agent: draft } = await resolveAgentRunVersion(agent, "draft", {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(Object.keys(draft.manifest.dependencies?.skills ?? {})).toEqual([SKILL_Y]);
     expect(await skillErrors(draft)).toEqual([]);
@@ -126,7 +132,10 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
   it("an omitted selector behaves exactly like published", async () => {
     const agent = await seedDriftedAgent();
-    const { agent: implicitly } = await resolveAgentRunVersion(agent, undefined);
+    const { agent: implicitly } = await resolveAgentRunVersion(agent, undefined, {
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
 
     expect(await skillErrors(implicitly)).toEqual([]);
   });

@@ -60,8 +60,15 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
+import {
+  buildMinimalZip,
+  uploadPackageZip,
+  deleteVersionZip,
+} from "../../../src/services/package-storage.ts";
 import { acceptSharedPackage } from "../../../src/services/space-packages.ts";
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { runs } from "@appstrate/db/schema";
+import { seedSchedule } from "../../helpers/seed.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 
 const app = getTestApp();
@@ -191,10 +198,20 @@ async function library(headers: Headers): Promise<{
 
 /** Publish a version and move the `latest` dist-tag onto it. */
 async function publish(packageId: string, version: string): Promise<number> {
+  const pkg = await getDbRow(packages, eq(packages.id, packageId));
+  const manifest = { ...pkg.draftManifest, name: packageId, version, type: pkg.type };
+  const zip = buildMinimalZip(
+    manifest,
+    pkg.draftContent ?? "",
+    pkg.type === "skill" ? "SKILL.md" : "prompt.md",
+  );
+  await uploadPackageZip(packageId, version, zip);
   const row = await seedPackageVersion({
     packageId,
     version,
-    manifest: { name: packageId, version, type: "agent" },
+    manifest,
+    integrity: computeIntegrity(zip),
+    artifactSize: zip.byteLength,
   });
   await db
     .insert(packageDistTags)
@@ -485,6 +502,40 @@ describe("offered is not activated", () => {
     // executes with the recipient's own credentials.
     expect(await pinOf(recipient.personalSpaceId, AGENT)).toBe(body.version_id);
 
+    const launched = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...recipient.headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(launched.status, await launched.clone().text()).toBe(201);
+    expect(await launched.json()).toMatchObject({ version_ref: "0.1.0" });
+    await waitForRunPipelineSettled();
+
+    const schedule = await seedSchedule({
+      orgId: ctx.orgId,
+      spaceId: recipient.personalSpaceId,
+      packageId: AGENT,
+      userId: recipient.userId,
+    });
+    await triggerScheduledRun(
+      schedule.id,
+      AGENT,
+      { type: "user", id: recipient.userId },
+      ctx.orgId,
+      recipient.personalSpaceId,
+      undefined,
+    );
+    await waitForRunPipelineSettled();
+    const scheduled = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]!.versionRef).toBe("0.1.0");
+
+    const detail = await app.request(`/api/packages/agents/${AGENT}`, {
+      headers: recipient.headers(),
+    });
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ version_pin: "0.1.0" });
+
     // Re-accepting is the update: same route, same act, now on v2.
     const again = await acceptShare(recipient.headers(), AGENT);
     expect(again.status, await again.clone().text()).toBe(200);
@@ -502,6 +553,68 @@ describe("offered is not activated", () => {
       (await library(recipient.headers())).packages.agent?.find((p) => p.id === AGENT)
         ?.update_available,
     ).toBe(true);
+  });
+
+  it("never replaces an unavailable accepted archive with the author's current prompt", async () => {
+    await acceptShare(recipient.headers(), AGENT);
+    await deleteVersionZip(AGENT, "0.1.0");
+    await db
+      .update(packages)
+      .set({ draftContent: "Unaccepted replacement" })
+      .where(eq(packages.id, AGENT));
+    const response = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: recipient.headers(),
+    });
+    await expectProblem(response, 422, { code: "version_artifact_unavailable" });
+    expect(await db.select().from(runs).where(eq(runs.packageId, AGENT))).toHaveLength(0);
+  });
+
+  it("configures the accepted input schema while an explicit draft read returns current authoring", async () => {
+    const row = await getDbRow(packages, eq(packages.id, AGENT));
+    await db
+      .update(packages)
+      .set({
+        draftManifest: {
+          ...row.draftManifest,
+          input: { schema: { type: "object", properties: { accepted: { type: "string" } } } },
+        },
+      })
+      .where(eq(packages.id, AGENT));
+    await publish(AGENT, "0.2.0");
+    await acceptShare(recipient.headers(), AGENT);
+    await db
+      .update(packages)
+      .set({ draftManifest: row.draftManifest, draftContent: "Current authoring" })
+      .where(eq(packages.id, AGENT));
+    const settings = await app.request(`/api/agents/${AGENT}/input-settings`, {
+      method: "PUT",
+      headers: { ...recipient.headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ values: { accepted: "keep me" }, locked_fields: [] }),
+    });
+    expect(settings.status, await settings.clone().text()).toBe(200);
+    const installed = await app.request(`/api/packages/agents/${AGENT}`, {
+      headers: recipient.headers(),
+    });
+    const dto = await installed.json();
+    expect(dto).toHaveProperty("input.schema.properties.accepted", { type: "string" });
+    expect(dto).toHaveProperty("input.values", { accepted: "keep me" });
+    const draft = await app.request(`/api/packages/agents/${AGENT}?version=draft`, {
+      headers: recipient.headers(),
+    });
+    expect(await draft.json()).toMatchObject({ prompt: "Current authoring" });
+  });
+
+  it("refuses to delete an accepted version instead of silently unpinning the recipient", async () => {
+    await acceptShare(recipient.headers(), AGENT);
+    const pin = await pinOf(recipient.personalSpaceId, AGENT);
+    await publish(AGENT, "0.2.0");
+    const removed = await app.request(`/api/packages/agents/${AGENT}/versions/0.1.0`, {
+      method: "DELETE",
+      headers: author.headers(homeId),
+    });
+    await expectProblem(removed, 409);
+    expect(await pinOf(recipient.personalSpaceId, AGENT)).toBe(pin);
   });
 
   it("leaves the shared section once the offer is accepted", async () => {

@@ -527,6 +527,8 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
+  /** Accepted installation version in the current space; null means unpinned. */
+  version_pin: string | null;
   /** Manifest-derived; may be absent (the SPA falls back to the id). */
   display_name?: string;
   description?: string;

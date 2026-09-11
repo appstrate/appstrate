@@ -204,6 +204,7 @@ export const oidcPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { description: "The referenced space does not exist or is inaccessible." },
         "409": {
           description:
             "`referencedSpaceId` names a personal space (`personal_space_takes_no_oauth_clients`).",

@@ -22,9 +22,11 @@ import {
   listAccessiblePackages,
   updateInstalledPackage,
   getInstalledPackageSettings,
+  getInstalledPackageVersion,
   hasPackageAccess,
 } from "../services/space-packages.ts";
 import { getPackage } from "../services/package-catalog.ts";
+import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
@@ -247,8 +249,10 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     requireAgent(),
     async (c) => {
-      const agent = c.get("package");
-
+      const scope = getSpaceScope(c);
+      const loaded = c.get("package");
+      const version = (await getInstalledPackageVersion(scope, loaded.id)) ?? "draft";
+      const { agent } = await resolveAgentRunVersion(loaded, version, scope);
       const body = await readJsonBody(c, agentInputSettingsSchema);
       const schema = asJSONSchemaObject(
         agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
@@ -295,7 +299,6 @@ export function createAgentsRouter() {
       // AND unsatisfiable — every run would fail and nobody could see why.
       assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
-      const scope = getSpaceScope(c);
       await updateInstalledPackage(scope, agent.id, {
         inputSettings: { values, locked: body.locked_fields },
       });

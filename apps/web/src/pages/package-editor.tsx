@@ -590,7 +590,9 @@ export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-se
   const isEdit = !!scope;
 
   // Load detail for editing
-  const agentQuery = usePackageDetail("agent", type === "agent" && isEdit ? packageId : undefined);
+  const agentQuery = usePackageDetail("agent", type === "agent" && isEdit ? packageId : undefined, {
+    version: "draft",
+  });
   const pkgQuery = usePackageDetail(type, type !== "agent" && isEdit ? packageId : undefined);
 
   const isLoading = type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading;

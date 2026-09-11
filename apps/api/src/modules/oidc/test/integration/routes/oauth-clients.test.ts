@@ -15,6 +15,7 @@ import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
   createTestUser,
+  memberContext,
   authHeaders,
   enableDashboardSso,
   type TestContext,
@@ -93,6 +94,27 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(row).toBeDefined();
     expect(row!.clientSecret).not.toBe(body.clientSecret);
     expect(row!.clientSecret?.length).toBe(64);
+  });
+
+  it("does not reveal another member's personal space through client creation", async () => {
+    const member = await memberContext(ctx, "member");
+    const { ensurePersonalSpaceFor } = await import("../../../../../services/spaces.ts");
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, member.user.id);
+    const response = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(spaceLevelBody(ctx, { referencedSpaceId: personal.id })),
+    });
+    expect(response.status).toBe(404);
+    const absent = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(
+        spaceLevelBody(ctx, { referencedSpaceId: `spc_${crypto.randomUUID()}` }),
+      ),
+    });
+    expect(absent.status).toBe(response.status);
+    expect((await absent.json()).detail).toBe((await response.json()).detail);
   });
 
   it("POST creates a dashboard client pinned to the current org", async () => {
@@ -243,14 +265,14 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.status).toBe(403);
   });
 
-  it("POST rejects end_user client for an app the org does not own (403)", async () => {
+  it("POST rejects end_user client for an app the org does not own (404)", async () => {
     const other = await createTestContext({ orgSlug: "otherorg" });
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(spaceLevelBody(ctx, { referencedSpaceId: other.defaultSpaceId })),
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("POST rejects invalid redirect URIs", async () => {

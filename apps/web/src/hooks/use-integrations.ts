@@ -22,7 +22,6 @@ import type {
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { isVersioned } from "../lib/version-selector";
 
 // Spec-pinned narrowings for the two integration read endpoints. They take the
 // generated OpenAPI response shape verbatim (so a rename/removal of any
@@ -172,17 +171,14 @@ function agentConnectionReadinessQueryOptions(
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
-  // A non-`draft` version pins the verdict to that published manifest, so the
-  // run-options modal's per-integration badge matches the run (#770). Omitted/
-  // `draft` → no query param → the draft verdict the launch badge has always
-  // shown. `version` rides the query so the cache key splits per version.
+  // Keep explicit draft distinct from the inherited installation snapshot.
   return $api.queryOptions(
     "get",
     "/api/agents/{scope}/{name}/connection-readiness",
     {
       params: {
         path: { scope, name },
-        ...(isVersioned(version) ? { query: { version } } : {}),
+        ...(version ? { query: { version } } : {}),
         header: {
           "X-Org-Id": orgId ?? undefined,
           "X-Space-Id": spaceId ?? undefined,

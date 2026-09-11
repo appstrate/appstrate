@@ -91,8 +91,19 @@ export function usePackageInstallState(packageId: string) {
   }, [libraryData, packageId, currentSpaceId]);
 }
 
+/** Installation changes affect the library and every space's package/agent cache. */
+export function useInvalidatePackageInstallation() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+    void qc.invalidateQueries({ queryKey: packageKeys.all });
+    void qc.invalidateQueries({ queryKey: agentsKeys.all });
+  };
+}
+
 export function useTogglePackageInstall() {
   const qc = useQueryClient();
+  const invalidate = useInvalidatePackageInstallation();
   const scope = useOrgOnlyScope();
   // Exact key of the useLibrary query (same init) for the optimistic update.
   const libraryKey = $api.queryOptions("get", "/api/library", {
@@ -138,11 +149,6 @@ export function useTogglePackageInstall() {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(libraryKey, ctx.prev);
     },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
-      // Legacy keys — package/agent lists are still on the legacy cache.
-      void qc.invalidateQueries({ queryKey: packageKeys.all });
-      void qc.invalidateQueries({ queryKey: agentsKeys.all });
-    },
+    onSettled: invalidate,
   });
 }

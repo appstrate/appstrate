@@ -50,6 +50,7 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
+import { getInstalledPackageVersion } from "./space-packages.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
@@ -782,7 +783,7 @@ export async function resolveAgentConnectionReadiness(args: {
   canConfigureIntegrations: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag).
-   * Omitted ⇒ `draft` — preserves the launch-badge default. Any other value
+   * Omitted ⇒ installed pin, else `draft`, matching the launch button. Any other value
    * resolves the same manifest the run would execute (issue #770), so the
    * readiness verdict matches the run for a pinned version, not the draft.
    */
@@ -791,10 +792,12 @@ export async function resolveAgentConnectionReadiness(args: {
   const { scope, agentPackageId, actor, canConfigureIntegrations, version } = args;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
-  // Resolve the effective definition for the selected version. `draft`/omitted
-  // short-circuits to the draft `LoadedPackage` untouched; a concrete version
-  // substitutes the published manifest via the same resolver the run uses.
-  const { agent } = await resolveAgentRunVersion(loaded, version ?? "draft");
+  // Match the launch form: installed pin first, draft for an unpinned author.
+  const { agent } = await resolveAgentRunVersion(
+    loaded,
+    version ?? (await getInstalledPackageVersion(scope, agentPackageId)) ?? "draft",
+    scope,
+  );
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
 

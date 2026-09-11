@@ -727,6 +727,33 @@ export async function getInstalledPackageSettings(
 // same interface without redeclaring it.
 // ---------------------------------------------------------------------------
 
+/** The installed pin shared by execution, export and the launch forms. */
+export async function getInstalledPackageVersion(
+  scope: SpaceScope,
+  packageId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ version: packageVersions.version })
+    .from(spacePackages)
+    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
+    .innerJoin(
+      packageVersions,
+      and(
+        eq(packageVersions.id, spacePackages.versionId),
+        eq(packageVersions.packageId, packageId),
+      ),
+    )
+    .where(
+      and(
+        eq(spacePackages.spaceId, scope.spaceId),
+        eq(spacePackages.packageId, packageId),
+        orgOrSystemFilter(scope.orgId),
+      ),
+    )
+    .limit(1);
+  return row?.version ?? null;
+}
+
 /**
  * Resolve the per-space run configuration for `(spaceId,
  * packageId)`. Returns `null` when no `space_packages` row exists
@@ -752,7 +779,6 @@ export async function getResolvedRunConfig(
       generationConfig: spacePackages.generationConfig,
       modelId: spacePackages.modelId,
       proxyId: spacePackages.proxyId,
-      versionId: spacePackages.versionId,
       draftManifest: packages.draftManifest,
     })
     .from(spacePackages)
@@ -768,18 +794,7 @@ export async function getResolvedRunConfig(
 
   if (!row) return null;
 
-  let versionPin: string | null = null;
-  if (row.versionId !== null && row.versionId !== undefined) {
-    // Constrain the pin lookup to THIS package's versions — a client-supplied
-    // `versionId` pointing at another package's version row must not resolve
-    // (and must never reveal a foreign package's version string).
-    const [versionRow] = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(and(eq(packageVersions.id, row.versionId), eq(packageVersions.packageId, packageId)))
-      .limit(1);
-    versionPin = versionRow?.version ?? null;
-  }
+  const versionPin = await getInstalledPackageVersion(scope, packageId);
 
   // JSONB read: narrow both members rather than trusting the column's
   // declared `$type` (same narrowing as `getInstalledPackageSettings`).

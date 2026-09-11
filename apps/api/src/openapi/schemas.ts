@@ -592,6 +592,7 @@ export const schemas = {
       "source",
       "scope",
       "version",
+      "version_pin",
       "dependencies",
       "input",
       "running_runs",
@@ -612,6 +613,11 @@ export const schemas = {
           "Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations.",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
+      version_pin: {
+        type: ["string", "null"],
+        description:
+          "Installed version in the current space. The default launch uses this pin when present.",
+      },
       manifest: {
         allOf: [{ $ref: "#/components/schemas/AgentManifest" }],
         description: "Full manifest object (user agents only)",

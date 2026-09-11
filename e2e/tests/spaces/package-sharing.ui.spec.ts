@@ -20,6 +20,7 @@ import { test, expect, createAuthedContext } from "../../fixtures/browser.fixtur
 import { createAgent, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
 import { selectOption } from "../../helpers/radix.ts";
+import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 
 /** The caller's own personal space id, from the listing that also repairs it. */
 async function personalSpaceOf(
@@ -70,7 +71,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   });
   expect(invited.status(), await invited.text()).toBe(201);
   const accepted = await request.post(`/invite/${(await invited.json()).token}/accept`, {
-    headers: { Cookie: guest.cookie, Origin: "http://localhost:3000" },
+    headers: { Cookie: guest.cookie, Origin: E2E_BASE_URL },
   });
   expect(accepted.status()).toBe(200);
 
@@ -149,4 +150,68 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   const adminRuns = await apiClient.get(`/agents/${scope}/${name}/runs`);
   expect(adminRuns.status()).toBe(200);
   expect((await adminRuns.json()).data ?? []).toHaveLength(0);
+});
+
+test("an offer opens in its destination space and accepting refreshes an already visited agent list", async ({
+  request,
+  browser,
+  browserCtx,
+  orgOnlyClient,
+}) => {
+  const orgId = browserCtx.org.orgId;
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `offered-${Date.now().toString(36)}`;
+  const homeId = await personalSpaceOf(request, browserCtx.auth.cookie, orgId);
+  const authorClient = createApiClient(request, {
+    cookie: browserCtx.auth.cookie,
+    orgId,
+    spaceId: homeId,
+  });
+  await createAgent(authorClient, scope, name);
+  const member = await registerUser(request);
+  const invite = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
+    email: member.email,
+    role: "member",
+  });
+  expect(invite.status()).toBe(201);
+  const joined = await request.post(`/invite/${(await invite.json()).token}/accept`, {
+    headers: { Cookie: member.cookie, Origin: E2E_BASE_URL },
+  });
+  expect(joined.status()).toBe(200);
+  const personalId = await personalSpaceOf(request, member.cookie, orgId);
+  const shared = await authorClient.post(`/packages/${scope}/${name}/shares`, {
+    target: { kind: "user", user_id: member.userId },
+  });
+  expect(shared.status(), await shared.text()).toBe(200);
+
+  const page = await (
+    await createAuthedContext(browser, member, orgId, browserCtx.org.defaultSpaceId)
+  ).newPage();
+  try {
+    await page.goto("/library");
+    const detailResponse = page.waitForResponse((response) =>
+      response.url().includes(`/api/packages/agents/${scope}/${name}`),
+    );
+    await page.getByRole("link", { name: `Test Agent ${name}`, exact: true }).click();
+    const detail = await detailResponse;
+    expect(detail.status()).toBe(200);
+    expect(detail.request().headers()["x-space-id"]).toBe(personalId);
+    await expect(page).toHaveURL(new RegExp(`/agents/${scope}/${name}$`));
+
+    // Stay in one SPA session: a reload would discard the cache under test.
+    await page.locator('a[href="/agents"]').first().click();
+    await expect(page.getByText(/Aucun agent disponible|No agents available/)).toBeVisible();
+    await page.getByTestId("org-switcher-button").click();
+    await page.locator('a[href="/library"]').first().click();
+    const accepted = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && response.url().includes("/shares/accept"),
+    );
+    await page.getByRole("button", { name: /Ajouter à mon espace|Add to my space/ }).click();
+    expect((await accepted).status()).toBe(200);
+    await page.locator('a[href="/agents"]').first().click();
+    await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
+  } finally {
+    await page.context().close();
+  }
 });

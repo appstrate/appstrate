@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db } from "@appstrate/db/client";
+import { notFound } from "../lib/errors.ts";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import {
@@ -347,7 +348,7 @@ export async function getOrgMemberWithProfile(orgId: string, userId: string) {
  * re-provisioning an existing member is safe.
  */
 export async function provisionMember(
-  tx: DbOrTx,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   orgId: string,
   userId: string,
   role: OrgRole = "member",
@@ -357,7 +358,9 @@ export async function provisionMember(
     .values({ orgId, userId, role })
     .onConflictDoNothing()
     .returning({ orgId: organizationMembers.orgId });
-  await ensurePersonalSpace(tx, orgId, userId);
+  if (!(await ensurePersonalSpace(tx, orgId, userId))) {
+    throw notFound("Organization member not found");
+  }
   // `created: false` is how a caller tells the LOSER of a concurrent-provision
   // race from a winner — the OIDC auto-join needs it, and re-reading the row
   // could not answer it.

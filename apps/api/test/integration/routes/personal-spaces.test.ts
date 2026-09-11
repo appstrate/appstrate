@@ -25,6 +25,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
   auditEvents,
+  organizationMembers,
   packages,
   runs,
   spaceMembers,
@@ -33,6 +34,7 @@ import {
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import {
   createTestContext,
@@ -55,6 +57,7 @@ import { resolveOrCreateOrgMembership } from "../../../src/modules/oidc/services
 import { removeMember } from "../../../src/services/organizations.ts";
 import {
   convertPersonalSpaceToTeam,
+  ensurePersonalSpaceFor,
   emptyAndDeletePersonalSpace,
   listSweepablePersonalSpaces,
   PERSONAL_SPACE_GRACE_DAYS,
@@ -861,6 +864,58 @@ describe("personal spaces — offboarding", () => {
     const row = await getDbRow(spaces, eq(spaces.id, personalId));
     expect(row.orphanedAt).not.toBeNull();
     expect(row.ownerUserId).toBe(member.user.id);
+  });
+
+  it("does not revive a departed member when an authenticated request reaches lazy repair late", async () => {
+    await removeMember(owner.orgId, member.user.id);
+    await expect(ensurePersonalSpaceFor(owner.orgId, member.user.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    const row = await getDbRow(spaces, eq(spaces.id, personalId));
+    expect(row.orphanedAt).not.toBeNull();
+    expect((await listSpaces(owner)).map((space) => space.id)).toContain(personalId);
+    await ageOrphan(personalId);
+    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
+  });
+
+  describeRequiresPostgres("a membership removal racing lazy repair", () => {
+    it("waits for the removal to commit and leaves the space orphaned", async () => {
+      const locked = Promise.withResolvers<void>();
+      const commit = Promise.withResolvers<void>();
+      const removing = db.transaction(async (tx) => {
+        await tx
+          .delete(organizationMembers)
+          .where(
+            and(
+              eq(organizationMembers.orgId, owner.orgId),
+              eq(organizationMembers.userId, member.user.id),
+            ),
+          );
+        locked.resolve();
+        await commit.promise;
+        await tx.update(spaces).set({ orphanedAt: new Date() }).where(eq(spaces.id, personalId));
+      });
+      await locked.promise;
+      const repairing = ensurePersonalSpaceFor(owner.orgId, member.user.id);
+      let settled = false;
+      void repairing.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      try {
+        await Bun.sleep(150);
+        expect(settled).toBe(false);
+      } finally {
+        commit.resolve();
+        await removing;
+      }
+      await expect(repairing).rejects.toMatchObject({ status: 404 });
+      expect((await getDbRow(spaces, eq(spaces.id, personalId))).orphanedAt).not.toBeNull();
+    });
   });
 
   it("lists an orphaned space to owners and admins, with `orphaned_at`, unenterable", async () => {

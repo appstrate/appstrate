@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { VERSION_DRAFT } from "../lib/version-selector";
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
@@ -63,12 +64,6 @@ export function RunAgentButton({
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
-  // The inline run button is an editor affordance: absent a pinned historical
-  // version (current/editor view → `version` undefined), it runs the working
-  // copy. That intent is made EXPLICIT here as `draft` — the transport hook no
-  // longer defaults, so this is the single place the editor's draft choice
-  // lives. A historical-version view passes its exact version through verbatim.
-  const runVersion = version ?? "draft";
   const runAgent = useRunAgent(packageId);
   const [inputOpen, setInputOpen] = useState(false);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
@@ -108,6 +103,8 @@ export function RunAgentButton({
   } = usePackageDetail("agent", providedDetail ? undefined : packageId, { enabled: false });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
+  // An accepted share runs its installed snapshot; unpinned authoring uses draft.
+  const runVersion = version ?? detail?.version_pin ?? VERSION_DRAFT;
 
   /** Start the run: open the input modal when the agent declares input, else fire directly. */
   const startRun = (agentDetail: AgentDetail) => {
@@ -115,7 +112,10 @@ export function RunAgentButton({
       !!agentDetail.input?.schema?.properties &&
       Object.keys(agentDetail.input.schema.properties).length > 0;
     if (!agentHasInput) {
-      runAgent.mutate({ version: runVersion }, { onError: onRunError });
+      runAgent.mutate(
+        { version: version ?? agentDetail.version_pin ?? VERSION_DRAFT },
+        { onError: onRunError },
+      );
       return;
     }
     setInputOpen(true);

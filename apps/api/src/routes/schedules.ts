@@ -129,13 +129,18 @@ function assertFirable(cronExpression: string, timezone: string): void {
  * this is the same order on the surface that keeps its verdict forever.
  */
 async function assertScheduleTargetValid(args: {
+  scope: SpaceScope;
   agent: LoadedPackage;
   /** `version_override` as this request leaves it — the selector every fire replays. */
   versionOverride: string | undefined;
   packageSettings: InstalledPackageSettings;
   input: Record<string, unknown> | undefined;
 }): Promise<void> {
-  const { agent: effectiveAgent } = await resolveAgentRunVersion(args.agent, args.versionOverride);
+  const { agent: effectiveAgent } = await resolveAgentRunVersion(
+    args.agent,
+    args.versionOverride,
+    args.scope,
+  );
   const inputSchema = effectiveAgent.manifest.input?.schema;
 
   if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
@@ -318,6 +323,7 @@ export function createSchedulesRouter() {
 
       const packageSettings = await getInstalledPackageSettings(scope.spaceId, agent.id);
       await assertScheduleTargetValid({
+        scope,
         agent,
         versionOverride: data.version_override,
         packageSettings,
@@ -437,6 +443,7 @@ export function createSchedulesRouter() {
       // against nothing.
       if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
       await assertScheduleTargetValid({
+        scope,
         agent: agentForInput,
         // `null` clears the override, i.e. back to the unified default; omitted
         // leaves whatever the row already replays.

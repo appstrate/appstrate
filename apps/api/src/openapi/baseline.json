@@ -3,7 +3,7 @@
   "info": {
     "title": "Appstrate API",
     "version": "1.0.0",
-    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Viewing as a role\n\nAn organization owner or administrator can preview the API as a lesser role by sending the `X-View-As` header (grammar, refusal codes and examples: the `X-View-As` parameter, declared on the operations a client derives its permission gates from). **Every authenticated operation that resolves an organization honours it**, not only the ones that declare it: the persona is applied where permissions are resolved, so every subsequent guard, listing and write answers as the previewed role would. It is documented on those few operations rather than on all of them for the same reason `Idempotency-Key` is documented here.\n\nTwo exceptions, both by design. Personal operations that resolve no organization — `/api/profile*`, `/api/me/connections*`, `/api/welcome/*` — accept the header and ignore it: they answer about the person, not about a role in an organization, so there is nothing for a persona to narrow. And the Server-Sent-Events routes (`/api/realtime/*`) take the persona as the `view_as` QUERY parameter rather than the header, because `EventSource` cannot send headers; the value, the validation and the refusals are identical.\n\nThe persona only ever REMOVES: it is intersected with what the caller really holds, it carries no per-principal grants, and it is refused — never silently ignored — when the credential cannot carry it or the caller is not eligible. The authenticated identity is unchanged; audit rows keep the real actor and record the persona under `after.view_as`. Responses produced under a validated persona carry `X-View-As-Active: 1`.\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same body replays the original response with `Idempotent-Replayed: true`; the same key with a different body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
+    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Viewing as a role\n\nAn organization owner or administrator can preview the API as a lesser role by sending the `X-View-As` header (grammar, refusal codes and examples: the `X-View-As` parameter, declared on the operations a client derives its permission gates from). **Every authenticated operation that resolves an organization honours it**, not only the ones that declare it: the persona is applied where permissions are resolved, so every subsequent guard, listing and write answers as the previewed role would. It is documented on those few operations rather than on all of them for the same reason `Idempotency-Key` is documented here.\n\nTwo exceptions, both by design. Personal operations that resolve no organization — `/api/profile*`, `/api/me/connections*`, `/api/welcome/*` — accept the header and ignore it: they answer about the person, not about a role in an organization, so there is nothing for a persona to narrow. And the Server-Sent-Events routes (`/api/realtime/*`) take the persona as the `view_as` QUERY parameter rather than the header, because `EventSource` cannot send headers; the value, the validation and the refusals are identical.\n\nThe persona only ever REMOVES: it is intersected with what the caller really holds, it carries no per-principal grants, and it is refused — never silently ignored — when the credential cannot carry it or the caller is not eligible. The authenticated identity is unchanged; audit rows keep the real actor and record the persona under `after.view_as`. Responses produced under a validated persona carry `X-View-As-Active: 1`.\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same method, URL and body replays the original response with `Idempotent-Replayed: true`; the same key with a different method, URL or body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
     "contact": {
       "name": "Appstrate",
       "url": "https://appstrate.dev",
@@ -926,7 +926,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents."
+            "description": "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the installed version pin, else draft, matching the launch button. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents."
           }
         ],
         "responses": {
@@ -956,6 +956,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       }
@@ -1730,7 +1733,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents."
+            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, then the latest published version; returns `404 no_published_version` when neither exists. An explicit selector deliberately overrides the installation. The run object's `version_ref` states which definition executed. Ignored for system agents."
           }
         ],
         "requestBody": {
@@ -1955,7 +1958,7 @@
             }
           },
           "422": {
-            "description": "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2387,7 +2390,7 @@
             }
           },
           "422": {
-            "description": "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4111,7 +4114,7 @@
         "operationId": "extendRunSink",
         "tags": ["Runs"],
         "summary": "Extend the sink expiry for a long-running remote run",
-        "description": "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.",
+        "description": "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, and bumps `last_heartbeat_at` (the column the stall watchdog reads). Extendable sinks are the open ones (not closed, not already expired) on a run in the caller's org and space that the caller may READ: `runs:read` is the runs they launched, `runs:read-all` the whole space. Anything else returns 404 rather than confirming the run exists.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4798,7 +4801,7 @@
                   },
                   "version_override": {
                     "type": ["string", "null"],
-                    "description": "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only)."
+                    "description": "Version selector (`draft` | `published` | version spec). Pass `null` to clear (inherits the installed version pin, then latest published; the working copy is opt-in via `draft` only)."
                   },
                   "connection_overrides": {
                     "type": ["object", "null"],
@@ -4931,7 +4934,7 @@
         "operationId": "listScheduleRuns",
         "tags": ["Schedules"],
         "summary": "List runs for a schedule",
-        "description": "List recent runs triggered by a specific schedule.",
+        "description": "List recent runs triggered by a specific schedule. Takes `schedules:read` AND a run read permission: the rows are runs, so `runs:read` lists the ones the caller launched — including the runs of the caller's own schedules — and `runs:read-all` the whole space. A credential holding `schedules:read` alone is rejected with 403.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6800,16 +6803,19 @@
             "description": "Redirect to the provider OAuth screen or the hosted form."
           },
           "400": {
-            "description": "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable."
+            "description": "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it."
           },
           "403": {
-            "description": "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint."
+            "description": "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead."
           },
           "410": {
             "description": "Invalid, expired, or already-used token (HTML error page)."
           },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
           "500": {
-            "description": "Integration cannot be connected / unexpected failure (HTML error page)."
+            "description": "Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable."
           },
           "502": {
             "description": "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry."
@@ -8257,7 +8263,7 @@
         "operationId": "createModel",
         "tags": ["Models"],
         "summary": "Create a custom model",
-        "description": "Create a new custom LLM model for the organization.",
+        "description": "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8360,6 +8366,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelAlreadyAdded"
           }
         }
       }
@@ -8472,6 +8481,7 @@
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 50,
+                    "uniqueItems": true,
                     "items": {
                       "type": "string",
                       "minLength": 1
@@ -8897,6 +8907,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelAlreadyAdded"
           }
         }
       },
@@ -9425,7 +9438,7 @@
         "operationId": "discoverModelProviderCredentialModels",
         "tags": ["Model Provider Credentials"],
         "summary": "Enumerate the models an endpoint serves",
-        "description": "Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.",
+        "description": "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -9467,7 +9480,7 @@
         },
         "responses": {
           "200": {
-            "description": "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id.",
+            "description": "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id. `truncated` marks a list that is short of what the endpoint serves.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -9480,7 +9493,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["outcome", "models", "message"],
+                  "required": ["outcome", "models", "truncated", "message"],
                   "properties": {
                     "outcome": {
                       "type": "string",
@@ -9506,7 +9519,8 @@
                           "max_tokens",
                           "input",
                           "reasoning",
-                          "source"
+                          "source",
+                          "endpoint_capabilities"
                         ],
                         "properties": {
                           "id": {
@@ -9536,9 +9550,39 @@
                             "type": ["string", "null"],
                             "enum": ["endpoint", "catalog", null],
                             "description": "Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it."
+                          },
+                          "endpoint_capabilities": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "description": "Capabilities explicitly published by the endpoint, suitable for persisting as model overrides. Omitted fields are unknown to the endpoint listing; the top-level description may fill them from a catalog for display only.",
+                            "properties": {
+                              "context_window": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "max_tokens": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "input": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                  "type": "string",
+                                  "enum": ["text", "image"]
+                                }
+                              },
+                              "reasoning": {
+                                "type": "boolean"
+                              }
+                            }
                           }
                         }
                       }
+                    },
+                    "truncated": {
+                      "type": "boolean",
+                      "description": "`true` when the endpoint had more models to declare and a safety cap stopped the read (more than 1000 models, more than 10 listing pages, or a listing that declares a next page without publishing a cursor to follow). The ids returned are then a prefix of what the endpoint serves, not the whole of it. Always `false` for a non-`ok` outcome."
                     },
                     "message": {
                       "type": ["string", "null"],
@@ -11237,7 +11281,7 @@
                   },
                   "space_assignments": {
                     "type": "array",
-                    "description": "Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every space.",
+                    "description": "Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting.",
                     "items": {
                       "$ref": "#/components/schemas/SpaceAssignment"
                     }
@@ -11288,7 +11332,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -11490,7 +11534,7 @@
                   },
                   "space_assignments": {
                     "type": "array",
-                    "description": "Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every space.",
+                    "description": "Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting.",
                     "items": {
                       "$ref": "#/components/schemas/SpaceAssignment"
                     }
@@ -11536,7 +11580,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -11909,7 +11953,7 @@
         "operationId": "batchGetProfiles",
         "tags": ["Profile"],
         "summary": "Batch lookup profiles",
-        "description": "Retrieve display names for a list of user IDs.",
+        "description": "Retrieve display names for a list of user IDs. Reads the organization directory, so it requires `members:read`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11990,6 +12034,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -15373,6 +15420,10 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionInUse",
+            "description": "The version is pinned by an installation (version_in_use)."
           }
         }
       }
@@ -15709,7 +15760,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
+            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, else the draft. Explicit `draft` always reads the working copy. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
           }
         ],
         "responses": {
@@ -15739,6 +15790,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       },
@@ -16250,7 +16304,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`.",
+            "description": "Agent has runs in progress (`agent_in_use`) or the version is pinned by an installation (`version_in_use`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17216,6 +17270,10 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionInUse",
+            "description": "The version is pinned by an installation (version_in_use)."
           }
         }
       }
@@ -17900,6 +17958,10 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionInUse",
+            "description": "The version is pinned by an installation (version_in_use)."
           }
         }
       }
@@ -19058,7 +19120,7 @@
         "operationId": "listAssignableSpaceRoles",
         "tags": ["Spaces"],
         "summary": "List assignable space roles",
-        "description": "Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.",
+        "description": "Returns presets and organization roles whose permissions are held by the caller in this space, and nothing the caller could not actually grant: where `custom_roles` is unavailable the bundles are omitted here (the org catalogue `GET /api/roles` still lists them, which is where a leftover is deleted). Requires space-members:invite, space-members:change-role, or space-settings:write.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19201,7 +19263,7 @@
         "operationId": "addSpaceMember",
         "tags": ["Spaces"],
         "summary": "Add a space member",
-        "description": "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
+        "description": "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise); a `preset_role` never does.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19292,7 +19354,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -19315,7 +19377,7 @@
         "operationId": "updateSpaceMember",
         "tags": ["Spaces"],
         "summary": "Change a space member's role",
-        "description": "Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.",
+        "description": "Change the role of an EXISTING explicit membership row (404 when there is none). Both ends are bounded by the caller: the new role may only grant permissions they hold, and the member's CURRENT role must be one they could have granted (403 otherwise) — including when changing their own role. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise), so moving a holder OFF a leftover bundle and onto a preset stays available where moving another one onto it does not.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19396,7 +19458,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -19417,7 +19479,7 @@
         "operationId": "removeSpaceMember",
         "tags": ["Spaces"],
         "summary": "Remove a space member",
-        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.",
+        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19597,40 +19659,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                },
-                "examples": {
-                  "forbidden": {
-                    "summary": "Missing permission",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/forbidden",
-                      "title": "Forbidden",
-                      "status": 403,
-                      "detail": "Insufficient permissions: roles:write required",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "forbidden",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  },
-                  "feature_unavailable": {
-                    "summary": "Feature not on this deployment",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
-                      "title": "Feature Unavailable",
-                      "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "feature_unavailable",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "409": {
             "description": "A role with this key already exists (`role_key_taken`)",
@@ -19781,40 +19810,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                },
-                "examples": {
-                  "forbidden": {
-                    "summary": "Missing permission",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/forbidden",
-                      "title": "Forbidden",
-                      "status": 403,
-                      "detail": "Insufficient permissions: roles:write required",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "forbidden",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  },
-                  "feature_unavailable": {
-                    "summary": "Feature not on this deployment",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
-                      "title": "Feature Unavailable",
-                      "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "feature_unavailable",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -19835,7 +19831,7 @@
         "operationId": "deleteRole",
         "tags": ["Roles"],
         "summary": "Delete a custom space role",
-        "description": "Requires the `custom_roles` feature. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
+        "description": "Never requires the `custom_roles` feature: removing a leftover bundle is what an EE → OSS downgrade needs, and it is the one verb that only ever shrinks what a bundle reaches. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19867,40 +19863,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                },
-                "examples": {
-                  "forbidden": {
-                    "summary": "Missing permission",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/forbidden",
-                      "title": "Forbidden",
-                      "status": 403,
-                      "detail": "Insufficient permissions: roles:write required",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "forbidden",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  },
-                  "feature_unavailable": {
-                    "summary": "Feature not on this deployment",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
-                      "title": "Feature Unavailable",
-                      "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "feature_unavailable",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -20730,7 +20693,7 @@
         "operationId": "listFiles",
         "tags": ["Files"],
         "summary": "List files",
-        "description": "List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own files (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.",
+        "description": "List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -21178,7 +21141,7 @@
         "operationId": "deleteFile",
         "tags": ["Files"],
         "summary": "Delete a file",
-        "description": "Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. A file referenced by a run cannot be deleted until those consumer runs are removed.",
+        "description": "Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file referenced by a run cannot be deleted until those consumer runs are removed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -21245,7 +21208,7 @@
         "operationId": "keepFile",
         "tags": ["Files"],
         "summary": "Keep a file (clear its expiry)",
-        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.",
+        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23305,7 +23268,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description).",
+        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description).",
         "schema": {
           "type": "string",
           "maxLength": 255
@@ -24097,6 +24060,7 @@
           "source",
           "scope",
           "version",
+          "version_pin",
           "dependencies",
           "input",
           "running_runs",
@@ -24127,6 +24091,10 @@
           "version": {
             "type": ["string", "null"],
             "description": "Version from manifest"
+          },
+          "version_pin": {
+            "type": ["string", "null"],
+            "description": "Installed version in the current space. The default launch uses this pin when present."
           },
           "manifest": {
             "allOf": [
@@ -24179,7 +24147,7 @@
                 }
               }
             ],
-            "description": "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`."
+            "description": "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. A summary read (`agents:run` without `agents:read`) still receives every locked field's NAME, but `values` carries no entry for one — a field the launcher cannot set is not one it reads the stored value of."
           },
           "output": {
             "type": "object",
@@ -24525,7 +24493,8 @@
           },
           "input": {
             "type": ["object", "null"],
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Resolved run input. Registered-agent input is null without agents:read because it can contain editor-imposed values, including historical locks. Inline input remains visible. Execution and rerun retain the complete input server-side."
           },
           "result": {
             "type": ["object", "null"],
@@ -26013,6 +25982,7 @@
           "name",
           "description",
           "permissions",
+          "unavailable_permissions",
           "createdAt",
           "updatedAt"
         ],
@@ -26044,7 +26014,14 @@
             "items": {
               "type": "string"
             },
-            "description": "Space-level permission strings the role grants, sorted."
+            "description": "Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back."
+          },
+          "unavailable_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset."
           },
           "createdAt": {
             "type": ["string", "null"],
@@ -26359,6 +26336,36 @@
       }
     },
     "responses": {
+      "VersionInUse": {
+        "description": "The version is pinned by an installation (`version_in_use`). Update or uninstall it before deletion.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "VersionArtifactUnavailable": {
+        "description": "The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
       "Unauthorized": {
         "description": "Missing or invalid authentication",
         "headers": {
@@ -26396,6 +26403,42 @@
               "detail": "Insufficient permissions",
               "code": "forbidden",
               "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "CustomRoleFeatureForbidden": {
+        "description": "`forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "examples": {
+              "forbidden": {
+                "summary": "Missing permission",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/forbidden",
+                  "title": "Forbidden",
+                  "status": 403,
+                  "detail": "Insufficient permissions",
+                  "instance": "urn:appstrate:request:req_2f1c6d84",
+                  "code": "forbidden",
+                  "requestId": "req_2f1c6d84"
+                }
+              },
+              "feature_unavailable": {
+                "summary": "Feature not on this deployment",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/feature-unavailable",
+                  "title": "Feature Unavailable",
+                  "status": 403,
+                  "detail": "Defining a custom space role requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
+                  "instance": "urn:appstrate:request:req_2f1c6d84",
+                  "code": "feature_unavailable",
+                  "requestId": "req_2f1c6d84"
+                }
+              }
             }
           }
         }
@@ -26583,6 +26626,16 @@
           }
         }
       },
+      "ModelAlreadyAdded": {
+        "description": "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
       "InternalServerError": {
         "description": "Unexpected server error",
         "content": {
@@ -26691,7 +26744,7 @@
         }
       },
       "IdempotencyConflict": {
-        "description": "Same Idempotency-Key used with a different request body",
+        "description": "Same Idempotency-Key used with a different method, URL or body",
         "headers": {
           "Request-Id": {
             "$ref": "#/components/headers/RequestId"
@@ -26706,7 +26759,7 @@
               "type": "https://docs.appstrate.dev/errors/idempotency-conflict",
               "title": "Idempotency Conflict",
               "status": 422,
-              "detail": "This Idempotency-Key was already used with a different request body. Use a new key for different requests.",
+              "detail": "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
               "code": "idempotency_conflict",
               "requestId": "req_abc123"
             }

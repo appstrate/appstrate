@@ -506,10 +506,15 @@ export function assertSpaceAdminAct(
  * must not create a space to then find nothing in it — those read
  * {@link findPersonalSpace} instead.
  *
- * The caller has already established that `userId` is a member of `orgId`.
+ * Membership is rechecked under a lock: the caller's earlier check may have
+ * preceded a concurrent removal.
  */
 export async function ensurePersonalSpaceFor(orgId: string, userId: string): Promise<SpaceRow> {
-  return ensurePersonalSpace(db, orgId, userId);
+  return db.transaction(async (tx) => {
+    const space = await ensurePersonalSpace(tx, orgId, userId);
+    if (!space) throw notFound("Organization member not found");
+    return space;
+  });
 }
 
 /**

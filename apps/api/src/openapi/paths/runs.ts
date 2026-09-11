@@ -77,7 +77,7 @@ const canonicalRunsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents.",
+            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, then the latest published version; returns `404 no_published_version` when neither exists. An explicit selector deliberately overrides the installation. The run object's `version_ref` states which definition executed. Ignored for system agents.",
         },
       ],
       requestBody: {

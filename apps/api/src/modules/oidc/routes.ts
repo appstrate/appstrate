@@ -38,7 +38,7 @@ import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { user, spaces } from "@appstrate/db/schema";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
-import { callerOrgRole } from "../../lib/view-as.ts";
+import { callerOrgRole, callerPersonalOwnerId } from "../../lib/view-as.ts";
 import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
 import { getOrgSettings } from "../../services/organizations.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
@@ -511,7 +511,7 @@ export function createOidcRouter() {
         // space-level: the space must belong to the caller's org.
         const space = await validateSpaceInOrg(data.referencedSpaceId, orgId);
         if (!space) {
-          throw forbidden("referencedSpaceId must belong to the current organization");
+          throw notFound("Space not found");
         }
         // A personal space takes no OAuth client, for the same reason it takes
         // no API key (RBAC spec §3.6): a client is an automation identity that
@@ -520,6 +520,9 @@ export function createOidcRouter() {
         // A 409, not a 404: only that space's owner reaches it at all, so
         // naming the reason discloses nothing.
         if (space.ownerUserId !== null) {
+          if (space.ownerUserId !== callerPersonalOwnerId(c)) {
+            throw notFound("Space not found");
+          }
           throw conflict(
             "personal_space_takes_no_oauth_clients",
             "A personal space takes no OAuth client: it belongs to one member and is removed when they leave. Register the client in a team space.",

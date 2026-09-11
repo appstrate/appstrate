@@ -20,7 +20,10 @@ import {
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
-import { getInstalledPackageSettings } from "../services/space-packages.ts";
+import {
+  getInstalledPackageSettings,
+  getInstalledPackageVersion,
+} from "../services/space-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -142,13 +145,14 @@ export async function buildAgentDetailDto(
     return null;
   }
 
-  // Version-aware projection (issue #770). `draft`/omitted reads the live
-  // manifest; a concrete version substitutes the published manifest + prompt
-  // via the same resolver the run uses, so the detail (config/input/integrations)
-  // matches what the run will execute.
-  const versionSel = opts.version?.trim();
+  // Launch forms read the installed snapshot by default; unpinned authoring
+  // still reads the draft. Explicit selectors use the run's own resolver.
+  const versionPin = await getInstalledPackageVersion(scope, agent.id);
+  const versionSel = opts.version?.trim() || versionPin;
   const versioned = !!versionSel && versionSel !== VERSION_SELECTOR_DRAFT;
-  const effective = versioned ? await resolveAgentRunVersion(agent, versionSel) : null;
+  const effective = versioned
+    ? await resolveAgentRunVersion(agent, versionSel ?? undefined, scope)
+    : null;
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
@@ -186,6 +190,7 @@ export async function buildAgentDetailDto(
     // `{scope}` path params accept (issue #629).
     scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
+    version_pin: versionPin,
     dependencies,
     // The agent's ONE parameter schema, plus the per-space layers the
     // launch form needs: `values` are the editor's stored defaults and

@@ -1023,6 +1023,10 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          $ref: "#/components/responses/VersionInUse",
+          description: "The version is pinned by an installation (version_in_use).",
+        },
       },
     },
   },
@@ -1243,7 +1247,7 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
+            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, else the draft. Explicit `draft` always reads the working copy. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
         },
       ],
       responses: {
@@ -1259,6 +1263,7 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     put: {
@@ -1565,7 +1570,7 @@ export const packagesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`.",
+            "Agent has runs in progress (`agent_in_use`) or the version is pinned by an installation (`version_in_use`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -2211,6 +2216,10 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          $ref: "#/components/responses/VersionInUse",
+          description: "The version is pinned by an installation (version_in_use).",
+        },
       },
     },
   },
@@ -2643,6 +2652,10 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          $ref: "#/components/responses/VersionInUse",
+          description: "The version is pinned by an installation (version_in_use).",
+        },
       },
     },
   },

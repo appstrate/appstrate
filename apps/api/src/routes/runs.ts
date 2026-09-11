@@ -245,15 +245,13 @@ export function createRunsRouter() {
       // instead of being swallowed into `{}` and launched as an input-less run.
       const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
 
-      // Version selector from query param: `draft`, `published`, or a
-      // version spec (exact / dist-tag / semver range). Omitted ≡ `published`
-      // for EVERY caller (latest published; 404 when none, #636) — the working
-      // copy is opt-in via `version=draft` only, never an implicit default.
-      // The editor UI passes `version=draft` explicitly.
+      // Explicit selectors override the installation; omitted uses its pin,
+      // then latest. Running the working copy is opt-in via version=draft.
       const versionOverride = c.req.query("version");
       const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
         agent,
         versionOverride,
+        getSpaceScope(c),
       );
 
       // Single canonical prefix — `run_` — shared with inline + remote origins.

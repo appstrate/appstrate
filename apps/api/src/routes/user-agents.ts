@@ -111,7 +111,11 @@ export function createUserAgentsRouter() {
       // `dependencies.skills`. `requireAccess: false`: the caller just wrote
       // this agent in their org, so the app-install gate must not 404 a
       // successful write.
-      const detail = await buildAgentDetailDto(c, { itemId: packageId, requireAccess: false });
+      const detail = await buildAgentDetailDto(c, {
+        itemId: packageId,
+        requireAccess: false,
+        version: "draft",
+      });
       if (!detail) {
         logger.error("Updated agent could not be re-read", {
           packageId,

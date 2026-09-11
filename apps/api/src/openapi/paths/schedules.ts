@@ -301,7 +301,7 @@ export const schedulesPaths = {
                 version_override: {
                   type: ["string", "null"],
                   description:
-                    "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only).",
+                    "Version selector (`draft` | `published` | version spec). Pass `null` to clear (inherits the installed version pin, then latest published; the working copy is opt-in via `draft` only).",
                 },
                 connection_overrides: {
                   type: ["object", "null"],

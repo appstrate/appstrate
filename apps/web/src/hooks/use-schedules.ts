@@ -197,7 +197,7 @@ interface ScheduleFormDeps {
  *
  * `version` (#770) pins the agent-detail projection to a published version so
  * the input / integrations / skills the form renders match the version the run
- * will execute. Omitted → `draft` (the editor working copy).
+ * will execute. Omitted → installed pin, else draft.
  */
 export function useScheduleFormDeps(
   packageId: string | undefined,
