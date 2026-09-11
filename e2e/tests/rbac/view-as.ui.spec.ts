@@ -177,6 +177,53 @@ test.describe("View as role", () => {
     await expect(banner(page)).toHaveCount(0);
   });
 
+  test("does not start a preview the user cancelled while it was loading", async ({
+    authedPage: page,
+  }) => {
+    // Submitting loads the persona's org row before committing anything, and
+    // that load is the whole window: the dialog unmounts on Cancel but the
+    // closure runs on. A preview committed there is persisted and survives a
+    // reload, and the server accepts this persona, so nothing ever ends it.
+    let release = () => {};
+    const stalled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let previewedListing = false;
+    await page.route(
+      (url) => url.pathname === "/api/orgs",
+      async (route) => {
+        // Only the listing asked for AS the persona waits; the app's own org
+        // reads have to keep answering or the page stops working.
+        if (!route.request().headers()["x-view-as"]) return route.continue();
+        previewedListing = true;
+        await stalled;
+        await route.continue();
+      },
+    );
+
+    await page.goto("/org-settings/space/members");
+    await page.getByTestId("view-as-space-button").click();
+    const dialog = page.getByRole("dialog");
+    await dialog.locator("#view-as-space").click();
+    await page.getByRole("option", { name: "Aucun espace" }).click();
+    await dialog.getByTestId("view-as-submit").click();
+    await expect.poll(() => previewedListing).toBe(true);
+
+    await dialog.getByRole("button", { name: /^(Annuler|Cancel)$/ }).click();
+    await expect(dialog).toHaveCount(0);
+
+    release();
+
+    await expect(banner(page)).toHaveCount(0);
+    expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
+    // Still the owner's own authority: this trigger is hidden from a member.
+    await expect(page.getByTestId("view-as-space-button")).toBeVisible();
+
+    // Nothing was persisted, so a reload has no preview to resume either.
+    await page.reload();
+    await expect(banner(page)).toHaveCount(0);
+  });
+
   test("previews a viewer, then gives the owner their authority back @critical", async ({
     authedPage: page,
     apiClient,
