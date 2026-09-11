@@ -139,11 +139,8 @@ const eeModule: AppstrateModule = {
     // Idempotent + race-safe (ON CONFLICT DO NOTHING); a warm boot is a no-op.
     const cursor = await ensureCursorSeeded(ctx.services, getEeDb());
 
-    // Refuse to silently resume a watermark the sweeper abandoned. Re-enabling
-    // the module after a window with it off leaves a gap the first tick would
-    // claim in one go and debit against today's quotas — irreversibly, and
-    // fleet-wide. Billing that gap or forgiving it is an operator's call, so
-    // this throws (a fatal boot) and names both actions.
+    // Fatal boot rather than silently resume an abandoned watermark — the
+    // reasoning and the operator's two options live on `assertCursorResumable`.
     await assertCursorResumable(cursor);
 
     // Billing sweeper — the EE metering consumer. Sweeps the platform's
