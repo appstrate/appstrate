@@ -1050,7 +1050,7 @@ describe("draft tree writes", () => {
     // first has not stored yet and drops its file.
     const target = { id, type: "skill" as const, orgId: ctx.orgId };
     const add = (path: string, text: string) => ({
-      precondition: { etag: "*" as const },
+      precondition: { imported: true as const },
       mutate: (files: Record<string, Uint8Array>) => ({
         ...files,
         [path]: encoder.encode(text),
@@ -1074,15 +1074,16 @@ describe("draft tree writes", () => {
     expect(Math.abs(first.lockVersion - second.lockVersion)).toBe(1);
   });
 
-  it("accepts the ETag the index served, and refuses a stale one", async () => {
+  it("accepts the draft token and refuses a stale one", async () => {
     const { res } = await listFiles(ctx, id);
     const etag = res.headers.get("ETag")!;
+    const lockVersion = await lockVersionOf();
     expect(etag).toMatch(/^"i-pd-[0-9a-f]{64}"$/);
 
     const written = await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        precondition: { etag },
+        precondition: { lockVersion },
         mutate: (files) => ({ ...files, "docs/note.md": encoder.encode("noted") }),
       },
     );
@@ -1102,15 +1103,15 @@ describe("draft tree writes", () => {
     await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        precondition: { etag },
+        precondition: { lockVersion },
         mutate: (files) => ({ ...files, "docs/late.md": encoder.encode("late") }),
       },
     ).catch((err: unknown) => {
       refused = err;
     });
     expect(refused).toBeInstanceOf(ApiError);
-    expect((refused as ApiError).status).toBe(412);
-    expect((refused as ApiError).code).toBe("precondition_failed");
+    expect((refused as ApiError).status).toBe(409);
+    expect((refused as ApiError).code).toBe("conflict");
 
     // Negative control: nothing of the refused write reached storage.
     expect(Object.keys(await storedTree())).not.toContain("docs/late.md");

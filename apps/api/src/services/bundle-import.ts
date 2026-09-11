@@ -481,6 +481,7 @@ export async function importBundle(
         content: parsedZip.content,
         files: parsedZip.files,
         zipBuffer: Buffer.from(getReconstructedPackage()),
+        draftManifest: parsedZip.manifest,
         version,
       });
     } catch (err) {

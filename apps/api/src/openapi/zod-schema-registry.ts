@@ -78,7 +78,6 @@ import {
   packageJsonCreateWithContentSchema,
   packageJsonUpdateSchema,
   createVersionBodySchema,
-  patchPackageFilesSchema,
 } from "../routes/packages.ts";
 
 // --- Space schemas (routes/spaces.ts) ---
@@ -553,12 +552,6 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
 
   // ─── Package draft file tree ────────────────────────────────────────────
-  {
-    method: "PATCH",
-    path: "/api/packages/{scope}/{name}/files",
-    jsonSchema: toJsonSchema(patchPackageFilesSchema),
-    description: "Write, delete and move files in a package draft tree",
-  },
 
   // ─── Integrations ───────────────────────────────────────────────────────
   {

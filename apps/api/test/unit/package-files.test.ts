@@ -8,6 +8,10 @@
  * integration suite.
  */
 
+import {
+  PackageFileWriteError,
+  type PackageFileWriteErrorCode,
+} from "@appstrate/core/package-file-operations";
 import { describe, it, expect } from "bun:test";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
@@ -15,9 +19,7 @@ import { ARCHIVE_MAX_FILES, PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES } from "@appstrat
 import {
   applyDraftOverlay,
   applyFileOperations,
-  PackageFileWriteError,
   type PackageFileOperation,
-  type PackageFileWriteErrorCode,
   buildFileIndex,
   draftSnapshotId,
   indexEtag,

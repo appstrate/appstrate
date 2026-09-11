@@ -2,67 +2,15 @@
 
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
-import {
-  createOrgItem,
-  reinstallOrgItem,
-  getOrgItem,
-  type CreateItemInput,
-} from "./package-items/crud.ts";
-import { uploadPackageFiles } from "./package-items/storage.ts";
-import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
+import { createOrgItem, getOrgItem } from "./package-items/crud.ts";
+import { mutatePackageDraftFiles } from "./package-files.ts";
+import { CONFIG_BY_TYPE } from "./package-items/config.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
 
 /**
- * Insert or update a skill during post-install.
- *
- * This path deliberately does NOT go through `mutatePackageDraftFiles`, the
- * read-modify-write every editor route takes, for two reasons that are both
- * load-bearing:
- *
- * - That helper runs `assertArchiveContentConforms` on the tree it stores. AFPS
- *   §3.3 gates a bundle's ROOT package only (`bundle-import.ts`), because a
- *   published bundle is immutable and a pre-rule DEPENDENCY is a skill nobody
- *   can fix — gating here would refuse bundles the platform is required to
- *   accept.
- * - `manifest` here is the RAW object parsed out of `files`, which the version
- *   row must carry verbatim; the draft ROW takes the caller's normalized
- *   manifest instead (retired `runtime_tools` ids dropped). One write cannot
- *   persist both.
- *
- * The cost, stated because nothing else states it: this row write and the
- * upload below are not serialized against the editor's writes. An import that
- * lands while an author is saving can drop a file the `PATCH` just stored,
- * without either side being told.
- */
-async function upsertItem(
-  orgId: string,
-  packageId: string,
-  item: CreateItemInput,
-  cfg: PackageTypeConfig,
-  manifest: Record<string, unknown>,
-): Promise<void> {
-  const existing = await getOrgItem(orgId, packageId, cfg);
-  if (existing && existing.lock_version != null) {
-    // Re-install: overwrite the existing package. `reinstallOrgItem` re-reads
-    // the current lock_version and retries on a concurrent bump (last-writer-
-    // wins), so the install is never silently dropped on an optimistic-lock
-    // mismatch — the previous `updateOrgItem(existing.lock_version)` ignored a
-    // null return and no-op'd when another writer touched the row first. A null
-    // here means the row vanished mid-reinstall → fall back to insert.
-    const updated = await reinstallOrgItem(orgId, packageId, { manifest, content: item.content });
-    if (!updated) {
-      await createOrgItem(orgId, item, cfg, manifest);
-    }
-  } else {
-    await createOrgItem(orgId, item, cfg, manifest);
-  }
-}
-
-/**
- * Run per-type post-install side-effects after a package is saved to the DB.
- * Creates a version in packageVersions for ALL types (agent, skill, integration,
- * mcp-server), handles skill upsert + per-type storage upload.
+ * Replace an imported draft through the common writer, then retain the original
+ * archive and its manifest as an immutable version for every package type.
  */
 export async function postInstallPackage(params: {
   packageType: PackageType;
@@ -72,6 +20,8 @@ export async function postInstallPackage(params: {
   content: string;
   files: Record<string, Uint8Array>;
   zipBuffer: Buffer;
+  draftManifest?: Record<string, unknown>;
+  lockVersion?: number;
   /** Override version instead of auto-detecting from manifest or auto-bumping. */
   version?: string;
 }): Promise<void> {
@@ -88,33 +38,27 @@ export async function postInstallPackage(params: {
   }
   const version: string = rawVersion;
 
-  if (packageType === "skill") {
-    const cfg = CONFIG_BY_TYPE[packageType];
-    const item: CreateItemInput = { id: packageId, content, createdBy: userId };
-    await upsertItem(orgId, packageId, item, cfg, manifest);
-    await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);
+  const cfg = CONFIG_BY_TYPE[packageType];
+  if (!(await getOrgItem(orgId, packageId, cfg))) {
+    await createOrgItem(
+      orgId,
+      { id: packageId, content, createdBy: userId },
+      cfg,
+      params.draftManifest ?? manifest,
+    );
   }
-
-  if (packageType === "agent" && Object.keys(files).length > 0) {
-    await uploadPackageFiles("agents", orgId, packageId, files);
-  }
-
-  if (packageType === "integration" && Object.keys(files).length > 0) {
-    // Vendored MCP server code (`server/`), the manifest, and the
-    // optional INTEGRATION.md companion all live alongside each other
-    // in the AFPS bundle — store the whole tree under integrations/.
-    // Phase 1.2a's resolver consumes the same payload at spawn time.
-    await uploadPackageFiles("integrations", orgId, packageId, files);
-  }
-
-  if (packageType === "mcp-server" && Object.keys(files).length > 0) {
-    // AFPS-native manifest (with MCPB-vocabulary `server` / `tools` /
-    // `user_config` lifted to the root alongside AFPS identity — NOT
-    // strict-MCPB; see §3.4) plus any vendored server tree. Stored under
-    // mcp-servers/ so the spawn resolver can serve the bundle to an
-    // integration whose `source.kind: "local"` references it.
-    await uploadPackageFiles("mcp-servers", orgId, packageId, files);
-  }
+  await mutatePackageDraftFiles(
+    { id: packageId, type: packageType, orgId },
+    {
+      precondition: {
+        imported: true,
+        ...(params.lockVersion !== undefined ? { lockVersion: params.lockVersion } : {}),
+      },
+      manifest: params.draftManifest ?? manifest,
+      draftContent: content,
+      replace: files,
+    },
+  );
 
   // No try/catch: a genuine version-creation failure MUST propagate so the
   // caller (e.g. bundle import) aborts rather than committing a `packages`

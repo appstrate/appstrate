@@ -27,7 +27,6 @@ import {
   listOrgItems,
   getOrgItem,
   createOrgItem,
-  reinstallOrgItem,
   deleteOrgItem,
   PackageAlreadyExistsError,
 } from "../services/package-items/crud.ts";
@@ -91,11 +90,13 @@ import {
   indexEtag,
   fileEtag,
   applyFileOperations,
-  PackageFileWriteError,
   type PackageFileOperation,
-  type PackageFileWriteErrorCode,
   type PackageFileSource,
 } from "../services/package-files.ts";
+import {
+  PackageFileWriteError,
+  type PackageFileWriteErrorCode,
+} from "@appstrate/core/package-file-operations";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import {
   collectConnectLoginWarnings,
@@ -109,7 +110,6 @@ import {
   notFound,
   conflict,
   internalError,
-  preconditionRequired,
   validationFailed,
   type ValidationFieldError,
 } from "../lib/errors.ts";
@@ -273,49 +273,9 @@ export const packageJsonCreateWithContentSchema = z
   })
   .strict();
 
-export const packageJsonUpdateSchema = z
-  .object({
-    manifest: z.record(z.string(), z.unknown()).optional(),
-    content: z.string().optional(),
-    /**
-     * Optimistic-lock token. Mandatory and integral — the value is a row version,
-     * never a fraction. This used to be `z.number().optional()` with a hand-rolled
-     * `null / typeof !== "number"` check in the handler restating both rules; the
-     * schema now carries them, so the spec's `required: ["lock_version"]` and
-     * `type: "integer"` have exactly one runtime counterpart.
-     */
-    lock_version: z.number().int(),
-  })
-  .strict();
-
-/**
- * Body of `POST /api/packages/{type}/{scope}/{name}/versions`. The body itself
- * is optional (`requestBody.required: false`) — the SPA omits it entirely when
- * no override is chosen — so `version` is the only member and it is optional.
- */
-export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
-
-/**
- * An archive-relative entry name an operation names. The shape rules (no `..`
- * segment, no empty segment, no `\`, no `__MACOSX/`) are NOT restated here:
- * `isSafeArchivePath` owns them, and it runs inside `applyFileOperations` on
- * the same path — one predicate, checked once, in the place that also knows
- * whether the entry is reserved. This bound is the wire-level ceiling that
- * stops a multi-megabyte string from ever reaching it.
- */
 const packageFilePathSchema = z.string().min(1).max(1024);
 
-/**
- * Body of `PATCH /api/packages/{scope}/{name}/files` — a batch of edits applied
- * to the draft tree IN ORDER and persisted once, so a rename is one request and
- * every intermediate tree is allowed to be invalid.
- *
- * A `write` carries exactly one of `text` (encoded UTF-8) or `bytes_base64`
- * (decoded as standard base64). Both, or neither, is a 400: "write this file"
- * has to name one set of bytes, and silently preferring one field over the
- * other would drop the author's content without a word.
- */
-export const patchPackageFilesSchema = z
+const packageFileOperationsSchema = z
   .object({
     operations: z
       .array(
@@ -345,6 +305,24 @@ export const patchPackageFilesSchema = z
       .max(200),
   })
   .strict();
+
+export const packageJsonUpdateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()).optional(),
+    content: z.string().optional(),
+    operations: packageFileOperationsSchema.shape.operations.optional(),
+    /**
+     * Optimistic-lock token. Mandatory and integral — the value is a row version,
+     * never a fraction. This used to be `z.number().optional()` with a hand-rolled
+     * `null / typeof !== "number"` check in the handler restating both rules; the
+     * schema now carries them, so the spec's `required: ["lock_version"]` and
+     * `type: "integer"` have exactly one runtime counterpart.
+     */
+    lock_version: z.number().int(),
+  })
+  .strict();
+
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -1074,13 +1052,13 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     }
 
     // Content required check
-    if (rcfg.requireContent && !content.trim()) {
+    if (!body.operations && rcfg.requireContent && !content.trim()) {
       throw invalidRequest("Content cannot be empty", "content");
     }
 
     // The RESOLVED content: the body's when supplied, the stored draft's when
     // carried forward.
-    if (content) assertContentConforms(rcfg.cfg.type, content, "content");
+    if (!body.operations && content) assertContentConforms(rcfg.cfg.type, content, "content");
 
     // A manifest-only integration PUT has no authored `content`. When the
     // overloaded column contains the manifest fallback (rather than a real
@@ -1113,18 +1091,31 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // different files for the manifest-backed types — see `storageFileName`.
     // `resolveDraftContent` guards the column; the storage entry is resolved on
     // its own terms.
-    await mutatePackageDraftFiles(
-      { id: itemId, type: rcfg.cfg.type, orgId },
-      {
-        precondition: { lockVersion: body.lock_version },
-        manifest: validatedManifest,
-        draftContent: resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
-        mutate: (files) => ({
-          ...files,
-          [rcfg.storageFileName]: new TextEncoder().encode(storageContent),
-        }),
-      },
-    );
+    try {
+      await mutatePackageDraftFiles(
+        { id: itemId, type: rcfg.cfg.type, orgId },
+        {
+          precondition: { lockVersion: body.lock_version },
+          manifest: validatedManifest,
+          validateBundle: body.operations !== undefined,
+          // File operations own the content column when they are supplied.
+          draftContent: body.operations
+            ? undefined
+            : resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
+          mutate: (files) => {
+            const next = { ...files };
+            if (body.content !== undefined || !body.operations)
+              next[rcfg.storageFileName] = new TextEncoder().encode(storageContent);
+            return applyFileOperations(next, toDraftFileOperations(body.operations ?? []), {
+              type: rcfg.cfg.type,
+            });
+          },
+        },
+      );
+    } catch (error) {
+      if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
+      throw error;
+    }
 
     // After-update hook (e.g. agent junction table sync)
     if (rcfg.afterUpdate) {
@@ -1139,7 +1130,12 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       action: "package.updated",
       resourceType: "package",
       resourceId: itemId,
-      after: { type: rcfg.cfg.type },
+      after: {
+        type: rcfg.cfg.type,
+        filePaths: body.operations?.map((op) =>
+          op.op === "move" ? `${op.from} → ${op.to}` : op.path,
+        ),
+      },
     });
 
     // Return the updated package resource bare — same serializer as the GET
@@ -1435,26 +1431,17 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       asRecord(detail.manifest),
       asRecord(existing.manifest),
     );
-    // Row and stored tree in ONE read-modify-write, under the package's advisory
-    // lock — the same helper the package `PUT` and the file-tree `PATCH` take.
-    // Restoring is a whole-tree replacement: the version's entries ARE the draft
-    // afterwards, so `mutate` ignores what it is handed. A version that stored
-    // no entries leaves the tree alone rather than emptying it — the row is
-    // still restored, which is what the version carries in that case.
-    //
-    // One write, not two, because the gap between two is a lost update with no
-    // symptom: a `PATCH` that takes the lock between a committed row and a
-    // later upload reads the bumped `lock_version`, writes its file into the
-    // pre-restore tree, answers `200` — and the upload replaces that tree
-    // wholesale. Inside the helper the restore holds the lock for both halves,
-    // so such a `PATCH` runs strictly before or strictly after it.
+    // Restores share the writer lock and replace the complete tree when the
+    // version has one. Legacy metadata-only versions leave existing files alone.
     await mutatePackageDraftFiles(
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
         precondition: { lockVersion: existing.lock_version },
         manifest: asRecord(detail.manifest),
         draftContent: content,
-        mutate: (files) => detail.content ?? files,
+        ...(detail.content
+          ? { replace: detail.content }
+          : { mutate: (files: Record<string, Uint8Array>) => files }),
       },
     );
 
@@ -1660,56 +1647,6 @@ function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string>
 // ═══════════════════════════════════════════════
 
 /**
- * Resolve the package a `PATCH .../files` targets, and settle every gate that
- * does not depend on the request body — the write counterpart of
- * {@link loadFileExplorerPackage}.
- *
- * The two loaders ask different questions, so they are two functions:
- *
- * - The read side gates on VISIBILITY (`hasPackageAccess`: a system package, or
- *   one installed in THIS space), because a reader reaches a package through a
- *   space.
- * - The write side gates on AUTHORITY OVER A SHARED DRAFT, exactly as the
- *   package `PUT` does — the `requirePackageInOrg()` middleware, i.e.
- *   {@link assertPackageMutationAccess}. A draft tree is one object behind every
- *   installation of the package, so editing it requires `<type>:write` in EVERY
- *   space where it is installed (403 otherwise), and reaching it at all requires
- *   that permission in at least one of them, or org-catalog authority over a
- *   package installed nowhere (404 otherwise). Gating on org ownership alone
- *   would let a builder in space A rewrite a skill that only exists in the
- *   private space B, through the file tree, while the `PUT` that writes the same
- *   tree refuses them.
- *
- * That call settles the row lookup, the `<type>:write` permission and the
- * system-package refusal together, in that order, and hands the row back — which
- * is what makes the RBAC resource knowable at all on a route registered on the
- * router ROOT, where the path names no type. Everything below it depends on the
- * row's `type` and therefore runs after it.
- */
-async function loadDraftFilesWriteTarget(
-  c: Context<AppEnv>,
-): Promise<{ id: string; type: PackageType; orgId: string }> {
-  const pkg = await assertPackageMutationAccess(c, getItemId(c), "write");
-
-  // Every package type is wired into `ROUTE_CONFIGS`; the map stays `Partial`
-  // only so its `?.` readers keep compiling.
-  const rcfg = ROUTE_CONFIGS[pkg.type]!;
-
-  if (!CONFIG_BY_TYPE[pkg.type].draftFilesWritable) {
-    throw new ApiError({
-      status: 400,
-      code: "package_type_not_editable",
-      title: "Package Type Not Editable",
-      detail: `${rcfg.cfg.labelSingular} '${pkg.id}' has files that are authored by importing an archive, not edited through the file tree`,
-    });
-  }
-
-  // `assertPackageMutationAccess` refuses a row whose org is not the caller's,
-  // so the org this write targets is the request's own.
-  return { id: pkg.id, type: pkg.type, orgId: c.get("orgId") };
-}
-
-/**
  * `PackageFileWriteError` → the HTTP answer, in one place.
  *
  * `applyFileOperations` answers WHAT is wrong with a batch and deliberately
@@ -1723,6 +1660,7 @@ const DRAFT_FILE_WRITE_PROBLEM: Record<
   PackageFileWriteErrorCode,
   { status: number; title: string }
 > = {
+  invalid_bundle: { status: 400, title: "Invalid Bundle" },
   invalid_path: { status: 400, title: "Invalid Request" },
   reserved_entry: { status: 400, title: "Invalid Request" },
   content_entry_immovable: { status: 400, title: "Invalid Request" },
@@ -1777,7 +1715,7 @@ function decodeOperationBytes(value: string, index: number): Uint8Array {
  * decoded, and everything below sees one shape.
  */
 function toDraftFileOperations(
-  operations: z.infer<typeof patchPackageFilesSchema>["operations"],
+  operations: z.infer<typeof packageFileOperationsSchema>["operations"],
 ): PackageFileOperation[] {
   const encoder = new TextEncoder();
   return operations.map((op, index) => {
@@ -2213,15 +2151,6 @@ export function createPackagesRouter() {
           }
         }
       }
-
-      // Overwrite the existing package's draft manifest and content with the
-      // imported archive's. Through `reinstallOrgItem` rather than a bare
-      // `UPDATE`: it bumps `lock_version`, so an editor tab holding the token
-      // from before this import is told its save is stale (409) instead of
-      // writing over the freshly imported draft with the one it had on screen.
-      // Last-writer-wins on the token is the right optimism here — an import IS
-      // the later writer, by definition.
-      await reinstallOrgItem(orgId, packageId, { manifest, content });
     } else {
       // New package — insert
       const cfg = ROUTE_CONFIGS[packageType as PackageType]?.cfg;
@@ -2253,8 +2182,11 @@ export function createPackagesRouter() {
         content,
         files,
         zipBuffer: artifact,
+        draftManifest: manifest as Record<string, unknown>,
+        lockVersion: force ? undefined : existing?.lockVersion,
       });
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       const message = getErrorMessage(err);
       logger.error("Post-install failed", { packageId, packageType, error: message });
       throw new ApiError({
@@ -2543,70 +2475,6 @@ export function createPackagesRouter() {
         "Content-Length": String(bytes.byteLength),
       },
     });
-  });
-
-  // PATCH /api/packages/:scope/:name/files — one atomic batch of edits to the
-  // package's DRAFT tree. Registered here for the same reason as the two GETs
-  // above: the literal `files` segment must be matched before `/:version` can
-  // capture it as a version spec.
-  //
-  // Draft only, and there is no `?version`: a published version is immutable,
-  // so the way to change what a version holds is to publish another one.
-  router.patch(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(30), async (c) => {
-    const target = await loadDraftFilesWriteTarget(c);
-
-    // The tree the caller is editing has to be the tree they read. An absent
-    // validator is refused rather than defaulted to "overwrite": two editor tabs
-    // on one skill is the ordinary case, and a blind write is how one of them
-    // loses a file with nothing to show for it. `*` is the explicit opt-out.
-    const ifMatch = c.req.header("if-match")?.trim();
-    if (!ifMatch) {
-      throw preconditionRequired(
-        "Send `If-Match` with the ETag from `GET /api/packages/{scope}/{name}/files`, or `*` to write over whatever the tree currently holds.",
-      );
-    }
-
-    const body = await readJsonBody(c, patchPackageFilesSchema);
-    const operations = toDraftFileOperations(body.operations);
-
-    let written;
-    try {
-      written = await mutatePackageDraftFiles(
-        { id: target.id, type: target.type, orgId: target.orgId },
-        {
-          precondition: { etag: ifMatch },
-          mutate: (files) => applyFileOperations(files, operations, { type: target.type }),
-        },
-      );
-    } catch (err) {
-      if (err instanceof PackageFileWriteError) throw draftFileWriteApiError(err);
-      throw err;
-    }
-
-    // The paths, never the bytes. "Three files changed" is not an audit trail
-    // of a route whose whole purpose is deleting and renaming files: the
-    // question an operator asks afterwards is WHICH entry disappeared, and the
-    // tree the write replaced no longer exists anywhere to answer it. Contents
-    // stay out — they are the package itself, and its versions hold them.
-    await recordAuditFromContext(c, {
-      action: "package.updated",
-      resourceType: "package",
-      resourceId: target.id,
-      after: {
-        type: target.type,
-        fileOperations: operations.length,
-        filePaths: operations.map((op) => (op.op === "move" ? `${op.from} → ${op.to}` : op.path)),
-      },
-    });
-
-    // Exactly what a subsequent `GET .../files` reports — body, ETag and cache
-    // policy — so the client replaces its cached index with this response
-    // instead of re-reading a tree it just wrote.
-    return c.json(
-      { entries: buildFileIndex(written.snapshot), lock_version: written.lockVersion },
-      200,
-      fileCacheHeaders(indexEtag(written.snapshot.snapshotId), false),
-    );
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP

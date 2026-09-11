@@ -303,37 +303,6 @@ export function conflict(
   });
 }
 
-/**
- * 412 (RFC 9110 §15.5.13) — the request carried an `If-Match` validator that no
- * longer matches the resource's current representation, so the write was not
- * applied. Distinct from {@link conflict}: a 409 means the caller's optimistic
- * token was stale, a 412 means the caller's CONDITION was evaluated and failed,
- * and a client that sent a validator branches on it to re-read and retry.
- */
-export function preconditionFailed(detail: string): ApiError {
-  return new ApiError({
-    status: 412,
-    code: "precondition_failed",
-    title: "Precondition Failed",
-    detail,
-  });
-}
-
-/**
- * 428 (RFC 6585 §3) — the request omitted a validator the resource REQUIRES on
- * a write. Distinct from {@link preconditionFailed}: a 412 means a condition
- * was evaluated and failed, a 428 means none was supplied at all, so the server
- * refuses to apply a blind overwrite. The detail names the header to send.
- */
-export function preconditionRequired(detail: string): ApiError {
-  return new ApiError({
-    status: 428,
-    code: "precondition_required",
-    title: "Precondition Required",
-    detail,
-  });
-}
-
 export function gone(code: string, detail: string): ApiError {
   return new ApiError({
     status: 410,

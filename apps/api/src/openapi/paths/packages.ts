@@ -63,6 +63,15 @@ function versionRestoreResponseSchema(detailRef: string) {
   };
 }
 
+const fileOperationsProperty = {
+  type: "array",
+  minItems: 1,
+  maxItems: 200,
+  items: { $ref: "#/components/schemas/PackageFileWriteOperation" },
+  description:
+    "Ordered file edits saved with the manifest under the same lock_version. A stale draft returns 409 without applying the batch. All package types support this field. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations.",
+} as const;
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -463,147 +472,6 @@ export const packagesPaths = {
             },
           },
         },
-      },
-    },
-    patch: {
-      operationId: "patchPackageFiles",
-      tags: ["Packages"],
-      summary: "Write, delete and move files in a package's draft tree",
-      description:
-        "Applies a batch of edits to the package's DRAFT file tree — the tree `GET` returns with no " +
-        "`version` — in order, and persists it once. A rename is therefore one request rather than a " +
-        "delete and a create that can half-fail, and the whole batch is validated against the " +
-        "RESULTING tree, so an intermediate state is never stored. Draft only: a published version is " +
-        "immutable, so changing what a version holds means publishing another one.\n\n" +
-        "`If-Match` is REQUIRED (`428` without it). It carries the ETag the file index served, which " +
-        'is a content digest of the tree: the condition states "the tree I am modifying is the tree I ' +
-        'read", and a `412` means someone else wrote in between — re-read the index and reapply. ' +
-        "`*` matches whatever is currently there, for a scripted caller that means to overwrite. " +
-        "Writers of one package are serialized server-side, so two concurrent batches queue instead " +
-        "of losing each other's files.\n\n" +
-        "`manifest.json` is not writable, deletable or movable here (`400`): it is a projection of " +
-        "the package's manifest, authored and validated through " +
-        "`PUT /api/packages/{type}/{scope}/{name}`. The type's content entry (`SKILL.md` for a skill, " +
-        "`prompt.md` for an agent) can be written but not deleted or renamed — a package of that type " +
-        "is defined by having it — and a written one must still parse (a skill's YAML frontmatter " +
-        "with `name` and `description`, else `400`). A `move` never overwrites its destination. " +
-        "Sizes: at most 1 MiB per file written here (larger binaries go through ZIP import), 10 000 " +
-        "entries and 50 MB decompressed for the whole tree, and at most 200 operations per request.\n\n" +
-        "Only `agent` and `skill` packages are editable this way; an `integration` or `mcp-server` " +
-        "carries an executable bundle whose invariants are enforced at import, and answers " +
-        "`400 package_type_not_editable`. Requires the resolved package's `<type>:write`. " +
-        "Rate-limited to 30 requests/minute.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "If-Match",
-          in: "header",
-          required: true,
-          description:
-            "The `ETag` the file index served for this package's draft, or `*` to write over the current tree unconditionally. Absent: `428`. Present and no longer current: `412`.",
-          schema: { type: "string" },
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/PackageFileWriteRequest" },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "The draft tree after the batch",
-          headers: {
-            ...STD_RESPONSE_HEADERS,
-            ETag: {
-              description:
-                'Strong entity-tag of the NEW index representation (`"i-…"`) — the validator to present on the next write.',
-              schema: { type: "string" },
-            },
-            "Cache-Control": {
-              description: "Always `private, no-cache`, as on the file index.",
-              schema: { type: "string" },
-            },
-            Vary: {
-              description: "Always `X-Org-Id, X-Space-Id`, as on the file index.",
-              schema: { type: "string" },
-            },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/PackageFileWriteResult" },
-            },
-          },
-        },
-        "400": {
-          description:
-            "The batch was refused and NEITHER the stored artifact nor the package row moved. " +
-            "`invalid_path` — a path the archive cannot carry (a `..` or empty segment, a leading " +
-            "or trailing `/`, a `\\`, a `__MACOSX/` prefix). `reserved_entry` — the operation names " +
-            "`manifest.json`. `content_entry_immovable` — it deletes or renames the type's content " +
-            "entry. `path_conflict` — a move onto a taken destination, or a path that would be both " +
-            "a file and a directory in the resulting tree. `package_type_not_editable` — this " +
-            "package type's files are authored by importing an archive. `validation_failed` — the " +
-            "body's shape (a `write` carrying both `text` and `bytes_base64`, or neither), or a " +
-            "written content entry that does not parse. `invalid_request` — a `bytes_base64` " +
-            "payload that is not standard base64. RFC 9457 problem+json.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": {
-          description:
-            "The package is not in the caller's organization, or a `delete` / `move` names a path " +
-            "the tree does not hold (`not_found`). RFC 9457 problem+json.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "412": {
-          description:
-            "`precondition_failed` — the `If-Match` validator no longer names this package's tree, " +
-            "so someone wrote between the read and this request and nothing was applied. Re-read " +
-            "`GET .../files` and reapply the edits on top of what it returns.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "413": {
-          description:
-            "`file_too_large` — one written file exceeds 1 MiB; import the package as a ZIP for " +
-            "larger binaries. Or `tree_too_large` — the resulting tree would exceed 10 000 entries " +
-            "or the 50 MB decompressed ceiling. Both refuse the whole batch. RFC 9457 problem+json.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
-        "428": {
-          description:
-            "`precondition_required` — no `If-Match` header. This resource refuses a blind " +
-            "overwrite: send the ETag the file index served, or `*` to overwrite deliberately.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -1201,6 +1069,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -1226,6 +1095,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {
@@ -1402,6 +1283,7 @@ export const packagesPaths = {
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -1423,6 +1305,12 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "409": {
           description:
             "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
@@ -2149,6 +2037,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -2170,6 +2059,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {
@@ -2576,6 +2477,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -2597,6 +2499,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {

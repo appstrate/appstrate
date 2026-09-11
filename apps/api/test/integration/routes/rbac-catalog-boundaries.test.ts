@@ -91,17 +91,21 @@ const library = async (h: Record<string, string>) => {
 const deleteSkill = (h: Record<string, string>) =>
   app.request(`/api/packages/skills/${ID}`, { method: "DELETE", headers: h });
 
-/**
- * One draft-tree write. `If-Match: *` and a well-formed body so the answer can
- * only be the authority gate: the route settles authorization before it looks
- * at the validator (428) or the body (400).
- */
-const patchFiles = (h: Record<string, string>) =>
-  app.request(`/api/packages/${ID}/files`, {
-    method: "PATCH",
-    headers: { ...h, "Content-Type": "application/json", "If-Match": "*" },
-    body: JSON.stringify({ operations: [{ op: "write", path: "notes.md", text: "x" }] }),
+/** Use the current token so these cases isolate the authority gate. */
+const saveFiles = async (h: Record<string, string>) => {
+  const [row] = await db
+    .select({ lockVersion: packages.lockVersion })
+    .from(packages)
+    .where(eq(packages.id, ID));
+  return app.request(`/api/packages/skills/${ID}`, {
+    method: "PUT",
+    headers: { ...h, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      lock_version: row!.lockVersion,
+      operations: [{ op: "write", path: "notes.md", text: "x" }],
+    }),
   });
+};
 
 /** Every route whose authority is the package's, with the init each one needs. */
 function routesUnderAuthority(): [
@@ -120,11 +124,14 @@ function routesUnderAuthority(): [
     ["POST", `/api/packages/skills/${ID}/versions/0.1.0/restore`],
     ["DELETE", `/api/packages/skills/${ID}/versions/0.1.0`],
     [
-      "PATCH",
-      `/api/packages/${ID}/files`,
+      "PUT",
+      `/api/packages/skills/${ID}`,
       {
-        headers: { "Content-Type": "application/json", "If-Match": "*" },
-        body: JSON.stringify({ operations: [{ op: "write", path: "notes.md", text: "x" }] }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lock_version: 0,
+          operations: [{ op: "write", path: "notes.md", text: "x" }],
+        }),
       },
     ],
   ];
@@ -274,14 +281,14 @@ describe("shared package authority", () => {
     await installIn(ctx.defaultSpaceId);
     await installIn(privateId);
     await seedSpaceMember({ spaceId: privateId, userId: guestId, presetRole: "viewer" });
-    expect((await patchFiles(headers)).status).toBe(403);
+    expect((await saveFiles(headers)).status).toBe(403);
     await expectSecretUntouched();
 
     await db
       .update(spaceMembers)
       .set({ presetRole: "builder" })
       .where(eq(spaceMembers.spaceId, privateId));
-    expect((await patchFiles(headers)).status).toBe(200);
+    expect((await saveFiles(headers)).status).toBe(200);
   });
 
   it("requires deletion authority in every shared installation, not only visibility", async () => {

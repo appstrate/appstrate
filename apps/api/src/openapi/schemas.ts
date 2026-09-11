@@ -883,38 +883,6 @@ export const schemas = {
       },
     },
   },
-  PackageFileWriteRequest: {
-    type: "object",
-    required: ["operations"],
-    additionalProperties: false,
-    properties: {
-      operations: {
-        type: "array",
-        minItems: 1,
-        maxItems: 200,
-        items: { $ref: "#/components/schemas/PackageFileWriteOperation" },
-        description:
-          "Edits to apply, in order, as one atomic batch. The whole batch is validated against the RESULTING tree and persisted once, so an intermediate state (a tree momentarily without its content entry, halfway through a move) is never stored and never visible.",
-      },
-    },
-  },
-  PackageFileWriteResult: {
-    type: "object",
-    required: ["entries", "lock_version"],
-    properties: {
-      entries: {
-        type: "array",
-        items: { $ref: "#/components/schemas/PackageFileEntry" },
-        description:
-          "The draft tree after the batch — byte-for-byte what `GET /api/packages/{scope}/{name}/files` now reports, so the client replaces its cached index with this instead of re-reading.",
-      },
-      lock_version: {
-        type: "integer",
-        description:
-          "The package row's new optimistic-lock token. Every write bumps it, so a `PUT /api/packages/{type}/{scope}/{name}` that still carries the pre-batch value is refused with `409`.",
-      },
-    },
-  },
   Run: {
     type: "object",
     // Every field a run response carries unconditionally. The list/detail/

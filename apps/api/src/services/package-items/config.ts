@@ -28,20 +28,6 @@ export interface PackageTypeConfig {
   /** Producer-side check for this type's authored content, run by every path that WRITES it. */
   validateContent?: (content: string) => CompanionFileViolation | null;
   /**
-   * Whether `PATCH /api/packages/{scope}/{name}/files` may write, delete and
-   * move entries in this type's draft tree; a `PATCH` on a type that says `false`
-   * is refused with `400 package_type_not_editable`.
-   *
-   * `agent` and `skill` say `true`: their packages are an authored directory —
-   * a prompt or a `SKILL.md` plus whatever scripts, references and assets sit
-   * beside it — and the editor is the tool that writes it. `integration` and
-   * `mcp-server` say `false`: their packages carry an executable bundle whose
-   * invariants `parsePackageZip` enforces at import and publish, and opening
-   * arbitrary per-file writes on them is a decision of its own rather than a
-   * consequence of this one.
-   */
-  draftFilesWritable: boolean;
-  /**
    * Whether `manifest.json` is a STORED file of this type's archive.
    *
    * For `agent` / `skill` it is not: the row owns the manifest, the file
@@ -67,7 +53,6 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     type: "agent",
     storageFolder: "agents",
     labelSingular: "Agent",
-    draftFilesWritable: true,
     manifestIsStoredFile: false,
   },
   skill: {
@@ -75,7 +60,6 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     storageFolder: "skills",
     labelSingular: "Skill",
     validateContent: checkSkillMarkdown,
-    draftFilesWritable: true,
     manifestIsStoredFile: false,
   },
   // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
@@ -83,7 +67,6 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     type: "integration",
     storageFolder: "integrations",
     labelSingular: "Integration",
-    draftFilesWritable: false,
     manifestIsStoredFile: true,
   },
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an
@@ -92,7 +75,6 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     type: "mcp-server",
     storageFolder: "mcp-servers",
     labelSingular: "MCP Server",
-    draftFilesWritable: false,
     manifestIsStoredFile: true,
   },
 };

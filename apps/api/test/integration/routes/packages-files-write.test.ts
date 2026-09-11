@@ -1,18 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The draft-tree write route:
- *   PATCH /api/packages/{scope}/{name}/files
- *
- * The guarantees worth pinning are the ones a naive implementation loses. A
- * batch is ATOMIC — every refusal below asserts that neither the stored ZIP nor
- * `packages.draft_content` moved, because a partially applied rename is the one
- * outcome an author cannot undo. The tree this route writes is the SAME tree the
- * explorer reads, the publish freezes and a draft run mounts, so the write is
- * followed through all three. And the concurrency story is two guards over one
- * row: the `PUT` bumps `lock_version`, this route matches the index `ETag`, and
- * a stale tab must get a number rather than a silent overwrite.
- */
+/** One manifest/file update, one optimistic token, all package types. */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
@@ -20,6 +8,7 @@ import { auditEvents, packages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { seedPackage, seedInstalledPackage, seedApiKey } from "../../helpers/seed.ts";
 import {
   uploadPackageFiles,
@@ -28,6 +17,13 @@ import {
 } from "../../../src/services/package-items/storage.ts";
 import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
 import { DraftPackageCatalog } from "../../../src/services/run-launcher/draft-package-catalog.ts";
+import { uploadFile } from "@appstrate/db/storage";
+import {
+  CONFIG_BY_TYPE,
+  PACKAGE_ITEMS_BUCKET,
+  packageItemKey,
+} from "../../../src/services/package-items/config.ts";
+import { zipArtifact } from "@appstrate/core/zip";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 
 const app = getTestApp();
@@ -65,7 +61,7 @@ function base64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
 }
 
-describe("PATCH /api/packages/{scope}/{name}/files", () => {
+describe("PUT /api/packages/{type}/{scope}/{name}", () => {
   let ctx: TestContext;
 
   /** The package's stored ZIP, as the next reader would unzip it. */
@@ -102,21 +98,38 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     return new Uint8Array(await res.arrayBuffer());
   }
 
-  async function patchFiles(
+  async function saveFiles(
     operations: WriteOperation[],
-    opts: { etag?: string | null; id?: string; headers?: Record<string, string> } = {},
+    opts: {
+      lockVersion?: number | null;
+      id?: string;
+      headers?: Record<string, string>;
+      manifest?: Record<string, unknown>;
+    } = {},
   ): Promise<Response> {
     const id = opts.id ?? SKILL_ID;
-    const etag = opts.etag === undefined ? (await listFiles(id)).etag : opts.etag;
-    const headers: Record<string, string> = {
-      ...(opts.headers ?? authHeaders(ctx)),
-      "Content-Type": "application/json",
-    };
-    if (etag !== null) headers["If-Match"] = etag;
-    return app.request(`/api/packages/${id}/files`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({ operations }),
+    const [row] = await db
+      .select({ type: packages.type, lockVersion: packages.lockVersion })
+      .from(packages)
+      .where(eq(packages.id, id))
+      .limit(1);
+    const path =
+      row?.type === "mcp-server"
+        ? "mcp-servers"
+        : row?.type === "integration"
+          ? "integrations"
+          : row?.type === "agent"
+            ? "agents"
+            : "skills";
+    const version = opts.lockVersion === undefined ? row?.lockVersion : opts.lockVersion;
+    return app.request(`/api/packages/${path}/${id}`, {
+      method: "PUT",
+      headers: { ...(opts.headers ?? authHeaders(ctx)), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operations,
+        ...(version !== null ? { lock_version: version } : {}),
+        ...(opts.manifest ? { manifest: opts.manifest } : {}),
+      }),
     });
   }
 
@@ -143,11 +156,171 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     });
   });
 
+  describe("the shared draft contract", () => {
+    for (const type of ["agent", "skill", "integration", "mcp-server"] as const) {
+      it(`saves a ${type}'s manifest and files together with one lock increment`, async () => {
+        const id = type === "skill" ? SKILL_ID : `@fw/edit-${type}`;
+        const manifest: Record<string, unknown> =
+          type === "mcp-server"
+            ? mcpServerManifest({ name: id })
+            : type === "integration"
+              ? { ...apiIntegrationManifest({ name: id, auths: { api_key: { type: "api_key" } } }) }
+              : { ...skillManifest(), name: id, type };
+        const folder = CONFIG_BY_TYPE[type].storageFolder;
+        if (type !== "skill") {
+          await seedPackage({
+            id,
+            orgId: ctx.orgId,
+            type,
+            createdBy: ctx.user.id,
+            draftManifest: manifest,
+            draftContent: type === "agent" ? "Follow the instructions." : "",
+          });
+          await seedInstalledPackage(ctx.defaultSpaceId, id);
+          await uploadPackageFiles(
+            folder,
+            ctx.orgId,
+            id,
+            type === "mcp-server"
+              ? {
+                  "main.js": encoder.encode("export {};"),
+                  "manifest.json": encoder.encode(JSON.stringify(manifest)),
+                }
+              : {},
+          );
+        }
+        const before = await packageRow(id);
+        const res = await saveFiles([{ op: "write", path: "notes.md", text: "Shared editor" }], {
+          id,
+          manifest: { ...manifest, description: "Updated metadata" },
+          lockVersion: before.lockVersion,
+        });
+        expect(res.status).toBe(200);
+        const saved = (await res.json()) as {
+          lock_version: number;
+          manifest: { description: string };
+        };
+        expect(saved.lock_version).toBe(before.lockVersion + 1);
+        expect(saved.manifest.description).toBe("Updated metadata");
+        expect(decoder.decode(await fileBytes("notes.md", id))).toBe("Shared editor");
+      });
+    }
+
+    it("refuses a broken MCP entry point but accepts its rename with the matching manifest", async () => {
+      const id = "@fw/server";
+      const manifest = mcpServerManifest({ name: id });
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "mcp-server",
+        createdBy: ctx.user.id,
+        draftManifest: manifest,
+      });
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await uploadPackageFiles("mcp-servers", ctx.orgId, id, {
+        "main.js": encoder.encode("export {};"),
+        "manifest.json": encoder.encode(JSON.stringify(manifest)),
+      });
+      const before = await packageRow(id);
+      const refused = await saveFiles([{ op: "move", from: "main.js", to: "next.js" }], {
+        id,
+        manifest: { ...manifest, description: "Must not persist" },
+      });
+      expect(refused.status).toBe(400);
+      expect(await packageRow(id)).toEqual(before);
+      expect(decoder.decode(await fileBytes("main.js", id))).toBe("export {};");
+      const accepted = await saveFiles([{ op: "move", from: "main.js", to: "next.js" }], {
+        id,
+        manifest: mcpServerManifest({ name: id, entryPoint: "next.js" }),
+      });
+      expect(accepted.status).toBe(200);
+      expect(decoder.decode(await fileBytes("next.js", id))).toBe("export {};");
+    });
+
+    it("can create and remove an integration's optional companion without resurrecting it", async () => {
+      const id = "@fw/integration";
+      const manifest = {
+        ...apiIntegrationManifest({ name: id, auths: { api_key: { type: "api_key" } } }),
+      };
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "integration",
+        createdBy: ctx.user.id,
+        draftManifest: manifest,
+      });
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      expect(
+        (await saveFiles([{ op: "write", path: "INTEGRATION.md", text: "Companion" }], { id }))
+          .status,
+      ).toBe(200);
+      expect((await packageRow(id)).draftContent).toBe("Companion");
+      expect((await saveFiles([{ op: "delete", path: "INTEGRATION.md" }], { id })).status).toBe(
+        200,
+      );
+      expect((await packageRow(id)).draftContent).toBe("");
+      expect((await listFiles(id)).entries.map((entry) => entry.path)).not.toContain(
+        "INTEGRATION.md",
+      );
+    });
+
+    it("accepts exactly one of two simultaneous saves made from the same draft", async () => {
+      const before = await packageRow();
+      const answers = await Promise.all(
+        ["first", "second"].map((text) =>
+          saveFiles([{ op: "write", path: "notes.md", text }], {
+            lockVersion: before.lockVersion,
+            manifest: { ...skillManifest(), description: text },
+          }),
+        ),
+      );
+      expect(answers.map((response) => response.status).sort()).toEqual([200, 409]);
+      const winner = (await answers.find((response) => response.status === 200)!.json()) as {
+        manifest: { description: string };
+      };
+      expect(decoder.decode(await fileBytes("notes.md"))).toBe(winner.manifest.description);
+      expect((await packageRow()).lockVersion).toBe(before.lockVersion + 1);
+    });
+  });
+
+  it("can repair invalid existing content through a file operation", async () => {
+    await db
+      .update(packages)
+      .set({ draftContent: "Legacy text without frontmatter" })
+      .where(eq(packages.id, SKILL_ID));
+    const response = await saveFiles([{ op: "write", path: "SKILL.md", text: SKILL_MD }]);
+    expect(response.status).toBe(200);
+    expect((await packageRow()).draftContent).toBe(SKILL_MD);
+  });
+
+  it("force import repairs a corrupt old ZIP without reading it", async () => {
+    await uploadFile(
+      PACKAGE_ITEMS_BUCKET,
+      packageItemKey("skills", ctx.orgId, SKILL_ID),
+      encoder.encode("broken zip"),
+    );
+    const zip = zipArtifact({
+      "manifest.json": encoder.encode(JSON.stringify(skillManifest())),
+      "SKILL.md": encoder.encode(SKILL_MD),
+      "repaired.md": encoder.encode("Recovered"),
+    });
+    const body = new FormData();
+    body.set("file", new Blob([zip]), "repaired.afps");
+    body.set("force", "true");
+    const response = await app.request("/api/packages/import?force=true", {
+      method: "POST",
+      headers: authHeaders(ctx),
+      body,
+    });
+    expect(response.status).toBe(201);
+    expect(decoder.decode(await fileBytes("repaired.md"))).toBe("Recovered");
+  });
+
   // ─── Happy path ────────────────────────────────────────────────────────────
 
   describe("applying a batch", () => {
     it("writes a text file, and the index lists it with its content", async () => {
-      const res = await patchFiles([{ op: "write", path: "docs/notes.md", text: "# Notes" }]);
+      const res = await saveFiles([{ op: "write", path: "docs/notes.md", text: "# Notes" }]);
       expect(res.status).toBe(200);
 
       const { entries } = await listFiles();
@@ -157,7 +330,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
 
     it("round-trips bytes_base64 byte-exact through the content route", async () => {
       const bytes = new Uint8Array([0, 127, 128, 255, 10, 13, 0]);
-      const res = await patchFiles([
+      const res = await saveFiles([
         { op: "write", path: "assets/blob.bin", bytes_base64: base64(bytes) },
       ]);
       expect(res.status).toBe(200);
@@ -168,7 +341,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     });
 
     it("deletes a file", async () => {
-      const res = await patchFiles([{ op: "delete", path: "scripts/run.py" }]);
+      const res = await saveFiles([{ op: "delete", path: "scripts/run.py" }]);
       expect(res.status).toBe(200);
 
       expect(Object.keys(await storedTree())).not.toContain("scripts/run.py");
@@ -177,7 +350,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     });
 
     it("moves a file, carrying its bytes to the new path", async () => {
-      const res = await patchFiles([{ op: "move", from: "scripts/run.py", to: "scripts/main.py" }]);
+      const res = await saveFiles([{ op: "move", from: "scripts/run.py", to: "scripts/main.py" }]);
       expect(res.status).toBe(200);
 
       const stored = await storedTree();
@@ -186,15 +359,15 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     });
 
     it("applies write, binary write, delete and move as one batch, and answers with the new tree", async () => {
-      const before = await listFiles();
-      const res = await patchFiles(
+      const before = await packageRow();
+      const res = await saveFiles(
         [
           { op: "write", path: "docs/notes.md", text: "# Notes" },
           { op: "write", path: "assets/icon.bin", bytes_base64: base64(new Uint8Array([9, 8])) },
           { op: "delete", path: "assets/logo.bin" },
           { op: "move", from: "scripts/run.py", to: "scripts/main.py" },
         ],
-        { etag: before.etag },
+        { lockVersion: before.lockVersion },
       );
       expect(res.status).toBe(200);
       const body = (await res.json()) as { entries: FileEntry[]; lock_version: number };
@@ -207,12 +380,6 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
         "manifest.json",
         "scripts/main.py",
       ]);
-      // The response IS the next GET, so a client replaces its cache with it
-      // rather than re-reading a tree it just wrote.
-      expect(body.entries).toEqual(after.entries);
-      expect(res.headers.get("ETag")).toBe(after.etag);
-      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
-      expect(res.headers.get("Vary")).toBe("X-Org-Id, X-Space-Id");
       expect(body.lock_version).toBe((await packageRow()).lockVersion);
     });
   });
@@ -222,7 +389,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
   describe("what the write reaches", () => {
     it("rewrites draft_content when the batch writes SKILL.md, so the detail route serves it", async () => {
       const next = "---\nname: edit-skill\ndescription: An edited skill.\n---\n\nRewritten.";
-      expect((await patchFiles([{ op: "write", path: "SKILL.md", text: next }])).status).toBe(200);
+      expect((await saveFiles([{ op: "write", path: "SKILL.md", text: next }])).status).toBe(200);
 
       expect((await packageRow()).draftContent).toBe(next);
       const detail = await app.request(`/api/packages/skills/${SKILL_ID}`, {
@@ -234,7 +401,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
 
     it("freezes a file added by the batch into the next published version", async () => {
       expect(
-        (await patchFiles([{ op: "write", path: "references/data.md", text: "reference" }])).status,
+        (await saveFiles([{ op: "write", path: "references/data.md", text: "reference" }])).status,
       ).toBe(200);
 
       const published = await app.request(`/api/packages/skills/${SKILL_ID}/versions`, {
@@ -255,7 +422,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     it("records the paths the batch touched in the audit trail", async () => {
       expect(
         (
-          await patchFiles([
+          await saveFiles([
             { op: "write", path: "docs/notes.md", text: "# Notes" },
             { op: "move", from: "scripts/run.py", to: "scripts/main.py" },
             { op: "delete", path: "assets/logo.bin" },
@@ -273,7 +440,6 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       // were in no longer exists anywhere to answer that.
       expect(audit!.after).toMatchObject({
         type: "skill",
-        fileOperations: 3,
         filePaths: ["docs/notes.md", "scripts/run.py \u2192 scripts/main.py", "assets/logo.bin"],
       });
       // The bytes are the package itself and stay out of the trail.
@@ -282,7 +448,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
 
     it("hands a file added by the batch to a draft run's bundle catalog", async () => {
       expect(
-        (await patchFiles([{ op: "write", path: "scripts/helper.py", text: "print(2)" }])).status,
+        (await saveFiles([{ op: "write", path: "scripts/helper.py", text: "print(2)" }])).status,
       ).toBe(200);
 
       // The catalog a draft run resolves its skills through — the same code path
@@ -316,7 +482,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
         "docs/./notes.md",
         "C:/notes.md",
       ]) {
-        const res = await patchFiles([{ op: "write", path, text: "x" }]);
+        const res = await saveFiles([{ op: "write", path, text: "x" }]);
         expect(`${path}: ${res.status}`).toBe(`${path}: 400`);
         expect(`${path}: ${(await problem(res)).code}`).toBe(`${path}: invalid_path`);
         await expectNothingWritten();
@@ -324,28 +490,28 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     });
 
     it("refuses to write manifest.json, which the package PUT owns", async () => {
-      const res = await patchFiles([{ op: "write", path: "manifest.json", text: "{}" }]);
+      const res = await saveFiles([{ op: "write", path: "manifest.json", text: "{}" }]);
       expect(res.status).toBe(400);
       expect((await problem(res)).code).toBe("reserved_entry");
       await expectNothingWritten();
     });
 
     it("refuses to delete the content entry a skill is defined by", async () => {
-      const res = await patchFiles([{ op: "delete", path: "SKILL.md" }]);
+      const res = await saveFiles([{ op: "delete", path: "SKILL.md" }]);
       expect(res.status).toBe(400);
       expect((await problem(res)).code).toBe("content_entry_immovable");
       await expectNothingWritten();
     });
 
     it("refuses to move the content entry away", async () => {
-      const res = await patchFiles([{ op: "move", from: "SKILL.md", to: "docs/SKILL.md" }]);
+      const res = await saveFiles([{ op: "move", from: "SKILL.md", to: "docs/SKILL.md" }]);
       expect(res.status).toBe(400);
       expect((await problem(res)).code).toBe("content_entry_immovable");
       await expectNothingWritten();
     });
 
     it("refuses a move onto a path that is already taken", async () => {
-      const res = await patchFiles([{ op: "move", from: "scripts/run.py", to: "assets/logo.bin" }]);
+      const res = await saveFiles([{ op: "move", from: "scripts/run.py", to: "assets/logo.bin" }]);
       expect(res.status).toBe(400);
       expect((await problem(res)).code).toBe("path_conflict");
       await expectNothingWritten();
@@ -355,23 +521,21 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       // `skill.md` beside `SKILL.md` is two entries in a ZIP and ONE file once
       // `skills sync` writes it to APFS — where `skill.md` lands last by sort
       // order, so the runtime would load a body this route never gated.
-      const res = await patchFiles([{ op: "write", path: "skill.md", text: "not the real one" }]);
+      const res = await saveFiles([{ op: "write", path: "skill.md", text: "not the real one" }]);
       expect(res.status).toBe(400);
       expect((await problem(res)).code).toBe("path_conflict");
       await expectNothingWritten();
     });
 
     it("refuses a SKILL.md whose frontmatter does not parse", async () => {
-      const res = await patchFiles([
-        { op: "write", path: "SKILL.md", text: "no frontmatter here" },
-      ]);
+      const res = await saveFiles([{ op: "write", path: "SKILL.md", text: "no frontmatter here" }]);
       expect(res.status).toBe(400);
       await expectNothingWritten();
     });
 
     it("refuses a file past the 1 MiB per-file ceiling with 413", async () => {
       const oversized = new Uint8Array(PACKAGE_FILE_INLINE_MAX_BYTES + 1);
-      const res = await patchFiles([
+      const res = await saveFiles([
         { op: "write", path: "assets/big.bin", bytes_base64: base64(oversized) },
       ]);
       expect(res.status).toBe(413);
@@ -385,17 +549,17 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
         path: `docs/n${i}.md`,
         text: "x",
       }));
-      const res = await patchFiles(operations);
+      const res = await saveFiles(operations);
       expect(res.status).toBe(400);
       await expectNothingWritten();
     });
 
     it("refuses a write carrying both text and bytes_base64, and one carrying neither", async () => {
-      const both = await patchFiles([
+      const both = await saveFiles([
         { op: "write", path: "docs/a.md", text: "x", bytes_base64: base64(encoder.encode("y")) },
       ]);
       expect(both.status).toBe(400);
-      const neither = await patchFiles([{ op: "write", path: "docs/a.md" }]);
+      const neither = await saveFiles([{ op: "write", path: "docs/a.md" }]);
       expect(neither.status).toBe(400);
       await expectNothingWritten();
     });
@@ -405,32 +569,14 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       // base64 string can have), and URL-safe — which is a second spelling of
       // the same bytes, not a second encoding this route accepts.
       for (const payload of ["not base64!", "aGVsbG8hZ", "_-_-"]) {
-        const res = await patchFiles([
-          { op: "write", path: "assets/x.bin", bytes_base64: payload },
-        ]);
+        const res = await saveFiles([{ op: "write", path: "assets/x.bin", bytes_base64: payload }]);
         expect(`${payload}: ${res.status}`).toBe(`${payload}: 400`);
       }
       await expectNothingWritten();
     });
 
-    it("refuses a package type whose files are authored by importing an archive", async () => {
-      const mcpId = "@fw/a-server";
-      await seedPackage({
-        id: mcpId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        createdBy: ctx.user.id,
-        draftManifest: { name: mcpId, version: "1.0.0", type: "mcp-server", schema_version: "0.1" },
-      });
-      await seedInstalledPackage(ctx.defaultSpaceId, mcpId);
-
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], { id: mcpId });
-      expect(res.status).toBe(400);
-      expect((await problem(res)).code).toBe("package_type_not_editable");
-    });
-
     it("404s a delete of a path the tree does not hold", async () => {
-      const res = await patchFiles([{ op: "delete", path: "scripts/absent.py" }]);
+      const res = await saveFiles([{ op: "delete", path: "scripts/absent.py" }]);
       expect(res.status).toBe(404);
       expect((await problem(res)).code).toBe("not_found");
       await expectNothingWritten();
@@ -448,34 +594,29 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       });
     }
 
-    it("428s a write that carries no If-Match at all", async () => {
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], { etag: null });
-      expect(res.status).toBe(428);
-      expect((await problem(res)).code).toBe("precondition_required");
+    it("rejects a write without lock_version", async () => {
+      const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
+        lockVersion: null,
+      });
+      expect(res.status).toBe(400);
       expect(Object.keys(await storedTree())).not.toContain("docs/a.md");
     });
 
-    it("412s a write whose If-Match no longer names this tree", async () => {
-      const stale = (await listFiles()).etag;
-      expect((await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }])).status).toBe(200);
+    it("rejects a stale draft token", async () => {
+      const stale = (await packageRow()).lockVersion;
+      expect((await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }])).status).toBe(200);
 
-      const res = await patchFiles([{ op: "write", path: "docs/b.md", text: "y" }], {
-        etag: stale,
+      const res = await saveFiles([{ op: "write", path: "docs/b.md", text: "y" }], {
+        lockVersion: stale,
       });
-      expect(res.status).toBe(412);
-      expect((await problem(res)).code).toBe("precondition_failed");
+      expect(res.status).toBe(409);
+      expect((await problem(res)).code).toBe("conflict");
       expect(Object.keys(await storedTree())).not.toContain("docs/b.md");
-    });
-
-    it("accepts `*` as a deliberate overwrite of whatever is there", async () => {
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], { etag: "*" });
-      expect(res.status).toBe(200);
-      expect(decoder.decode((await storedTree())["docs/a.md"]!)).toBe("x");
     });
 
     it("moves the row's lock_version, so a PUT holding the pre-batch token is refused", async () => {
       const before = (await packageRow()).lockVersion;
-      const patched = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }]);
+      const patched = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }]);
       expect(patched.status).toBe(200);
       const { lock_version } = (await patched.json()) as { lock_version: number };
 
@@ -487,15 +628,15 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       expect(fresh.status).toBe(200);
     });
 
-    it("412s a batch holding the ETag from before a package PUT", async () => {
-      const stale = (await listFiles()).etag;
+    it("rejects file operations after a concurrent manifest save", async () => {
+      const stale = (await packageRow()).lockVersion;
       const next = "---\nname: edit-skill\ndescription: An edited skill.\n---\n\nVia PUT.";
       expect((await putSkill(next, (await packageRow()).lockVersion)).status).toBe(200);
 
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
-        etag: stale,
+      const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
+        lockVersion: stale,
       });
-      expect(res.status).toBe(412);
+      expect(res.status).toBe(409);
       expect(Object.keys(await storedTree())).not.toContain("docs/a.md");
     });
   });
@@ -520,13 +661,13 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
 
     it("replaces row and stored tree together, and moves the row's token", async () => {
       expect(
-        (await patchFiles([{ op: "write", path: "references/data.md", text: "reference" }])).status,
+        (await saveFiles([{ op: "write", path: "references/data.md", text: "reference" }])).status,
       ).toBe(200);
       expect((await publish("1.0.0")).status).toBe(201);
 
       // Draft moves on after the version: one more file, and a rewritten body.
       const rewritten = "---\nname: edit-skill\ndescription: An edited skill.\n---\n\nAfter.";
-      const patched = await patchFiles([
+      const patched = await saveFiles([
         { op: "write", path: "scratch/tmp.md", text: "scratch" },
         { op: "write", path: "SKILL.md", text: rewritten },
       ]);
@@ -567,17 +708,17 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       expect((await publish("1.0.0")).status).toBe(201);
       // The draft has to move past the version, or restoring it is a no-op and
       // the validator below would still be live — proving nothing.
-      expect((await patchFiles([{ op: "write", path: "scratch/tmp.md", text: "t" }])).status).toBe(
+      expect((await saveFiles([{ op: "write", path: "scratch/tmp.md", text: "t" }])).status).toBe(
         200,
       );
-      const stale = (await listFiles()).etag;
+      const stale = (await packageRow()).lockVersion;
       expect((await restore("1.0.0")).status).toBe(200);
       expect(Object.keys(await storedTree())).not.toContain("scratch/tmp.md");
 
-      const res = await patchFiles([{ op: "write", path: "docs/late.md", text: "late" }], {
-        etag: stale,
+      const res = await saveFiles([{ op: "write", path: "docs/late.md", text: "late" }], {
+        lockVersion: stale,
       });
-      expect(res.status).toBe(412);
+      expect(res.status).toBe(409);
       expect(Object.keys(await storedTree())).not.toContain("docs/late.md");
     });
   });
@@ -600,8 +741,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     }
 
     it("403s a credential that can read skills but not write them", async () => {
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
-        etag: "*",
+      const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
         headers: keyHeaders(await keyWith(["skills:read"])),
       });
       expect(res.status).toBe(403);
@@ -609,8 +749,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     });
 
     it("403s a credential holding agents:write but not skills:write — the guard reads the row's type", async () => {
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
-        etag: "*",
+      const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
         headers: keyHeaders(await keyWith(["agents:write", "skills:read"])),
       });
       expect(res.status).toBe(403);
@@ -629,8 +768,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
       });
       await seedInstalledPackage(ctx.defaultSpaceId, foreignId);
 
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
-        etag: "*",
+      const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
         id: foreignId,
       });
       expect(res.status).toBe(404);
@@ -650,8 +788,7 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
         "SKILL.md": encoder.encode(SKILL_MD),
       });
 
-      const res = await patchFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
-        etag: "*",
+      const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
         id: systemId,
       });
       expect(res.status).toBe(403);
@@ -666,9 +803,9 @@ describe("PATCH /api/packages/{scope}/{name}/files", () => {
     });
 
     it("401s without a credential", async () => {
-      const res = await app.request(`/api/packages/${SKILL_ID}/files`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "If-Match": "*" },
+      const res = await app.request(`/api/packages/skills/${SKILL_ID}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operations: [{ op: "write", path: "docs/a.md", text: "x" }] }),
       });
       expect(res.status).toBe(401);

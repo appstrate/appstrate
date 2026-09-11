@@ -285,10 +285,6 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "draft-tree move op; a REQUEST shape, compared against its Zod schema by step 4, not a response",
   PackageFileWriteOperation:
     "draft-tree edit union; a REQUEST shape, compared against its Zod schema by step 4, not a response",
-  PackageFileWriteRequest:
-    "draft-tree edit batch; a REQUEST shape, compared against its Zod schema by step 4, not a response",
-  PackageFileWriteResult:
-    "the draft file index plus the row's new lock_version; derived from ZIP entries, no shared-type",
 };
 
 /**
