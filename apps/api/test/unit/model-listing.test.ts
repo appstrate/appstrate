@@ -12,6 +12,8 @@ import { describe, it, expect } from "bun:test";
 import {
   listServedModels,
   parseServedModels,
+  type ListServedModelsResult,
+  type ParsedServedModels,
 } from "../../src/services/model-providers/model-listing.ts";
 
 const DATA_SHAPES = [
@@ -25,8 +27,8 @@ const DATA_SHAPES = [
 ];
 
 /** Ids only — the shape assertions below are about the container, not the hints. */
-function ids(models: { id: string }[] | null): string[] | null {
-  return models?.map((m) => m.id) ?? null;
+function ids(parsed: ParsedServedModels | null): string[] | null {
+  return parsed?.models.map((m) => m.id) ?? null;
 }
 
 describe("parseServedModels", () => {
@@ -71,23 +73,42 @@ describe("parseServedModels", () => {
     expect(
       parseServedModels("openai-responses", {
         data: [{ id: "a", max_model_len: 4096 }, { id: "b" }, { id: "a", max_model_len: 8192 }],
-      }),
+      })?.models,
     ).toEqual([
       { id: "a", hints: { contextWindow: 4096 } },
       { id: "b", hints: {} },
     ]);
   });
 
-  it("caps a runaway listing at 1000 models", () => {
+  it("caps a runaway listing at 1000 models and says it cut one", () => {
     const data = Array.from({ length: 1500 }, (_, i) => ({ id: `m-${i}` }));
-    const models = parseServedModels("openai-responses", { data });
-    expect(models).toHaveLength(1000);
-    expect(models?.[999]?.id).toBe("m-999");
+    const parsed = parseServedModels("openai-responses", { data });
+    expect(parsed?.models).toHaveLength(1000);
+    expect(parsed?.models[999]?.id).toBe("m-999");
+    expect(parsed?.capped).toBe(true);
+  });
+
+  it("a listing of exactly 1000 fills the cap without being cut", () => {
+    const data = Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}` }));
+    const parsed = parseServedModels("openai-responses", { data });
+    expect(parsed?.models).toHaveLength(1000);
+    expect(parsed?.capped).toBe(false);
+  });
+
+  it("entries past the cap that are all duplicates do not count as a cut", () => {
+    const data = [
+      ...Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}` })),
+      { id: "m-0" },
+      { id: "m-1" },
+    ];
+    const parsed = parseServedModels("openai-responses", { data });
+    expect(parsed?.models).toHaveLength(1000);
+    expect(parsed?.capped).toBe(false);
   });
 
   it("accepts an empty listing as an empty list, not an unreadable one", () => {
-    expect(parseServedModels("openai-responses", { data: [] })).toEqual([]);
-    expect(parseServedModels("google-vertex", { models: [] })).toEqual([]);
+    expect(parseServedModels("openai-responses", { data: [] })?.models).toEqual([]);
+    expect(parseServedModels("google-vertex", { models: [] })?.models).toEqual([]);
   });
 
   it("returns null for a body that is not an object", () => {
@@ -116,8 +137,8 @@ describe("parseServedModels", () => {
   });
 
   it("skips an empty id (or one that is nothing but the `models/` prefix)", () => {
-    expect(parseServedModels("openai-responses", { data: [{ id: "" }] })).toEqual([]);
-    expect(parseServedModels("openai-responses", { data: [{}] })).toEqual([]);
+    expect(parseServedModels("openai-responses", { data: [{ id: "" }] })?.models).toEqual([]);
+    expect(parseServedModels("openai-responses", { data: [{}] })?.models).toEqual([]);
     expect(
       ids(
         parseServedModels("google-vertex", { models: [{ name: "models/" }, { name: "models/m" }] }),
@@ -129,7 +150,7 @@ describe("parseServedModels", () => {
 describe("parseServedModels hints", () => {
   /** One entry through the parser — the sniffing is what is under test. */
   function hintsOf(entry: Record<string, unknown>): unknown {
-    return parseServedModels("openai-completions", { data: [entry] })?.[0]?.hints;
+    return parseServedModels("openai-completions", { data: [entry] })?.models[0]?.hints;
   }
 
   it("plain OpenAI: an entry that publishes nothing carries no hint", () => {
@@ -233,5 +254,47 @@ describe("listServedModels", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toBe("BLOCKED_URL");
+  });
+
+  /** Serves the given pages in order on loopback — which the test preload allowlists. */
+  async function listFrom(pages: unknown[]): Promise<ListServedModelsResult> {
+    let served = 0;
+    const server = Bun.serve({ port: 0, fetch: () => Response.json(pages[served++]) });
+    try {
+      return await listServedModels({
+        apiShape: "openai-responses",
+        baseUrl: `http://127.0.0.1:${server.port}/v1`,
+        apiKey: "k",
+      });
+    } finally {
+      await server.stop(true);
+    }
+  }
+
+  it("reports a single page cut by the model cap as truncated", async () => {
+    const result = await listFrom([
+      { data: Array.from({ length: 1500 }, (_, i) => ({ id: `m-${i}` })) },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.models).toHaveLength(1000);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("a full page whose successor only repeats known ids is not truncated", async () => {
+    const result = await listFrom([
+      {
+        data: Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}` })),
+        has_more: true,
+        last_id: "m-999",
+      },
+      { data: [{ id: "m-0" }] },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.models).toHaveLength(1000);
+    expect(result.truncated).toBe(false);
   });
 });

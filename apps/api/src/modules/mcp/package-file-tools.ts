@@ -100,11 +100,7 @@ async function readPackageFileBytes(
 ): Promise<PackageFileBytes> {
   const fileId = parseFileUri(uri);
   if (!fileId) throw new McpError(ErrorCode.InvalidParams, `Not a file URI: ${uri}`);
-  // Read-only surface: MCP exposes no `keep` / `delete` affordance, so a
-  // creator's ownership right never applies through it.
-  const resolved = await getFileForActor(ctx.scope, ctx.actor, fileId, ctx.permissions, {
-    creatorCanManage: false,
-  });
+  const resolved = await getFileForActor(ctx.scope, ctx.actor, fileId, ctx.permissions);
   if (!resolved) throw new McpError(ErrorCode.InvalidParams, `File not found: ${uri}`);
   if (!resolved.capabilities.download) {
     throw new McpError(ErrorCode.InvalidParams, `File is not downloadable: ${uri}`);

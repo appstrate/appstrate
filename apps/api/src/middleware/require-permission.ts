@@ -27,7 +27,11 @@ import type { Resource, Action } from "../lib/permissions.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 
 /**
- * Marker stamped on every route-level permission guard this module produces.
+ * Marker carried by every route-level permission guard.
+ *
+ * `makePermissionGuard` stamps it in core, so `requirePermission`,
+ * `requireCorePermission` and `requireModulePermission` all carry it;
+ * {@link requireAnyPermission} decides its own denial and stamps its own.
  *
  * Read by the conformance test that proves no route resolves an agent (and so
  * 404s on an unreachable one) before it has proven the caller may ask — see
@@ -47,8 +51,7 @@ export function isPermissionGuard(handler: unknown): boolean {
  * Usage: `router.post("/path", requirePermission("agents", "write"), handler)`
  */
 export function requirePermission<R extends Resource>(resource: R, action: Action<R>) {
-  const guard = makePermissionGuard(`${resource as string}:${action as string}`);
-  return markHandler((c: Context<AppEnv>, next: Next) => guard(c, next), PERMISSION_GUARD);
+  return makePermissionGuard(`${resource as string}:${action as string}`);
 }
 
 /**

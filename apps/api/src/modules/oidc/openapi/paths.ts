@@ -163,6 +163,9 @@ const updateClientRequest = {
   additionalProperties: false,
 };
 
+const SPACE_SETTINGS_GATE_NOTE =
+  "Requires `space-settings:write` in THIS space (preset `admin`) — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.";
+
 const commonHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -676,7 +679,8 @@ export const oidcPaths = {
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       summary: "Get per-space SMTP configuration",
       description:
-        "Returns the SMTP configuration for a space. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: space` scoped to this space. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:read`/`spaces:write` — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.",
+        "Returns the SMTP configuration for a space. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: space` scoped to this space. " +
+        SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "200": {
@@ -702,7 +706,8 @@ export const oidcPaths = {
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       summary: "Upsert per-space SMTP configuration",
       description:
-        "Creates or replaces the SMTP configuration for a space. The `pass` field is encrypted at rest and never returned in any response. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:read`/`spaces:write` — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.",
+        "Creates or replaces the SMTP configuration for a space. The `pass` field is encrypted at rest and never returned in any response. " +
+        SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       requestBody: {
         required: true,
@@ -751,8 +756,7 @@ export const oidcPaths = {
       operationId: "deleteSpaceSmtpConfig",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       summary: "Delete per-space SMTP configuration",
-      description:
-        "Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:read`/`spaces:write` — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.",
+      description: SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
@@ -772,7 +776,8 @@ export const oidcPaths = {
       operationId: "testSpaceSmtpConfig",
       summary: "Send a test email using the stored per-space SMTP configuration",
       description:
-        "Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:read`/`spaces:write` — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.",
+        "Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator. " +
+        SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
@@ -826,7 +831,8 @@ export const oidcPaths = {
       ],
       summary: "Get per-space social auth provider configuration",
       description:
-        "Returns the stored OAuth App credentials for a given provider on this space. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: space` OAuth clients — no fallback to the instance env OAuth App. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:read`/`spaces:write` — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.",
+        "Returns the stored OAuth App credentials for a given provider on this space. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: space` OAuth clients — no fallback to the instance env OAuth App. " +
+        SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "200": {
@@ -860,7 +866,8 @@ export const oidcPaths = {
       ],
       summary: "Upsert per-space social auth provider configuration",
       description:
-        "Creates or replaces the OAuth App credentials for a given provider on this space. The `clientSecret` field is encrypted at rest and never returned in any response. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:read`/`spaces:write` — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.",
+        "Creates or replaces the OAuth App credentials for a given provider on this space. The `clientSecret` field is encrypted at rest and never returned in any response. " +
+        SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       requestBody: {
         required: true,
@@ -916,8 +923,7 @@ export const oidcPaths = {
         },
       ],
       summary: "Delete per-space social auth provider configuration",
-      description:
-        "Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:read`/`spaces:write` — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.",
+      description: SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },

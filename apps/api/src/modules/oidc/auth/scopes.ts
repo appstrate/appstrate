@@ -146,9 +146,6 @@ export function getAppstrateScopeSet(): ReadonlySet<string> {
  * module fixed for dashboard tokens from reappearing for space clients.
  */
 export function getEndUserScopeSet(): ReadonlySet<string> {
-  return new Set<string>([
-    ...OIDC_IDENTITY_SCOPES,
-    ...OIDC_ALLOWED_SCOPES,
-    ...getModuleEndUserAllowedScopes(),
-  ]);
+  const dashboardOnly = OIDC_DASHBOARD_ONLY_SCOPES as ReadonlySet<string>;
+  return new Set(getAppstrateScopes().filter((scope) => !dashboardOnly.has(scope)));
 }

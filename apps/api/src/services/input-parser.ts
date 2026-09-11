@@ -683,15 +683,11 @@ export async function parseRequestInput(
           fileRefs.length > 0
             ? await Promise.all(
                 fileRefs.map(async ({ ref, id }) => {
-                  // Read-only surface (it resolves `appfile://` refs for a run
-                  // input): no `keep` / `delete` affordance, so a creator's
-                  // ownership right never applies through it.
                   const doc = await getFileForActor(
                     { orgId, spaceId },
                     actor,
                     id,
                     callerPermissions(c),
-                    { creatorCanManage: false },
                   );
                   // Cross-actor ACL (S2): the container ACL is the outer gate
                   // and narrows a run-contained output to the runs the caller
