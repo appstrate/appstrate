@@ -1238,12 +1238,18 @@ skills sync is running` and kept the stale plugin. The lock is now
   self-service client stays confined.
 
 - **Operators: run `scripts/migration/0011` after the drizzle batch carrying
-  `0057`, on any deployment that has ever accepted a self-registered client.**
+  `0057`, on any deployment that has ever accepted a self-registered client —
+  the API refuses to boot in between, and that is the intended sequence.**
   `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
   `0011` fills it from the `selfService` key already in `metadata`. Until it
   runs, a self-registered client reads as operator-provisioned and its tokens
-  are not confined. Idempotent, one transaction, and it never flips a `true`
-  back.
+  are not confined, so the deployment comes up only far enough to apply `0057`,
+  counts the rows still unfolded and exits naming the script; under a supervisor
+  it restarts into the same refusal. The order is therefore: deploy → the API
+  applies `0057` and exits → run `0011` against the database → restart. A
+  deployment that never accepted a self-registered client counts zero and never
+  sees the refusal. The script is idempotent, runs in one transaction, and never
+  flips a `true` back.
 
 ## [1.0.0-beta.53] - 2026-08-26
 
