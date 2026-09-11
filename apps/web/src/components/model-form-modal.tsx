@@ -238,6 +238,7 @@ function ModelForm({
   const dropListing = () => {
     setPicked([]);
     setFailedModelIds([]);
+    setDuplicateModelIds([]);
   };
 
   /**
