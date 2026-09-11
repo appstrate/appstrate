@@ -25,6 +25,7 @@
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
+import type { RunWireDto } from "@appstrate/shared-types";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -39,7 +40,10 @@ import {
   seedMcpServer,
   seedPackage,
   seedRun,
+  seedSchedule,
+  seedApiKey,
 } from "../../helpers/seed.ts";
+import { uninstallPackage } from "../../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
@@ -407,10 +411,25 @@ describe("runner preset", () => {
       id: LAUNCH_AGENT_ID,
       orgId: owner.orgId,
       createdBy: owner.user.id,
-      draftManifest: { name: LAUNCH_AGENT_ID, version: "0.1.0", type: "agent" },
+      draftManifest: {
+        name: LAUNCH_AGENT_ID,
+        version: "0.1.0",
+        type: "agent",
+        input: {
+          schema: {
+            type: "object",
+            properties: {
+              topic: { type: "string" },
+              tone: { type: "string" },
+            },
+          },
+        },
+      },
       draftContent: "Do the thing.",
     });
-    await seedInstalledPackage(owner.defaultSpaceId, LAUNCH_AGENT_ID);
+    await seedInstalledPackage(owner.defaultSpaceId, LAUNCH_AGENT_ID, {
+      inputSettings: { values: { topic: "weekly", tone: LOCKED_VALUE }, locked: ["tone"] },
+    });
 
     const credentialId = await createApiKeyCredential({
       orgId: owner.orgId,
@@ -444,15 +463,130 @@ describe("runner preset", () => {
       body: JSON.stringify({ input: {} }),
     });
     expect(launched.status).toBe(201);
-    const { id: runId } = (await launched.json()) as { id: string };
+    const launchBody = (await launched.json()) as { id: string; input: Record<string, unknown> };
+    const runId = launchBody.id;
+    try {
+      expect(launchBody.input).toBeNull();
+      for (const path of [`/api/runs/${runId}`, `/api/runs/${runId}?wait=1`]) {
+        const read = await app.request(path, { headers: authHeaders(runner) });
+        expect(read.status).toBe(200);
+        expect(((await read.json()) as RunWireDto).input).toBeNull();
+      }
+      const agentRuns = await app.request(`/api/agents/${LAUNCH_AGENT_ID}/runs`, {
+        headers: authHeaders(runner),
+      });
+      expect(agentRuns.status).toBe(200);
+      expect(((await agentRuns.json()) as { data: RunWireDto[] }).data[0]!.input).toBeNull();
+      // The execution/replay source remains intact; the author can read it.
+      const full = await app.request(`/api/runs/${runId}`, { headers: authHeaders(owner) });
+      expect(full.status).toBe(200);
+      expect(((await full.json()) as RunWireDto).input).toEqual({
+        topic: "weekly",
+        tone: LOCKED_VALUE,
+      });
 
-    const list = await app.request("/api/runs", { headers: authHeaders(runner) });
-    expect(list.status).toBe(200);
-    expect(((await list.json()) as { data: { id: string }[] }).data.map((r) => r.id)).toEqual([
-      runId,
-    ]);
+      const list = await app.request("/api/runs", { headers: authHeaders(runner) });
+      expect(list.status).toBe(200);
+      const page = (await list.json()) as {
+        data: { id: string; input: Record<string, unknown> }[];
+      };
+      expect(page.data.map((r) => r.id)).toEqual([runId]);
+      expect(page.data[0]!.input).toBeNull();
+      const replay = await app.request(`/api/agents/${LAUNCH_AGENT_ID}/run?version=draft`, {
+        method: "POST",
+        headers: authHeaders(runner, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ rerun_from: runId }),
+      });
+      expect(replay.status).toBe(201);
+      const replayBody = (await replay.json()) as RunWireDto;
+      expect(replayBody.input).toBeNull();
+      const fullReplay = await app.request(`/api/runs/${replayBody.id}`, {
+        headers: authHeaders(owner),
+      });
+      expect(((await fullReplay.json()) as RunWireDto).input).toEqual({
+        topic: "weekly",
+        tone: LOCKED_VALUE,
+      });
+    } finally {
+      await waitForRunPipelineSettled();
+    }
+  });
 
-    await waitForRunPipelineSettled();
+  it("hides locked input in scheduled-run lists and permission previews", async () => {
+    const schedule = await seedSchedule({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      packageId: AGENT_ID,
+      userId: runner.user.id,
+    });
+    const run = await seedRun({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      packageId: AGENT_ID,
+      userId: runner.user.id,
+      scheduleId: schedule.id,
+      status: "success",
+      input: { topic: "weekly", tone: LOCKED_VALUE },
+    });
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      createdBy: owner.user.id,
+      scopes: ["runs:read-all", "schedules:read"],
+    });
+    const page = await app.request(`/api/schedules/${schedule.id}/runs`, {
+      headers: { Authorization: `Bearer ${key.rawKey}` },
+    });
+    expect(page.status).toBe(200);
+    expect(((await page.json()) as { data: RunWireDto[] }).data[0]!.input).toBeNull();
+    const preview = await app.request(`/api/runs/${run.id}`, {
+      headers: authHeaders(owner, {
+        "X-View-As": `org_role=member; space=${owner.defaultSpaceId}; role=preset:runner`,
+      }),
+    });
+    // The preview also preserves run ownership: it cannot see the runner's run.
+    expect(preview.status).toBe(404);
+    const ownerRun = await seedRun({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      packageId: AGENT_ID,
+      userId: owner.user.id,
+      status: "pending",
+      input: { topic: "weekly", tone: LOCKED_VALUE },
+    });
+    // A nonterminal run forces the long-poll's second read after its budget.
+    const ownPreview = await app.request(`/api/runs/${ownerRun.id}?wait=1`, {
+      headers: authHeaders(owner, {
+        "X-View-As": `org_role=member; space=${owner.defaultSpaceId}; role=preset:runner`,
+      }),
+    });
+    expect(ownPreview.status).toBe(200);
+    expect(((await ownPreview.json()) as RunWireDto).input).toBeNull();
+  });
+
+  it("withholds historical input after an uninstall and reinstall clears the locks", async () => {
+    const run = await seedRun({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      packageId: AGENT_ID,
+      userId: runner.user.id,
+      status: "success",
+      input: { tone: LOCKED_VALUE, topic: "weekly" },
+    });
+    await uninstallPackage({ orgId: owner.orgId, spaceId: owner.defaultSpaceId }, AGENT_ID);
+    const read = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(runner) });
+    expect(read.status).toBe(200);
+    expect(((await read.json()) as RunWireDto).input).toBeNull();
+    await seedInstalledPackage(owner.defaultSpaceId, AGENT_ID);
+    const reinstalled = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(runner) });
+    expect(reinstalled.status).toBe(200);
+    expect(((await reinstalled.json()) as RunWireDto).input).toBeNull();
+    const full = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(owner) });
+    expect(full.status).toBe(200);
+    expect(((await full.json()) as RunWireDto).input).toEqual({
+      tone: LOCKED_VALUE,
+      topic: "weekly",
+    });
   });
 
   it("reproduces the summary under X-View-As from the owner", async () => {

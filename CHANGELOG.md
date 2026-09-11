@@ -35,8 +35,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   produced, and never reads the agent's content, its skills or anyone else's
   runs. What makes that usable is that `agents:run` carries a **summary read**
   of the agent: the list, the detail and the resolved model answer a runner with
-  what the launch form needs — the parameter schema with its stored values and
-  locked fields, the output shape, the enforced timeout, the caller's own run
+  what the launch form needs — the parameter schema with its unlocked stored values and
+  locked field names, the output shape, the enforced timeout, the caller's own run
   counters, and the integrations the agent talks to, which a runner is the one
   who connects — and omit the manifest, the prompt, the authoring history, and
   the skills and MCP servers the agent is built from. Every other agent route,
@@ -59,7 +59,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   omits a withheld group rather than emptying it, and `skills: []` would say the
   agent declares none, which is false rather than unknown. A loosening like this
   is not a breaking change and `detect:breaking` does not classify it, so it is
-  written out here.
+  written out here. Without `agents:read`, registered-agent run responses also
+  return `input: null` so editor-imposed values remain private even after locks
+  change or the agent is reinstalled. Dashboard reruns replay the prior input
+  server-side with `rerun_from`, preserving the original version; inline inputs
+  remain visible.
 
 - **Role preview — see the product as a role before you assign it.** An owner or
   administrator can have every request answered as a lesser persona (an org role,

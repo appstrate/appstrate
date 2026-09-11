@@ -42,6 +42,7 @@ import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
+import { agentReadIsSummary } from "../lib/package-access.ts";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -591,6 +592,7 @@ export function createSchedulesRouter() {
         offset,
         actor: getActor(c),
         visibility: runVisibilityFilter(c),
+        canReadAgentInput: !agentReadIsSummary(c),
       });
       setOffsetLinkHeader({ c, limit, offset, total: result.total });
       return c.json(result);

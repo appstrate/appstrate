@@ -876,9 +876,12 @@ export const schemas = {
         type: "string",
         enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
       },
-      // `runs.input` is a nullable jsonb column (createFailedRun writes null);
-      // emitted verbatim, so the wire value can be null.
-      input: { type: ["object", "null"], additionalProperties: true },
+      input: {
+        type: ["object", "null"],
+        additionalProperties: true,
+        description:
+          "Resolved run input. Registered-agent input is null without agents:read because it can contain editor-imposed values, including historical locks. Inline input remains visible. Execution and rerun retain the complete input server-side.",
+      },
       result: {
         type: ["object", "null"],
         description:

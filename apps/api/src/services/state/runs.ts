@@ -340,9 +340,14 @@ function projectConnectionsUsed(
   }));
 }
 
-function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
+function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
   return {
     ...runRowToWireDto(r.run),
+    // Resolved input includes editor-imposed values. Current installation locks
+    // cannot protect historical values after an unlock or reinstall, so readers
+    // without agents:read get no registered-agent input. Inline input is entirely
+    // caller-provided. Storage remains complete for execution and server-side rerun.
+    input: canReadAgentInput || r.packageEphemeral === true ? r.run.input : null,
     user_name: r.userName ?? null,
     end_user_name: r.endUserName ?? null,
     api_key_name: r.apiKeyName ?? null,
@@ -1516,6 +1521,7 @@ async function listRunsWithFilter(
   limit: number,
   offset: number,
   actor: Actor | null,
+  canReadAgentInput: boolean,
 ): Promise<RunListPage> {
   // The `total` count and the page share the same filter but are independent
   // reads — issued concurrently so the endpoint costs one round trip instead
@@ -1537,7 +1543,7 @@ async function listRunsWithFilter(
   ]);
   const [countRow] = countRows;
 
-  const data = rows.map(mapEnrichedRun);
+  const data = rows.map((row) => mapEnrichedRun(row, canReadAgentInput));
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),
@@ -1554,16 +1560,17 @@ export async function listPackageRuns(
     actor?: Actor | null;
     /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
     visibility?: SQL;
+    canReadAgentInput?: boolean;
   } = {},
 ) {
-  const { limit = 50, offset = 0, actor = null, visibility } = options;
+  const { limit = 50, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
   if (visibility) conditions.push(visibility);
-  return listRunsWithFilter(and(...conditions)!, limit, offset, actor);
+  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
 
 /**
@@ -1597,6 +1604,7 @@ interface ListGlobalRunsOptions {
   actor?: Actor | null;
   /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
   visibility?: SQL;
+  canReadAgentInput?: boolean;
 }
 
 export async function listGlobalRuns(
@@ -1613,6 +1621,7 @@ export async function listGlobalRuns(
     chatSessionId,
     actor = null,
     visibility,
+    canReadAgentInput = false,
   } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
@@ -1678,7 +1687,7 @@ export async function listGlobalRuns(
   ]);
   const [countRow] = countRows;
 
-  const data = rows.map(mapEnrichedRun);
+  const data = rows.map((row) => mapEnrichedRun(row, canReadAgentInput));
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),
@@ -1689,9 +1698,15 @@ export async function listGlobalRuns(
 export async function listScheduleRuns(
   scope: SpaceScope,
   scheduleId: string,
-  options: { limit?: number; offset?: number; actor?: Actor | null; visibility?: SQL } = {},
+  options: {
+    limit?: number;
+    offset?: number;
+    actor?: Actor | null;
+    visibility?: SQL;
+    canReadAgentInput?: boolean;
+  } = {},
 ) {
-  const { limit = 20, offset = 0, actor = null, visibility } = options;
+  const { limit = 20, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
@@ -1701,6 +1716,7 @@ export async function listScheduleRuns(
     limit,
     offset,
     actor,
+    canReadAgentInput,
   );
 }
 
@@ -1708,12 +1724,15 @@ export async function listScheduleRuns(
  * One run, enriched. `visibility` is the caller's run-read predicate
  * (`lib/run-visibility.ts`): a run the caller may not read simply misses, so
  * the handler's existing `notFound` covers it — hidden is 404, never 403.
+ * Agent input requires an explicit agents:read grant; callers without one
+ * retain the run's observable result but cannot read imposed input values.
  */
 export async function getRunFull(
   scope: SpaceScope,
   id: string,
   actor: Actor | null = null,
   visibility?: SQL,
+  canReadAgentInput = false,
 ) {
   const conditions = [
     eq(runs.id, id),
@@ -1762,7 +1781,7 @@ export async function getRunFull(
   }
 
   return {
-    ...mapEnrichedRun(row),
+    ...mapEnrichedRun(row, canReadAgentInput),
     inline_manifest: inlineManifest,
     inline_prompt: inlinePrompt,
   };

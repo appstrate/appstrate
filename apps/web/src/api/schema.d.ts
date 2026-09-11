@@ -5766,6 +5766,7 @@ export interface components {
             orgId: string;
             /** @enum {string} */
             status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
+            /** @description Resolved run input. Registered-agent input is null without agents:read because it can contain editor-imposed values, including historical locks. Inline input remains visible. Execution and rerun retain the complete input server-side. */
             input: {
                 [key: string]: unknown;
             } | null;

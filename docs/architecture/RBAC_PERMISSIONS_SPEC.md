@@ -99,6 +99,12 @@ Scheduled runs re-resolve their user's space role at every fire and require
 space or removing that permission disables the schedule and records a failed run.
 End-user schedules retain their pinned-space identity check.
 
+Run visibility does not grant access to an agent's imposed input values. Without
+`agents:read`, registered-agent run responses return `input: null`, including launch,
+lists, cancellation and long polling. This also protects historical values after
+locks change or an agent is reinstalled. Inline inputs remain visible; execution
+and authorized server-side reruns retain the complete stored input.
+
 ### 3.4 Permission vocabulary by level
 
 Org-level (granted by org roles; resource rows live at the org):
