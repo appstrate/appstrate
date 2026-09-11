@@ -20,6 +20,7 @@ import {
   formatPriceChangeSummary,
   formatRateDelta,
   priceChanges,
+  assertPricesRetained,
   projectGenerationCapabilities,
   projectEntry,
   type CoverageRow,
@@ -565,5 +566,30 @@ describe("normalized artifact provenance", () => {
 
   it("rejects a lock without a normalized output digest", () => {
     expect(() => assertNormalizedCatalogDigest(artifact, undefined)).toThrow(/normalizedDigest/);
+  });
+});
+
+describe("pricing refresh removal guard", () => {
+  const before = { input: 1, output: 2, cacheRead: 0.1 };
+  it("refuses removed models and disappearing token rates", () => {
+    for (const after of [null, { input: 1, output: 2 }]) {
+      expect(() =>
+        assertPricesRetained([{ provider: "anthropic", model: "priced", before, after }]),
+      ).toThrow("anthropic/priced");
+    }
+  });
+
+  it("permits explicit zero prices, price changes and additions", () => {
+    expect(() => assertPricesRetained([])).not.toThrow();
+    expect(() =>
+      assertPricesRetained([
+        {
+          provider: "anthropic",
+          model: "priced",
+          before,
+          after: { input: 0, output: 3, cacheRead: 0, cacheWrite: 0.5 },
+        },
+      ]),
+    ).not.toThrow();
   });
 });

@@ -402,6 +402,18 @@ function priceChanges(
 /** The four per-million rate buckets of {@link CompactEntry.cost}, in table order. */
 const RATE_BUCKETS = ["input", "output", "cacheRead", "cacheWrite"] as const;
 
+/** A disappearing rate is a missing price, never an implicit free tier. */
+function assertPricesRetained(changes: readonly PriceChange[]): void {
+  const missing = changes.filter(({ before, after }) =>
+    RATE_BUCKETS.some((bucket) => before[bucket] !== undefined && after?.[bucket] === undefined),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Pricing refresh would remove rates for ${missing.map((row) => `${row.provider}/${row.model}`).join(", ")}. Resolve these catalog entries before applying. No catalog files were written.`,
+    );
+  }
+}
+
 /**
  * One bucket's move, as a table cell: `5 → 7.5 (+50%)`, `— → 0.1`, `0.1 → —`,
  * or `·` when the rate is unchanged (including absent on both sides).
@@ -848,14 +860,19 @@ async function main(): Promise<void> {
     };
     summaries.push(summary);
     summarize(summary);
+  }
 
-    if (apply && !diff.unchanged) {
+  // Validate every provider before writing any catalog or derived artifact.
+  if (apply) {
+    assertPricesRetained(priceChangeRows);
+    for (const { provider, unchanged } of summaries) {
+      if (unchanged) continue;
       writeFileSync(
-        `${DATA_DIR}/${ourName}.json`,
-        JSON.stringify(upstreamSnapshot, null, 2) + "\n",
+        `${DATA_DIR}/${provider}.json`,
+        JSON.stringify(snapshots[provider], null, 2) + "\n",
         "utf8",
       );
-      console.log(`    → wrote ${DATA_DIR}/${ourName}.json`);
+      console.log(`    → wrote ${DATA_DIR}/${provider}.json`);
     }
   }
 
@@ -997,6 +1014,7 @@ export {
   projectGenerationCapabilities,
   formatCoverageSummary,
   formatPriceChangeSummary,
+  assertPricesRetained,
   formatRateDelta,
   priceChanges,
   projectEntry,
