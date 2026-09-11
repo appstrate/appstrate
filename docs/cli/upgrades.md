@@ -55,8 +55,8 @@ The command:
    a diagnostic. Re-install via curl to enable in-place upgrades.
 4. Otherwise: resolves the target version (default = the **highest** platform
    `v<semver>` Release, not the most recently created one — the Releases API
-   is listed and every page is read before the maximum is taken, so a hotfix
-   cut for an older line never becomes "latest"), downloads the asset + signed
+   is listed and up to 200 listed Releases are read before the maximum is
+   taken, so a hotfix cut for an older line never becomes "latest"), downloads the asset + signed
    checksums + minisign signature, verifies the signature against the same
    pubkey baked into `scripts/bootstrap.sh`, verifies the SHA-256, and
    atomically renames the new binary over `process.execPath`.
