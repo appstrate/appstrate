@@ -408,6 +408,12 @@ export function createModelProviderCredentialsRouter() {
             input: described.input,
             reasoning: described.reasoning,
             source: described.source,
+            endpoint_capabilities: {
+              context_window: described.endpointCapabilities.contextWindow,
+              max_tokens: described.endpointCapabilities.maxTokens,
+              input: described.endpointCapabilities.input,
+              reasoning: described.endpointCapabilities.reasoning,
+            },
           };
         }),
         message: null,

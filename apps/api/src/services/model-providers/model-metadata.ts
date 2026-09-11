@@ -26,6 +26,8 @@ interface ServedModelDescription {
   reasoning: boolean | null;
   /** `endpoint` when the listing published any field, `catalog` on a pure hit, else `null`. */
   source: "endpoint" | "catalog" | null;
+  /** Only these fields may be persisted as endpoint capability overrides. */
+  endpointCapabilities: ServedModelHints;
 }
 
 /** Strip one leading `<vendor>/` segment; null when the id carries none. */
@@ -71,5 +73,6 @@ export function describeServedModel(
     input: hints.input ?? entry?.capabilities.filter((c) => MODALITIES.includes(c)) ?? null,
     reasoning: hints.reasoning ?? entry?.capabilities.includes("reasoning") ?? null,
     source: hinted ? "endpoint" : entry ? "catalog" : null,
+    endpointCapabilities: hints,
   };
 }

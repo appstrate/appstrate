@@ -29,6 +29,7 @@ function detected(id: string): DiscoveredModel {
     input: null,
     reasoning: null,
     source: "endpoint",
+    endpoint_capabilities: {},
   };
 }
 

@@ -406,6 +406,7 @@ export const modelProviderCredentialsPaths = {
                         "input",
                         "reasoning",
                         "source",
+                        "endpoint_capabilities",
                       ],
                       properties: {
                         id: { type: "string", description: "Model id exactly as served." },
@@ -423,6 +424,22 @@ export const modelProviderCredentialsPaths = {
                           enum: ["endpoint", "catalog", null],
                           description:
                             "Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it.",
+                        },
+                        endpoint_capabilities: {
+                          type: "object",
+                          additionalProperties: false,
+                          description:
+                            "Capabilities explicitly published by the endpoint, suitable for persisting as model overrides. Omitted fields are unknown to the endpoint listing; the top-level description may fill them from a catalog for display only.",
+                          properties: {
+                            context_window: { type: "integer", minimum: 1 },
+                            max_tokens: { type: "integer", minimum: 1 },
+                            input: {
+                              type: "array",
+                              minItems: 1,
+                              items: { type: "string", enum: ["text", "image"] },
+                            },
+                            reasoning: { type: "boolean" },
+                          },
                         },
                       },
                     },

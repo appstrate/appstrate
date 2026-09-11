@@ -231,26 +231,20 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
 }
 
 /** The values a row carries, as explicit overrides. An empty modality list is dropped: the server refuses it. */
-function describedCapabilities(row: ModelPickRow): ModelCapabilityOverrides {
+function describedCapabilities(
+  row: ModelPickRow["endpointCapabilities"],
+): ModelCapabilityOverrides {
   return {
     ...(row.input?.length ? { input: row.input } : {}),
-    ...(row.contextWindow !== null ? { contextWindow: row.contextWindow } : {}),
-    ...(row.maxTokens !== null ? { maxTokens: row.maxTokens } : {}),
-    ...(row.reasoning !== null ? { reasoning: row.reasoning } : {}),
+    ...(row.contextWindow != null ? { contextWindow: row.contextWindow } : {}),
+    ...(row.maxTokens != null ? { maxTokens: row.maxTokens } : {}),
+    ...(row.reasoning != null ? { reasoning: row.reasoning } : {}),
   };
 }
 
 /**
- * How much of a picked row ships depends on WHO described it, not just which
- * listing it came from. `search`: everything, cost included — the search IS
- * the billing rate. `catalog`: the id only, the vendored catalog answers for
- * the rest. `discover`: the endpoint's own words only.
- *
- * A discovered row the endpoint said nothing about was described by a catalog
- * entry that may belong to a DIFFERENT vendor, describing that vendor's hosted
- * deployment. Pinning it writes a window the operator's server may not serve,
- * permanently — the read path only re-resolves a provider's OWN catalog, so no
- * refresh can correct it. An unknown limit is inert; a wrong one breaks runs.
+ * Search includes the billing rate; catalog rows resolve at read time.
+ * Discovery pins only endpoint capabilities, never catalog display hints.
  */
 function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
   if (row.origin === "search") {
@@ -261,8 +255,10 @@ function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
       ...(row.cost ? { cost: row.cost } : {}),
     };
   }
-  if (row.source !== "endpoint") return { modelId: row.id };
-  return { modelId: row.id, ...describedCapabilities(row) };
+  return {
+    modelId: row.id,
+    ...(row.origin === "discover" ? describedCapabilities(row.endpointCapabilities) : {}),
+  };
 }
 
 export function buildModelsBatchPayload(input: {

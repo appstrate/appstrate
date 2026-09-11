@@ -156,6 +156,9 @@ const stub = Bun.serve({
           data: [{ id: "local-llm", max_model_len: 32768 }, { id: "gpt-4o" }],
         });
       }
+      if (req.headers.get("authorization") === "Bearer mixed-hints-key") {
+        return Response.json({ data: [{ id: "gpt-4o", max_model_len: 8192 }] });
+      }
       // An endpoint whose listing is WELL-FORMED and enormous: ~6 MB of valid
       // JSON, chunked so no `content-length` declares it. Parsing it would
       // succeed — only a byte budget on the read refuses it.
@@ -223,6 +226,12 @@ interface DiscoverModel {
   input: string[] | null;
   reasoning: boolean | null;
   source: "endpoint" | "catalog" | null;
+  endpoint_capabilities: {
+    context_window?: number;
+    max_tokens?: number;
+    input?: string[];
+    reasoning?: boolean;
+  };
 }
 
 interface DiscoverBody {
@@ -309,6 +318,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
       input: null,
       reasoning: null,
       source: null,
+      endpoint_capabilities: {},
     });
 
     // A price carried over from the vendor's catalog would land in the usage
@@ -341,6 +351,37 @@ describe("POST /api/model-provider-credentials/discover", () => {
     expect(known.id).toBe("gpt-4o");
     expect(known.context_window).toBeGreaterThan(0);
     expect(known.source).toBe("catalog");
+  });
+
+  it("adds a discovered model using only the endpoint's capabilities as overrides", async () => {
+    const res = await discover(ctx, {
+      provider_id: "openai-compatible",
+      api_key: "mixed-hints-key",
+      base_url_override: GOOD_BASE_URL,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.models[0]).toMatchObject({
+      id: "gpt-4o",
+      context_window: 8192,
+      source: "endpoint",
+    });
+    expect(body.models[0]!.max_tokens).toBeGreaterThan(8192);
+    expect(body.models[0]!.endpoint_capabilities).toEqual({ context_window: 8192 });
+    const credentialId = await createCustomCredential(ctx, GOOD_BASE_URL);
+
+    const added = await app.request("/api/models", {
+      method: "POST",
+      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ modelId: "gpt-4o", contextWindow: 8192, credentialId }),
+    });
+    expect(added.status).toBe(201);
+    expect(await added.json()).toMatchObject({
+      contextWindow: 8192,
+      maxTokens: null,
+      input: null,
+      reasoning: null,
+    });
   });
 
   it("enumerates an anthropic-messages endpoint over the Anthropic listing shape", async () => {

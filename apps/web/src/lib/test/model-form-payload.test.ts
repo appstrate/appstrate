@@ -472,6 +472,7 @@ function row(overrides: Partial<ModelPickRow> & { id: string; origin: ModelPickR
     input: null,
     reasoning: null,
     source: null,
+    endpointCapabilities: {},
     cost: null,
     featured: false,
     ...overrides,
@@ -496,7 +497,13 @@ describe("buildModelsBatchPayload — what a row ships, per describer", () => {
     ],
     [
       "discover: what the endpoint published, never its label nor the cost",
-      row({ id: "m", origin: "discover", ...DESCRIBED, source: "endpoint" }),
+      row({
+        id: "m",
+        origin: "discover",
+        ...DESCRIBED,
+        source: "endpoint",
+        endpointCapabilities: DESCRIBED,
+      }),
       {
         modelId: "m",
         input: ["text", "image"],
@@ -517,8 +524,26 @@ describe("buildModelsBatchPayload — what a row ships, per describer", () => {
     ],
     [
       "discover: a reported false is kept, an empty modality list is dropped",
-      row({ id: "m", origin: "discover", source: "endpoint", input: [], reasoning: false }),
+      row({
+        id: "m",
+        origin: "discover",
+        source: "endpoint",
+        input: [],
+        reasoning: false,
+        endpointCapabilities: { input: [], reasoning: false },
+      }),
       { modelId: "m", reasoning: false },
+    ],
+    [
+      "discover: catalog display values never become overrides beside an endpoint hint",
+      row({
+        id: "m",
+        origin: "discover",
+        ...DESCRIBED,
+        source: "endpoint",
+        endpointCapabilities: { contextWindow: 32768, reasoning: false },
+      }),
+      { modelId: "m", contextWindow: 32768, reasoning: false },
     ],
     [
       "search: everything, the rate included",

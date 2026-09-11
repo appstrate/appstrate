@@ -13466,6 +13466,13 @@ export interface operations {
                              * @enum {string|null}
                              */
                             source: "endpoint" | "catalog" | null;
+                            /** @description Capabilities explicitly published by the endpoint, suitable for persisting as model overrides. Omitted fields are unknown to the endpoint listing; the top-level description may fill them from a catalog for display only. */
+                            endpoint_capabilities: {
+                                context_window?: number;
+                                max_tokens?: number;
+                                input?: ("text" | "image")[];
+                                reasoning?: boolean;
+                            };
                         }[];
                         /** @description `true` when the endpoint had more models to declare and a safety cap stopped the read (more than 1000 models, more than 10 listing pages, or a listing that declares a next page without publishing a cursor to follow). The ids returned are then a prefix of what the endpoint serves, not the whole of it. Always `false` for a non-`ok` outcome. */
                         truncated: boolean;
