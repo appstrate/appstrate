@@ -111,10 +111,11 @@
   "viewAs.banner": "Vous voyez l'organisation en tant que <b>{{role}}</b>",
   "viewAs.bannerSpace": "Vous voyez l'organisation en tant que <b>{{role}}</b>, <b>{{spaceRole}}</b> dans <b>{{space}}</b>",
   "viewAs.bannerHere": "· dans <b>{{space}}</b> : <b>{{role}}</b> (espace ouvert)",
+  "viewAs.bannerOwn": "Ce que vous avez créé reste visible — vos runs, vos fichiers, vos connexions. Ce rôle en voit moins.",
   "viewAs.exit": "Quitter",
-  "viewAs.stopped.invalid_view_as": "Prévisualisation arrêtée : la prévisualisation enregistrée n'est plus lisible.",
-  "viewAs.stopped.view_as_unsupported": "Prévisualisation arrêtée : cette session ne peut pas prévisualiser de rôle.",
-  "viewAs.stopped.view_as_forbidden": "Prévisualisation arrêtée : vous n'avez plus le droit de prévisualiser ce rôle.",
-  "viewAs.stopped.view_as_not_found": "Prévisualisation arrêtée : l'espace ou le rôle prévisualisé n'existe plus.",
-  "viewAs.stopped.generic": "Prévisualisation arrêtée."
+  "viewAs.stopped.invalid_view_as": "Prévisualisation indisponible : cette prévisualisation n'a pas pu être lue.",
+  "viewAs.stopped.view_as_unsupported": "Prévisualisation indisponible : cette session ne peut pas prévisualiser de rôle.",
+  "viewAs.stopped.view_as_forbidden": "Prévisualisation indisponible : vous n'avez pas le droit de prévisualiser ce rôle.",
+  "viewAs.stopped.view_as_not_found": "Prévisualisation indisponible : l'espace ou le rôle à prévisualiser n'existe pas.",
+  "viewAs.stopped.generic": "Prévisualisation indisponible."
 }

@@ -9,10 +9,10 @@
  * cases where the row is deliberately NOT written.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { auditEvents, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
-import { getTestApp } from "../../helpers/app.ts";
+import { getTestApp, setFeatureFlag } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
   createTestContext,
@@ -28,10 +28,18 @@ const app = getTestApp();
 
 describe("Invitation space assignments", () => {
   let ctx: TestContext;
+  let restoreFlag: () => void;
 
   beforeEach(async () => {
     await truncateAll();
+    // Naming a bundle in an invitation is granting one, so these cases need
+    // `features.custom_roles` — the gate itself is covered in `roles.test.ts`.
+    restoreFlag = setFeatureFlag("custom_roles", true);
     ctx = await createTestContext({ orgSlug: "assign-org" });
+  });
+
+  afterEach(() => {
+    restoreFlag();
   });
 
   function invite(body: Record<string, unknown>) {

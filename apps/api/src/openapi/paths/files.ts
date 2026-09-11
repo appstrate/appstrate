@@ -173,8 +173,10 @@ export const filesPaths = {
       description:
         "List the files visible to the caller in the current space. Requires the " +
         "`files:read` permission (the family gate — mirrors `runs:read`); on top of it, " +
-        "each row is filtered by its own container ACL, so members see their own files " +
-        "(and system-owned ones) and end-users see only their own. Filter by `purpose`, " +
+        "each row is filtered by its own container ACL, so a member sees the files of the " +
+        "runs it may read (the whole space with `runs:read-all`, otherwise the runs it " +
+        "launched) plus its own chat and container-less files, and end-users see only " +
+        "their own. Filter by `purpose`, " +
         "`run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; " +
         "paginate with `startingAfter` + `limit`.",
       parameters: [
@@ -288,7 +290,9 @@ export const filesPaths = {
       summary: "Delete a file",
       description:
         "Delete a file (storage object + row) and release its quota. Allowed for a caller " +
-        "with the `files:delete` permission (owner/admin) or the file's own creator. " +
+        "with the `files:delete` permission (owner/admin), or the file's own creator on a " +
+        "credential that admits `files:delete` — an API key or token whose scopes omit it " +
+        "does not inherit its creator's files. " +
         "A file referenced by a run cannot be deleted until those consumer runs are removed.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -330,7 +334,9 @@ export const filesPaths = {
       description:
         "Pin a file so it is never swept by the retention GC: clears its `expires_at` " +
         "(sets it to null / permanent). Allowed for a caller with the `files:delete` " +
-        "permission (owner/admin) or the file's own creator. Idempotent — keeping an " +
+        "permission (owner/admin), or the file's own creator on a credential that admits " +
+        "`files:delete` — an API key or token whose scopes omit it does not inherit its " +
+        "creator's files. Idempotent — keeping an " +
         "already-permanent file is a no-op that returns 200 with the unchanged file. " +
         "An id the caller cannot read returns 404.",
       parameters: [

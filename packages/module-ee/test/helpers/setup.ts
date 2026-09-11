@@ -16,6 +16,7 @@ import { getOrgQueries, setOrgQueries, type EeOrgQueries } from "../../src/platf
 import { mockPlatformServices } from "./mock-platform.ts";
 import { orgQueries } from "./org-queries.ts";
 import { startStripeMock } from "./stripe.ts";
+import { stopBillingSweeper } from "../../src/billing/billing-sweeper.ts";
 
 /**
  * Point the module's three `init(ctx)` seams at the in-memory doubles for ONE test file,
@@ -32,6 +33,12 @@ export function useEeTestSeams(): void {
   const SWAPPED_ENV = ["NODE_ENV", "STRIPE_MOCK_HOST", "STRIPE_MOCK_PORT"] as const;
 
   beforeAll(() => {
+    // `init()` armed the module's periodic tick at boot — maintenance-only, since
+    // `test/requirements.ts` pins EE_RECONCILIATION_INTERVAL_SECONDS=0, but still a
+    // timer. Disarm it: a maintenance tick firing mid-suite would clear the pending
+    // cancellations a test seeded. Idempotent, like the rest of this helper.
+    stopBillingSweeper();
+
     for (const key of SWAPPED_ENV) previousEnv[key] = process.env[key];
 
     // Before the first `getStripe()`, which caches host + port and honors the mock only
@@ -76,6 +83,7 @@ export function useEeReconciliationEnv(): void {
     "EE_RECONCILIATION_INTERVAL_SECONDS",
     "EE_RECONCILIATION_BATCH_SIZE",
     "EE_RECONCILIATION_REPLAY_WINDOW",
+    "EE_RECONCILIATION_MAX_GAP_SECONDS",
   ] as const;
 
   const previous: Record<string, string | undefined> = {};

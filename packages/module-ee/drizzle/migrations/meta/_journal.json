@@ -50,6 +50,13 @@
       "when": 1788887495383,
       "tag": "0006_cutover_floor_and_pricing_status",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789068582305,
+      "tag": "0007_bigint_cost_credits",
+      "breakpoints": true
     }
   ]
 }

@@ -68,6 +68,7 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
+import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
@@ -482,9 +483,15 @@ export function createIntegrationsRouter() {
         });
         return c.html(popupHtmlError(userMessage, { state }));
       }
-      const msg = err instanceof Error ? err.message : "OAuth callback failed";
-      logger.error("Integration OAuth callback failed", { msg });
-      return c.html(popupHtmlError(`Error: ${msg}`, { state }));
+      // Not an `OAuthCallbackError`, so nothing authored this message for a
+      // reader: it is a DB fault, a TypeError, an SSRF refusal. Same rule as
+      // the branch above and as `/connect/start` (issue #1345) — this page is
+      // session-less, so the text goes to the log and the user gets the
+      // generic sentence.
+      logger.error("Integration OAuth callback threw", { err: String(err) });
+      return c.html(
+        popupHtmlError("Could not complete the connection. Please try again.", { state }),
+      );
     }
 
     // Persist via the OAuth2 strategy. The exchange above reconstructed the
@@ -916,7 +923,12 @@ export function createIntegrationsRouter() {
   // GET /connect/start?token=… — the single dispatch entry point. Verifies the
   // capability token, consumes its jti (single-use), pins a page cookie, then
   // redirects: oauth2 → provider screen; else → the hosted SPA form at /connect.
-  router.get("/connect/start", async (c) => {
+  //
+  // Rate-limited per IP: no session, the signed token is the only credential,
+  // and a refusal that hands the jti back leaves the link replayable for its
+  // 10-minute TTL (issue #1344). The 429 is the platform's standard
+  // problem+json, not a popup page: it answers abuse, not a flow failure.
+  router.get("/connect/start", rateLimitByIp(60), async (c) => {
     // The single-use capability token rides this request's query string. Strip
     // the Referer entirely so the token can never leak to the provider (oauth2
     // redirect) or any downstream navigation — defence in depth on top of the
@@ -929,51 +941,87 @@ export function createIntegrationsRouter() {
     if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
+    // Every completion this handler emits must name the integration (issue
+    // #1346): a completion identifying nothing matches every card by contract
+    // (`completionMatches`), and `packageId` is the only identifier a
+    // hosted-connect page holds — the OAuth `state` is minted later.
+    const completionDetail = { packageId: claims.package_id };
     // Resolve the integration BEFORE consuming the jti — if the auth no longer
     // exists, the capability token stays unburned so the caller can retry once
     // the integration is back, rather than being forced to re-mint.
     let auth: Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
+    let manifest: Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"];
     try {
-      ({ auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
+      ({ auth, manifest } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
     } catch {
-      return c.html(popupHtmlError("This integration is no longer available.", {}), 410);
+      return c.html(
+        popupHtmlError("This integration is no longer available.", completionDetail),
+        410,
+      );
     }
     // Single-use: burn the jti only once we know the link is actionable.
     if (!(await consumeJti(claims.jti, claims.exp))) {
-      return c.html(popupHtmlError("This connect link has already been used.", {}), 410);
+      return c.html(
+        popupHtmlError("This connect link has already been used.", completionDetail),
+        410,
+      );
     }
 
     if (auth.type === "oauth2") {
-      // Same scope-union semantics as POST /connect/oauth2.
-      const granted = claims.connection_id
-        ? await getCurrentScopesGranted({
-            scope,
-            integrationId: claims.package_id,
-            authKey: claims.auth_key,
-            actor,
-            connectionId: claims.connection_id,
-          })
-        : [];
-      const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
-      const scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
-      const strategy = resolveStrategy(auth);
+      // Same scope-union semantics as POST /connect/oauth2 — except that here
+      // it runs AFTER the burn and reads the database, so an unguarded fault
+      // escaped to the global error handler and rendered raw
+      // `application/problem+json` inside the popup, on top of a link the click
+      // had already spent (issue #1352).
+      //
+      // Nothing is granted, minted or sent upstream until `begin` runs below,
+      // so a click that dies here is indistinguishable from no click at all:
+      // hand the jti back and the very same link works once the fault passes.
+      // That is the opposite of what the `begin` guard further down does with
+      // its unknown failures, which may have gone half way.
+      let scopes: string[];
+      let strategy: ReturnType<typeof resolveStrategy>;
+      try {
+        const granted = claims.connection_id
+          ? await getCurrentScopesGranted({
+              scope,
+              integrationId: claims.package_id,
+              authKey: claims.auth_key,
+              actor,
+              connectionId: claims.connection_id,
+            })
+          : [];
+        const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
+        scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
+        strategy = resolveStrategy(auth);
+      } catch (err) {
+        logger.error("Hosted connect scope resolution failed", {
+          err: String(err),
+          packageId: claims.package_id,
+          authKey: claims.auth_key,
+        });
+        await releaseJti(claims.jti);
+        return c.html(
+          popupHtmlError("Could not start the connection. Please try again.", completionDetail),
+          500,
+        );
+      }
       if (!strategy.begin) {
-        return c.html(popupHtmlError("This integration cannot be connected.", {}), 500);
+        // Same criterion as the guard above: a pure in-memory check, no egress.
+        await releaseJti(claims.jti);
+        return c.html(
+          popupHtmlError("This integration cannot be connected.", completionDetail),
+          500,
+        );
       }
       // `begin` throws for two different reasons, and the popup must tell them
-      // apart (issue #1263). Without a guard at all the throw escapes to the
-      // global error handler, which renders raw `application/problem+json`
-      // inside the popup instead of the friendly popupHtmlError page every
-      // other failure path here returns.
+      // apart (issue #1263).
       //
-      //  1. A client-side `ApiError` (4xx): the space has no OAuth client for
-      //     this auth, auto-DCR against the provider was refused, the manifest
-      //     declares no issuer/endpoints. Permanent until someone acts, and the
-      //     `detail` names that action — the same message the programmatic
-      //     `POST …/connect/oauth2` already returns as its 403. Render it with
-      //     its own status, and hand the jti back: nothing was minted on the
-      //     strength of this click, so a retry once the admin has registered
-      //     the client can reuse the very same link instead of re-minting.
+      //  1. A client-side `ApiError` (4xx): permanent until an admin acts.
+      //     Render it with its own status, but GENERICALLY (issue #1345) —
+      //     the `ApiError` detail names operator artefacts (a client row id,
+      //     `CONNECTION_ENCRYPTION_KEY`, an upstream AS's prose) and this
+      //     route has no session. The detail stays on the log line above.
       //  2. Anything else (provider discovery error, network, an unexpected
       //     throw): transient or unknown. Keep the generic wording, keep the
       //     502, keep the jti burned — an unknown failure may have gone half
@@ -1000,17 +1048,34 @@ export function createIntegrationsRouter() {
             packageId: claims.package_id,
             authKey: claims.auth_key,
           });
-          await releaseJti(claims.jti);
-          // `err.message` is the problem `detail` — the public half of an
-          // ApiError by contract (never `cause`), and popupHtmlError escapes it.
-          return c.html(popupHtmlError(err.message, {}), err.status as ContentfulStatusCode);
+          // Hand the jti back only when the refusal PROVABLY precedes any
+          // egress. A classic auth resolves its client from OUR database, so
+          // nothing left the process and the same link works once an admin
+          // registers it. An auto-provisioned (DCR/CIMD) auth already POSTed an
+          // RFC 7591 registration upstream by the time it refuses — releasing the
+          // jti would let one link replay that registration on every click (issue
+          // #1344). Burn it, and tell the user to re-mint rather than reopen a
+          // link that now 410s.
+          const reusable = !usesAutoProvisionedClient(manifest, auth);
+          if (reusable) await releaseJti(claims.jti);
+          const retry = reusable ? "open this link again" : "request a new connection link";
+          return c.html(
+            popupHtmlError(
+              `This integration is not ready to be connected. Ask an administrator to finish setting it up, then ${retry}.`,
+              completionDetail,
+            ),
+            err.status as ContentfulStatusCode,
+          );
         }
         logger.error("Hosted connect OAuth begin failed", {
           err: String(err),
           packageId: claims.package_id,
           authKey: claims.auth_key,
         });
-        return c.html(popupHtmlError("Could not start the connection. Please try again.", {}), 502);
+        return c.html(
+          popupHtmlError("Could not start the connection. Please try again.", completionDetail),
+          502,
+        );
       }
       return c.redirect(result.redirectUrl);
     }

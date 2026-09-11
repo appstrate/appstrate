@@ -19,7 +19,6 @@ import {
   loadTokens,
   deleteTokens,
   _setKeyringFactoryForTesting,
-  _shouldRefuseWindowsFallback,
   type KeyringHandle,
   type Tokens,
 } from "../src/lib/keyring.ts";
@@ -53,12 +52,17 @@ function mkTokensJson(partial: {
 }
 
 // In-memory keyring backend + a toggle to simulate a failing daemon.
-// `throwMessage` defaults to the napi-rs/keyring error surfaced when no
-// backend is available — the expected silent-fallback path.
+// `throwMessage` defaults to the `keyring-core` `PlatformFailure`
+// wording — no store on this host, the expected silent-fallback path.
+// The two wordings used across this file are pinned against the shipped
+// native binary by `keyring-error-markers.test.ts`.
+const PLATFORM_FAILURE = "Platform failure: no DBus session bus";
+const STORE_LOCKED = "Couldn't access platform storage: SecKeychain error -25308";
+
 class FakeKeyring implements KeyringHandle {
   static store = new Map<string, string>();
   static shouldThrow = false;
-  static throwMessage = "Platform secure storage failure";
+  static throwMessage = PLATFORM_FAILURE;
 
   constructor(private profile: string) {}
 
@@ -111,7 +115,7 @@ beforeEach(async () => {
   process.env.XDG_CONFIG_HOME = tmpDir;
   FakeKeyring.store.clear();
   FakeKeyring.shouldThrow = false;
-  FakeKeyring.throwMessage = "Platform secure storage failure";
+  FakeKeyring.throwMessage = PLATFORM_FAILURE;
   _setKeyringFactoryForTesting((profile) => new FakeKeyring(profile));
 });
 
@@ -275,7 +279,7 @@ describe("broken-keyring fallback refusal (unix)", () => {
 
   beforeEach(() => {
     FakeKeyring.shouldThrow = true;
-    FakeKeyring.throwMessage = "gnome-keyring: DBus call timed out";
+    FakeKeyring.throwMessage = STORE_LOCKED;
     delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
   });
 
@@ -297,8 +301,30 @@ describe("broken-keyring fallback refusal (unix)", () => {
     await expect(loadTokens("default")).rejects.toThrow(/keyring is installed but not serving/);
   });
 
-  it("refuses deleteTokens when the daemon is broken and no opt-in is set", async () => {
-    await expect(deleteTokens("default")).rejects.toThrow(/keyring is installed but not serving/);
+  it("clears the plaintext file even when the keyring delete fails", async () => {
+    // Issue #1321: refusing the delete guaranteed the outcome the
+    // refusal exists to prevent — a live 30-day refresh token left in
+    // credentials.json after `appstrate logout` said "Signed out".
+    // The file store must be cleared FIRST, and the surviving keyring
+    // entry reported afterwards.
+    process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = "1";
+    await saveTokens("default", mkTokens({ accessToken: "t", expiresAt: futureMs() }));
+    delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    const { readFile } = await import("node:fs/promises");
+    expect(await readFile(credentialsPath(), "utf8")).toContain("rt-t");
+
+    await expect(deleteTokens("default")).rejects.toThrow(/keyring entry could not be removed/);
+
+    await expect(readFile(credentialsPath(), "utf8")).rejects.toThrow(/ENOENT/);
+  });
+
+  it("stays silent on delete when the host has no keyring store at all", async () => {
+    // Nothing was ever written to a store that does not exist, so the
+    // failed delete is a no-op — only the file store mattered.
+    FakeKeyring.throwMessage = PLATFORM_FAILURE;
+    await saveTokens("default", mkTokens({ accessToken: "t", expiresAt: futureMs() }));
+    await deleteTokens("default");
+    expect(await loadTokens("default")).toBeNull();
   });
 
   it("allows the plaintext fallback when APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1", async () => {
@@ -309,7 +335,7 @@ describe("broken-keyring fallback refusal (unix)", () => {
   });
 
   it("still silent-falls-back on missing-backend (CI, stripped container)", async () => {
-    FakeKeyring.throwMessage = "Platform secure storage failure";
+    FakeKeyring.throwMessage = PLATFORM_FAILURE;
     // No opt-in env var. This is the bare-container / CI case — a
     // keyring is not expected, so falling back to 0600 file is the
     // documented behavior.
@@ -317,34 +343,15 @@ describe("broken-keyring fallback refusal (unix)", () => {
     await saveTokens("default", toks);
     expect(await loadTokens("default")).toEqual(toks);
   });
-});
 
-describe("Windows fallback refusal", () => {
-  // The in-process platform check is exercised via the exported
-  // `_shouldRefuseWindowsFallback` helper — stubbing
-  // `process.platform` globally is racy with Bun's test runner and
-  // would leak between tests.
-  it("refuses the fallback on win32 when the keyring backend is missing", () => {
-    const err = new Error("Platform secure storage failure");
-    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(true);
-  });
-
-  it("refuses the fallback on win32 when the keyring backend is broken", () => {
-    const err = new Error("Credential Manager RPC call failed");
-    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(true);
-  });
-
-  it("does NOT refuse on win32 when the entry simply doesn't exist yet", () => {
-    // Reads on a fresh install hit this path — no creds stored yet.
-    // The caller just returns null; no fallback needed, no refusal.
-    const err = new Error("No matching entry");
-    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(false);
-  });
-
-  it("never refuses on non-Windows platforms", () => {
-    const err = new Error("Platform secure storage failure");
-    expect(_shouldRefuseWindowsFallback("linux", err)).toBe(false);
-    expect(_shouldRefuseWindowsFallback("darwin", err)).toBe(false);
+  it("refuses rather than guesses when the wording is unknown", async () => {
+    // The conservative side of the split: an unrecognised throw never becomes a
+    // silent plaintext write — which is what makes the next upstream rewording
+    // loud instead of silently permissive.
+    FakeKeyring.throwMessage = "Platform secure storage failure";
+    await expect(
+      saveTokens("default", mkTokens({ accessToken: "ok3", expiresAt: futureMs() })),
+    ).rejects.toThrow(/keyring is installed but not serving/);
   });
 });
 
@@ -519,41 +526,6 @@ describe("loadTokens expiration handling", () => {
       mkTokensJson({ accessToken: "boundary", expiresAt: now, refreshExpiresAt: now }),
     );
     expect(await loadTokens("default")).toBeNull();
-  });
-});
-
-describe("classifyKeyringError after MISSING_BACKEND_MARKERS cleanup", () => {
-  // Regression guard: Fix 2 removed `"No matching entry"` from
-  // `MISSING_BACKEND_MARKERS` because `classifyKeyringError` checks
-  // for it FIRST and returns `"entry-missing"` before consulting the
-  // array. Verify the entry-missing classification is still preserved
-  // and the silent-fallback path on a real missing-backend marker
-  // still works.
-  it("classifies 'No matching entry' as entry-missing (read returns null, no throw)", async () => {
-    FakeKeyring.shouldThrow = true;
-    FakeKeyring.throwMessage = "No matching entry";
-    // entry-missing on read should NOT trigger refuseBrokenKeyring —
-    // it's the normal "user hasn't logged in yet" signal. Falls
-    // through to the file fallback, which is also empty → null.
-    expect(await loadTokens("default")).toBeNull();
-  });
-
-  it("still silent-falls-back on 'Platform secure storage failure'", async () => {
-    FakeKeyring.shouldThrow = true;
-    FakeKeyring.throwMessage = "Platform secure storage failure";
-    // No APPSTRATE_ALLOW_PLAINTEXT_TOKENS — the missing-backend path
-    // is the expected silent-fallback case (CI / stripped container).
-    const toks = mkTokens({ accessToken: "ok", expiresAt: futureMs() });
-    await saveTokens("default", toks);
-    expect(await loadTokens("default")).toEqual(toks);
-  });
-
-  it("still silent-falls-back on 'No storage' marker", async () => {
-    FakeKeyring.shouldThrow = true;
-    FakeKeyring.throwMessage = "No storage backend available";
-    await saveTokens("default", mkTokens({ accessToken: "ok2", expiresAt: futureMs() }));
-    const loaded = await loadTokens("default");
-    expect(loaded?.accessToken).toBe("ok2");
   });
 });
 

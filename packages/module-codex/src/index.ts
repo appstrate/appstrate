@@ -163,6 +163,24 @@ const codexHooks: ModelProviderHooks = {
 };
 
 // ---------------------------------------------------------------------------
+// Plan gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Codex ids the vendor documents for **Pro plans and above** —
+ * https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in).
+ *
+ * Hand-written because no feed carries plan tiers: `docs/architecture/
+ * SUBSCRIPTION_COMPLIANCE.md` forbids enumerating a subscription, and neither
+ * the OpenAI pricing catalog nor the `chatgpt` snapshot has the field.
+ *
+ * They stay in `modelDiscoveryCandidates` (a deliberate pick by someone who
+ * knows their plan) and out of `featuredModels`, which the platform auto-seeds
+ * into `org_models` on first connection and defaults the org to.
+ */
+export const PRO_PLAN_MODEL_IDS = ["gpt-6-astra", "gpt-5.3-codex-spark"] as const;
+
+// ---------------------------------------------------------------------------
 // Provider definition
 // ---------------------------------------------------------------------------
 
@@ -210,23 +228,17 @@ const codexProvider: ModelProviderDefinition = {
   // `gpt-5-search-api`, the `-chat-latest` aliases…) that a Codex
   // subscription never serves, so deriving from it would over-list by a wide
   // margin. Reviewed against
-  // https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in,
-  // fetched 2026-07-27, re-read 2026-09-07 when `gpt-6-astra` reached the
-  // catalog) and re-reviewed whenever
-  // `apps/api/src/data/subscription-watch/chatgpt.json` drifts.
+  // https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in).
   //
-  // That review is no longer trust-based: `apps/api/test/unit/services/
+  // That review is not trust-based: `apps/api/test/unit/services/
   // curated-model-drift.test.ts` fails CI when the vendored openai catalog
   // gains an id newer than this list. A catalog id the subscription does NOT
   // serve is recorded — after checking the doc above — in
   // `apps/api/src/data/subscription-watch/reviewed.json`, never just dropped.
   //
-  // Recommended set, newest first. `gpt-6-astra` is documented for Pro plans
-  // and above — like `gpt-5.3-codex-spark`, which is also recommended but is
-  // absent from openai.json, so the boot check forbids featuring it and it
-  // lives in the candidate list only. A plan that does not serve a featured
-  // id finds out at the first run, as for every other id here.
-  featuredModels: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  // Recommended set, newest first; excludes PRO_PLAN_MODEL_IDS (see above),
+  // enforced by test/unit/discovery-candidates.test.ts.
+  featuredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
   // OFFLINE validation: the platform issues ZERO Codex API calls to test
   // a credential or discover models. The connection test runs the
   // `validateCredential` hook below (local JWT decode) — its mere presence is
@@ -235,12 +247,10 @@ const codexProvider: ModelProviderDefinition = {
   // availability is checked at the first agent run (on the Pi engine).
   // Served as-is (∩ catalog) — what THIS account's plan actually serves is
   // discovered by the user at first run, not by the platform. Superset of
-  // `featuredModels`:
-  // the documented "recommended" set in doc order (incl. the Pro-only
-  // `gpt-5.3-codex-spark` preview), then the "other available" models — which
-  // is why the tail is not strictly newest-first. `gpt-5.2` and
-  // `gpt-5.3-codex` are deprecated for ChatGPT sign-in and were dropped from
-  // both lists.
+  // `featuredModels`: the documented "recommended" set in doc order
+  // (PRO_PLAN_MODEL_IDS included — see above), then the "other available"
+  // models — which is why the tail is not strictly newest-first. `gpt-5.2` and
+  // `gpt-5.3-codex` are deprecated for ChatGPT sign-in and dropped from both.
   modelDiscoveryCandidates: [
     "gpt-6-astra",
     "gpt-5.6-sol",

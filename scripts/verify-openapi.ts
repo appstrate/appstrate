@@ -39,7 +39,6 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
-import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
@@ -61,6 +60,7 @@ import {
   llmProxyUrlPath,
   type ProxiedApiShape,
 } from "../packages/runner-pi/src/llm-proxy-routes.ts";
+import { validateOpenApiStructure } from "./lib/openapi-structure.ts";
 import { collectModuleOpenApi, discoverWorkspaceModuleDirs } from "./lib/module-openapi.ts";
 import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
@@ -126,16 +126,12 @@ console.log(`  Spec endpoints: ${specEndpoints.size} (coverage asserted in §5 /
 console.log(`\n  2. Structural Validation (@readme/openapi-parser)`);
 console.log(`  --------------------------------------------------`);
 
-try {
-  // Deep-clone to avoid mutation by the parser (it dereferences $refs in-place)
-  const specCopy = JSON.parse(JSON.stringify(openApiSpec));
-  // Skip external $ref resolution (AFPS schema URLs) — validated separately by afps-spec repo
-  await validateOpenAPI(specCopy, { resolve: { external: false } });
+const structuralFailure = await validateOpenApiStructure(openApiSpec);
+if (structuralFailure === null) {
   console.log(`  OK — valid OpenAPI ${openApiSpec.openapi} document.`);
-} catch (err: unknown) {
+} else {
   exitCode = 1;
-  const msg = err instanceof Error ? err.message : String(err);
-  console.log(`  FAIL — ${msg}`);
+  console.log(`  FAIL — ${structuralFailure}`);
 }
 
 // ═══════════════════════════════════════════════════
@@ -183,7 +179,7 @@ try {
   });
 
   // Strip remote $refs (AFPS schema URLs) before linting — Redocly's lintFromString
-  // has no option equivalent to validateOpenAPI's `resolve: { external: false }`, and
+  // has no option equivalent to the parser's `resolve: { external: false }`, and
   // fetching the 4 AFPS schemas over HTTPS adds ~20s with no disk cache. The AFPS
   // schemas are validated separately by the afps-spec repo, so replacing them with a
   // stub object is safe and drops this step from ~20s to ~150ms.

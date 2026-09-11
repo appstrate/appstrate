@@ -285,6 +285,52 @@ describe("scripts/migration/0008 — org `viewer` becomes `guest` + explicit spa
     expect(await policy()).toEqual(expected);
   });
 
+  it("skips step 4 past its window instead of widening a client left empty on purpose", async () => {
+    // Step 4's predicate is the one that does not remove its own condition: a
+    // client whose org had no space, or one an admin deliberately left with no
+    // assignments, still matches it forever. The run-once marker is what makes
+    // that a no-op instead of a permission widening.
+    const assignments = (id: string) =>
+      json<SpaceAssignment[]>(
+        `SELECT signup_space_assignments AS v FROM oauth_clients WHERE id = '${id}'`,
+      );
+    const legacySnapshot = [
+      { space_id: SPACE_DEFAULT, preset_role: "viewer" },
+      { space_id: SPACE_OTHER, preset_role: "viewer" },
+    ];
+    await exec(`
+      INSERT INTO oauth_clients (id, client_id, name, level, referenced_org_id, signup_role, redirect_uris)
+      VALUES ('oac_0008_legacy','oauth_0008_legacy','Legacy viewer','org','${ORG}','guest','{}');
+    `);
+
+    await runScript();
+
+    // Positive control, in this same case: inside the window step 4 DOES write,
+    // so the assertion below is the marker at work and not a broken fixture.
+    expect(await assignments("oac_0008_legacy")).toEqual(legacySnapshot);
+    expect(
+      await count(
+        `SELECT count(*)::int AS n FROM drizzle.migration_scripts
+           WHERE script = '0008-org-viewer-to-guest'`,
+      ),
+    ).toBe(1);
+
+    // The new application is live: an admin creates an org signup client and
+    // leaves it with no space assignments on purpose, and a space is created.
+    await exec(`
+      INSERT INTO oauth_clients (id, client_id, name, level, referenced_org_id, signup_role, redirect_uris)
+      VALUES ('oac_0008_deliberate','oauth_0008_deliberate','Guest, no spaces','org','${ORG}','guest','{}');
+      INSERT INTO spaces (id, org_id, name) VALUES ('${SPACE_LATER}','${ORG}','Later');
+    `);
+
+    await runScript();
+
+    // The stale predicate matches it; the marker is what stops the write.
+    expect(await assignments("oac_0008_deliberate")).toEqual([]);
+    // …and the client step 4 already served does not collect the new space.
+    expect(await assignments("oac_0008_legacy")).toEqual(legacySnapshot);
+  });
+
   it("leaves an OAuth client that already carries a snapshot alone", async () => {
     await exec(`
       INSERT INTO oauth_clients (id, client_id, name, level, referenced_org_id, signup_role, signup_space_assignments, redirect_uris)

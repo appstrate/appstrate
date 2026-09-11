@@ -986,7 +986,7 @@ export function App() {
               <Route
                 path="space/auth"
                 element={
-                  <RequirePermission permission="spaces:write">
+                  <RequirePermission permission="space-settings:write">
                     <OrgSettingsSpaceAuthPage />
                   </RequirePermission>
                 }

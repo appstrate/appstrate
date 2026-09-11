@@ -19,31 +19,53 @@
  * the fixture and the assertion were written from the same belief.
  *
  * This suite is the missing half. It hits real Stripe in TEST MODE and checks
- * the two things a mock structurally cannot:
+ * the three things a mock structurally cannot:
  *
  *   1. Shape — every key path the mock claims exists must exist on the live
- *      object. Extra live fields are fine (the fixtures are deliberately
- *      minimal); invented ones are not. This is the check that turns the next
- *      drift into a red mock instead of a quiet production lie.
+ *      object, for Subscription, Customer, Checkout.Session,
+ *      BillingPortal.Session and Invoice. Extra live fields are fine (the
+ *      fixtures are deliberately minimal); invented ones are not. This is the
+ *      check that turns the next drift into a red mock instead of a quiet
+ *      production lie.
  *   2. Semantics — the handful of behaviours the module bets on, above all
  *      that `subscriptions.update` REPLACES the priced item instead of adding
  *      one. A mock returns whatever we told it to; only Stripe can say whether
  *      that call double-charges every customer who changes plan.
+ *   3. Account configuration — that every enabled webhook endpoint renders
+ *      payloads at the version this module pins. The SDK pin governs what a
+ *      `retrieve` returns; a webhook payload is rendered at the ENDPOINT's
+ *      configured version, and `subscriptionPeriodEnd` is applied to
+ *      `event.data.object` too.
  *
  * Coverage is opt-in, following `scripts/conformance/probes.ts`: no
  * `STRIPE_LIVE_SECRET_KEY`, no run, no noise. It is deliberately NOT
  * `STRIPE_SECRET_KEY` — a developer `.env` holding a working key must never
  * make `bun test` start creating objects in an account nobody aimed at.
+ *
+ * The checks that need no key are `test/unit/stripe-fixtures.test.ts` and the
+ * `Fixture<T>` typing in `test/helpers/stripe.ts`.
+ *
+ * Run it with:
+ *
+ *   STRIPE_LIVE_SECRET_KEY=sk_test_… bun test packages/module-ee/test/live
+ *
+ * (`packages/module-ee` declares `postgres: true`, so the harness needs the
+ * test infrastructure up even though this file touches no table.)
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 import Stripe from "stripe";
 import {
+  INVOICE_READS,
+  SUBSCRIPTION_READS,
   defaultCheckoutResponse,
   defaultCustomerResponse,
   defaultPortalResponse,
   defaultSubscriptionResponse,
+  fullInvoiceFixture,
+  valueAtPath,
 } from "../helpers/stripe.ts";
+import { STRIPE_API_VERSION } from "../../src/stripe/client.ts";
 
 const SECRET_KEY = process.env.STRIPE_LIVE_SECRET_KEY;
 
@@ -86,20 +108,12 @@ function driftedPaths(mock: unknown, live: unknown, prefix = ""): string[] {
 
   return Object.entries(mock as Record<string, unknown>).flatMap(([key, value]) => {
     const path = prefix ? `${prefix}.${key}` : key;
+    // `undefined` is the fixture declining to set the field (the builders spell
+    // every key so the typechecker sees them), not a claim about the live shape.
+    if (value === undefined) return [];
     if (!(key in liveRecord)) return [`${path} (absent from the live object)`];
     return driftedPaths(value, liveRecord[key], path);
   });
-}
-
-/** Value at a dotted path, `[0]` segments included. `undefined` when absent. */
-function at(root: unknown, path: string): unknown {
-  return path
-    .split(".")
-    .flatMap((seg) => seg.split(/\[(\d+)\]/).filter(Boolean))
-    .reduce<unknown>((node, seg) => {
-      if (node === null || typeof node !== "object") return undefined;
-      return (node as Record<string, unknown>)[seg];
-    }, root);
 }
 
 describe.skipIf(!SECRET_KEY)("Stripe live contract", () => {
@@ -111,11 +125,16 @@ describe.skipIf(!SECRET_KEY)("Stripe live contract", () => {
 
   let customer: Stripe.Customer;
   let subscription: Stripe.Subscription;
+  let invoice: Stripe.Invoice;
   let starterPriceId: string;
   let proPriceId: string | null = null;
 
   beforeAll(async () => {
-    stripe = new Stripe(SECRET_KEY!, { apiVersion: "2026-08-26.dahlia" });
+    // The pin comes from production (src/stripe/client.ts), never from a
+    // literal restated here: a second copy in a file `tsc` drags forward on its
+    // own schedule is how a suite ends up validating an API version production
+    // stopped speaking at the previous SDK bump.
+    stripe = new Stripe(SECRET_KEY!, { apiVersion: STRIPE_API_VERSION });
 
     // Prices come from the account rather than from env: `requirements.ts`
     // force-overrides STRIPE_PRICE_ID_* for the mocked suite, so reading those
@@ -142,6 +161,21 @@ describe.skipIf(!SECRET_KEY)("Stripe live contract", () => {
       items: [{ price: starterPriceId }],
       metadata: { orgId: "00000000-0000-4000-a000-00000000c0de", planId: "starter" },
     });
+
+    // The invoice `invoice.paid` / `invoice.payment_failed` carry. Fetched
+    // rather than mocked because the field budget allocation hangs on —
+    // `parent.subscription_details.subscription` — is a post-basil RELOCATION
+    // of the removed top-level `invoice.subscription`, and a relocation is
+    // exactly what a fixture cannot notice about itself.
+    const invoiceRef = subscription.latest_invoice;
+    if (!invoiceRef) {
+      throw new Error(
+        "The subscription came back with no latest_invoice — the account cannot charge the attached card.",
+      );
+    }
+    invoice = await stripe.invoices.retrieve(
+      typeof invoiceRef === "string" ? invoiceRef : invoiceRef.id!,
+    );
   });
 
   afterAll(async () => {
@@ -180,32 +214,30 @@ describe.skipIf(!SECRET_KEY)("Stripe live contract", () => {
       });
       expect(driftedPaths(defaultPortalResponse(), session)).toEqual([]);
     });
+
+    it("invoice", () => {
+      expect(driftedPaths(fullInvoiceFixture(), invoice)).toEqual([]);
+    });
   });
 
-  // ─── 2. Shape: production's reads must land on both sides ─────
+  // ─── 2. Shape: production's reads must land on the LIVE object ─
 
-  // Every path `packages/module-ee/src` dereferences on a retrieved
-  // subscription. Asserted against the LIVE object and the MOCK alike: a path
-  // that exists in only one of them is a test suite proving nothing.
-  const SUBSCRIPTION_READS = [
-    "id",
-    "status",
-    "customer",
-    "metadata",
-    "cancel_at_period_end",
-    "items.data[0].id",
-    "items.data[0].price.id",
-    "items.data[0].current_period_end",
-  ];
+  // The mirror half — that the FIXTURES carry these same paths — is
+  // `test/unit/stripe-fixtures.test.ts`, which needs no key and therefore runs
+  // everywhere. A path resolving on only one of the two sides is a suite
+  // proving nothing, which is why the lists live in `test/helpers/stripe.ts`
+  // and neither file restates them.
 
-  describe("the fields production reads exist", () => {
+  describe("the fields production reads exist on Stripe", () => {
     for (const path of SUBSCRIPTION_READS) {
       it(`live subscription has ${path}`, () => {
-        expect(at(subscription, path)).toBeDefined();
+        expect(valueAtPath(subscription, path)).toBeDefined();
       });
+    }
 
-      it(`mock subscription has ${path}`, () => {
-        expect(at(defaultSubscriptionResponse("sub_shape"), path)).toBeDefined();
+    for (const path of INVOICE_READS) {
+      it(`live invoice has ${path}`, () => {
+        expect(valueAtPath(invoice, path)).toBeDefined();
       });
     }
   });
@@ -258,6 +290,24 @@ describe.skipIf(!SECRET_KEY)("Stripe live contract", () => {
     await expect(
       stripe.webhooks.constructEventAsync(payload, "t=1,v1=deadbeef", secret),
     ).rejects.toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
+  });
+
+  it("every webhook endpoint renders payloads at the version the module pins", async () => {
+    // The SDK pin governs what `subscriptions.retrieve` RETURNS. It does not
+    // govern webhook payloads: those are rendered at the version configured on
+    // the endpoint. `subscriptionPeriodEnd` is applied to `event.data.object`
+    // too (src/stripe/webhooks.ts), so an endpoint left at 2025-03-31 reads a
+    // `current_period_end` that has since moved onto the item — and `periodEnd`
+    // silently stops updating on `customer.subscription.updated`.
+    //
+    // `api_version: null` means "the account default", which is not pinned to
+    // anything this repository can see, so it counts as a mismatch.
+    const endpoints = await stripe.webhookEndpoints.list({ limit: 100 });
+    const mismatched = endpoints.data
+      .filter((e) => e.status === "enabled" && e.api_version !== STRIPE_API_VERSION)
+      .map((e) => `${e.url} (${e.api_version ?? "account default"})`);
+
+    expect(mismatched).toEqual([]);
   });
 
   it("raises StripeInvalidRequestError for an unknown subscription", async () => {

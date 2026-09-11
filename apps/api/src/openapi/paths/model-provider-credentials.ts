@@ -328,7 +328,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Enumerate the models an endpoint serves",
       description:
-        "Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.",
+        "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -372,13 +372,13 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "200": {
           description:
-            "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id.",
+            "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id. `truncated` marks a list that is short of what the endpoint serves.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["outcome", "models", "message"],
+                required: ["outcome", "models", "truncated", "message"],
                 properties: {
                   outcome: {
                     type: "string",
@@ -406,6 +406,7 @@ export const modelProviderCredentialsPaths = {
                         "input",
                         "reasoning",
                         "source",
+                        "endpoint_capabilities",
                       ],
                       properties: {
                         id: { type: "string", description: "Model id exactly as served." },
@@ -424,8 +425,29 @@ export const modelProviderCredentialsPaths = {
                           description:
                             "Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it.",
                         },
+                        endpoint_capabilities: {
+                          type: "object",
+                          additionalProperties: false,
+                          description:
+                            "Capabilities explicitly published by the endpoint, suitable for persisting as model overrides. Omitted fields are unknown to the endpoint listing; the top-level description may fill them from a catalog for display only.",
+                          properties: {
+                            context_window: { type: "integer", minimum: 1 },
+                            max_tokens: { type: "integer", minimum: 1 },
+                            input: {
+                              type: "array",
+                              minItems: 1,
+                              items: { type: "string", enum: ["text", "image"] },
+                            },
+                            reasoning: { type: "boolean" },
+                          },
+                        },
                       },
                     },
+                  },
+                  truncated: {
+                    type: "boolean",
+                    description:
+                      "`true` when the endpoint had more models to declare and a safety cap stopped the read (more than 1000 models, more than 10 listing pages, or a listing that declares a next page without publishing a cursor to follow). The ids returned are then a prefix of what the endpoint serves, not the whole of it. Always `false` for a non-`ok` outcome.",
                   },
                   message: {
                     type: ["string", "null"],

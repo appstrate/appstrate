@@ -11,50 +11,6 @@ const ROLE_ID_PARAM = {
   description: "Custom role id (`srl_` prefix). Presets are not addressable.",
 } as const;
 
-/**
- * The 403 of a write route, which has TWO causes and one status: the caller
- * lacks the permission (`forbidden`), or the deployment does not carry the
- * feature (`feature_unavailable`). `code` is what tells them apart, so both are
- * named here rather than the generic `Forbidden` response, which documents only
- * the first.
- */
-const WRITE_FORBIDDEN = {
-  description:
-    "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
-  content: {
-    "application/problem+json": {
-      schema: { $ref: "#/components/schemas/ProblemDetail" },
-      examples: {
-        forbidden: {
-          summary: "Missing permission",
-          value: {
-            type: "https://docs.appstrate.dev/errors/forbidden",
-            title: "Forbidden",
-            status: 403,
-            detail: "Insufficient permissions: roles:write required",
-            instance: "urn:appstrate:request:req_2f1c6d84",
-            code: "forbidden",
-            requestId: "req_2f1c6d84",
-          },
-        },
-        feature_unavailable: {
-          summary: "Feature not on this deployment",
-          value: {
-            type: "https://docs.appstrate.dev/errors/feature-unavailable",
-            title: "Feature Unavailable",
-            status: 403,
-            detail:
-              "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-            instance: "urn:appstrate:request:req_2f1c6d84",
-            code: "feature_unavailable",
-            requestId: "req_2f1c6d84",
-          },
-        },
-      },
-    },
-  },
-} as const;
-
 export const rolesPaths = {
   "/api/roles": {
     get: {
@@ -135,7 +91,7 @@ export const rolesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": WRITE_FORBIDDEN,
+        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
         "409": {
           description: "A role with this key already exists (`role_key_taken`)",
           content: {
@@ -223,7 +179,7 @@ export const rolesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": WRITE_FORBIDDEN,
+        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "A role with this key already exists (`role_key_taken`)",
@@ -240,13 +196,13 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "Delete a custom space role",
       description:
-        "Requires the `custom_roles` feature. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
+        "Never requires the `custom_roles` feature: removing a leftover bundle is what an EE \u2192 OSS downgrade needs, and it is the one verb that only ever shrinks what a bundle reaches. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, ROLE_ID_PARAM],
       responses: {
         "204": { description: "Role deleted", headers: REQUEST_ID_ONLY_HEADERS },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": WRITE_FORBIDDEN,
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "The role is still assigned (`role_in_use`)",

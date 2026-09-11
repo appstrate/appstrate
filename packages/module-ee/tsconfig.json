@@ -3,5 +3,10 @@
   // `drizzle` for the reason `packages/db` lists its own config file: nothing
   // imports `drizzle/drizzle.config.ts`, so without it the config that drives
   // `db:generate` sits in no program and can break silently.
-  "include": ["src", "drizzle"]
+  //
+  // `test` because the Stripe fixtures live there and are typed against the SDK
+  // (`Fixture<T>`, test/helpers/stripe.ts): outside the program a bump of
+  // `stripe` moves a field, `tsc` drags `src` forward, and the fixtures stay
+  // behind describing an API version production no longer speaks.
+  "include": ["src", "drizzle", "test"]
 }

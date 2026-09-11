@@ -220,7 +220,9 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
       orgId: ctx.orgId,
       credentialId: cred.id,
       label: "Disabled on a dead credential",
-      modelId: "gpt-5-codex",
+      // A second binding of the same (credential, model) is refused since
+      // `uq_org_models_unaliased_binding`; the disabled row is its own model.
+      modelId: "gpt-5-codex-mini",
       enabled: false,
     });
     expect(await modelNeedsReconnection(ctx.orgId, disabled.id)).toBe(false);

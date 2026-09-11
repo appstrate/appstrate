@@ -14,6 +14,7 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { setDisplayName } from "../services/profile.ts";
 
 export const profileUpdateSchema = z
@@ -162,8 +163,13 @@ profileRouter.post("/profile/password", async (c) => {
   return c.json({ status: true });
 });
 
-// POST /api/profiles/batch — batch lookup display names by user IDs (scoped to org members)
-profileRouter.post("/profiles/batch", async (c) => {
+// POST /api/profiles/batch — batch lookup display names by user IDs (scoped to
+// org members). Resolving ids to names IS the org directory, read one page at a
+// time, so it carries the directory permission (`members:read`, RBAC spec §3.2)
+// — the same one `buildOrgDetail` gates the member list on. Without it a
+// `guest`, the org role defined as "member reads minus `members:read`", put
+// names on ids and learned membership from which ids came back empty.
+profileRouter.post("/profiles/batch", requirePermission("members", "read"), async (c) => {
   const orgId = c.get("orgId");
   const data = await readJsonBody(c, batchLookupSchema);
   const ids = data.ids.filter(Boolean);

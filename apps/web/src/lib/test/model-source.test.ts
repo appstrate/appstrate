@@ -104,6 +104,7 @@ describe("idOnlyRow", () => {
       input: null,
       reasoning: null,
       source: null,
+      endpointCapabilities: {},
       cost: null,
       origin: "catalog",
       featured: false,
@@ -120,6 +121,7 @@ describe("discoveredRows", () => {
     input: ["text"],
     reasoning: false,
     source: "endpoint",
+    endpoint_capabilities: { context_window: 32768, reasoning: false },
   };
 
   it("carries the listing's own provenance through unchanged", () => {
@@ -132,6 +134,7 @@ describe("discoveredRows", () => {
       reasoning: false,
       source: "endpoint",
       origin: "discover",
+      endpointCapabilities: { contextWindow: 32768, reasoning: false },
     });
   });
 
@@ -144,6 +147,7 @@ describe("discoveredRows", () => {
         max_tokens: null,
         input: null,
         source: null,
+        endpoint_capabilities: {},
       },
     ])[0];
     expect(bare).toMatchObject({ label: null, contextWindow: null, input: null, source: null });

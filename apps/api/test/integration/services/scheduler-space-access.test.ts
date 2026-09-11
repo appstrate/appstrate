@@ -13,7 +13,6 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { createSchedule, triggerScheduledRun } from "../../../src/services/scheduler.ts";
-import { removeSpaceMember } from "../../../src/services/space-members.ts";
 
 describe("scheduled runs respect current space access", () => {
   let ctx: TestContext;
@@ -44,7 +43,8 @@ describe("scheduled runs respect current space access", () => {
         actor,
         { cronExpression: "0 * * * *" },
       );
-      if (change === "remove") await removeSpaceMember(space.id, member.id);
+      if (change === "remove")
+        await db.delete(spaceMembers).where(eq(spaceMembers.spaceId, space.id));
       if (change === "downgrade")
         await db
           .update(spaceMembers)
