@@ -8,18 +8,9 @@ import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 
-/**
- * Marker stamped on every middleware that resolves an agent from the route
- * params and 404s when it is unreachable.
- *
- * Such a middleware answers "does this agent exist?" before the route has
- * proven the caller may ask. Mounted ahead of the permission guard it turns
- * 403-vs-404 into an enumeration oracle over the space's private catalog, so
- * the mount ORDER is a security property — and one no reviewer reliably sees.
- * The marker lets a conformance test read the real order off Hono's route
- * table instead (see
- * `test/integration/middleware/agent-lookup-permission-order.test.ts`).
- */
+/** Stamped on middleware that resolves an agent and 404s on an unreachable one.
+ *  Mounting it ahead of the permission guard turns 403-vs-404 into a catalog
+ *  oracle; a conformance test reads the real order off the route table. */
 const AGENT_LOOKUP = Symbol.for("appstrate.agentLookup");
 
 /** True when `handler` is a middleware produced by {@link requireAgent} or

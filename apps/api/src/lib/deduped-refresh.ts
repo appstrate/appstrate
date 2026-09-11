@@ -32,29 +32,13 @@
 
 import { withRedisLock } from "./distributed-lock.ts";
 
-/**
- * Distributed-lock lease in seconds — sized as `30s network timeout` + slack.
- * A watchdog renews it while the exchange runs, so this is not a cap on the
- * critical section: it is how long a CRASHED holder's lock lingers before a
- * peer can reclaim it.
- */
+/** Lock lease — the `30s` network timeout plus slack. See {@link withRedisLock}. */
 const REFRESH_LOCK_TTL_SECONDS = 45;
 /**
- * Hard cap on how long the lock watchdog keeps renewing. Two full exchange
- * timeouts past the lease: a holder still running then is not slow, it is
- * wedged, and must stop renewing so the credential's refresh is not deadlocked
- * for every other instance.
- *
- * `withRedisLock` derives the waiter's give-up point from this (the waiter
- * polls until the holder's lease is guaranteed gone), so the two cannot drift
- * apart. Trade-off: a caller queued behind a wedged holder waits up to
- * ~2.5 min before proceeding unlocked, plus the 30 s exchange timeout in
- * `@appstrate/connect`. Waiting is the cheaper failure — proceeding early
- * double-spends the rotating `refresh_token` and flags a valid credential
- * `needsReconnection`. A forced caller that arrives while a proactive flight
- * is already exchanging pays that once, not once per hop — it adopts that
- * exchange's token rather than queueing a second one behind it (see
- * {@link dedupedRefresh}).
+ * Hard cap on renewal: two full exchange timeouts past the lease. Trade-off: a
+ * caller queued behind a wedged holder waits up to ~2.5 min before proceeding
+ * unlocked. Waiting is the cheaper failure — proceeding early double-spends the
+ * rotating `refresh_token` and flags a valid credential `needsReconnection`.
  */
 const REFRESH_LOCK_MAX_HOLD_SECONDS = 90;
 
@@ -108,15 +92,6 @@ const refreshChains = new Map<string, Promise<unknown>>();
  * verdict, so a forced caller sharing a proactive flight outright would be
  * handed back the very token that just 401'd it — short-circuited on freshness
  * by that flight's post-acquire re-read, with no upstream exchange at all.
- *
- * A forced caller does not therefore have to *wait out* an overlapping
- * proactive flight before starting its own. It awaits that flight and adopts
- * its result when the flight actually exchanged: a token minted upstream is by
- * construction not the stored one the caller 401'd on, so it is exactly what
- * the caller asked for, one lock-wait + exchange hop earlier than queueing.
- * When the proactive flight instead short-circuits on freshness (or fails),
- * the forced caller falls through to a flight of its own — the chain tail has
- * cleared by then, so it starts immediately rather than queueing.
  *
  * Flights that DO run concurrently are chained per `key` (`refreshChains`
  * in-process, the Redis lock across instances): the forced/proactive split
