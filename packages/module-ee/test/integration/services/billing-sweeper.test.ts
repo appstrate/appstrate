@@ -1540,6 +1540,7 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
     // sweep is armed, so it un-pauses. `useEeReconciliationEnv` restores both.
     process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "300";
     process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
     delete process.env.EE_RECONCILIATION_MAX_GAP_SECONDS;
     _resetEeEnvForTests();
   });
@@ -1548,9 +1549,9 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
   async function seedGap(absentHours: number, backlog: number): Promise<CursorSeedResult> {
     const watermark = 1;
     await seedBillingCursor(watermark, 0, new Date(Date.now() - absentHours * HOUR_MS));
-    // One settled row AT the frontier is enough: the guard reads
-    // `settledFrontier()`, never the rows between.
-    if (backlog > 0) seedLlmUsage({ orgId, costUsd: 0.05, id: watermark + backlog });
+    for (let i = 1; i <= backlog; i++) {
+      seedLlmUsage({ orgId, costUsd: 0.05, id: watermark + i });
+    }
     return ensureCursorSeeded(mockPlatformServices, getEeDb());
   }
 
@@ -1558,7 +1559,7 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
     const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
 
     await expect(assertCursorResumable(cursor)).rejects.toThrow(
-      /last confirmed its watermark 48h ago and 5001 settled ledger rows/,
+      /last confirmed its watermark 48h ago and at least 5001 ledger rows/,
     );
   });
 
@@ -1575,9 +1576,66 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
   it("boots a platform that was merely shut down — old cursor, no gap behind it", async () => {
     // Nothing accrued while the platform was off, so there is nothing to back-bill
     // and an age test on its own would have bricked this boot.
-    const cursor = await seedGap(48, DRAIN_CAPACITY);
+    const cursor = await seedGap(48, 0);
 
     expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("counts actual rows, not missing serial ids", async () => {
+    const cursor = await seedGap(48, 0);
+    seedLlmUsage({ orgId, costUsd: 0.05, id: 100_000 });
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("allows exactly one tick of rows", async () => {
+    const cursor = await seedGap(48, DRAIN_CAPACITY);
+    seedLlmUsage({ orgId, costUsd: 0.05, id: 1 }); // Replay is not forward backlog.
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("does not let a recent unsettled BYOK runner hide a stale cursor's backlog", async () => {
+    const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
+    const first = mockLedger[0]!;
+    first.source = "runner";
+    first.credentialSource = "org";
+    first.settled = false;
+    // The platform's ledger seam has no age filter: the runner can have just started
+    // while the persistent cursor was last confirmed two days ago.
+    await expect(assertCursorResumable(cursor)).rejects.toThrow(/at least 5001 ledger rows/);
+  });
+
+  it("leaves a system head-of-line stall to the sweeper", async () => {
+    const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
+    mockLedger[0]!.source = "runner";
+    mockLedger[0]!.settled = false;
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("also respects system stalls in the replay window below the watermark", async () => {
+    const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
+    seedLlmUsage({ orgId, costUsd: 0.05, id: 1, source: "runner", settled: false });
+    expect(await assertCursorResumable(cursor)).toBeUndefined();
+  });
+
+  it("bounds reads to one tick plus one forward row and the replay window", async () => {
+    await seedBillingCursor(200, 0, new Date(Date.now() - 48 * HOUR_MS));
+    for (let id = 1; id <= DRAIN_CAPACITY * 2; id++) seedLlmUsage({ orgId, costUsd: 0.05, id });
+    const cursor = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const listSpy = spyOn(mockPlatformServices.usage, "list");
+    const frontierSpy = spyOn(mockPlatformServices.usage, "settledFrontier");
+    try {
+      await expect(assertCursorResumable(cursor)).rejects.toThrow();
+      expect(frontierSpy).not.toHaveBeenCalled();
+      expect(listSpy).toHaveBeenCalled();
+      const limits = listSpy.mock.calls.map(([input]) => input!.limit!);
+      expect(Math.max(...limits)).toBeLessThanOrEqual(1000);
+      expect(limits.reduce((sum, limit) => sum + limit, 0)).toBeLessThanOrEqual(
+        DRAIN_CAPACITY + 201,
+      );
+    } finally {
+      listSpy.mockRestore();
+      frontierSpy.mockRestore();
+    }
   });
 
   it("boots a sweep that is behind but still ticking", async () => {

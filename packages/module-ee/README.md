@@ -416,7 +416,9 @@ Every subscription-scoped webhook writes only to the account that **currently ca
 
 The handlers that ATTACH a subscription share the "no held subscription" arms: an account qualifies when it carries no subscription id, or when the id it carries names a subscription outside `HELD_SUBSCRIPTION_STATUSES`. That second arm is what a stale id needs — only `customer.subscription.deleted` nulls the column, so a lost or late one leaves a dead id behind, and pinning on the id alone drops the org's next paid checkout as "superseded", leaving it charged with no plan and no quota. An account on a different subscription Stripe DOES hold is excluded.
 
-`checkout.session.completed` and `invoice.paid` add one arm: they also write the account already carrying THAT subscription, because both carry authoritative data for it and neither may depend on winning the ordering race against the other. `customer.subscription.created` does not — its payload is creation-time state (`incomplete` or `trialing`, `cancel_at_period_end: false`), so a late one would roll the live status and cancel flag back on the very subscription the account is on.
+`checkout.session.completed` and `invoice.paid` add one arm: they also write the account already carrying THAT subscription, because both carry authoritative data for it and neither may depend on winning the ordering race against the other. `customer.subscription.created` only attaches an unheld account. All three retrieve the live subscription and refuse ended subscriptions before granting entitlements.
+
+Subscription-scoped handlers take a PostgreSQL transaction advisory lock keyed by subscription id **before** any live Stripe read. The lock covers the account update and event completion together: a cancellation waits for an in-flight attach, then clears its grant. If cancellation was processed first, the attach's live read sees the ended subscription. Distinct event-id claims alone cannot provide this ordering. Storage projection and emails run after commit, so they see the committed account and never consume a second connection while lock waiters occupy the pool.
 
 The condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — the expected tail of a replacement, not a fault.
 
@@ -671,6 +673,10 @@ happen across such a window, and only the first is guarded:
    ago (default a day) **and** more rows piled up than one tick can drain. Both
    halves are required — age alone would refuse a platform that was simply shut
    down for a week, backlog alone a sweep that is honestly behind while ticking.
+   The guard counts actual rows through bounded `usage.list` pages: at most one
+   tick plus one forward row and the replay window. Missing serial ids do not
+   count. Unsettled BYOK rows can be passed; an unsettled system row, including
+   below the watermark in the replay window, stops the scan just as it stops the sweep.
    The two decisions the refusal names:
    - **forgive the gap** — `DELETE FROM ee_billing_cursor;`, then boot. `init()`
      re-seeds the watermark _and_ `floor_id` at the current settled frontier,

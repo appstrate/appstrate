@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import { describe, expect, it, beforeEach } from "bun:test";
+import type Stripe from "stripe";
 import { eq } from "drizzle-orm";
 import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
@@ -10,6 +11,7 @@ import {
   setSubscriptionResponse,
   invoiceEventObject,
   requests,
+  type Fixture,
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { billingAccounts, stripeEvents } from "../../../drizzle/schema.ts";
@@ -29,6 +31,15 @@ describe("handleWebhook", () => {
 
   function signedEvent(payload: object) {
     return generateWebhookEvent(payload, WEBHOOK_SECRET);
+  }
+
+  function signedCreatedEvent(id: string, subscription: Fixture<Stripe.Subscription>) {
+    setSubscriptionResponse(subscription);
+    return signedEvent({
+      id,
+      type: "customer.subscription.created",
+      data: { object: subscription },
+    });
   }
 
   describe("checkout.session.completed", () => {
@@ -230,18 +241,12 @@ describe("handleWebhook", () => {
         stripeSubscriptionId: null,
       });
 
-      const { body, signature } = signedEvent({
-        id: "evt_sub_created_001",
-        type: "customer.subscription.created",
-        data: {
-          object: {
-            id: "sub_created_001",
-            customer: "cus_sub_created_001",
-            status: "active",
-            cancel_at_period_end: false,
-            metadata: { orgId, planId: "starter" },
-          },
-        },
+      const { body, signature } = signedCreatedEvent("evt_sub_created_001", {
+        id: "sub_created_001",
+        customer: "cus_sub_created_001",
+        status: "active",
+        cancel_at_period_end: false,
+        metadata: { orgId, planId: "starter" },
       });
 
       await handleWebhook(body, signature);
@@ -266,26 +271,20 @@ describe("handleWebhook", () => {
       });
 
       const periodEnd = Math.floor(Date.now() / 1000) + 14 * 24 * 3600;
-      const { body, signature } = signedEvent({
-        id: "evt_sub_trial_001",
-        type: "customer.subscription.created",
-        data: {
-          object: {
-            id: "sub_trial_001",
-            customer: "cus_trial_001",
-            status: "trialing",
-            cancel_at_period_end: false,
-            metadata: { orgId, planId: "starter" },
-            items: {
-              data: [
-                {
-                  id: "si_trial",
-                  current_period_end: periodEnd,
-                  price: { id: "price_starter_test" },
-                },
-              ],
+      const { body, signature } = signedCreatedEvent("evt_sub_trial_001", {
+        id: "sub_trial_001",
+        customer: "cus_trial_001",
+        status: "trialing",
+        cancel_at_period_end: false,
+        metadata: { orgId, planId: "starter" },
+        items: {
+          data: [
+            {
+              id: "si_trial",
+              current_period_end: periodEnd,
+              price: { id: "price_starter_test" },
             },
-          },
+          ],
         },
       });
 
@@ -315,19 +314,13 @@ describe("handleWebhook", () => {
         creditQuota: 80000,
       });
 
-      const { body, signature } = signedEvent({
-        id: "evt_late_created",
-        type: "customer.subscription.created",
-        data: {
-          object: {
-            id: "sub_new",
-            customer: "cus_late_created",
-            status: "incomplete",
-            cancel_at_period_end: true,
-            metadata: { orgId, planId: "starter" },
-            items: { data: [{ id: "si_new", price: { id: "price_starter_test" } }] },
-          },
-        },
+      const { body, signature } = signedCreatedEvent("evt_late_created", {
+        id: "sub_new",
+        customer: "cus_late_created",
+        status: "incomplete",
+        cancel_at_period_end: true,
+        metadata: { orgId, planId: "starter" },
+        items: { data: [{ id: "si_new", price: { id: "price_starter_test" } }] },
       });
 
       await handleWebhook(body, signature);
@@ -356,19 +349,13 @@ describe("handleWebhook", () => {
         creditQuota: 0,
       });
 
-      const { body, signature } = signedEvent({
-        id: "evt_created_over_statusless",
-        type: "customer.subscription.created",
-        data: {
-          object: {
-            id: "sub_fresh",
-            customer: "cus_statusless",
-            status: "active",
-            cancel_at_period_end: false,
-            metadata: { orgId, planId: "starter" },
-            items: { data: [{ id: "si_fresh", price: { id: "price_starter_test" } }] },
-          },
-        },
+      const { body, signature } = signedCreatedEvent("evt_created_over_statusless", {
+        id: "sub_fresh",
+        customer: "cus_statusless",
+        status: "active",
+        cancel_at_period_end: false,
+        metadata: { orgId, planId: "starter" },
+        items: { data: [{ id: "si_fresh", price: { id: "price_starter_test" } }] },
       });
 
       await handleWebhook(body, signature);
@@ -1095,19 +1082,13 @@ describe("handleWebhook", () => {
       it("attaches a `created` over a `canceled` id", async () => {
         await seedDeadSubscription("canceled");
 
-        const { body, signature } = signedEvent({
-          id: "evt_dead_created",
-          type: "customer.subscription.created",
-          data: {
-            object: {
-              id: "sub_recreated",
-              customer: "cus_identity",
-              status: "active",
-              cancel_at_period_end: false,
-              metadata: { orgId, planId: "starter" },
-              items: { data: [{ id: "si_recreated", price: { id: "price_starter_test" } }] },
-            },
-          },
+        const { body, signature } = signedCreatedEvent("evt_dead_created", {
+          id: "sub_recreated",
+          customer: "cus_identity",
+          status: "active",
+          cancel_at_period_end: false,
+          metadata: { orgId, planId: "starter" },
+          items: { data: [{ id: "si_recreated", price: { id: "price_starter_test" } }] },
         });
 
         await handleWebhook(body, signature);
@@ -1144,19 +1125,13 @@ describe("handleWebhook", () => {
     it("ignores a `created` for a second subscription on an already-linked account", async () => {
       await seedReplacedSubscription();
 
-      const { body, signature } = signedEvent({
-        id: "evt_identity_created_second",
-        type: "customer.subscription.created",
-        data: {
-          object: {
-            id: "sub_second",
-            customer: "cus_identity",
-            status: "active",
-            cancel_at_period_end: false,
-            metadata: { orgId, planId: "starter" },
-            items: { data: [{ id: "si_second", price: { id: "price_starter_test" } }] },
-          },
-        },
+      const { body, signature } = signedCreatedEvent("evt_identity_created_second", {
+        id: "sub_second",
+        customer: "cus_identity",
+        status: "active",
+        cancel_at_period_end: false,
+        metadata: { orgId, planId: "starter" },
+        items: { data: [{ id: "si_second", price: { id: "price_starter_test" } }] },
       });
 
       await handleWebhook(body, signature);

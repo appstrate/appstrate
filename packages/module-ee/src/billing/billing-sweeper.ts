@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import { logger } from "../logger.ts";
-import { getEeEnv } from "../env.ts";
+import { getEeEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
 import { retryPendingCancellations } from "./org-cancellation.ts";
 import { resyncAllStorageEntitlements } from "./storage-entitlement.ts";
 import {
   addPricingFaults,
+  ledgerScanStart,
   noPricingFaults,
   sweepLedgerBatch,
   type CursorSeedResult,
@@ -120,10 +121,10 @@ let inFlightResync: Promise<unknown> | null = null;
  * the sweeper was not running, AND a gap it cannot drain in one tick piled up
  * while it wasn't.
  *
- * A stalled sweeper is not caught here, and must not be: an unsettled `system`
- * row pins `settledFrontier()` at the same place it pins the watermark, so the
- * backlog stays ~0 however long the stall lasts. That is the head-of-line
- * warning's job, not this one's.
+ * Count the rows the sweeper can actually pass, including unsettled BYOK rows.
+ * A system stall (including in the replay window) belongs to the head-of-line
+ * warning. Serial-id gaps are not usage. Read at most one tick plus one forward
+ * row and the replay window; the rest of a large ledger cannot change the decision.
  */
 export async function assertCursorResumable(cursor: CursorSeedResult): Promise<void> {
   const env = getEeEnv();
@@ -137,17 +138,30 @@ export async function assertCursorResumable(cursor: CursorSeedResult): Promise<v
   const absentSeconds = Math.floor((Date.now() - cursor.updatedAt.getTime()) / 1000);
   if (absentSeconds <= env.EE_RECONCILIATION_MAX_GAP_SECONDS) return;
 
-  const frontierId = await getPlatformServices().usage.settledFrontier();
-  const backlog = frontierId - cursor.lastLlmUsageId;
   // One tick's full drain capacity: below it the next tick clears the gap by
   // itself, which is the ordinary catch-up this must not interrupt.
   const drainCapacity = MAX_DRAIN_ITERATIONS * env.EE_RECONCILIATION_BATCH_SIZE;
-  if (backlog <= drainCapacity) return;
+  let afterId = ledgerScanStart(cursor);
+  let remaining = drainCapacity + 1 + cursor.lastLlmUsageId - afterId;
+  let backlog = 0;
+  while (backlog <= drainCapacity) {
+    const limit = Math.min(remaining, LEDGER_LIST_MAX_LIMIT);
+    const rows = await getPlatformServices().usage.list({ afterId, limit });
+    for (const row of rows) {
+      if (!row.settled && row.credentialSource === "system") return;
+      if (row.id > cursor.lastLlmUsageId) backlog++;
+      if (backlog > drainCapacity) break;
+    }
+    if (backlog > drainCapacity) break;
+    if (rows.length < limit) return;
+    afterId = rows[rows.length - 1]!.id;
+    remaining -= rows.length;
+  }
 
   throw new Error(
     `The billing sweep last confirmed its watermark ${Math.floor(absentSeconds / 3600)}h ago ` +
-      `and ${backlog} settled ledger rows have accumulated since ` +
-      `(watermark ${cursor.lastLlmUsageId}, settled frontier ${frontierId}). ` +
+      `and at least ${backlog} ledger rows can be swept beyond it ` +
+      `(watermark ${cursor.lastLlmUsageId}). ` +
       `Resuming would bill that whole gap against the organizations' CURRENT quotas. ` +
       `Choose explicitly — forgive the gap with \`DELETE FROM ee_billing_cursor;\`, which makes ` +
       `the next boot re-seed the watermark AND floor_id at the settled frontier exactly as the ` +

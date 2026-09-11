@@ -4,9 +4,9 @@ import Stripe from "stripe";
 import { z } from "zod";
 import { getStripe } from "./client.ts";
 import { cancelSubscription } from "./cancel.ts";
-import { getEeDb } from "../db.ts";
+import { getEeDb, type EeTx } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
-import { and, eq, isNull, notInArray, or, type SQL } from "drizzle-orm";
+import { and, eq, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { logger } from "../logger.ts";
 import {
   getPlans,
@@ -170,8 +170,8 @@ function logEndedSubscription(
  * after a refused attach means the org has no billing row at all (every other shape
  * satisfies {@link attachableSubscription}).
  */
-async function heldSubscriptionId(orgId: string): Promise<string | null> {
-  const [account] = await getEeDb()
+async function heldSubscriptionId(db: EeTx, orgId: string): Promise<string | null> {
+  const [account] = await db
     .select({ stripeSubscriptionId: billingAccounts.stripeSubscriptionId })
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
@@ -191,6 +191,7 @@ async function heldSubscriptionId(orgId: string): Promise<string | null> {
  * Stripe's redelivery retry, and a cancel of an already-gone subscription is a no-op.
  */
 async function reconcileSupersededCheckout(
+  db: EeTx,
   event: Stripe.Event,
   orgId: string,
   subscriptionId: string,
@@ -199,7 +200,7 @@ async function reconcileSupersededCheckout(
 
   // No winner to point at: no billing row (nothing to reconcile against), or a row already
   // on this very subscription (no duplicate at all) — neither justifies ending a paid one.
-  const heldId = await heldSubscriptionId(orgId);
+  const heldId = await heldSubscriptionId(db, orgId);
   if (heldId === null || heldId === subscriptionId) return;
 
   logger.warn("Duplicate paid subscription — cancelling the one that lost the attach", {
@@ -213,6 +214,25 @@ async function reconcileSupersededCheckout(
     throw new Error(`Failed to cancel superseded subscription ${subscriptionId} for org ${orgId}`);
   }
 }
+
+/** Resolve before any Stripe request, so cancellation also waits for in-flight GETs. */
+function eventSubscriptionId(event: Stripe.Event): string | null {
+  switch (event.type) {
+    case "checkout.session.completed":
+      return refId(event.data.object.subscription);
+    case "invoice.paid":
+    case "invoice.payment_failed":
+      return refId(event.data.object.parent?.subscription_details?.subscription);
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+      return event.data.object.id;
+    default:
+      return null;
+  }
+}
+
+type AfterCommit = Array<() => void | Promise<unknown>>;
 
 export async function handleWebhook(body: string, signature: string): Promise<void> {
   const event = await getStripe().webhooks.constructEventAsync(
@@ -255,30 +275,43 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
     return; // Being processed by another handler
   }
 
+  const afterCommit: AfterCommit = [];
   try {
-    await processEvent(event);
+    await db.transaction(async (tx) => {
+      const subscriptionId = eventSubscriptionId(event);
+      if (subscriptionId) {
+        // Different event IDs can describe the same subscription. Serialize its live
+        // read AND account mutation across replicas; an UPDATE's row lock alone starts
+        // too late. Transaction scope releases the lock on rollback or connection loss,
+        // and all SQL uses this connection rather than exhausting the pool with waiters.
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${`ee-stripe-subscription:${subscriptionId}`}, 0))`,
+        );
+      }
+      await processEvent(event, tx, afterCommit);
 
-    // Mark done only while the claim is still `processing`. This is a partial
-    // guard, not a full claim-ownership check: it detects the common case where
-    // OUR row was deleted by a stale-claim reclaim mid-processing (0 rows → we
-    // log it). It does NOT distinguish our claim from a fresh reinserted one, so
-    // the pathological interleave (handler runs > CLAIM_TTL, gets reclaimed, a
-    // retry reinserts + reprocesses) is not fully prevented — fully closing it
-    // needs a per-claim nonce column. Accepted: handlers are sub-second, so the
-    // > 5-min window is effectively unreachable; most handlers are idempotent
-    // (the subscription_cycle credit reset being the exception).
-    const [confirmed] = await db
-      .update(stripeEvents)
-      .set({ status: "done", processedAt: new Date() })
-      .where(and(eq(stripeEvents.eventId, event.id), eq(stripeEvents.status, "processing")))
-      .returning({ eventId: stripeEvents.eventId });
+      // Mark done only while the claim is still `processing`. This is a partial
+      // guard, not a full claim-ownership check: it detects the common case where
+      // OUR row was deleted by a stale-claim reclaim mid-processing (0 rows → we
+      // log it). It does NOT distinguish our claim from a fresh reinserted one, so
+      // the pathological interleave (handler runs > CLAIM_TTL, gets reclaimed, a
+      // retry reinserts + reprocesses) is not fully prevented — fully closing it
+      // needs a per-claim nonce column. Accepted: handlers are sub-second, so the
+      // > 5-min window is effectively unreachable; most handlers are idempotent
+      // (the subscription_cycle credit reset being the exception).
+      const [confirmed] = await tx
+        .update(stripeEvents)
+        .set({ status: "done", processedAt: new Date() })
+        .where(and(eq(stripeEvents.eventId, event.id), eq(stripeEvents.status, "processing")))
+        .returning({ eventId: stripeEvents.eventId });
 
-    if (!confirmed) {
-      logger.warn("Stripe event claim was reclaimed during processing — may reprocess on retry", {
-        eventId: event.id,
-        type: event.type,
-      });
-    }
+      if (!confirmed) {
+        logger.warn("Stripe event claim was reclaimed during processing — may reprocess on retry", {
+          eventId: event.id,
+          type: event.type,
+        });
+      }
+    });
   } catch (err) {
     // Delete claim to allow immediate retry by Stripe
     await db
@@ -287,10 +320,23 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
       .catch(() => {});
     throw err;
   }
+
+  // Platform projection reads the committed plan using another pool connection;
+  // neither it nor email delivery may run against an uncommitted account update.
+  for (const effect of afterCommit) {
+    try {
+      await effect();
+    } catch (err) {
+      logger.error("Stripe post-commit effect failed", { eventId: event.id, err });
+    }
+  }
 }
 
-async function processEvent(event: Stripe.Event): Promise<void> {
-  const db = getEeDb();
+async function processEvent(
+  event: Stripe.Event,
+  db: EeTx,
+  afterCommit: AfterCommit,
+): Promise<void> {
   const plans = getPlans();
 
   switch (event.type) {
@@ -364,7 +410,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         .returning({ orgId: billingAccounts.orgId });
 
       if (!linked) {
-        await reconcileSupersededCheckout(event, orgId, subscriptionId);
+        await reconcileSupersededCheckout(db, event, orgId, subscriptionId);
         break;
       }
 
@@ -376,26 +422,34 @@ async function processEvent(event: Stripe.Event): Promise<void> {
 
       // Project the new plan onto the platform storage limit (best-effort —
       // the periodic resync repairs a miss).
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
-      sendBillingEmail(orgId, "subscription-confirmed", {
-        planName: plan.name,
-        price: plan.monthlyPrice,
-        periodEnd: (subscriptionPeriodEnd(checkoutSubscription) ?? new Date()).toISOString(),
-        locale: "fr",
-      });
+      afterCommit.push(() =>
+        sendBillingEmail(orgId, "subscription-confirmed", {
+          planName: plan.name,
+          price: plan.monthlyPrice,
+          periodEnd: (subscriptionPeriodEnd(checkoutSubscription) ?? new Date()).toISOString(),
+          locale: "fr",
+        }),
+      );
       break;
     }
 
     case "customer.subscription.created": {
       // Safety net: captures subscriptions created outside Checkout flow
-      const subscription = event.data.object;
-      const subMetadata = parseStripeMetadata(subscription.metadata);
+      const subMetadata = parseStripeMetadata(event.data.object.metadata);
       if (!subMetadata) {
         logger.warn("Subscription created with invalid metadata", { eventId: event.id });
         break;
       }
       const { orgId } = subMetadata;
+      // Creation-time payloads survive cancellation too. Retrieve under the same
+      // subscription lock as checkout/invoice before attaching an unheld account.
+      const subscription = await getStripe().subscriptions.retrieve(event.data.object.id);
+      if (isEndedSubscription(subscription)) {
+        logEndedSubscription(event, orgId, subscription);
+        break;
+      }
 
       const subCustomerId = refId(subscription.customer);
       if (!subCustomerId) {
@@ -439,7 +493,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         status: subscription.status,
       });
 
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
       break;
     }
 
@@ -523,8 +577,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           ...(resetCredits ? { creditsUsed: 0 } : {}),
           creditQuota: plan.creditQuota,
           periodEnd: subscriptionPeriodEnd(subscription),
-          // Invoice paid = subscription is current
-          subscriptionStatus: "active",
+          subscriptionStatus: subscription.status,
           stripeSubscriptionId: subscription.id,
           ...(invoiceCustomerId ? { stripeCustomerId: invoiceCustomerId } : {}),
           updatedAt: new Date(),
@@ -545,17 +598,19 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         billingReason: invoice.billing_reason,
       });
 
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
       // Email: payment receipt
       const amountPaid = (invoice.amount_paid ?? 0) / 100; // cents → dollars
-      sendBillingEmail(orgId, "payment-receipt", {
-        planName: plan.name,
-        amount: amountPaid,
-        invoiceUrl: invoice.hosted_invoice_url ?? null,
-        periodEnd: (subscriptionPeriodEnd(subscription) ?? new Date()).toISOString(),
-        locale: "fr",
-      });
+      afterCommit.push(() =>
+        sendBillingEmail(orgId, "payment-receipt", {
+          planName: plan.name,
+          amount: amountPaid,
+          invoiceUrl: invoice.hosted_invoice_url ?? null,
+          periodEnd: (subscriptionPeriodEnd(subscription) ?? new Date()).toISOString(),
+          locale: "fr",
+        }),
+      );
       break;
     }
 
@@ -618,7 +673,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       });
 
       // Plan may have changed (Customer Portal switch) — re-project storage.
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
       const accessUntil = (itemPeriodEnd ?? new Date()).toISOString();
 
@@ -629,11 +684,13 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         "cancel_at_period_end" in previousAttributes &&
         !previousAttributes.cancel_at_period_end
       ) {
-        sendBillingEmail(orgId, "cancellation-confirmed", {
-          planName: newPlan?.name ?? subMetadata.planId,
-          accessUntil,
-          locale: "fr",
-        });
+        afterCommit.push(() =>
+          sendBillingEmail(orgId, "cancellation-confirmed", {
+            planName: newPlan?.name ?? subMetadata.planId,
+            accessUntil,
+            locale: "fr",
+          }),
+        );
       }
 
       // Email: plan changed (price changed, not a cancellation)
@@ -647,13 +704,15 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         const oldPlan = Object.values(plans).find((p) => p?.stripePriceId === previousPriceId);
 
         if (oldPlan && oldPlan.id !== newPlan.id) {
-          sendBillingEmail(orgId, "plan-changed", {
-            oldPlanName: oldPlan.name,
-            newPlanName: newPlan.name,
-            newPrice: newPlan.monthlyPrice,
-            effectiveDate: accessUntil,
-            locale: "fr",
-          });
+          afterCommit.push(() =>
+            sendBillingEmail(orgId, "plan-changed", {
+              oldPlanName: oldPlan.name,
+              newPlanName: newPlan.name,
+              newPrice: newPlan.monthlyPrice,
+              effectiveDate: accessUntil,
+              locale: "fr",
+            }),
+          );
         }
       }
       break;
@@ -706,13 +765,15 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // Storage follows the plan, not the credit anti-abuse rule: the org
       // drops to the free-plan ceiling (existing documents are never evicted;
       // the platform only blocks new writes above the limit).
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
       // Email: subscription expired
-      sendBillingEmail(orgId, "subscription-expired", {
-        resubscribeUrl: billingSettingsUrl(getAppUrl()),
-        locale: "fr",
-      });
+      afterCommit.push(() =>
+        sendBillingEmail(orgId, "subscription-expired", {
+          resubscribeUrl: billingSettingsUrl(getAppUrl()),
+          locale: "fr",
+        }),
+      );
       break;
     }
 
@@ -757,13 +818,15 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           const amountDue = (invoice.amount_due ?? 0) / 100;
           const attemptCount = invoice.attempt_count ?? 1;
 
-          sendBillingEmail(failedAccount.orgId, "payment-failed", {
-            planName: plan?.name ?? failedAccount.planId,
-            amount: amountDue,
-            attemptNumber: attemptCount,
-            updateUrl: billingSettingsUrl(getAppUrl()),
-            locale: "fr",
-          });
+          afterCommit.push(() =>
+            sendBillingEmail(failedAccount.orgId, "payment-failed", {
+              planName: plan?.name ?? failedAccount.planId,
+              amount: amountDue,
+              attemptNumber: attemptCount,
+              updateUrl: billingSettingsUrl(getAppUrl()),
+              locale: "fr",
+            }),
+          );
         }
       }
       break;
@@ -791,12 +854,14 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           .where(eq(billingAccounts.stripeCustomerId, expiringCustomerId));
 
         if (expiringAccount) {
-          sendBillingEmail(expiringAccount.orgId, "card-expiring", {
-            cardLast4: source.last4,
-            expiryMonth: `${String(source.exp_month).padStart(2, "0")}/${String(source.exp_year).slice(-2)}`,
-            updateUrl: billingSettingsUrl(getAppUrl()),
-            locale: "fr",
-          });
+          afterCommit.push(() =>
+            sendBillingEmail(expiringAccount.orgId, "card-expiring", {
+              cardLast4: source.last4,
+              expiryMonth: `${String(source.exp_month).padStart(2, "0")}/${String(source.exp_year).slice(-2)}`,
+              updateUrl: billingSettingsUrl(getAppUrl()),
+              locale: "fr",
+            }),
+          );
         }
       }
       break;
