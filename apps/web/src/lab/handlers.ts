@@ -521,6 +521,41 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/spaces\/[^/]+$/,
     handler: () => ({ status: 200, body: f.spaces.data[0] }),
   },
+  /* RBAC: the role catalog, its vocabulary, and who reaches a space. */
+  {
+    method: "GET",
+    pattern: /^\/api\/roles$/,
+    // Presets are platform constants, so "empty" still lists them: only the
+    // org's own bundles can be absent.
+    handler: (_u, scenario) => ({
+      status: 200,
+      body: {
+        ...f.roles,
+        data: scenario === "empty" ? f.roles.data.filter((r) => r.kind === "preset") : f.roles.data,
+      },
+    }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/roles\/vocabulary$/,
+    handler: () => ({ status: 200, body: f.roleVocabulary }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/spaces\/[^/]+\/roles$/,
+    handler: () => ({
+      status: 200,
+      body: { object: "list", hasMore: false, data: f.assignableSpaceRoles },
+    }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/spaces\/[^/]+\/members$/,
+    handler: (_u, scenario) => ({
+      status: 200,
+      body: { object: "list", hasMore: false, data: list(f.spaceMembers, scenario) },
+    }),
+  },
   {
     method: "GET",
     pattern: /^\/api\/api-keys$/,
@@ -565,7 +600,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       // `?status=failed,timeout` — several at once, like the endpoint.
       const statuses = (url.searchParams.get("status") ?? "").split(",").filter(Boolean);
       const kind = url.searchParams.get("kind");
-      const mine = url.searchParams.get("user") === "me";
+      const mine = url.searchParams.get("user") === "me" || !f.LAB_READS_ALL_RUNS;
       // `?q=` — the agent, the error, the number, like the endpoint.
       const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
       const filtered = all.filter((r) => {
@@ -911,6 +946,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       const all = list(f.runs, s, f.heavyRuns).filter(
         (run) =>
           run.packageId === packageId &&
+          (f.LAB_READS_ALL_RUNS || run.userId == null || run.userId === f.USER_ID) &&
           (requestedStatuses.size === 0 || requestedStatuses.has(run.status)),
       );
       const offset = Number(url.searchParams.get("offset") ?? 0);

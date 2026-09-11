@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { getPreset, getRole, orgPermissionsForRole, spacePermissionsForPreset } from "./role";
+import { SPACE_LEVEL_PERMISSIONS } from "@appstrate/core/permissions";
+import {
+  LAB_PRESETS,
+  getPreset,
+  getRole,
+  orgPermissionsForRole,
+  spacePermissionsForPreset,
+  type LabPreset,
+} from "./role";
 
 /**
  * The fake data lab mode serves.
@@ -169,6 +177,12 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
  */
 const LAB_ORG_PERMISSIONS = orgPermissionsForRole();
 const LAB_SPACE_PERMISSIONS = spacePermissionsForPreset();
+/**
+ * Without `runs:read-all` the server answers only the caller's own runs
+ * (`runVisibilityFilter`). The run handlers apply the same rule, so a narrow
+ * preset sees in the lab exactly what it would see for real.
+ */
+export const LAB_READS_ALL_RUNS = LAB_SPACE_PERMISSIONS.includes("runs:read-all");
 const LAB_SPACE_PRESET = getPreset();
 const LAB_ORG_ROLE = getRole();
 
@@ -251,6 +265,141 @@ export const availableApiKeyScopes: Json200<"/api/api-keys/available-scopes", "g
   hasMore: false,
   data: ["agents:read", "agents:run", "runs:read", "end-users:read", "end-users:write"],
 };
+
+/* -------------------------------------------------------------------------- */
+/* Roles and space membership                                                  */
+/* -------------------------------------------------------------------------- */
+
+type Role = Json200<"/api/roles", "get">["data"][number];
+
+/** A preset is a platform constant: the server sends its key as its name. */
+function presetRole(preset: LabPreset): Role {
+  return {
+    object: "role",
+    kind: "preset",
+    id: null,
+    key: preset,
+    name: preset,
+    description: null,
+    permissions: [...spacePermissionsForPreset(preset)].sort(),
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+/** The five presets, then one org bundle: the roles page shows both kinds. */
+export const roles: Json200<"/api/roles", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    ...LAB_PRESETS.map(presetRole),
+    {
+      object: "role",
+      kind: "custom",
+      id: "role_lab_accounting",
+      key: "accounting",
+      name: "Comptabilité",
+      description: "Lance les agents comptables et relit tous leurs runs, sans les modifier.",
+      permissions: [
+        "agents:read",
+        "agents:run",
+        "files:read",
+        "integrations:connect",
+        "integrations:read",
+        "runs:read",
+        "runs:read-all",
+      ],
+      createdAt: ago(30_000),
+      updatedAt: ago(4_000),
+    },
+  ],
+};
+
+/**
+ * What the caller may hand out in a space: the roles whose every permission it
+ * holds there. Flip the panel's preset and the role picker narrows with it.
+ */
+export const assignableSpaceRoles: Role[] = roles.data.filter((role) =>
+  role.permissions.every((permission) => LAB_SPACE_PERMISSIONS.includes(permission)),
+);
+
+type VocabularyGroup = Json200<"/api/roles/vocabulary", "get">["data"][number];
+
+/** Grouped exactly as `spaceLevelVocabulary()` groups it on the server. */
+function vocabulary(): VocabularyGroup[] {
+  const grantable = new Set<string>(availableApiKeyScopes.data);
+  const byResource = new Map<string, VocabularyGroup["permissions"]>();
+  for (const permission of [...SPACE_LEVEL_PERMISSIONS].sort()) {
+    const colon = permission.indexOf(":");
+    const resource = permission.slice(0, colon);
+    const entries = byResource.get(resource) ?? [];
+    entries.push({
+      permission,
+      action: permission.slice(colon + 1),
+      api_key_grantable: grantable.has(permission),
+    });
+    byResource.set(resource, entries);
+  }
+  return [...byResource.entries()]
+    .map(([resource, permissions]) => ({ resource, permissions }))
+    .sort((a, b) => a.resource.localeCompare(b.resource));
+}
+
+export const roleVocabulary: Json200<"/api/roles/vocabulary", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: vocabulary(),
+};
+
+type SpaceMember = Json200<"/api/spaces/{id}/members", "get">["data"][number];
+
+/**
+ * One person per way of reaching a space: org owner and admin through their
+ * org role, a member through the space being open (on its default role), and a
+ * guest through an explicit seat on a custom role.
+ */
+export const spaceMembers: SpaceMember[] = [
+  {
+    object: "space_member",
+    userId: USER_ID,
+    name: "Olivier Tarbès",
+    email: "olivier@tractr.net",
+    org_role: "owner",
+    source: "org_role",
+    role: { kind: "preset", key: "admin", name: "admin" },
+    createdAt: null,
+  },
+  {
+    object: "space_member",
+    userId: "user_lab_2",
+    name: "Pierre",
+    email: "pierre@tractr.net",
+    org_role: "admin",
+    source: "org_role",
+    role: { kind: "preset", key: "admin", name: "admin" },
+    createdAt: null,
+  },
+  {
+    object: "space_member",
+    userId: "user_lab_3",
+    name: "Camille",
+    email: "camille@tractr.net",
+    org_role: "member",
+    source: "open_space",
+    role: { kind: "preset", key: "operator", name: "operator" },
+    createdAt: null,
+  },
+  {
+    object: "space_member",
+    userId: "user_lab_4",
+    name: "Julie Martin",
+    email: "julie@cabinet-martin.fr",
+    org_role: "guest",
+    source: "explicit",
+    role: { kind: "custom", key: "accounting", name: "Comptabilité" },
+    createdAt: ago(3_000),
+  },
+];
 
 export const apiKeys: Json200<"/api/api-keys", "get"> = {
   object: "list",
@@ -2634,6 +2783,13 @@ export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
       email: "camille@tractr.net",
       role: "member",
       joinedAt: ago(12_000),
+    },
+    {
+      userId: "user_lab_4",
+      displayName: "Julie Martin",
+      email: "julie@cabinet-martin.fr",
+      role: "guest",
+      joinedAt: ago(3_000),
     },
   ],
   invitations: [],

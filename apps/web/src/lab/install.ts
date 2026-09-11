@@ -39,6 +39,7 @@ window.__APP_CONFIG__ = {
     billing: true,
     webhooks: true,
     oidc: true,
+    custom_roles: true,
   },
   trustedOrigins: [],
 };
