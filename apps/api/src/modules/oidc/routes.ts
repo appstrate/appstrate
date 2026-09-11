@@ -648,17 +648,10 @@ export function createOidcRouter() {
    *
    * These routes address ONE space by path param but sit at the app root,
    * outside `SPACE_SCOPED_PREFIXES`, so no space-context middleware runs for
-   * them. They used to be gated on the ORG-level `spaces:read` / `spaces:write`
-   * — strings every `member` and `guest` holds for the whole org — with the
-   * only space check being "does this space belong to my org". A guest, whose
-   * definition is "no implicit reach into any space", therefore read the SMTP
-   * host/username and the social `clientId`/`scopes` of spaces they are not in,
-   * `private` ones included (#1337).
-   *
-   * The router now enters the space named by `:id` itself, through the core
-   * seam every module route uses (`enterSpaceContext`, which runs the canonical
-   * `validateSpaceInOrg` — 400 on a malformed id, 404 outside the org — then
-   * resolves the caller's role there, refusing a non-member with 403
+   * them. The router therefore enters the space named by `:id` itself, through
+   * the core seam every module route uses (`enterSpaceContext`, which runs the
+   * canonical `validateSpaceInOrg` — 400 on a malformed id, 404 outside the org
+   * — then resolves the caller's role there, refusing a non-member with 403
    * `not_a_space_member`, or 404 for a `private` space). Each route below then
    * declares the SPACE-level `space-settings:write`: this IS per-space
    * configuration, and it is the same permission `PATCH /api/spaces/:id`
