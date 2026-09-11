@@ -7,20 +7,10 @@
 # when a fixture claims a field the live API does not have, or when Stripe stops
 # behaving the way the module bets it does.
 #
-# Without `STRIPE_LIVE_SECRET_KEY` the suite skips itself — the same opt-in
-# shape as `scripts/conformance/probes.ts`. On a pull_request that skip is
-# allowed and this job stays green, because two kinds of PR structurally cannot
-# see repository secrets:
-#
-#   * fork PRs, which never receive them; and
-#   * DEPENDABOT PRs, which receive the Dependabot secret store instead. This is
-#     the reason the `pull_request` trigger alone cannot cover an SDK bump: the
-#     variable is empty, `describe.skipIf` skips every test, and the job reports
-#     green having checked nothing.
-#
-# The `push` trigger below is the half that does cover it. On push, schedule and
-# workflow_dispatch the repository secrets ARE available, so a missing key there
-# is a real failure and this job says so rather than skipping quietly.
+# Without `STRIPE_LIVE_SECRET_KEY` the suite skips itself. A skip is tolerated
+# only on pull_request, where fork and Dependabot PRs structurally cannot see
+# repository secrets; on push, schedule and workflow_dispatch a missing key FAILS
+# the job. Full rationale: `packages/module-ee/README.md`.
 name: Stripe live contract
 
 on:

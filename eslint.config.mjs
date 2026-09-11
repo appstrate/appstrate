@@ -37,10 +37,9 @@ const PI_SDK_BAN = {
 // errors in a module-level WeakSet — so a symbol must come from the SAME copy
 // as the better-auth code that reads it. Reaching for `@better-auth/core/*`
 // pins us to whichever copy the package manager happens to link for `apps/api`,
-// which is decided by the peer graph, not by us: #1295 was exactly that (two
-// copies split by a `jose` skew, the marker lookup missed, and the MCP 403 lost
-// its `WWW-Authenticate` step-up). `better-auth/*` re-exports the same symbols
-// from the copy better-auth itself uses, so it is right whatever the graph does.
+// which the peer graph decides, not us. `better-auth/*` re-exports the same
+// symbols from the copy better-auth itself uses, so it is right whatever the
+// graph does.
 //
 // `utils/host` is the one exception, and it is carved out here rather than
 // disabled at the import site: `better-auth` re-exports no host classifier (its
@@ -802,7 +801,12 @@ export default tseslint.config(
     // unhandled-rejection paths in `@appstrate/core` — which is PUBLISHED, so a
     // dropped rejection there ships to every consumer. `packages/*/src` is a
     // discovered superset (a new package is covered the day it lands), not a
-    // roster of the packages that happened to look async today.
+    // roster of the packages that happened to look async today. `apps/cli/src`,
+    // `runtime-pi` and `scripts/**` are backend by the same criteria —
+    // `scripts/migration/**` mutates production data. `apps/web/src` has its own
+    // type-aware block (a much noisier JSX population); test trees are excluded
+    // below. The type programs for these trees are what exhausts node's default
+    // heap — see `scripts/lint.ts`.
     //
     // ─── Why test code is excluded ───────────────────────────────────────
     //
@@ -826,22 +830,6 @@ export default tseslint.config(
     //
     // If this ever needs to get cheaper, narrow `files` before dropping a rule:
     // the cost is the type program, not the rule count.
-    //
-    // ─── Scope ──────────────────────────────────────────────────────────
-    //
-    // `apps/cli/src`, `runtime-pi` and `scripts` are backend code by every
-    // criterion above — `runtime-pi` is where the rationale's own headline
-    // example, a run orchestrator, actually lives, and `scripts/migration/**`
-    // mutates PRODUCTION data, where a call that returns before its writes
-    // land reports a move that did not happen.
-    //
-    // Type programs for these trees are what exhausts node's default heap,
-    // which is why `scripts/lint.ts` raises it — see the note there.
-    //
-    // Test trees stay out for the reason given above, and `apps/web/src` stays
-    // out because it has its own type-aware block: these three rules over JSX
-    // event handlers are a different (and much noisier) population than the
-    // backend one, and widening to the SPA is not this block's job.
     files: [
       "apps/api/src/**/*.ts",
       "apps/cli/src/**/*.ts",
