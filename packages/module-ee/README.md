@@ -754,9 +754,10 @@ knowing:
   (`bun run test:tier0`) the module is not imported, not initialized, and its
   test files are not collected. It needs PostgreSQL and `postgres.js`, neither
   of which the tier-0 PGlite adapter offers. The runner prints the skip.
-- the same file sets `EE_RECONCILIATION_INTERVAL_SECONDS=0` so `init()` arms
-  no periodic sweep — a timer firing mid-suite would bill rows a test seeded.
-  The sweep functions are driven directly by
+- the same file sets `EE_RECONCILIATION_INTERVAL_SECONDS=0`, which pauses
+  METERING — a sweep firing mid-suite would bill rows a test seeded. `init()`
+  still arms the maintenance tick that keeps running under it; `useEeTestSeams()`
+  is what disarms that. The sweep functions are driven directly by
   `test/integration/services/billing-sweeper.test.ts`.
 
 `test/helpers/setup.ts` installs the two seams these tests drive themselves: the
