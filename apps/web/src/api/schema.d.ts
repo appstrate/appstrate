@@ -15438,6 +15438,7 @@ export interface operations {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
                      *           "name": "Acme Corp",
                      *           "slug": "acme-corp",
+                     *           "logo": null,
                      *           "role": "owner",
                      *           "permissions": [
                      *             "org:read",
@@ -15493,6 +15494,7 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440001",
                      *       "name": "New Organization",
                      *       "slug": "new-org",
+                     *       "logo": null,
                      *       "role": "owner",
                      *       "createdAt": "2026-01-15T10:30:00Z"
                      *     }
@@ -15539,6 +15541,7 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
+                     *       "logo": null,
                      *       "members": [
                      *         {
                      *           "userId": "usr_abc123",
@@ -22872,6 +22875,7 @@ export interface operations {
                      *       "id": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
+                     *       "logo": null,
                      *       "role": "member",
                      *       "permissions": [
                      *         "org:read",
