@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
@@ -59,6 +59,18 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId);
   const [roleValue, setRoleValue] = useState("");
   const [entering, setEntering] = useState(false);
+  /**
+   * Every way out of this dialog — the Cancel button, Escape, the overlay —
+   * unmounts it without stopping the listing `submit` is awaiting. The closure
+   * survives the unmount, so it asks this before committing anything.
+   */
+  const abandoned = useRef(false);
+
+  /** The one exit: whatever closed the dialog, the preview it started is off. */
+  const close = () => {
+    abandoned.current = true;
+    onClose();
+  };
 
   const inSpace = selectedSpaceId !== NO_SPACE;
   const {
@@ -87,8 +99,13 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
       // and the banner must appear together, and a load that fails must leave
       // the admin exactly where they were rather than under a persona wearing
       // their own authority.
-      enterViewAs(persona, await fetchOrgsAs(persona));
+      const orgs = await fetchOrgsAs(persona);
+      // Committing a preview the user already left would persist it, and a
+      // persona the server accepts is never stopped later: nothing would undo it.
+      if (abandoned.current) return;
+      enterViewAs(persona, orgs);
     } catch (err) {
+      if (abandoned.current) return;
       setEntering(false);
       // Three of the four refusals are permanent; "try again" is only ever true
       // of a failure the server named nothing for.
@@ -101,17 +118,17 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
     // "Lecteur dans Default" over a page answered for another space reads as
     // a preview that does not work.
     if (space && roleOption) switchSpace(space.id);
-    onClose();
+    close();
   };
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={close}
       title={t("viewAs.title")}
       actions={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={close}>
             {t("btn.cancel", { ns: "common" })}
           </Button>
           <Button

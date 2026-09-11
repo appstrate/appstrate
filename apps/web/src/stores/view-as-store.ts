@@ -143,6 +143,11 @@ export function toViewAsPersona(
  */
 export function enterViewAs(persona: ViewAsPersona, orgs: Organization[]): void {
   viewAsStore.getState().commit(persona, null);
+  // Seeding cancels nothing, and `["orgs"]` is the one query the reset below
+  // spares: an `/api/orgs` still in flight under the PREVIOUS authority would
+  // land afterwards and write the previewer's permissions over the persona's.
+  // `exitViewAs` gets this free from `invalidateQueries`, which cancels first.
+  void queryClient.cancelQueries({ queryKey: orgKeys.all });
   queryClient.setQueryData(orgKeys.all, orgs);
   removeOrgScopedQueries(queryClient);
 }
