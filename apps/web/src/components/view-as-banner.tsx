@@ -29,13 +29,9 @@ import { useSpaces } from "../hooks/use-spaces";
  * dans Default" over a page answered for Marketing otherwise reads as a preview
  * that does not work.
  *
- * It also states the preview's one boundary. A persona is a restriction of the
- * caller's own session and the caller stays themselves (`apps/api/src/lib/view-as.ts`),
- * so every capability gated on IDENTITY rather than on role survives it: the
- * runs the previewer launched (`runs:read` means "mine"), the files they
- * uploaded, the integration connections they own. Previewing those would take
- * impersonation, which the design refuses; naming the boundary is what keeps
- * "see what this role sees" honest.
+ * It also states the preview's one boundary: a persona RESTRICTS the caller
+ * without replacing them (`apps/api/src/lib/view-as.ts`), so anything gated on
+ * identity survives it — `runs:read` still means "mine".
  */
 export function ViewAsBanner() {
   const { t } = useTranslation(["common", "settings"]);

@@ -50,15 +50,13 @@ function listing(overrides: Partial<DiscoveryState> = {}): string {
   );
 }
 
-describe("DiscoveryControls — a listing the endpoint answered in full", () => {
+describe("DiscoveryControls — what a listing reports about itself", () => {
   it("counts what it found and claims nothing is missing", () => {
     const html = listing();
     expect(html).toContain(settingsFr["models.form.discoverCount_other"].replace("{{count}}", "2"));
     expect(html).not.toContain(settingsFr["models.form.discoverTruncated"]);
   });
-});
 
-describe("DiscoveryControls — a listing a cap cut short", () => {
   it("says the count is short of what the endpoint serves", () => {
     expect(listing({ truncated: true })).toContain(settingsFr["models.form.discoverTruncated"]);
   });

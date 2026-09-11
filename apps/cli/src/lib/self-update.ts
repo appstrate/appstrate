@@ -44,19 +44,10 @@ const RELEASE_URL_BASE = "https://github.com/appstrate/appstrate/releases";
  * `release.yml` can steer an update.
  */
 const RELEASES_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases";
-/**
- * 100 is the GitHub API maximum. Every page is walked before the highest
- * version is picked (see `resolveTargetVersion`), so a larger page is strictly
- * fewer requests: two calls cover the same 200 releases a 30-per-page walk
- * would spend seven on.
- */
+// 100 is the API maximum, and the walk always reads every page, so a larger
+// page is strictly fewer requests. Two pages = 200 releases, ~50 platform
+// cycles, bounded against GitHub's 60 req/h unauthenticated limit.
 const RELEASES_PAGE_SIZE = 100;
-/**
- * Pages scanned before giving up: 200 releases, ~50 platform cycles back (each
- * creates one `v*` plus at most three npm Releases). The cap bounds the API
- * calls — GitHub's unauthenticated limit is 60 req/h per IP, and every
- * resolution now pays for the full walk rather than stopping early.
- */
 const RELEASES_MAX_PAGES = 2;
 const PLATFORM_TAG = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -387,13 +378,9 @@ export async function resolveTargetVersion(
   // `core@`, `afps-shared@`) publish their own Releases and are skipped by
   // tag, the same way `releases/latest` skips drafts and prereleases.
   //
-  // EVERY page is collected before the HIGHEST version wins, not the highest
-  // within the first page that holds a candidate: creation order and version
-  // order diverge whenever a hotfix is cut for an older line. `v1.1.0` ships,
-  // enough npm Releases accumulate to fill a page, then `v1.0.1` is published
-  // for the old line — it now sits alone on page 1 while `v1.1.0` sits on
-  // page 2. Stopping at the first page with a candidate hands back `v1.0.1`
-  // and downgrades every user, which is exactly what this walk prevents.
+  // EVERY page is collected before the HIGHEST version wins: creation order and
+  // version order diverge whenever a hotfix is cut for an older line, so the
+  // first page holding a candidate can hold the LOWER one.
   const skipped: string[] = [];
   const candidates: string[] = [];
   for (let page = 1; page <= RELEASES_MAX_PAGES; page++) {

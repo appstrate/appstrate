@@ -1,24 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pins `lib/keyring.ts`'s error marker against the `@napi-rs/keyring`
- * native binary this checkout actually installs.
- *
- * Why this test exists: the marker is the only discriminator we get.
- * `@napi-rs/keyring` surfaces `keyring-core` errors as plain JS `Error`s
- * — no variant, no `code`, nothing but the Display string — and that
- * string decides whether a keyring failure means "this host has no
- * store, use the 0600 file" or "the store is locked, refuse to write
- * plaintext". The 2.0 bump (#1299) reworded every one of them and no
- * call site noticed, so a store-less CI runner started hard-refusing
- * instead of falling back (#1321). A matcher over an upstream message
- * that nothing verifies is a silent time bomb; reading the shipped
- * binary turns the next rewording into a red test.
- *
- * The binary is read as BYTES and never loaded: `new Entry(...)` on a
- * daemon-less Linux runner segfaults the process (see the note on
- * `_isKeyringFactoryOverriddenForTesting` in `lib/keyring.ts`), which
- * no test can catch.
+ * Pins `lib/keyring.ts`'s error marker against the `@napi-rs/keyring` native
+ * binary this checkout installs: the marker decides between "no store here,
+ * use the 0600 file" and "store locked, refuse to write plaintext", and an
+ * upstream rewording that nothing verifies is silent. Read as BYTES and never
+ * loaded — `new Entry(...)` on a daemon-less runner segfaults the process.
  */
 
 import { describe, it, expect, beforeAll } from "bun:test";
