@@ -413,9 +413,8 @@ export async function billLedgerRows(
   // `unattributed` bucket grows without bound, so a float column's absolute
   // error would grow with it.)
   //
-  // WIDTH: `cost_credits` is `bigint`, so both casts below are `::bigint` — see
-  // the column's note in drizzle/schema.ts. The RETURNING delta comes back as a
-  // string (postgres.js renders int8 as text), hence the `Number()` below.
+  // WIDTH: `cost_credits` is `bigint` (see drizzle/schema.ts); postgres.js renders
+  // int8 as text, hence the `Number()` below.
   //
   // ROUNDING INVARIANT: exactly ONE rounding rule — half away from zero — is
   // shared by `dollarsToCredits` in src/credits.ts (JS `Math.round`, which is

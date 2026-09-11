@@ -13,11 +13,8 @@ applyEeFixtureEnv();
 
 describe("env", () => {
   it("pins the platform's usage.list ceiling", () => {
-    // The platform clamps `usage.list` at this many rows
-    // (`LLM_USAGE_LIST_MAX_LIMIT` in apps/api, pinned by its own
-    // `test/unit/llm-usage-list-cap.test.ts`). Neither side may import the
-    // other's constant across the licence boundary, so both pin the contract
-    // value: a change on one side fails a test on that side.
+    // Neither side may import the other's constant across the licence boundary,
+    // so this pin mirrors `apps/api/test/unit/llm-usage-list-cap.test.ts`.
     expect(LEDGER_LIST_MAX_LIMIT).toBe(1000);
   });
 

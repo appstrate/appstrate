@@ -31,11 +31,8 @@ import { getPlatformServices } from "../platform.ts";
  *     the tick instead of trickling one batch per interval; the remainder rides
  *     the next tick.
  *   - Per-replica jitter so multi-replica deployments don't sweep in lockstep.
- *   - The MAINTENANCE half of the tick — see {@link runMaintenance} — which is
- *     not metering and therefore outlives a paused sweep: the throttled
- *     storage-entitlement reconcile (STARTED, not awaited — see
- *     {@link maybeResyncEntitlements}) and the retry of Stripe cancellations
- *     `onOrgDelete` could not confirm.
+ *   - The MAINTENANCE half of the tick — see {@link runMaintenance} — which
+ *     outlives a paused sweep.
  *
  * OBSERVABILITY. Every tick emits one structured summary line: this is the money
  * path, and a silent tick is indistinguishable from a dead one. On top of that:
@@ -64,9 +61,7 @@ import { getPlatformServices } from "../platform.ts";
  * pino logs are the honest transport.
  *
  * Pause METERING: set `EE_RECONCILIATION_INTERVAL_SECONDS=0`. The timer keeps
- * running — at {@link MAINTENANCE_INTERVAL_SECONDS}, sweep skipped — because
- * the maintenance half is not metering and stopping it charges customers for
- * organizations that no longer exist.
+ * running at {@link MAINTENANCE_INTERVAL_SECONDS} — see {@link runMaintenance}.
  */
 
 let sweeperTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,9 +98,8 @@ const ALERT_AFTER_FAILED_TICKS = 3;
 const MAX_DRAIN_ITERATIONS = 50;
 
 /**
- * Tick cadence when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering. Its
- * own cadence, not a fallback to the sweep's: {@link runMaintenance} is
- * idempotent and, in steady state, one indexed SELECT that returns nothing.
+ * Tick cadence when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering. Its own, not a
+ * fallback: {@link runMaintenance} is idempotent and, in steady state, one empty indexed SELECT.
  */
 const MAINTENANCE_INTERVAL_SECONDS = 300;
 
@@ -118,20 +112,11 @@ let inFlightResync: Promise<unknown> | null = null;
  * Refuse to resume a watermark the sweeper abandoned — the enable → disable →
  * re-enable gap.
  *
- * WHAT GOES WRONG WITHOUT THIS. Taking the module out of `MODULES` (or pausing
- * metering) stops the sweep; it does NOT stop the platform appending to
- * `llm_usage`. The watermark outlives the window, so the first tick after
- * re-enabling claims every row that accumulated in it and debits the lot
- * against TODAY's quotas: soft-cap overshoots, quota-warning emails fleet-wide,
- * and credits already spent by the time an operator reads the heartbeat. None
- * of it is reversible — the claim table is never purged, so the rows cannot be
- * un-billed by re-reading them.
- *
- * Billing that gap or forgiving it is a commercial decision (customers were
- * usually told billing was off), so neither is a default: the module refuses to
- * boot and names both actions. The refusal is fatal on purpose — the loader
- * turns it into a failed boot, and a warning on the money path is a warning
- * nobody reads until the invoices land.
+ * The watermark outlives a window with the module off while the platform keeps
+ * appending to `llm_usage`, so the first tick after re-enabling would claim the
+ * whole gap against TODAY's quotas — irreversibly, the claim table is never
+ * purged. Billing it or forgiving it is a commercial decision, so the module
+ * refuses to boot and the thrown message names both actions.
  *
  * THE PREDICATE IS DELIBERATELY TWO-PART — each half alone has a false positive
  * that would brick a healthy boot. Age alone refuses a platform that was merely
@@ -181,10 +166,7 @@ export async function assertCursorResumable(cursor: CursorSeedResult): Promise<v
 
 /**
  * Start the periodic worker. `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses the
- * METERING sweep only — the timer still runs, at
- * {@link MAINTENANCE_INTERVAL_SECONDS}, so {@link runMaintenance} keeps
- * retrying pending Stripe cancellations. Safe to call once at module init —
- * re-entry is guarded.
+ * METERING sweep only — see {@link runMaintenance}. Re-entry is guarded.
  */
 export function startBillingSweeper(): void {
   if (sweeperTimer !== null) {
